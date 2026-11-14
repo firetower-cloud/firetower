@@ -121,6 +121,22 @@ pub fn socket_path(session_id: &str) -> PathBuf {
     base.join(format!("{session_id}.sock"))
 }
 
+/// Where a supervisor leaves the reason it could not start the agent.
+///
+/// **Beside the socket, because the pane does not survive.** `agent-run` runs
+/// inside tmux, and a command that exits takes its window and everything it
+/// printed with it — so the one place the reason existed was gone by the time
+/// anybody asked. The control plane was left saying "the agent for s_… did
+/// not start", which names nothing anybody can act on.
+///
+/// A file rather than a channel: the two processes share no parent, the
+/// failure may happen before anything is listening, and the launcher is
+/// polling a path already.
+pub fn failure_path(session_id: &str) -> PathBuf {
+    let socket = socket_path(session_id);
+    socket.with_file_name(format!("{session_id}.failed"))
+}
+
 /// What to start, and where.
 #[derive(Debug, Clone)]
 pub struct Launch {

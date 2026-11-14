@@ -791,10 +791,14 @@ pub(super) async fn repo_branches(
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<Branches>> {
-    let asking = principal.owner().unwrap_or("");
+    let asking = owner(&principal)?;
+    // Theirs, or not found. Lower severity than the two on the session path —
+    // what leaks is a remote address and a branch list rather than a secret —
+    // and the same root: an id from the request, looked up without the person
+    // who sent it.
     let repo = state
         .db
-        .repo(&RepoId::from_stored(id))
+        .repo_of(asking, &RepoId::from_stored(id))
         .await?
         .ok_or_else(|| ApiError::not_found("repository"))?;
 

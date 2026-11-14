@@ -1388,6 +1388,18 @@ pub struct Fleet {
     capacity: Arc<RwLock<HashMap<String, ft_core::Capacity>>>,
     /// Keyed by session, spread from the workspace reading that covers it.
     usage: Arc<RwLock<HashMap<String, ft_core::WorkspaceUsage>>>,
+    /// Workspaces a worker has said it has finished making.
+    ///
+    /// **Completion, which is not the same fact as resource accounting.** The
+    /// scheduler's launch permit used to wait on `usage`, and that answers
+    /// before a checkout has started on Linux and never at all on macOS. This
+    /// is the worker saying it is done — see
+    /// `ft_proto::ToServer::WorkspaceCreated`.
+    ///
+    /// In memory, like everything else here: a control plane that restarts
+    /// has not been told, and the only caller — a launch holding a permit —
+    /// died with it.
+    created: Arc<RwLock<HashSet<String>>>,
     /// How somebody is told a session stopped, when they asked to be.
     notify: crate::notify::Notifier,
     /// Questions each session is blocked on, until they are answered.
@@ -1537,6 +1549,7 @@ impl Fleet {
             progress: Arc::new(RwLock::new(HashMap::new())),
             capacity: Arc::new(RwLock::new(HashMap::new())),
             usage: Arc::new(RwLock::new(HashMap::new())),
+            created: Default::default(),
             notify: crate::notify::Notifier::from_env(),
             supervised: Arc::new(RwLock::new(HashMap::new())),
             vault: None,
@@ -1852,6 +1865,16 @@ impl Fleet {
     /// divided up, and a session whose first report has not arrived yet.
     pub async fn usage_of(&self, session_id: &SessionId) -> Option<ft_core::WorkspaceUsage> {
         self.usage.read().await.get(session_id.as_str()).copied()
+    }
+
+    /// Whether a worker has said it has finished making this workspace.
+    ///
+    /// The one question a launch holding a permit asks. `false` for a
+    /// workspace still being made, for one whose worker is too old to say,
+    /// and for a control plane that has restarted since — the first is worth
+    /// waiting for and the other two are what the wait's own cap is for.
+    pub async fn workspace_created(&self, session_id: &SessionId) -> bool {
+        self.created.read().await.contains(session_id.as_str())
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<Event> {
@@ -2362,6 +2385,7 @@ impl Fleet {
         let progress = self.progress.clone();
         let capacity = self.capacity.clone();
         let usage = self.usage.clone();
+        let created = self.created.clone();
         let notify = self.notify.clone();
         let describing = self.clone();
         // For the frames a line makes us want to send back — an agent that has
@@ -2419,6 +2443,18 @@ impl Fleet {
                             last_heard = std::time::Instant::now();
                         }
                         match inbound {
+                        // **A workspace is finished being made.** The only
+                        // reader is a launch holding a permit; see
+                        // `Fleet::workspace_created`.
+                        Ok(ToServer::WorkspaceCreated { session_id, ok }) => {
+                            tracing::debug!(
+                                session = %session_id,
+                                ok,
+                                "the worker has finished making this workspace"
+                            );
+                            created.write().await.insert(session_id.to_string());
+                        }
+
                         Ok(ToServer::Usage { capacity: said, workspaces }) => {
                             capacity.write().await.insert(host_id.to_string(), said);
 

@@ -863,7 +863,8 @@
      are in the same rule for the same reason — a row that cannot shrink can
      only grow. */
   .shelf .chip,
-  .composer .bar .chip {
+  .composer .bar .chip,
+  .s-compose .bar .chip {
     flex: 0 1 auto;
     min-width: 0;
   }
@@ -3590,6 +3591,12 @@ html:not([data-platform="macos"]) {
   .src-row:hover {
     background: var(--color-raise);
   }
+  /* The nudge `.tog` used to carry for everybody: this row starts its
+     children at the top, so the switch is brought down to the first line of
+     the text beside it. */
+  .src-row .tog {
+    margin-top: 11px;
+  }
   .src-row.dark .tx {
     opacity: 0.55;
   }
@@ -3659,12 +3666,18 @@ html:not([data-platform="macos"]) {
 
   /* The switch. **Neutral, never green** — on is `--body`, because a source
      being included is a state and not a success. */
+  /* **No margin of its own.** `margin-top: 11px` lived here and is
+     positional: it drops the 17px switch onto the centre of the first text
+     line in `.src-row`, which is `align-items: flex-start`. Every other row
+     that has since taken a switch centres its children — a switch beside two
+     pill buttons, a switch beside a centred label — and inherited an 11px
+     push downward, which is the misalignment reported on the schedule
+     page's action row. The nudge belongs to the row that wants it. */
   .tog {
     position: relative;
     flex: none;
     width: 28px;
     height: 17px;
-    margin-top: 11px;
     border-radius: 99px;
     background: var(--color-overlay);
     transition: background var(--dur-native) var(--ease-swift);
@@ -5116,5 +5129,668 @@ html:not([data-platform="macos"]) {
     height: 1px;
     margin: 4px 9px;
     background: var(--color-line);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SCHEDULES — work that starts itself.
+   ═══════════════════════════════════════════════════════════════════
+
+   The artifact's own classes, on this client's tokens. Everything here is
+   `s-` prefixed and used by one destination, which is why it is a block at
+   the end rather than scattered into the sections above: a reader asking
+   "what does the schedules screen add" gets one answer.
+
+   Four shapes it does *not* add, because they already exist: `.pg` and
+   `.pg-head` are the pane shell eleven configuration screens share, `.r` is
+   the list row, `.colhead` is the names over a table, and `.facts-card` is
+   the rail of facts beside a detail. A fifth screen inventing its own would
+   be the duplication `components.html` measures. */
+@layer components {
+  /* ── The trigger row ──────────────────────────────────────────
+     Pills in a tray, wrapping: how often, then whatever that cadence asks
+     for next, then the time and the zone.
+
+     **`.s-kind` is kept and nothing uses it today.** It is the first
+     cell — the one naming the *kind* of trigger, wearing no chevron
+     because it states a fact rather than offering a choice — and it is
+     not drawn while there is one kind of trigger to name. The rule stays
+     for the day a second ships, which is also the day the row gets its
+     first cell back; `NewSchedule` carries the reasoning where the cell
+     used to be. */
+  .s-trig {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    min-height: 42px;
+    margin-top: 6px;
+    padding: 5px 7px;
+    border-radius: 12px;
+    background: var(--color-raise);
+  }
+  .s-kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    padding: 0 12px;
+    border-radius: 99px;
+    font-size: 14.5px;
+    color: var(--color-bone);
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
+    flex: none;
+    cursor: default;
+  }
+  .s-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    height: 30px;
+    padding: 0 11px;
+    border-radius: 99px;
+    font-size: 14.5px;
+    color: var(--color-text);
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
+    flex: none;
+    white-space: nowrap;
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  .s-pill:hover {
+    color: var(--color-bone);
+  }
+  /* **The label gives way, not the row.** A zone is
+     `America/Argentina/Buenos_Aires` at its longest, and the row these sit in
+     wraps — a pill that cannot shrink pushes the one beside it onto a second
+     line rather than truncating. */
+  .s-pill .lbl {
+    min-width: 0;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* A cron expression is read character by character. */
+  .s-pill.mono,
+  .s-pill[data-mono="true"] {
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    letter-spacing: -0.01em;
+    color: var(--color-bone);
+  }
+  .s-pill[data-bad="true"] {
+    color: var(--color-brick);
+    box-shadow: inset 0 0 0 1px var(--color-brick-deep);
+  }
+  .s-reads {
+    margin-top: 6px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--color-dim);
+  }
+  .s-reads b {
+    font-weight: 500;
+    color: var(--color-text);
+  }
+  .s-reads .s-fires {
+    display: block;
+    margin-top: 3px;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-mute);
+  }
+  /* **Brick, and deliberately not how a disk refusal is drawn.** This one
+     is correctable where you are standing: the thing to change is six
+     inches above the message. */
+  .s-refuse {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+    padding: 11px 13px;
+    border-radius: 12px;
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--color-brick);
+    background: var(--color-brick-tint);
+    box-shadow: inset 0 0 0 1px var(--color-brick-deep);
+  }
+  .s-refuse > svg {
+    flex: none;
+    margin-top: 2px;
+  }
+
+  /* ── The consequence note ─────────────────────────────────────
+     **Not amber when you are making it yourself.** In this product amber
+     means "worth reading before you approve somebody else's work", and
+     nobody else's is in front of you on the create sheet. It goes amber at
+     exactly one moment — approving what an agent proposed — and brick at
+     one more, which is a schedule that cannot run at all. */
+  .s-conseq {
+    margin-top: 18px;
+    display: flex;
+    gap: 12px;
+    padding: 13px 15px;
+    border-radius: 13px;
+    background: var(--color-raise);
+  }
+  .s-conseq > svg {
+    flex: none;
+    margin-top: 2px;
+    color: var(--color-dim);
+  }
+  .s-conseq p {
+    font-size: 14px;
+    line-height: 1.62;
+    color: var(--color-text);
+  }
+  .s-conseq p + p {
+    margin-top: 6px;
+  }
+  .s-conseq b {
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .s-conseq[data-tone="amber"] {
+    background: var(--color-amber-tint);
+    box-shadow: inset 0 0 0 1px var(--color-amber-deep);
+  }
+  .s-conseq[data-tone="amber"] > svg,
+  .s-conseq[data-tone="amber"] p,
+  .s-conseq[data-tone="amber"] b {
+    color: var(--color-amber);
+  }
+  .s-conseq[data-tone="brick"] {
+    background: var(--color-brick-tint);
+    box-shadow: inset 0 0 0 1px var(--color-brick-deep);
+  }
+  .s-conseq[data-tone="brick"] > svg,
+  .s-conseq[data-tone="brick"] p,
+  .s-conseq[data-tone="brick"] b {
+    color: var(--color-brick);
+  }
+
+  /* ── The create sheet ─────────────────────────────────────────
+     Wider than the sharing sheet because it carries a composer, which has
+     a measure of its own. Same shell: `.veil` lays down the one scrim
+     value and `.sheet2` is the card.
+
+     **Three rows, and the middle one is what makes the summary pinned.**
+     The body scrolls; the summary and the footer do not, so a person
+     cannot approve an unattended run without the consequences having been
+     on screen. */
+  /* **Under `Pop`, and scrolling.** Two things come out of one decision:
+     the sheet's pickers are the composer's own, which portal to the body at
+     `z-70` so a menu is never clipped by the card it drops from — a scrim
+     above them would paint over every menu, so this sits below them, the way
+     Sharing's dialog does at 60. And because nothing inside the card may
+     clip, the card is allowed to be taller than the window and *this*
+     scrolls. */
+  .s-veil {
+    z-index: 58;
+    overflow-y: auto;
+    /* Top-aligned, because a centred card that is taller than the window has
+       its head above the edge. 8vh is where the product's other dialogs sit;
+       40px of padding under it is the scrim's own. */
+    place-items: start center;
+    padding-top: 8vh;
+  }
+  /* `position: relative` and `overflow: visible`: the summary used to be
+     pinned in a fixed-height flex column, which meant the body was a
+     scroller — and a scroller clips. `RunPicker` opens upward from the
+     composer's footer and was cut off by exactly that edge. */
+  .s-sheet {
+    position: relative;
+    width: 624px;
+    max-width: 100%;
+    display: flex;
+    flex-direction: column;
+    /* Both of `.sheet2`'s own, undone on purpose: it caps at the scrim's
+       height and clips, which is the pair that made the body a scroller. */
+    max-height: none;
+    overflow: visible;
+  }
+  .s-sbody {
+    padding: 4px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  /* **No focus ring on the two text fields.** `.fld .box` draws a 1.5px inset
+     and the window's own `:focus-visible` draws an outline on top of it;
+     neither is on the control this sheet is modelled on. The composer has no
+     ring at all — you can see the caret. Scoped here rather than removed from
+     `.fld`, which other forms still want. */
+  .s-sheet .fld .box:focus-within {
+    box-shadow: none;
+  }
+  .s-sheet .fld .box input:focus-visible,
+  .s-sheet .s-compose .in:focus-visible {
+    outline: none;
+  }
+  .s-fold {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 30px;
+    padding: 0 11px;
+    margin: 0 -11px;
+    border-radius: 10px;
+    font-size: 14.5px;
+    color: var(--color-dim);
+    align-self: flex-start;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .s-fold:hover {
+    background: var(--color-raise);
+    color: var(--color-bone);
+  }
+  .s-fold svg {
+    transition: transform var(--dur-native) var(--ease-swift);
+  }
+  .s-fold[aria-expanded="true"] svg {
+    transform: rotate(180deg);
+  }
+  .s-adv {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 13px;
+    background: var(--color-raise);
+  }
+  .s-arow {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .s-arow .s-al {
+    flex: 1;
+    min-width: 0;
+  }
+  .s-arow .s-al b {
+    display: block;
+    font-size: 14.5px;
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .s-arow .s-al s {
+    display: block;
+    text-decoration: none;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--color-dim);
+  }
+  /* **A flex row, not a bare span.** `.tog` is 28×17 and carries
+     `flex:none`, so it is built to be a flex item; inside an inline span
+     it collapses to 0 × 0 and the delete switch draws with no switch in
+     it. That shipped once. */
+  .s-arow .s-av {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .s-src {
+    flex: none;
+    font-size: 13.5px;
+    color: var(--color-dim);
+  }
+  .s-src b {
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+
+  /* A composer inside a form rather than docked to a page. It keeps the
+     shelf and the footer and loses the send button: you are not sending
+     this, you are describing it. */
+  .s-compose {
+    border-radius: 16px;
+    background: var(--color-overlay);
+  }
+  .s-compose .shelf {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 0;
+    border-radius: 16px 16px 0 0;
+    background: transparent;
+    padding: 8px 10px 18px;
+  }
+  .s-compose .s-in {
+    position: relative;
+    background: var(--color-panel);
+    border-radius: 15px;
+    padding: 13px 14px 9px;
+    box-shadow: var(--shadow-raise);
+    margin: -10px 4px 4px;
+  }
+  .s-compose .s-in .in {
+    display: block;
+    width: 100%;
+    min-height: 40px;
+    resize: vertical;
+    background: transparent;
+    font-size: 15.5px;
+    line-height: 1.6;
+    color: var(--color-bone);
+  }
+  .s-compose .s-in .in::placeholder {
+    color: var(--color-mute);
+  }
+  .s-compose .bar {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 10px;
+    flex-wrap: wrap;
+  }
+
+  /* ── One schedule, opened ─────────────────────────────────── */
+  .s-head {
+    display: flex;
+    align-items: flex-start;
+    gap: 18px;
+    margin-top: 18px;
+  }
+  .s-head > div:first-child {
+    flex: 1;
+    min-width: 0;
+  }
+  .s-head h1 {
+    font-size: 28px;
+    line-height: 1.16;
+    letter-spacing: -0.022em;
+    font-weight: 530;
+    color: var(--color-bone);
+  }
+  .s-head .acts {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding-top: 4px;
+  }
+  .s-two {
+    margin-top: 26px;
+    display: grid;
+    gap: 30px;
+    grid-template-columns: minmax(0, 1fr) 300px;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .s-two {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .s-prompt {
+    margin-top: 10px;
+    padding: 15px 17px;
+    border-radius: 13px;
+    background: var(--color-raise);
+    font-size: 15.5px;
+    line-height: 1.62;
+    color: var(--color-text);
+    white-space: pre-wrap;
+  }
+  .s-h3 {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--color-dim);
+    letter-spacing: 0.004em;
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+  }
+  .s-h3 .n {
+    font-size: 13.5px;
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .s-blk {
+    margin-top: 28px;
+  }
+
+  /* A run. One line: the mark, what happened in a sentence, when, how
+     long — and an arrow only where there is still a workspace to open. */
+  .s-runs {
+    margin-top: 6px;
+    display: flex;
+    flex-direction: column;
+  }
+  .s-run {
+    display: flex;
+    align-items: flex-start;
+    gap: 13px;
+    width: calc(100% + 24px);
+    margin: 0 -12px;
+    padding: 9px 12px;
+    border-radius: 11px;
+    min-height: 44px;
+    text-align: left;
+    font-size: 14.5px;
+    line-height: 1.45;
+    color: var(--color-text);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .s-run:hover {
+    background: var(--color-raise);
+  }
+  /* Two lines, not one. The summary is the reason to read this list, and
+     a row that ellipsises it at forty characters hides the answer. */
+  .s-run > span:nth-child(2) {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .s-run > .g {
+    flex: none;
+    margin-top: 2px;
+    display: grid;
+    place-items: center;
+  }
+  .s-run[data-gone="true"] {
+    cursor: default;
+  }
+  /* Under the history: where in it you are, and how much of it to show.
+     `margin-left: auto` on the size picker so the two steps stay together on
+     the left and the choice sits apart from them — it is not a third step. */
+  .s-pager {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    margin-top: 14px;
+  }
+  .s-pager .s-pagesize {
+    margin-left: auto;
+  }
+  .s-foot-note {
+    margin-top: 14px;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: var(--color-mute);
+    max-width: 70ch;
+  }
+
+  /* ── What a run leaves ────────────────────────────────────────
+     Two populations, named, with the count in both switch states. The cap
+     that used to sit over them is gone: it was read before the thing it
+     applied to, and it had never been agreed to. */
+  .s-pop {
+    margin-top: 14px;
+    padding: 12px 13px;
+    border-radius: 12px;
+    background: var(--color-raise);
+  }
+  .s-poph {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    font-size: 14px;
+  }
+  .s-poph b {
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .s-poph span {
+    margin-left: auto;
+    color: var(--color-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  /* Allowed to look alarming when runs are being refused. **Amber, never
+     ember**: ember means an agent is waiting on you, and a filling disk
+     is not that. */
+  .s-poph span[data-loud="true"] {
+    color: var(--color-amber);
+  }
+  .s-cardnote {
+    margin-top: 9px;
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--color-mute);
+  }
+  .s-cardnote b {
+    font-weight: 500;
+    color: var(--color-dim);
+  }
+
+  /* ── A facts card whose values are sentences ──────────────────
+     `.facts-card dd` is `nowrap` with an ellipsis and right-aligned, which
+     is correct for the values it was built for — *First available*, a model
+     name, a branch. Two of the schedule cards hold whole sentences instead,
+     and all five of *When a run cannot finish* truncated at every width
+     with no tooltip to recover them.
+     
+     So the stacked variant, which is the artifact's own: the label above the
+     value rather than beside it, and the value wraps. A sentence does not
+     compete with its label for one line's width. */
+  .facts-card.s-stack dl {
+    display: block;
+    margin-top: 9px;
+  }
+  .facts-card.s-stack dt {
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--color-dim);
+    white-space: normal;
+  }
+  .facts-card.s-stack dd {
+    text-align: left;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--color-bone);
+    margin: 1px 0 10px;
+  }
+  .facts-card.s-stack dd:last-of-type {
+    margin-bottom: 0;
+  }
+  /* And the one-off: a value in an ordinary card that has to wrap, kept
+     right-aligned with the rest of them. */
+  .facts-card dd.s-wrap {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  /* The reason a schedule stopped itself, on its row. */
+  .s-tag {
+    flex: none;
+    padding: 2px 9px;
+    border-radius: 99px;
+    font-size: 12.5px;
+    color: var(--color-dim);
+    background: var(--color-raise);
+    white-space: nowrap;
+  }
+
+  /* ── The examples, which are the empty state ─────────────────
+     No illustration and no sentence about emptiness. What somebody needs
+     on an empty library is not to be told it is empty — it is an idea of
+     what the thing is for. */
+  .s-egs {
+    margin-top: 14px;
+    display: grid;
+    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  }
+  .s-eg {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 11px;
+    padding: 14px 15px;
+    border-radius: 13px;
+    text-align: left;
+    background: var(--color-raise);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .s-eg:hover {
+    background: var(--color-overlay);
+  }
+  .s-eg .ic {
+    grid-row: 1 / 3;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    color: var(--color-dim);
+    background: var(--color-panel);
+  }
+  .s-eg b {
+    font-size: 14.5px;
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .s-eg s {
+    text-decoration: none;
+    font-size: 13px;
+    color: var(--color-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  .s-eg p {
+    grid-column: 2;
+    margin-top: 6px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--color-mute);
+  }
+  .s-eg .makes {
+    grid-column: 2;
+    margin-top: 7px;
+    font-size: 12.5px;
+    color: var(--color-dim);
+  }
+
+  /* The six things somebody has to know before turning on an unattended
+     run, as labelled rows rather than a paragraph. */
+  .s-sumbox {
+    padding: 14px 16px;
+    border-radius: 13px;
+    background: var(--color-raise);
+  }
+  .s-sumbox h3 {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-dim);
+  }
+  .s-sum {
+    margin-top: 9px;
+    display: grid;
+    grid-template-columns: 150px minmax(0, 1fr);
+    gap: 6px 14px;
+    font-size: 13.5px;
+    line-height: 1.55;
+  }
+  .s-sum dt {
+    color: var(--color-mute);
+  }
+  .s-sum dd {
+    color: var(--color-text);
   }
 }

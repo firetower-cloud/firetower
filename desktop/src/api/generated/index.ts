@@ -12,6 +12,7 @@ export * from './organization/organization.ts';
 export * from './providers/providers.ts';
 export * from './repos/repos.ts';
 export * from './roles/roles.ts';
+export * from './schedules/schedules.ts';
 export * from './secrets/secrets.ts';
 export * from './sessions/sessions.ts';
 export * from './setup/setup.ts';

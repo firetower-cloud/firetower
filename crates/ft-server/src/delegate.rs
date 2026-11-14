@@ -101,7 +101,277 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "create_skill" => create_skill(state, request).await,
         "update_skill" => update_skill(state, request).await,
         "list_skills" => list_skills(state, request).await,
+        "propose_schedule" => propose_schedule(state, request).await,
+        "list_schedules" => list_schedules(state, request).await,
+        "pause_schedule" => pause_schedule(state, request).await,
         other => bail!("`{other}` is not something a session can ask Firetower for"),
+    }
+}
+
+// ── schedules ──────────────────────────────────────────────────────────
+//
+// **Propose, list, pause. Nothing else.** An agent may write a schedule down
+// and may stop one; it may not turn one on, edit one, or delete one. And there
+// is deliberately **no tool that ends a workspace** — a run that kept one did
+// so because something was left behind or a question went unanswered, and an
+// agent tidying that away would delete the thing a person had not read yet.
+
+/// Write a schedule down, off, for a person to approve.
+///
+/// The same `write_one` a person's own create goes through, so a proposal
+/// cannot reach a weaker check: the repository is looked up as the owner, the
+/// fifteen-minute floor is enforced, and the row lands inactive and unapproved
+/// whoever asked for it.
+async fn propose_schedule(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str().to_string();
+
+    let name = text(&request.input, "name").context("name the schedule")?;
+    let prompt =
+        text(&request.input, "prompt").context("say what each run should do, in `prompt`")?;
+    let timezone = text(&request.input, "timezone")
+        .context("say which time zone the clock is in, as an IANA name like Europe/Paris")?;
+    let at = text(&request.input, "at").context("say what time of day, as HH:MM")?;
+
+    let cadence = match text(&request.input, "cadence")
+        .unwrap_or_default()
+        .to_lowercase()
+        .as_str()
+    {
+        "daily" => ft_core::schedule::Cadence::Daily { at },
+        "weekdays" => ft_core::schedule::Cadence::Weekdays { at },
+        "weekly" => ft_core::schedule::Cadence::Weekly {
+            at,
+            day: weekday_named(text(&request.input, "day").as_deref())?,
+        },
+        "monthly" => ft_core::schedule::Cadence::Monthly {
+            at,
+            on: ft_core::schedule::MonthlyOn::Day {
+                day: request
+                    .input
+                    .get("dayOfMonth")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1) as u8,
+            },
+        },
+        // **No custom cron from here.** A cron expression is a thing a person
+        // reads character by character before approving it, and an agent
+        // writing one is a proposal nobody can check at a glance. The four
+        // named cadences say the same things.
+        other => bail!(
+            "`{other}` is not a cadence. Use daily, weekdays, weekly or monthly — a cron \
+             expression is something a person writes where they can read it back."
+        ),
+    };
+
+    // By slug, as the person knows it, and looked up as *theirs*.
+    let repo_id = match text(&request.input, "repo") {
+        Some(slug) => Some(
+            state
+                .db
+                .repo_of_slug(&slug, &owner)
+                .await?
+                .with_context(|| format!("there is no repository called \"{slug}\" connected"))?
+                .id,
+        ),
+        None => None,
+    };
+
+    if let Some(existing) = schedule_named(state, &owner, &name).await? {
+        bail!(
+            "there is already a schedule called \"{}\" — propose a different one, or tell them \
+             what you would change about that one",
+            existing.name
+        );
+    }
+
+    let profile = match text(&request.input, "profile") {
+        Some(wanted) => Some(
+            state
+                .roles
+                .by_name(&owner, &wanted)
+                .await?
+                .with_context(|| format!("there is no profile called \"{wanted}\""))?
+                .id,
+        ),
+        None => None,
+    };
+
+    let id = ft_core::ScheduleId::new();
+    crate::api::schedules::write_one(
+        state,
+        &owner,
+        &owner,
+        &id,
+        crate::api::schedules::NewSchedule {
+            name: name.clone(),
+            prompt,
+            repo_id,
+            // One repository, which is all the tool asks for. A proposal is a
+            // sentence an agent wrote, not a form.
+            repo_ids: Vec::new(),
+            base: None,
+            // **No machine.** A proposal names none, so the scheduler places
+            // each run — see [`NewSchedule::host_id`]. The person approving it
+            // is the one who can say which machine it should be.
+            host_id: None,
+            cadence,
+            timezone,
+            profile,
+            agent: session.agent,
+            account_id: None,
+            settings: Default::default(),
+            skills: None,
+            delete_clean_runs: true,
+            // Copied text, never a foreign key — `reclaim.rs` deletes this
+            // session within the minute of it ending.
+            from_session_id: Some(session.id.as_str().to_string()),
+        },
+        true,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("{}", e.message))?;
+
+    // Who asked, for the row's "where it came from" card. In `pins` rather
+    // than a column for the same reason the session id is text: it is a copy
+    // of something that is about to be deleted.
+    note_proposer(state, &id, &session).await?;
+
+    Ok(format!(
+        "Proposed the \"{name}\" schedule. **It is off and has never run** — it is on their \
+         Schedules screen waiting for them to read it and turn it on, and nothing happens until \
+         they do. You cannot approve it yourself."
+    ))
+}
+
+/// The schedules this person has.
+async fn list_schedules(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let rows = state.db.schedules_of(session.owner.as_str()).await?;
+    if rows.is_empty() {
+        return Ok("They have no schedules.".into());
+    }
+    let mut out = String::new();
+    for row in &rows {
+        let (_, kept) = state.db.run_counts(&row.id).await?;
+        let when = state
+            .db
+            .triggers_of(&row.id)
+            .await?
+            .first()
+            .and_then(|t| crate::schedules::clock_of(&t.config).map(|c| c.reads()))
+            .unwrap_or_else(|| "on a clock".into());
+        out.push_str(&format!(
+            "- **{}** — {when} {}{}\n",
+            row.name,
+            match (row.active, row.approved_at.is_some()) {
+                (true, _) => "· on",
+                (false, false) => "· waiting to be turned on, has never run",
+                (false, true) => "· off",
+            },
+            match kept {
+                0 => String::new(),
+                1 => " · 1 run still holding a workspace".into(),
+                n => format!(" · {n} runs still holding a workspace"),
+            }
+        ));
+    }
+    Ok(out)
+}
+
+/// Stop a schedule's future runs.
+///
+/// **Not symmetric, on purpose.** Stopping is safe and is a thing an agent may
+/// notice is needed; starting is the act that needs somebody to have read what
+/// would run, so there is no `resume_schedule` here and there will not be one.
+async fn pause_schedule(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str().to_string();
+    let wanted = text(&request.input, "name").context("name the schedule to stop")?;
+    let found = schedule_named(state, &owner, &wanted)
+        .await?
+        .with_context(|| format!("they have no schedule called \"{wanted}\""))?;
+
+    if !found.active {
+        return Ok(format!("\"{}\" was already off.", found.name));
+    }
+
+    // Null `paused_reason`: this reads as "somebody paused this" rather than
+    // "this gave up", which is right — an agent pausing one is a decision
+    // somebody made, even if that somebody was an agent.
+    state.db.set_schedule_active(&found.id, false, None).await?;
+    for trigger in state.db.triggers_of(&found.id).await? {
+        state.db.set_next_fire_at(&trigger.id, None).await?;
+    }
+    Ok(format!(
+        "Stopped \"{}\". Any run already going carries on, and **you cannot turn it back on** — \
+         they will have to, on the Schedules screen.",
+        found.name
+    ))
+}
+
+/// One of theirs, by name.
+async fn schedule_named(
+    state: &AppState,
+    owner: &str,
+    name: &str,
+) -> Result<Option<crate::db::ScheduleRow>> {
+    let wanted = name.trim().to_lowercase();
+    Ok(state
+        .db
+        .schedules_of(owner)
+        .await?
+        .into_iter()
+        .find(|s| s.name.trim().to_lowercase() == wanted))
+}
+
+/// Which agent proposed a schedule, and where, for the card that says so.
+async fn note_proposer(
+    state: &AppState,
+    id: &ft_core::ScheduleId,
+    session: &Session,
+) -> Result<()> {
+    let Some(row) = state.db.schedule(id).await? else {
+        return Ok(());
+    };
+    let mut pins = row.pins.clone();
+    if let Some(obj) = pins.as_object_mut() {
+        // The profile it was running as, which is what somebody recognises —
+        // "Ada, the lead" rather than a session id. A plain agent has none,
+        // and the card then says the true thing.
+        let who = match session.profile_id.as_deref() {
+            Some(id) => state
+                .roles
+                .one(session.owner.as_str(), id, crate::access::Level::Viewer)
+                .await
+                .ok()
+                .flatten()
+                .map(|r| r.name)
+                .unwrap_or_else(|| "An agent".into()),
+            None => "An agent".into(),
+        };
+        obj.insert("proposedBy".into(), json!(who));
+        obj.insert("fromWorkspaceName".into(), json!(session.name.clone()));
+    }
+    state
+        .db
+        .update_schedule(id, &row.name, &row.spec, &pins, row.delete_clean_runs)
+        .await?;
+    Ok(())
+}
+
+/// A weekday by name, for a tool that takes words rather than numbers.
+fn weekday_named(said: Option<&str>) -> Result<ft_core::schedule::Weekday> {
+    use ft_core::schedule::Weekday;
+    match said.unwrap_or("monday").trim().to_lowercase().as_str() {
+        "monday" | "mon" => Ok(Weekday::Monday),
+        "tuesday" | "tue" => Ok(Weekday::Tuesday),
+        "wednesday" | "wed" => Ok(Weekday::Wednesday),
+        "thursday" | "thu" => Ok(Weekday::Thursday),
+        "friday" | "fri" => Ok(Weekday::Friday),
+        "saturday" | "sat" => Ok(Weekday::Saturday),
+        "sunday" | "sun" => Ok(Weekday::Sunday),
+        other => bail!("`{other}` is not a day of the week"),
     }
 }
 
@@ -536,11 +806,14 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         owner.clone(),
         owner,
         req,
-        Some(Lineage {
-            parent: lead.id.clone(),
-            reason,
-            req: Some(request.req.clone()),
-        }),
+        crate::api::sessions::Launch {
+            lineage: Some(Lineage {
+                parent: lead.id.clone(),
+                reason,
+                req: Some(request.req.clone()),
+            }),
+            ..Default::default()
+        },
     )
     .await
     .map_err(|e| anyhow::anyhow!("{}", e.message))?;

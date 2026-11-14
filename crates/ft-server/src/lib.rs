@@ -25,6 +25,7 @@ pub mod preview;
 pub mod providers;
 pub mod reclaim;
 pub mod roles;
+pub mod schedules;
 pub mod skills;
 pub mod sshkey;
 pub mod tasks;
@@ -263,6 +264,13 @@ pub async fn run(config: Config) -> Result<()> {
     // What finished workspaces were holding. Also the first thing that clears
     // whatever built up before there was anything to clear it.
     tokio::spawn(reclaim::watch(state.clone()));
+    // The clock. An eighth of these, and the only one that starts work rather
+    // than tidying up after it — which is why its first pass waits longer
+    // than `reclaim`'s: a host coming back is noticed within `RETRY_CAP`, and
+    // a scheduled run started before then fails as `HostUnreachable` and
+    // counts against the schedule. A sweep must not move a schedule toward
+    // pausing because this process had just restarted.
+    tokio::spawn(schedules::watch(state.clone()));
     tokio::spawn(updates::runs::resume(state.clone()));
     // One digest per completed day, into the outbox a client collects from.
     // Hourly rather than at midnight: a control plane is restarted and

@@ -19,6 +19,9 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   Blocks,
+  CircleSlash2,
+  Clock,
+  FileClock,
   FolderGit2,
   GitBranch,
   Inbox,
@@ -38,6 +41,8 @@ import {
 import { Icon } from "~/components/ui";
 import { BeatMark } from "~/components/BeatMark";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
+import { useAllRuns, useListSchedules } from "~/api/generated/schedules/schedules";
+import type { Schedule } from "~/api/generated/model";
 import { useMe } from "~/api/generated/auth/auth";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { childrenElsewhere, doing, flat, group, isChild, placeBeat, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
@@ -113,6 +118,7 @@ function Contents({ at, stale, onCollapse }: { at: DestinationId; stale: boolean
           </>
         )}
         {at === "artifacts" && <Artifacts />}
+        {at === "schedules" && <Schedules path={path} />}
         {at === "customize" && <Customize />}
         {at === "repos" && <Repositories />}
         {at === "machines" && <Machines />}
@@ -588,6 +594,116 @@ function Artifacts() {
       )}
     </>
   );
+}
+
+/**
+ * Schedules.
+ *
+ * Three rows, then three sections. **No segmented control**: the two scopes
+ * are rows here rather than a switch, because a switch would say the page
+ * stays put and it does not — *All runs* is its own page.
+ *
+ * *Waiting for you* is where a proposal is announced, and it is the only
+ * place one is. There is no dot on the rail glyph and there will not be: the
+ * rail says where you can go, and what wants you is said in the panel beside
+ * it, which previews from any destination.
+ */
+function Schedules({ path }: { path: string }) {
+  const { data } = useListSchedules();
+  useNow();
+  const everything = data ?? [];
+  const waiting = everything.filter(
+    (s) => (s.made.byAgent && !s.approvedAt) || (!s.active && !!s.pausedReason),
+  );
+  const mine = everything.filter((s) => !waiting.includes(s));
+  const runs = useAllRuns({ limit: 5 });
+  const onRuns = path.startsWith("/schedules/runs");
+
+  return (
+    <>
+      <Row label="All schedules" icon={Clock} on={path === "/schedules"} to="/schedules" />
+      <Row label="All runs" icon={FileClock} on={onRuns} to="/schedules/runs" />
+      {/* **No New schedule here.** It was the same action twice: *All
+          schedules* is one row above it and carries the button. Two rows in
+          this panel, then the sections. */}
+      {everything.length === 0 && (
+        <p className="px-2 pt-3 text-meta text-dim">
+          Nothing on a clock yet. Start one from an example.
+        </p>
+      )}
+      {waiting.length > 0 && (
+        <>
+          <Label>Waiting for you</Label>
+          {waiting.map((s) => (
+            <ScheduleRow key={s.id} schedule={s} on={path.endsWith(s.id)} />
+          ))}
+        </>
+      )}
+      {mine.length > 0 && (
+        <>
+          <Label>Your schedules</Label>
+          {mine.map((s) => (
+            <ScheduleRow key={s.id} schedule={s} on={path.endsWith(s.id)} />
+          ))}
+        </>
+      )}
+      {(runs.data ?? []).length > 0 && (
+        <>
+          <Label>Recent runs</Label>
+          {(runs.data ?? []).map((r) => (
+            <button key={r.id} onClick={() => navigate("/schedules/runs")} className="prow">
+              <span className="min-w-0 flex-1 truncate">{r.scheduleName}</span>
+              <span className="shrink-0 text-meta tabular-nums text-dim">
+                {elapsed(minutesSince(r.fireAt))}
+              </span>
+            </button>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
+/**
+ * One schedule, in the panel.
+ *
+ * **The mark here is the schedule's own state**, not its last run's: there is
+ * no column beside it to say what the mark refers to. On the list there is a
+ * *Last run* column, so the mark there is the outcome.
+ */
+function ScheduleRow({ schedule, on }: { schedule: Schedule; on: boolean }) {
+  return (
+    <button
+      onClick={() => navigate(`/schedules/${schedule.id}`)}
+      aria-current={on}
+      className="prow"
+      title={schedule.name}
+    >
+      <span className="grid w-[17px] shrink-0 place-items-center">
+        {schedule.made.byAgent && !schedule.approvedAt ? (
+          <span className="dot" title="waiting for you to turn it on" />
+        ) : !schedule.active ? (
+          <Icon of={CircleSlash2} size={14} className="text-dim" aria-label="off" />
+        ) : (
+          <Icon of={Clock} size={14} className="text-dim" aria-label="on" />
+        )}
+      </span>
+      <span className="min-w-0 flex-1 truncate">{schedule.name}</span>
+      <span className="shrink-0 text-meta tabular-nums text-dim">
+        {schedule.active ? whenNext(schedule) : "off"}
+      </span>
+    </button>
+  );
+}
+
+/** The next run, short enough for a 252px panel. */
+function whenNext(schedule: Schedule): string {
+  const at = schedule.triggers[0]?.nextFireAt;
+  if (!at) return "—";
+  const mins = Math.round((Date.parse(at) - Date.now()) / 60_000);
+  if (!Number.isFinite(mins)) return "—";
+  if (mins <= 0) return "due";
+  return `in ${elapsed(mins)}`;
 }
 
 /* ── The pieces every panel is made of ───────────────────────────────────── */

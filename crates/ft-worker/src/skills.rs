@@ -63,6 +63,18 @@ pub async fn apply(
     id: &SessionId,
     agent: Agent,
     skills: &[SkillBundle],
+    // **Whether every one of them has to land.** Off, the long-standing
+    // answer: one bundle a filesystem refuses costs that bundle and is said
+    // out loud, because the set a session asked for is worth more than the
+    // one skill nobody can write. On — an approved workspace being created,
+    // with nobody present — the first failure is the answer, and the caller
+    // must not start the agent.
+    //
+    // Only `create_workspace` passes this on. `start_agent` passes `false`
+    // whatever the session was approved with, so a relaunch is best effort;
+    // that is a gap and is named where it is, not papered over here. See
+    // `ft_proto::CreateWorkspace::skills_required`.
+    required: bool,
 ) -> Result<()> {
     let Some(root) = root(workspace, id, agent) else {
         return Ok(());
@@ -87,6 +99,13 @@ pub async fn apply(
         // checked anyway: a name with a separator in it would write outside the
         // directory this cleans up.
         if !usable(&bundle.name) {
+            if required {
+                anyhow::bail!(
+                    "“{}” is not a name this machine can make a folder from, and this run was \
+                     approved to read it",
+                    bundle.name
+                );
+            }
             tracing::warn!(skill = %bundle.name, "not a usable skill folder name; skipped");
             continue;
         }
@@ -108,6 +127,14 @@ pub async fn apply(
         // skipped and said out loud, the same answer an unusable name gets
         // just above.
         if let Err(e) = write_bundle(&at, bundle).await {
+            if required {
+                return Err(e).with_context(|| {
+                    format!(
+                        "writing “{}”, which this run was approved to read",
+                        bundle.name
+                    )
+                });
+            }
             tracing::warn!(skill = %bundle.name, "could not write it; skipped: {e:#}");
         }
     }
@@ -119,6 +146,33 @@ pub async fn apply(
         let at = root.join(gone);
         if let Err(e) = tokio::fs::remove_dir_all(&at).await {
             tracing::warn!(skill = %gone, "could not take it back out: {e}");
+        }
+    }
+
+    // **Checked, not assumed.** Everything above is a write that said it
+    // worked; this is the directory saying so. It costs one `metadata` call
+    // per approved skill and it is the only statement here that does not
+    // depend on having thought of the way a write can half-happen.
+    if required {
+        for bundle in skills {
+            let at = root.join(&bundle.name);
+            if !tokio::fs::try_exists(&at).await.unwrap_or(false) {
+                anyhow::bail!(
+                    "“{}” is not in {} and this run was approved to read it",
+                    bundle.name,
+                    root.display()
+                );
+            }
+            for file in &bundle.files {
+                let path = at.join(&file.path);
+                if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+                    anyhow::bail!(
+                        "{} is missing from “{}”, which this run was approved to read",
+                        file.path,
+                        bundle.name
+                    );
+                }
+            }
         }
     }
 
@@ -221,6 +275,85 @@ mod tests {
         }
     }
 
+    /// **Blocker B: a required set is installed or the launch fails.**
+    ///
+    /// Writing these is best effort, which is right for somebody sitting in
+    /// front of a session: one skill a filesystem refuses costs that skill
+    /// rather than the session. A run *approved* against named skill versions
+    /// is the other case — a safety skill among them as often as not, with
+    /// nobody there to notice it is absent — and the server refusing to
+    /// dispatch without it means nothing if this swallows the failure.
+    #[tokio::test]
+    async fn a_required_skill_that_cannot_be_written_fails_the_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = SessionId::from_stored("s_required");
+
+        // A name that is not a folder. Best effort skips it and says so.
+        let skipped = apply(
+            dir.path(),
+            &id,
+            Agent::ClaudeCode,
+            &[bundle("../escape", &[("SKILL.md", "x", false)])],
+            false,
+        )
+        .await;
+        assert!(
+            skipped.is_ok(),
+            "best effort keeps the session: {skipped:?}"
+        );
+
+        // Required, and the same set is a refusal rather than a warning.
+        let refused = apply(
+            dir.path(),
+            &id,
+            Agent::ClaudeCode,
+            &[bundle("../escape", &[("SKILL.md", "x", false)])],
+            true,
+        )
+        .await
+        .expect_err("a run approved to read it cannot start without it");
+        assert!(
+            format!("{refused:#}").contains("approved to read"),
+            "{refused:#}"
+        );
+    }
+
+    /// **And "written" is checked rather than assumed.**
+    ///
+    /// Every write above reports its own success, and the reviewer reproduced
+    /// `Ok(())` with an approved `SKILL.md` absent — so the last word is the
+    /// directory's, not the writer's. Reproduced here by taking the file away
+    /// behind the writer's back, which is what a half-failed write looks like
+    /// from this side.
+    #[tokio::test]
+    async fn a_required_skill_missing_from_disk_fails_the_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let id = SessionId::from_stored("s_vanished");
+        let root = root(dir.path(), &id, Agent::ClaudeCode).unwrap();
+        let set = [bundle("house-prose", &[("SKILL.md", "x", false)])];
+
+        apply(dir.path(), &id, Agent::ClaudeCode, &set, true)
+            .await
+            .expect("it lands");
+        tokio::fs::remove_file(root.join("house-prose/SKILL.md"))
+            .await
+            .unwrap();
+
+        // The folder is still there, so nothing above this notices: applying
+        // the same set leaves a skill the agent cannot read.
+        let refused = apply(dir.path(), &id, Agent::ClaudeCode, &set, true)
+            .await
+            .expect_err("the file it was approved to read is not there");
+        assert!(
+            format!("{refused:#}").contains("SKILL.md"),
+            "and says which: {refused:#}"
+        );
+        // Best effort still comes up, with the skill empty.
+        assert!(apply(dir.path(), &id, Agent::ClaudeCode, &set, false)
+            .await
+            .is_ok());
+    }
+
     #[tokio::test]
     async fn the_set_on_disk_becomes_the_set_that_was_sent() {
         let dir = tempfile::tempdir().unwrap();
@@ -238,6 +371,7 @@ mod tests {
                 ),
                 bundle("house-prose", &[("SKILL.md", "x", false)]),
             ],
+            false,
         )
         .await
         .unwrap();
@@ -250,6 +384,7 @@ mod tests {
             &id,
             Agent::ClaudeCode,
             &[bundle("rust-review", &[("SKILL.md", "x", false)])],
+            false,
         )
         .await
         .unwrap();
@@ -258,7 +393,7 @@ mod tests {
 
         // And an empty set leaves the directory itself, because a watcher
         // already knows about it and would not notice a new one.
-        apply(dir.path(), &id, Agent::ClaudeCode, &[])
+        apply(dir.path(), &id, Agent::ClaudeCode, &[], false)
             .await
             .unwrap();
         assert!(root.exists());
@@ -280,6 +415,7 @@ mod tests {
                     ("scripts/go.sh", "#!/bin/sh\n", true),
                 ],
             )],
+            false,
         )
         .await
         .unwrap();
@@ -309,6 +445,7 @@ mod tests {
             &id,
             Agent::Codex,
             &[bundle("../escape", &[("SKILL.md", "x", false)])],
+            false,
         )
         .await
         .unwrap();
@@ -350,6 +487,7 @@ mod tests {
                 ),
                 bundle("after-it", &[("SKILL.md", "x", false)]),
             ],
+            false,
         )
         .await
         .expect("the set is applied, not abandoned");
@@ -370,10 +508,13 @@ mod tests {
             &a,
             Agent::ClaudeCode,
             &[bundle("mine", &[("SKILL.md", "x", false)])],
+            false,
         )
         .await
         .unwrap();
-        apply(dir.path(), &b, Agent::ClaudeCode, &[]).await.unwrap();
+        apply(dir.path(), &b, Agent::ClaudeCode, &[], false)
+            .await
+            .unwrap();
 
         assert!(root(dir.path(), &a, Agent::ClaudeCode)
             .unwrap()

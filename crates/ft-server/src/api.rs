@@ -23,6 +23,7 @@ pub(crate) mod hosts;
 mod providers;
 mod repos;
 mod roles;
+pub(crate) mod schedules;
 mod secrets;
 pub(crate) mod sessions;
 mod setup;
@@ -511,7 +512,25 @@ async fn credential_on(
         crate::updates::StepState,
         crate::updates::deploy::FileVerdict,
         crate::updates::deploy::FilePlan,
-        crate::updates::store::Targets
+        crate::updates::store::Targets,
+        ft_core::schedule::Schedule,
+        ft_core::schedule::ScheduleRun,
+        ft_core::schedule::Trigger,
+        ft_core::schedule::TriggerKind,
+        ft_core::schedule::Cadence,
+        ft_core::schedule::MonthlyOn,
+        ft_core::schedule::Weekday,
+        ft_core::schedule::Streak,
+        ft_core::schedule::ScheduleRunState,
+        ft_core::schedule::RunSource,
+        ft_core::schedule::Outcome,
+        ft_core::schedule::PausedReason,
+        ft_core::schedule::Provenance,
+        schedules::NewSchedule,
+        schedules::CadenceQuestion,
+        schedules::CadenceAnswer,
+        schedules::RunOf,
+        schedules::StartedRun
     ))
 )]
 pub struct ApiDoc;
@@ -614,6 +633,22 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(skills::skill_collisions))
         .routes(routes!(skills::share_skills))
         .routes(routes!(skills::set_repo_defaults))
+        .routes(routes!(
+            schedules::list_schedules,
+            schedules::create_schedule
+        ))
+        .routes(routes!(
+            schedules::one_schedule,
+            schedules::update_schedule,
+            schedules::delete_schedule
+        ))
+        .routes(routes!(schedules::approve_schedule))
+        .routes(routes!(schedules::pause_schedule))
+        .routes(routes!(schedules::resume_schedule))
+        .routes(routes!(schedules::run_schedule_now))
+        .routes(routes!(schedules::schedule_runs))
+        .routes(routes!(schedules::all_runs))
+        .routes(routes!(schedules::read_cadence))
         .routes(routes!(roles::list_roles, roles::create_role))
         .routes(routes!(roles::update_role, roles::delete_role))
         .routes(routes!(roles::set_default_role))

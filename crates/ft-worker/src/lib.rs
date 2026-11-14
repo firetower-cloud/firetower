@@ -178,8 +178,23 @@ struct Sending {
 /// How often a worker says what its machine is doing.
 ///
 /// Slow enough that `df` and `docker system df` cost nothing measurable, and
-/// fast enough that a meter follows a build starting. The numbers it carries
-/// are drawn as meters that move; they are not decisions anything waits on.
+/// fast enough that a meter follows a build starting.
+///
+/// **One of these numbers is now a decision something waits on.** It used to
+/// say here that none of them were — that they were drawn as meters that move
+/// and nothing else — and that stopped being true when the control plane
+/// began refusing a launch on a machine that is low on disk: `disk_total_mb`
+/// and `disk_used_mb` are read in `create_session_as`, against a floor, and a
+/// run is refused rather than started. So this cadence is load-bearing, and
+/// making the reporting lazier would make that refusal decide on a reading
+/// older than it looks. The rest of `Capacity` is still only ever drawn.
+///
+/// **Both numbers, not just the free space.** `disk_total_mb` decides which
+/// of two refusals a person is given: a machine under the floor is one to
+/// clear space on, and a machine whose *whole disk* is under the floor can
+/// never pass it, which is a different sentence and a different remedy.
+/// Reporting a total of zero — which `capacity.rs` does when it cannot read
+/// the disk at all — is read as "unknown" and refuses nothing.
 const REPORT_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 /// How often to look for an agent that has rotated its own credential.
 ///
@@ -769,7 +784,18 @@ impl Worker {
             }
             ToWorker::CreateWorkspace(spec) => {
                 let session_id = spec.session_id.clone();
-                if let Err(e) = self.create_workspace(*spec, out).await {
+                let made = self.create_workspace(*spec, out).await;
+                // **Said when it is over, either way.** The scheduler holds a
+                // launch permit until this arrives — see
+                // `ToServer::WorkspaceCreated` — and a creation that failed
+                // holds no disk, so the permit goes back on both paths.
+                let _ = out
+                    .send(ToServer::WorkspaceCreated {
+                        session_id: session_id.clone(),
+                        ok: made.is_ok(),
+                    })
+                    .await;
+                if let Err(e) = made {
                     let kind = EventKind::Failed {
                         code: "SetupFailed".into(),
                         message: format!("{e:#}"),
@@ -2289,9 +2315,28 @@ You are in the directory that holds them, not inside one of them.              P
         // sent — after waiting for it to be listening, because a turn written
         // into a socket nobody has bound yet is simply lost.
         if structured {
-            structured::wait_until_listening(id)
-                .await
-                .context("waiting for the agent to start")?;
+            // **Named, and leading with the engine.** This said "waiting for
+            // the agent to start", and what followed was the session id and a
+            // timeout — a sentence whose first half is machinery and whose
+            // second half is an identifier. The reason now comes from the
+            // supervisor itself; this puts something a person recognises in
+            // front of it.
+            if let Err(waited) = structured::wait_until_listening(id).await {
+                // **And whether its terminal is still there**, which is the
+                // one fact this side has and the supervisor does not: a pane
+                // that has already closed means the command exited, so
+                // "look at its terminal" would be advice about something
+                // that is gone.
+                let gone = !tmux.exists().await;
+                anyhow::bail!(
+                    "{} did not start: {waited:#}{}",
+                    agent.label(),
+                    match gone {
+                        true => " Its terminal has closed, so whatever ran exited immediately.",
+                        false => "",
+                    }
+                );
+            }
             // Whatever this agent needs said first — for one that is a prompt,
             // for another it is a handshake with the prompt still to come. The
             // shapes belong to the control plane; this only puts them on the
@@ -2540,7 +2585,13 @@ You are in the directory that holds them, not inside one of them.              P
         // Always, even with nothing selected: the directory has to exist
         // before the agent starts, or the first skill turned on mid-session
         // lands somewhere nothing is watching.
-        if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills).await {
+        // Best effort. `StartAgent` carries no requirement of its own —
+        // starting a second agent in a workspace, or restarting one, is a
+        // path where the set has already been delivered once and where
+        // nothing here knows whether it was approved. A scheduled run
+        // *relaunched* on this path can therefore come up without a skill it
+        // was approved with, which is a gap rather than a decision.
+        if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills, false).await {
             tracing::warn!(
                 "{}: writing this session's skills: {e:#}",
                 spec.agent.label()
@@ -2705,7 +2756,25 @@ You are in the directory that holds them, not inside one of them.              P
         )
         .await?;
 
-        if let Err(e) = crate::skills::apply(&path, &id, spec.agent, &spec.skills).await {
+        // **A run approved to read a set of skills does not start without
+        // them.** Best effort otherwise, which is right for a session
+        // somebody is in front of: the one skill nobody can write is worth
+        // less than the session, and whoever is there can see it is missing.
+        // With nobody there, a safety skill that silently failed to install
+        // is a run nobody would know was unguarded — so this fails the launch
+        // before the agent is started rather than after.
+        if let Err(e) =
+            crate::skills::apply(&path, &id, spec.agent, &spec.skills, spec.skills_required).await
+        {
+            if spec.skills_required {
+                return Err(e).with_context(|| {
+                    format!(
+                        "{} was approved to read {} skill(s) and they could not all be installed",
+                        spec.agent.label(),
+                        spec.skills.len()
+                    )
+                });
+            }
             tracing::warn!(
                 "{}: writing this session's skills: {e:#}",
                 spec.agent.label()
@@ -2800,7 +2869,10 @@ You are in the directory that holds them, not inside one of them.              P
     ) -> Result<()> {
         let workspace = self.workspace_of(session_id).await?;
         let (agent, _) = self.store.session_brief(session_id).await?;
-        crate::skills::apply(&workspace, session_id, agent, skills).await
+        // `SetSkills`, which is somebody changing the set on a running
+        // session: best effort, and they are looking at the screen that shows
+        // what landed.
+        crate::skills::apply(&workspace, session_id, agent, skills, false).await
     }
 
     async fn workspace_of(&self, session_id: &SessionId) -> Result<PathBuf> {
@@ -5833,6 +5905,7 @@ mod tests {
             env: vec![],
             agent_home: vec![],
             skills: vec![],
+            skills_required: false,
             persona: String::new(),
         }))
     }
@@ -6072,6 +6145,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    skills_required: false,
                     persona: String::new(),
                 })),
             ],
@@ -6129,6 +6203,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    skills_required: false,
                     persona: String::new(),
                 })),
             ],
@@ -6231,6 +6306,7 @@ mod tests {
                     env: vec![],
                     agent_home: vec![],
                     skills: vec![],
+                    skills_required: false,
                     persona: String::new(),
                 })),
             ],
