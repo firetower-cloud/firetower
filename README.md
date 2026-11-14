@@ -27,7 +27,7 @@ Firetower is an open-source workspace for running teams of AI agents on infrastr
 
 ### Join an existing installation
 
-[Download Firetower](https://usefiretower.com/docs/join), enter your company’s Firetower address, and sign in. Desktop clients are available for macOS and Windows; mobile clients for iOS and Android.
+[Download Firetower](https://usefiretower.com/docs/join), enter your company’s Firetower address, and sign in. Desktop clients are available for macOS, Windows and Linux; mobile clients for iOS and Android.
 
 ### Host your own
 

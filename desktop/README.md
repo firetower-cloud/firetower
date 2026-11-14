@@ -1,4 +1,4 @@
-# Firetower for macOS
+# Firetower for macOS, Windows and Linux
 
 A native window onto your Firetowers, one at a time. It connects to a control
 plane over the mesh VPN, keeps a token per server, and talks to every server
@@ -193,12 +193,18 @@ shipped app's.
 ## Installers
 
 `scripts/build-mac.sh` builds the `.dmg` on this Mac (`--universal` for one
-file that runs on Apple Silicon and Intel). A Windows installer can only be
-built on Windows: `gh workflow run desktop.yml`, then `gh run download`,
+file that runs on Apple Silicon and Intel). The other two can only be built on
+their own platform: `gh workflow run desktop.yml`, then `gh run download`,
 gives the `.exe` (per-user, what people install) and the `.msi` (for deploying
-by policy) from a Windows runner, unsigned. Signing and notarization are the
-release workflow's job and happen behind a protected environment; nothing
-signing-related is in the tree but the public half of the updater's key.
+by policy) from a Windows runner, and the `.deb` and the `.AppImage` from a
+Linux one, all unsigned. Signing and notarization are the release workflow's
+job and happen behind a protected environment; nothing signing-related is in
+the tree but the public half of the updater's key.
+
+`desktop/linux/` is a Docker harness for looking at the Linux build from a
+Mac — it builds, installs and photographs it under a window manager. What the
+Linux build cannot do yet is written down for the people downloading it, in
+[`docs/linux.md`](../docs/linux.md).
 
 ## Windows
 
@@ -219,8 +225,10 @@ instead, and a commit here with no conventional subject reaches neither.
 Merging that PR makes a draft release and runs `desktop-release.yml`: a
 universal `.dmg` (`Firetower_<version>_macos.dmg`) with the app signed by the
 Developer ID certificate and the image notarized, an `.exe` and `.msi` for
-Windows, each with the updater's signature, and `latest.json` — then the
-release is published. The signing job runs in the `release` environment: a
+Windows, an `.AppImage` for Linux — and no `.deb`, which could not update
+itself; see `docs/linux.md` — each with the updater's signature, and
+`latest.json`, which is built once in the `publish` job from the signatures on
+the release rather than by each leg. Then the release is published. The signing job runs in the `release` environment: a
 reviewer approves it before its secrets are readable. `latest.json` is also
 copied onto the rolling `desktop-latest` release, the one fixed address the
 app reads: GitHub's own `latest` is whichever package of this repository
