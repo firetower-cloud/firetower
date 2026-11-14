@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { tileLine } from "./GetTheApp";
+import { showsOnLinux, tileLine } from "./GetTheApp";
 
 /**
  * Three states, three sentences — the thing a download tile could not say.
@@ -41,5 +41,40 @@ describe("the line under a platform's name", () => {
     expect(tileLine({ ...mac, href: "…/Firetower_0.29.1_macos.dmg", settled: true, reached: true })).toBe(
       "Apple silicon and Intel",
     );
+  });
+});
+
+/**
+ * The block under the tiles, which is advice rather than a download.
+ *
+ * It carries where to keep the AppImage, the known gaps, and this card's only
+ * link to `docs/linux.md`. So which states it appears in is the same question
+ * as which states that link exists in, and the answer follows the tiles: a
+ * lookup that failed is not a release with nothing in it.
+ */
+describe("whether On Linux is drawn", () => {
+  it("is drawn while the lookup is still out", () => {
+    // What it says is true whatever the lookup returns, and the card should
+    // not grow under somebody's cursor when the links arrive.
+    expect(showsOnLinux({ settled: false, reached: true })).toBe(true);
+  });
+
+  it("is drawn once there is an AppImage to keep somewhere", () => {
+    expect(showsOnLinux({ settled: true, reached: true, linux: "…/Firetower_0.29.1_amd64.AppImage" })).toBe(true);
+  });
+
+  it("is drawn when the lookup failed, where nothing is known about the release", () => {
+    // The tile above is still offering "AppImage, x86_64" in this state, and
+    // where to keep a file is not a claim about any particular release. This
+    // is also the only state in which the reader has least to go on, so it is
+    // the worst one in which to remove the link to the documentation.
+    expect(showsOnLinux({ settled: true, reached: false })).toBe(true);
+  });
+
+  it("is hidden only when the release was read and has no AppImage", () => {
+    // The one case where there positively is no Linux download: the tile says
+    // "Not in this release" itself, and advice about a file nobody can get
+    // from here is noise.
+    expect(showsOnLinux({ settled: true, reached: true })).toBe(false);
   });
 });

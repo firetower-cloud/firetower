@@ -147,11 +147,7 @@ export function GetTheApp() {
           <Platform name="Linux" hint="AppImage, x86_64" href={downloads.linux} glyph={<TuxGlyph />} tag="Experimental" settled={downloads.settled} reached={downloads.reached} />
         </div>
 
-        {/* Drawn while the lookup is still out, because it is true whatever
-            the lookup returns and the card should not grow when the links
-            arrive. Gone once we know there is no AppImage: it is advice about
-            a file you cannot get from here. */}
-        {(!downloads.settled || downloads.linux) && <OnLinux />}
+        {showsOnLinux(downloads) && <OnLinux />}
 
         {/* A dropped connection is not a release with nothing in it, and it is
             not Linux's fault — said once, under the tiles, with the link to
@@ -267,6 +263,36 @@ function Platform({
   ) : (
     <span className={`${className} ${settled ? "" : "opacity-60"}`}>{inner}</span>
   );
+}
+
+/**
+ * Whether the *On Linux* block is drawn.
+ *
+ * Drawn while the lookup is still out, because what it says is true whatever
+ * the lookup comes back with, and the card should not grow under somebody's
+ * cursor when the links arrive.
+ *
+ * Drawn again when the lookup **failed**, which is the same argument the tiles
+ * make one line above: nothing is known about the release, the Linux tile is
+ * still offering an AppImage, and where to keep a file is not a claim about
+ * any particular release. Hiding it there would take away the advice *and*
+ * this card's only link to `docs/linux.md` on the one path where the reader
+ * has least to go on.
+ *
+ * Hidden in exactly one case — the release was read and has no AppImage in it.
+ * Then there positively is no Linux download, the tile says so itself, and
+ * advice about where to keep a file nobody can get from here is noise.
+ */
+export function showsOnLinux({
+  settled,
+  reached,
+  linux,
+}: {
+  settled: boolean;
+  reached: boolean;
+  linux?: string;
+}) {
+  return !settled || !reached || Boolean(linux);
 }
 
 /**
