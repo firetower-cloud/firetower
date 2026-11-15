@@ -355,6 +355,103 @@ pub const SANDBOX_WORKSPACE: &str = "workspace";
 pub const SANDBOX_WORKSPACE_NETWORK: &str = "workspace+network";
 pub const SANDBOX_EVERYTHING: &str = "everything";
 
+/// The permission mode that refuses rather than asks, per engine.
+///
+/// `None` for an agent with no permission control at all. **Per engine,
+/// because the word differs**: Claude Code spells it `dontAsk` and Codex
+/// spells it `never`, and handing one engine the other's word is a control
+/// that silently does nothing — which for a session with nobody present
+/// means it stops to ask somebody who is not there, or does not stop at all.
+pub fn never_asks_as(agent: crate::Agent) -> Option<&'static str> {
+    match agent {
+        crate::Agent::ClaudeCode => Some("dontAsk"),
+        crate::Agent::Codex => Some("never"),
+        _ => None,
+    }
+}
+
+/// The values this engine's picker would offer for a control.
+///
+/// Empty means the server cannot enumerate it — which is a third answer and
+/// not the same as the control being absent. Codex lists its models and
+/// efforts over its own protocol, so a caller validating a model against an
+/// empty list must not read that as "no such model".
+pub fn choices_for(agent: crate::Agent, kind: ControlKind) -> Vec<String> {
+    for_agent(agent, Vec::new(), Vec::new())
+        .into_iter()
+        .filter(|c| c.kind == kind)
+        .flat_map(|c| c.choices)
+        .map(|c| c.value)
+        .collect()
+}
+
+/// Whether this engine offers this control at all, and this value for it.
+///
+/// **Unknown is refused, not assumed safe.** [`grants_more`] answers `false`
+/// for a value it has never heard of, which read as "this does not grant
+/// anything" — so a sandbox value no catalogue lists passed a check meant to
+/// stop exactly that. Anything an unattended run is started on has to be a
+/// value the picker would have offered, because that is the set somebody has
+/// reasoned about.
+///
+/// `false` also for a control this engine does not have: a sandbox on Claude
+/// Code is not a safe no-op, it is a field that will be ignored while
+/// somebody believes it is in force.
+pub fn offers(agent: crate::Agent, kind: ControlKind, value: &str) -> bool {
+    for_agent(agent, Vec::new(), Vec::new())
+        .into_iter()
+        .filter(|c| c.kind == kind)
+        .flat_map(|c| c.choices)
+        .any(|choice| choice.value == value)
+}
+
+/// Whether this engine has such a control at all.
+///
+/// Told apart from "offers this value" because one engine lists its models
+/// at runtime: the control exists and the server cannot enumerate it, which
+/// is a third answer and not the same as the control being absent.
+pub fn has_control(agent: crate::Agent, kind: ControlKind) -> bool {
+    match (agent, kind) {
+        // Codex lists models and efforts over its own protocol, so
+        // `for_agent` leaves them out when it has not spoken yet. The control
+        // is still that engine's.
+        (crate::Agent::Codex, ControlKind::Model | ControlKind::Effort) => true,
+        _ => for_agent(agent, Vec::new(), Vec::new())
+            .into_iter()
+            .any(|c| c.kind == kind),
+    }
+}
+
+/// Whether a value for this control grants the agent more than it otherwise
+/// had — the `caution: Grants` the pickers draw a warning against.
+///
+/// Asked of the catalogue rather than of a list written down somewhere else,
+/// so a choice added with `.grants()` is covered by whatever reads this
+/// without that code being revisited. **Which is the point**: an unattended
+/// run must not be startable on a value a person would have been warned
+/// about, and "the list of dangerous values" is not a thing to maintain
+/// twice.
+pub fn grants_more(agent: crate::Agent, kind: ControlKind, value: &str) -> bool {
+    for_agent(agent, Vec::new(), Vec::new())
+        .into_iter()
+        .filter(|c| c.kind == kind)
+        .flat_map(|c| c.choices)
+        .any(|choice| choice.value == value && choice.caution == Some(Caution::Grants))
+}
+
+/// What an unattended run's sandbox may be, where the engine has one.
+///
+/// `workspace+network` rather than `workspace`: a scheduled run clones,
+/// installs what a setup script asks for and pushes a branch, and all three
+/// need the network. What it may not have is `everything`, which is no
+/// filesystem fence at all — see [`grants_more`].
+pub fn unattended_sandbox(agent: crate::Agent) -> Option<&'static str> {
+    match agent {
+        crate::Agent::Codex => Some(SANDBOX_WORKSPACE_NETWORK),
+        _ => None,
+    }
+}
+
 /// What a session running this agent can be asked to change.
 ///
 /// `models` is passed in because one agent knows its own and the other does

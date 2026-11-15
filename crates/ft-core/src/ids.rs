@@ -103,6 +103,21 @@ id_type!(
     "Identifies one version of a skill. Append-only: a session pins one."
 );
 id_type!(
+    ScheduleId,
+    "sch",
+    "Identifies a schedule — a durable authorization to start an agent with nobody present."
+);
+id_type!(
+    TriggerId,
+    "trg",
+    "Identifies one trigger on a schedule. A cron today; a webhook or an API call later."
+);
+id_type!(
+    ScheduleRunId,
+    "run",
+    "Identifies one occurrence of a schedule. Append-only: the history outlives the workspace."
+);
+id_type!(
     ArtifactId,
     "ar",
     "Identifies an artifact — a page an agent published for somebody to look at."

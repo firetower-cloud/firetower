@@ -29,6 +29,25 @@ pub struct Askpass {
     server: JoinHandle<()>,
 }
 
+/// A path as one shell word, whatever is in it.
+///
+/// **This was interpolated bare, and a path is not a shell word.** The script
+/// is generated from `current_exe()`, which is wherever this binary happens
+/// to live — and on a machine where that path contained a parenthesis, the
+/// bridge came out as `exec /tmp/x/firetower-worker (1) askpass "$@"`. Under
+/// dash that is a syntax error at line 2, so git got no credential and every
+/// fetch failed with `unable to read askpass response`. Nothing said the
+/// script was the problem.
+///
+/// Single quotes, because inside them a POSIX shell takes every character
+/// literally — spaces, brackets, `$`, backslashes, newlines. The one
+/// character that cannot appear is a single quote itself, so each one is
+/// closed, escaped and reopened: `'it'\''s'`. That is the whole of it, and it
+/// is exact rather than a list of characters somebody remembered.
+fn quoted(path: &Path) -> String {
+    format!("'{}'", path.display().to_string().replace('\'', "'\\''"))
+}
+
 impl Askpass {
     /// Start serving `credential` to whatever connects, until dropped.
     ///
@@ -52,7 +71,7 @@ impl Askpass {
         let bridge = dir.path().join("askpass");
         tokio::fs::write(
             &bridge,
-            format!("#!/bin/sh\nexec {} askpass \"$@\"\n", helper.display()),
+            format!("#!/bin/sh\nexec {} askpass \"$@\"\n", quoted(helper)),
         )
         .await
         .context("writing the askpass bridge")?;
@@ -185,6 +204,97 @@ mod tests {
 
         assert_eq!(user, "x-access-token");
         assert_eq!(pass, "s3cret");
+    }
+
+    /// **The bridge has to survive the path it is generated from.**
+    ///
+    /// A parenthesis in `current_exe()` produced `exec …/worker (1) askpass
+    /// "$@"`, which dash rejects at line 2 — so git got no credential and
+    /// every fetch failed saying it could not read the askpass response.
+    /// Nothing in that message mentions the script.
+    ///
+    /// Checked two ways, because a syntax check passes things that do not
+    /// run: `sh -n` is the failure that was reported, and executing it is the
+    /// thing that actually has to work. The helper here is a script of its
+    /// own that writes down what it was called with, so this asserts the
+    /// arguments arrive as well.
+    #[tokio::test]
+    async fn the_bridge_survives_a_path_a_shell_would_choke_on() {
+        let home = tempfile::tempdir().unwrap();
+        let awkward = home.path().join("Firetower (dev) 2.0");
+        tokio::fs::create_dir_all(&awkward).await.unwrap();
+        let helper = awkward.join("firetower-worker (1)");
+        let said = awkward.join("said");
+        tokio::fs::write(
+            &helper,
+            format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\n", quoted(&said)),
+        )
+        .await
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            tokio::fs::set_permissions(&helper, std::fs::Permissions::from_mode(0o700))
+                .await
+                .unwrap();
+        }
+
+        let server = Askpass::start(
+            Credential {
+                username: "u".into(),
+                secret: "s".into(),
+            },
+            &helper,
+        )
+        .await
+        .unwrap();
+        let bridge = server.env()[0].1.clone();
+
+        let checked = tokio::process::Command::new("/bin/sh")
+            .arg("-n")
+            .arg(&bridge)
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            checked.status.success(),
+            "the bridge is not a script this shell can read: {}",
+            String::from_utf8_lossy(&checked.stderr)
+        );
+
+        let ran = tokio::process::Command::new(&bridge)
+            .arg("Password for 'https://x@example.com': ")
+            .output()
+            .await
+            .unwrap();
+        assert!(
+            ran.status.success(),
+            "the bridge did not run: {}",
+            String::from_utf8_lossy(&ran.stderr)
+        );
+        let args = tokio::fs::read_to_string(&said).await.unwrap();
+        assert_eq!(
+            args.lines().next(),
+            Some("askpass"),
+            "git's prompt has to arrive after our own subcommand: {args:?}"
+        );
+    }
+
+    /// Every character a path can hold and a shell can misread.
+    #[test]
+    fn a_path_becomes_one_shell_word() {
+        assert_eq!(quoted(Path::new("/tmp/plain")), "'/tmp/plain'");
+        assert_eq!(
+            quoted(Path::new("/tmp/with (1)/and a space")),
+            "'/tmp/with (1)/and a space'"
+        );
+        assert_eq!(
+            quoted(Path::new("/tmp/$HOME;rm -rf /")),
+            "'/tmp/$HOME;rm -rf /'"
+        );
+        // The one character single quotes cannot hold: closed, escaped,
+        // reopened.
+        assert_eq!(quoted(Path::new("/tmp/it's")), "'/tmp/it'\\''s'");
     }
 
     #[tokio::test]

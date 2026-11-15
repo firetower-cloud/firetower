@@ -965,6 +965,63 @@ impl Connections {
     }
 }
 
+/// How git will reach a remote, and therefore **whose identity it will use**.
+///
+/// Not the same question as "which git host is this on", which is what
+/// [`host_of`] answers. `host_of` was pressed into service as a local-path
+/// test and it is not one: it answers `None` for a bare hostname
+/// (`ssh://git@gitbox/acme.git`) because that is not a name it could match a
+/// connection against, and `Some("github.com")` for the scp-like
+/// `git@github.com:acme/backend.git`, which is ssh. Used as a fence, the
+/// first case waved through a remote nobody had authorized and the second
+/// accepted an https token for a transport that would never present it.
+pub enum Transport {
+    /// A path on the machine. Nothing leaves it, and no credential applies
+    /// because nothing authenticates.
+    Local,
+    /// `https://` or `http://` — **the only transport that carries a
+    /// credential we hand over per run.** Git asks our helper for it, and
+    /// the identity on the wire is the one we chose.
+    Web,
+    /// Anything that authenticates out of the machine's own configuration:
+    /// `ssh://`, git's scp-like `git@host:path`, `git://`, anything else.
+    /// The credential we hold is never presented; the host's key or its
+    /// absence decides, and that identity is shared by every session on it.
+    ///
+    /// Carries the word for a refusal to use, because "we cannot run this
+    /// unattended" is only actionable if it says which transport.
+    Machine(&'static str),
+}
+
+/// Which of the three a remote is.
+pub fn transport_of(remote: &str) -> Transport {
+    let remote = remote.trim();
+    if remote.is_empty()
+        || remote.starts_with('/')
+        || remote.starts_with('.')
+        || remote.starts_with('~')
+    {
+        return Transport::Local;
+    }
+    if let Some((scheme, _)) = remote.split_once("://") {
+        return match scheme.to_ascii_lowercase().as_str() {
+            "https" | "http" => Transport::Web,
+            // A path with a scheme on it. Still a path.
+            "file" => Transport::Local,
+            "ssh" | "git+ssh" | "ssh+git" => Transport::Machine("ssh"),
+            "git" => Transport::Machine("the git protocol"),
+            _ => Transport::Machine("that transport"),
+        };
+    }
+    // No scheme. A colon before any slash is git's scp-like form, which is
+    // ssh — `git@github.com:acme/backend.git`. Anything else is a relative
+    // path.
+    match remote.split('/').next().is_some_and(|f| f.contains(':')) {
+        true => Transport::Machine("ssh"),
+        false => Transport::Local,
+    }
+}
+
 /// The host out of a clone URL, in either of git's two shapes — **with its
 /// port**, when it has one.
 ///
@@ -1036,6 +1093,37 @@ mod tests {
             version: None,
             builtin: true,
             position: 0,
+        }
+    }
+
+    fn word(remote: &str) -> &'static str {
+        match transport_of(remote) {
+            Transport::Local => "local",
+            Transport::Web => "web",
+            Transport::Machine(_) => "machine",
+        }
+    }
+
+    /// **The classification the unattended fence rests on.** Every `machine`
+    /// line here is a remote `host_of` got wrong in one direction or the
+    /// other: the bare-hostname ssh URLs it called local, and the scp-like
+    /// forms it called an https host.
+    #[test]
+    fn a_remote_is_classified_by_whose_identity_it_would_use() {
+        for (remote, expected) in [
+            ("/home/editor/media-app", "local"),
+            ("../sibling", "local"),
+            ("~/work/thing", "local"),
+            ("file:///srv/git/thing.git", "local"),
+            ("vendor/thing", "local"),
+            ("https://github.com/acme/backend.git", "web"),
+            ("http://localhost:3210/acme/backend.git", "web"),
+            ("git@github.com:acme/backend.git", "machine"),
+            ("ssh://git@github.com/acme/backend.git", "machine"),
+            ("ssh://git@gitbox/acme/backend.git", "machine"),
+            ("git://example.com/acme/backend.git", "machine"),
+        ] {
+            assert_eq!(word(remote), expected, "{remote}");
         }
     }
 

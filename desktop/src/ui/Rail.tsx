@@ -6,7 +6,7 @@
  * between them. It is two things now: this, which is **where you can go**, and
  * `RailPanel`, which is **what is in the place you are pointing at**.
  *
- * Six destinations and nothing under them but the avatar. 42px targets, 20px
+ * Seven destinations and nothing under them but the avatar. 42px targets, 20px
  * icons, 4px gaps. Selection is a pill in the sheet's own colour, because the
  * selected destination is the sheet's handle; nothing else fills.
  *
@@ -262,9 +262,13 @@ function RailButton({
       data-peek={peeked}
       className="rbtn"
     >
-      {/* No dot can appear on a destination. The one mark the rail carried —
-          *a newer build is out* — is on the avatar now, beside the menu row
-          that says which version. */}
+      {/* **No dot can appear on a destination**, in any state. The one mark
+          the rail ever carried — *a newer build is out* — is on the avatar
+          now, beside the menu row that says which version.
+          
+          That includes a schedule waiting to be approved. A proposal is
+          announced where a held skill's is: a *Waiting for you* section in
+          the panel that destination owns, and nothing above it. */}
       <Glyph size={20} strokeWidth={on ? 2 : 1.8} aria-hidden />
     </button>
   );

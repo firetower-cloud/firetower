@@ -42,10 +42,11 @@ import { BLEED, useEdges, useRail } from "~/ui/edges";
 import Animated from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
 import { router } from "expo-router";
-import { ChevronRight } from "lucide-react-native";
+import { ChevronRight, Clock } from "lucide-react-native";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
+import { useListSchedules } from "~/api/generated/schedules/schedules";
 import type { Session } from "~/api/generated/model";
 import { banded, childrenElsewhere, fleetLine, group, lead, useSettled, useVanished, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
@@ -147,6 +148,7 @@ export default function Home() {
   const { data: repos } = useRepos();
   const { data: agents } = useAgents();
   const { data: artifacts = [] } = useListArtifacts();
+  const schedules = useListSchedules();
 
   const [draft, setDraft] = useState("");
   const [peeking, setPeeking] = useState<string | null>(null);
@@ -294,6 +296,12 @@ export default function Home() {
     );
   }
 
+  /* A proposal nobody has looked at, or a schedule Firetower stopped. Both
+     want a decision, which is what the count means. */
+  const schedulesWaiting = (schedules.data ?? []).filter(
+    (s) => (s.made.byAgent && !s.approvedAt) || (!s.active && !!s.pausedReason),
+  ).length;
+
   const bare = noRepo;
   const greeting = bare
     ? "Nothing to cut from yet."
@@ -331,6 +339,41 @@ export default function Home() {
         {greeting}
       </Text>
     </View>
+  );
+
+  /**
+   * **The phone's way into Schedules, and there is no fifth tab.**
+   *
+   * Four is what `NativeTabs` presents well as a vertical rail on the Duo,
+   * and a fifth would be paid for on every pose to reach a destination most
+   * people open weekly. So it is a 50pt row under the greeting, above the
+   * section the redesign deliberately lifted out of the bottom third.
+   *
+   * It carries a count **only while something wants a decision** — a proposal
+   * waiting to be turned on, or a schedule Firetower stopped. Not a count of
+   * schedules, which would be a number that is always there and therefore
+   * says nothing.
+   */
+  const entry = (
+    <Pressable
+      testID="schedules-entry"
+      accessibilityRole="button"
+      onPress={() => router.push("/schedules")}
+      className="min-h-[50px] flex-row items-center gap-3 px-5"
+      android_ripple={{ color: color.overlay }}
+    >
+      <Clock size={18} color={color.dim} strokeWidth={1.8} />
+      <Text className="font-sans text-bone" style={{ fontSize: size.body }}>
+        Schedules
+      </Text>
+      {schedulesWaiting > 0 ? (
+        <Text className="font-sans text-mute" style={{ fontSize: size.meta }}>
+          {schedulesWaiting} waiting for you
+        </Text>
+      ) : null}
+      <View className="flex-1" />
+      <ChevronRight size={17} color={color.mute} strokeWidth={1.8} />
+    </Pressable>
   );
 
   const waiting =
@@ -446,6 +489,7 @@ export default function Home() {
       }
     >
       {head}
+      {entry}
       {loading && live.length === 0 ? (
         <View className="items-center justify-center py-20">
           <Waiting say="Reading your workspaces" />
@@ -530,6 +574,7 @@ export default function Home() {
                   them rather than nothing. */}
               <View className="flex-1" />
               {head}
+              {entry}
             </ScrollView>
             {box}
           </View>

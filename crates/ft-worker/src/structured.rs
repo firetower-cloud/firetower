@@ -57,6 +57,12 @@ fn quote(text: &str) -> String {
 /// Polling rather than a signal because the thing we are waiting for is in
 /// another process tree, started by tmux, which tells us nothing about how it
 /// got on.
+///
+/// **And it stops as soon as there is a reason, rather than at the timeout.**
+/// `agent-run` writes why it could not start before it exits — see
+/// [`crate::agentd::failure_path`] — so a missing binary used to cost thirty
+/// seconds of waiting and then said nothing about itself. Now it is the
+/// moment the supervisor gives up, and the reason is what gets reported.
 pub async fn wait_until_listening(session_id: &SessionId) -> Result<()> {
     let deadline = std::time::Instant::now() + STARTUP;
     let mut wait = Duration::from_millis(20);
@@ -67,15 +73,39 @@ pub async fn wait_until_listening(session_id: &SessionId) -> Result<()> {
         {
             return Ok(());
         }
+        if let Some(why) = gave_up(session_id).await {
+            anyhow::bail!("{why}");
+        }
         if std::time::Instant::now() >= deadline {
+            // Nothing wrote a reason, so say what is actually known: it was
+            // started, it was given this long, and it never answered. The
+            // supervisor being gone is the one extra fact available here, and
+            // it is the difference between "slow" and "dead".
             anyhow::bail!(
-                "the agent for {session_id} did not start listening within {}s",
+                "it did not answer within {}s and left no reason. Open the workspace's \
+                 terminal to see what it printed.",
                 STARTUP.as_secs()
             );
         }
         tokio::time::sleep(wait).await;
         // Backs off so a slow start is not a thousand connection attempts.
         wait = (wait * 2).min(Duration::from_millis(500));
+    }
+}
+
+/// What the supervisor said on its way out, if it has said anything.
+///
+/// Trimmed and capped: this becomes a line on somebody's screen, and an
+/// agent's own stack trace is not that line. The first part of the chain is
+/// the part that names the cause.
+async fn gave_up(session_id: &SessionId) -> Option<String> {
+    let said = tokio::fs::read_to_string(crate::agentd::failure_path(session_id.as_str()))
+        .await
+        .ok()?;
+    let said = said.trim();
+    match said.is_empty() {
+        true => None,
+        false => Some(said.chars().take(400).collect()),
     }
 }
 
@@ -454,6 +484,43 @@ mod tests {
             Ok(result) => assert!(result.is_err(), "a missing agent is not a success"),
         }
     }
+    /// **A supervisor that gave up is quoted, not waited out.**
+    ///
+    /// The control plane could only ever say "the agent for s_… did not start
+    /// listening within 30s", which names the machinery and an identifier and
+    /// nothing a person can act on. The cause existed — in a tmux pane that
+    /// died with the command that printed it — so `agent-run` writes it down
+    /// before it exits and this reads it.
+    #[tokio::test]
+    async fn a_supervisor_that_gave_up_is_quoted_rather_than_waited_out() {
+        let session = SessionId::from_stored("s_gave-up-on-start-01");
+        let note = crate::agentd::failure_path(session.as_str());
+        tokio::fs::create_dir_all(note.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(
+            &note,
+            "supervising the agent: starting claude: No such file or directory (os error 2)",
+        )
+        .await
+        .unwrap();
+
+        let began = std::time::Instant::now();
+        let refused = wait_until_listening(&session)
+            .await
+            .expect_err("there is a reason, so this is not a success");
+        let _ = tokio::fs::remove_file(&note).await;
+
+        assert!(
+            refused.to_string().contains("No such file or directory"),
+            "the cause has to be in it: {refused}"
+        );
+        assert!(
+            began.elapsed() < STARTUP / 2,
+            "it waited out the timeout instead of reading the reason"
+        );
+    }
+
     #[tokio::test]
     async fn a_restart_waits_for_a_new_answer_and_surfaces_resume_refusal() {
         let workspace = tempfile::tempdir().unwrap();

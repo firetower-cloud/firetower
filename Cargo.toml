@@ -129,6 +129,20 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 ulid = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
+# A cron parser and the IANA database, for Schedules. Neither was here before,
+# and both are needed together: a cadence is a wall-clock instruction in a
+# named zone ("07:00, Europe/Paris"), and an offset is wrong twice a year.
+#
+# `croner` rather than `cron`, because it reads the five-field expression
+# everybody writes rather than requiring a sixth for seconds, and because it
+# can describe a pattern in English — which is the read-back the create form
+# shows, written once in the server so there is one cron implementation in the
+# product rather than two that disagree about daylight saving in March.
+#
+# `chrono-tz` carries the database in the binary rather than reading
+# /usr/share/zoneinfo, which the release image may not have.
+croner = { version = "4", default-features = false, features = ["chrono"] }
+chrono-tz = "0.10"
 directories = "5"
 async-trait = "0.1"
 futures = "0.3"
