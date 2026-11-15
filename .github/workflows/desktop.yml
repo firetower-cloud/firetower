@@ -4,8 +4,12 @@
 # Types, tests and lints first, then the unsigned installers as artifacts on
 # the run, so a branch can be tried before it is merged. No secrets, so it is
 # safe for a pull request from a fork; the release workflow adds signing
-# behind a protected environment — and does not publish Linux at all, which is
-# why the Linux packages here are the only way to get one.
+# behind a protected environment.
+#
+# **Both Linux packages are still built here, and only the AppImage is
+# released.** The release carries one Linux download so that it can update
+# itself; this one is for trying a branch, where a `.deb` costs nothing and is
+# the easier thing to install on a machine you already administer.
 #
 # Run it by hand:  gh workflow run desktop.yml   then   gh run download
 name: desktop
@@ -21,6 +25,13 @@ on:
       - "desktop/**"
       - "api/openapi.json"
       - ".github/workflows/desktop.yml"
+      # The release workflow and the AppImage scripts, because `pnpm test`
+      # below asserts their shape — that the Linux leg is given no Apple or
+      # Azure credentials, that the release carries no `.deb`, and that no
+      # build leg writes `latest.json`. A check that does not run on the
+      # change it is checking is not a check.
+      - ".github/workflows/desktop-release.yml"
+      - ".github/scripts/appimage-*.sh"
 
 permissions:
   contents: read
@@ -122,10 +133,27 @@ jobs:
       - run: cargo test --locked
         working-directory: desktop/src-tauri
 
+      # The AppImage bundler fetches five files from the internet and runs
+      # them, each one `if !exists { download }`, so putting pinned and
+      # verified copies where it looks is what stops it. A sixth, the AppImage
+      # runtime, is fetched a level deeper by the `appimagetool` inside the
+      # plugin and is handed over as `$LDAI_RUNTIME_FILE` instead. It is also
+      # what fixes the white window on current distributions: the linuxdeploy
+      # Tauri hands out is older than `libwayland-client.so.0` joining the
+      # AppImage excludelist. The script explains the rest.
+      - if: matrix.platform == 'linux'
+        run: $GITHUB_WORKSPACE/.github/scripts/appimage-tools.sh
+
       - uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0
         with:
           projectPath: desktop
           args: ${{ matrix.args }}
+
+      # And then assert it of the artifact rather than trusting that the step
+      # above did its job: this is the only thing that notices if the pinned
+      # file names stop being the ones the installed CLI looks for.
+      - if: matrix.platform == 'linux'
+        run: $GITHUB_WORKSPACE/.github/scripts/appimage-guard.sh src-tauri/target/release/bundle/appimage/*.AppImage
 
       # Tauri's own DMG script arranges the window through Finder, which a
       # build machine has no session for; this assembles the image instead.

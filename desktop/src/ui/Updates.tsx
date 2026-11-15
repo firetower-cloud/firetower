@@ -42,7 +42,7 @@ import type { Chosen } from "~/api/updates";
 import { ACTIVE, canStart, countEnded, needsChoice, willWrite, wouldEnd } from "~/api/updates";
 import { useBackendKey } from "~/backend";
 import { bridge } from "~/bridge";
-import { look, takeUpdate, useBuild } from "~/update";
+import { look, takeUpdate, useBuild, whyUpdateFailed } from "~/update";
 
 import { why } from "~/data";
 
@@ -270,7 +270,10 @@ function ThisApp() {
     setTrouble(null);
     setTaking(true);
     takeUpdate().catch((e) => {
-      setTrouble(why(e));
+      /* `whyUpdateFailed` rather than `why`, because this one failure carries
+         its own next step: an update that could not write over the running
+         copy is not one to try again in a few minutes. */
+      setTrouble(whyUpdateFailed(e));
       setTaking(false);
     });
   };
@@ -298,7 +301,7 @@ function ThisApp() {
       {trouble && (
         <p className="mt-2 flex items-start gap-2 rounded-lg bg-raise px-3 py-2 text-micro leading-relaxed text-brick">
           <Icon of={AlertTriangle} size={12} />
-          <span className="min-w-0 flex-1">{trouble} Try it again in a few minutes.</span>
+          <span className="min-w-0 flex-1">{trouble}</span>
         </p>
       )}
     </>

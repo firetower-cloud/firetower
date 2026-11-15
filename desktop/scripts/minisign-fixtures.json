@@ -1,0 +1,36 @@
+{
+  "_": [
+    "Signatures made by the Tauri CLI this repository pins (2.11.4) — the same",
+    "`tauri signer` that signs a real release — over the payloads in here, with",
+    "a throwaway key. Regenerate with desktop/scripts/minisign-fixtures.sh.",
+    "`payload` is base64 of the bytes signed; `signature` is the `.sig` verbatim."
+  ],
+  "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEZBRjgxOTc1RUQ0RTk2QkQKUldTOWxrN3RkUm40K25oQkp3ZEJBSHQxbWp2MU11TWcvcHlONy9kb2FJQ05wREVKaEpRTUlZLzAK",
+  "otherPubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDlGOThFOUM3Q0NFQjZDQUEKUldTcWJPdk14K21ZbnlCU2k3T0JhN1hWUVdHalVlTzdzOEdWdy9uV01wU1hGMHdyVVAyL1VvZk0K",
+  "signed": {
+    "mac": {
+      "payload": "bWFjT1MgYXBwIGFyY2hpdmUsIHZlcnNpb24gMC4yOS4x",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOWxrN3RkUm40K3RzYmxhcjFiT3ZEUno2cWFkMXNvaFQ4QU9FN0NUcXBNS2NCdHNGWFZUa1ZaQVc4WkYrOWxlR2FzTjE0ZDhmaHFXZlhGRVBzeU9ObWJnNnhuU3dlOUFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Njk2ODU5CWZpbGU6RmlyZXRvd2VyLmFwcC50YXIuZ3oKT0tRbG93UVlHT0lkM1BiSFp6M2IvZ0FGUGd6VDZIMFZtZUZsdzB4TzZuajVBM2NIQU5BOVJBa0g3YTh3WGcvUTNQRDZCQVFYKzdMUjBXMk53YnZTQ1E9PQo="
+    },
+    "macPrevious": {
+      "payload": "bWFjT1MgYXBwIGFyY2hpdmUsIHZlcnNpb24gMC4yOS4w",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOWxrN3RkUm40K3V1Y2tuWlYvZ1Bnc3hFNExpbzAyY3ZOSmw4VHFKNTRxMlhHeGxwWHhma2I3OVhzbk8xUW00VmN2WDdyOHlwVmY1U1dmOFBCM0l3ZmEvckZVRnpMSlFvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Njk2ODYwCWZpbGU6RmlyZXRvd2VyLmFwcC50YXIuZ3oKYnRXZWw0ODB1RDNNV3FEVlllVmlQdzZiZW9FNGg4cndaN3JKdFJrVS9lejBPN1Y0bDVFY2I3amlDTHlJZ1FYdmtwVXljazQzdlhUQXJDZldhTkxaQmc9PQo="
+    },
+    "windows": {
+      "payload": "TlNJUyBpbnN0YWxsZXIsIHZlcnNpb24gMC4yOS4x",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOWxrN3RkUm40K2lPKzNYQVZyd05wUS9XU2VlZHBTOWdLNzlWanRVdk41QVFBKzQ2V0VkcmduK0cwSHN6alJINUg1eUFiNEQ2TFA0WmpmSHdBYUpPU040Nk9QVVI4T3dFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Njk2ODYwCWZpbGU6RmlyZXRvd2VyXzAuMjkuMV94NjQtc2V0dXAuZXhlCnVCOTNWbUk1emRyQTJlelVSOTZyYU55dE13dlUyRHdqRVVYQXZsaUdIQ1hENklZaWhaVmxCVS9TbkIvNHJ4RkZVNVBldVVrOTRTYjFid2pQdE5aQ0FRPT0K"
+    },
+    "msi": {
+      "payload": "TVNJIGluc3RhbGxlciwgdmVyc2lvbiAwLjI5LjE=",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOWxrN3RkUm40K2wvUGU4ZHB4anBOQmVnL0NJWERLbFcvMDkyRTN5U2pOa2RGdUlkM2QyQ3A2WVptYVVnK2dEcmMxWXNPTlJHMXU1K0UzdHJCVlR3YlQvWVFjOUlHc0F3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Njk2ODYwCWZpbGU6RmlyZXRvd2VyXzAuMjkuMV94NjRfZW4tVVMubXNpCjRvbEdWdGpvM2FTRTRPOFhPL3ZxWHBxZHV3NDlzNEdGNkRnOTJLWnZ3WjlJTnhxWU5RRW81c3cyKzJIRWtPeUc2NDhaYVRFSDZSZXZ4ZFE0YksrUENnPT0K"
+    },
+    "appimage": {
+      "payload": "QXBwSW1hZ2UsIHZlcnNpb24gMC4yOS4x",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTOWxrN3RkUm40K21VOUJRREF4akJPbmNiTWl5aEE5REZoOHdTNWhrbjhhUEY0endPNENmY3BDNkRJTitKamxZMVNUQXdCa1JJT0VpM3Z4dUJReExORFdlUThkRnhMU3dRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Njk2ODU5CWZpbGU6RmlyZXRvd2VyXzAuMjkuMV9hbWQ2NC5BcHBJbWFnZQpUckh1UUxpamZqSDFCVXI2bVp2RzdWVmxsMGNCQ2lydk80UGN6YllBQzdDb2Fob3BUZ3cxcm1WTVNpaU1hUjJQb1Q2d3Y4Z1ZzdUpIc2xtam1ScVZBdz09Cg=="
+    },
+    "windowsOtherKey": {
+      "payload": "TlNJUyBpbnN0YWxsZXIsIHZlcnNpb24gMC4yOS4x",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTcWJPdk14K21ZbnluM3UzQXNmNGNucUsxV1ZuZFdpQlMrbk9kYUt4R0VZbFpTQmc0bC9ZOFdsMDhuWHZRaFRQQVMwcWJqWHlSc3ZjSVhzME9xS1h4bFRTVmlGSVQraXdzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0Njk2ODYwCWZpbGU6RmlyZXRvd2VyXzAuMjkuMV94NjQtc2V0dXAuZXhlCmwwM1RBaTFqbW9aMXdMOWVCYnpNendUelVNYll0RnVTbXBFTTErN3ZrNndSU2x2YUNRenlGMkxpZW4xN3llbXlvQ1RPRmJKYUlJeERITHJzWDZWTEJRPT0K"
+    }
+  }
+}
