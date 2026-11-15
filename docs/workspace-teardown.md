@@ -16,6 +16,65 @@ workspace that was already finished and works through them fifty at a time,
 which is the backlog. Only the orphaned `events` are deleted in the migration,
 because the foreign key cannot be trusted until they are gone.
 
+## Two holes, found by a workspace that sat on a dashboard for nine days
+
+Both were in what landed rather than in the plan, and each on its own was
+survivable. Together they made a place that could neither be ended by anybody
+nor collected by the sweep: the row wore a warning triangle, *End workspace*
+answered "already ended", and nothing else in the product could touch it.
+
+**A workspace with no sessions in it was never collected.** The sweep asked
+`EXISTS (SELECT 1 FROM sessions …)` before anything else, to keep itself off a
+workspace in the seconds between making it and starting the first agent in it —
+`NOT EXISTS` over an empty set being true. There are no such seconds:
+`Db::insert_session` writes the workspace and its first session in one
+transaction, and nothing else in the control plane makes a workspace, so no
+committed row is ever legitimately session-less. What the guard protected in
+practice was a row whose sessions had gone some other way, and nothing could
+ever collect that. There is no age guard in its place, for the same reason — but
+a path that ever makes a workspace *before* its first session has to do both in
+one transaction, or this sweep will take it within the minute.
+
+**Ending a place is a question about the place, not about the session that
+names it.** A workspace carries the id of the session that cut it, so "end this
+workspace" arrives as a delete of that session with `workspace=true` — and
+`destroy_session` refused it outright when that session had already ended. An
+agent ending on its own is ordinary and supported (`reclaim` and the worker's
+"the last agent out reclaims it" both depend on it), so the supported action was
+what put the place beyond reach, and `?force=true` was no escape because the
+status gate ran in front of it. The gate now applies only to a single-agent
+end.
+
+And a place with nothing running left in it is now removed by the handler
+rather than refused: the delete's goal is already true, which is not an error.
+That is the one place allowed to reclaim inline, because somebody is watching
+the row they just asked to be rid of. The sweep is still what collects every
+place that finishes some other way, which is every other way a place finishes.
+
+Both of them go through `Db::purge_finished_workspace`, and that matters twice
+over.
+
+*One predicate, in one place.* A handler and a sweep each carrying their own
+idea of when a place is over would eventually disagree, and whichever was wrong
+would be deleting somebody's work. So the handler does not spell the condition
+out, and the sweep no longer deletes by id on the strength of its own listing —
+it asks again, at the moment it deletes.
+
+*And a lock, because a guarded `DELETE` on its own is not enough.* That is what
+shipped to review and review broke it. Under READ COMMITTED the `NOT EXISTS` is
+answered from the snapshot the statement began with, so a session inserted by
+another transaction and not yet committed is invisible to it: the predicate
+holds, the delete blocks on the `FOR KEY SHARE` lock that child insert takes on
+the workspace row, and when that transaction commits the delete proceeds on its
+stale answer — taking a run that has just started, with no teardown asked of
+any worker and no debt written down. `EvalPlanQual` does not help: it re-checks
+against a newer version of the target row, and the workspace row was only
+locked, never updated. So the row is taken `FOR UPDATE` first — the weaker `FOR
+NO KEY UPDATE` does not conflict with `FOR KEY SHARE` and would not wait — and
+the guarded delete runs as a second statement, with a snapshot that sees what
+the first one waited for. `a_run_starting_as_the_place_is_purged_survives_it`
+holds that schedule open on a second connection.
+
 ## The problem
 
 Nothing on the session path is ever deleted. `forget_session` and `mark_cleaned`

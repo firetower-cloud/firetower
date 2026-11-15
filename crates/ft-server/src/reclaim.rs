@@ -70,11 +70,19 @@ pub async fn sweep(state: &AppState) -> anyhow::Result<usize> {
         // point is that somebody watching a disk fill can see where it went.
         let bytes = state.db.workspace_weight(workspace).await.unwrap_or(0);
 
-        match state.db.purge_workspace(workspace).await {
-            // Zero rows means somebody else got there first, which is fine and
-            // is not worth counting.
-            Ok(0) => {}
-            Ok(_) => {
+        // Asked again, under a lock, rather than deleted on the strength of the
+        // list. `workspaces_to_purge` is a snapshot, and between taking it and
+        // getting here somebody can start another agent in one of these places
+        // — the directory still exists, it is only the control plane that had
+        // decided it was over. An unconditional `DELETE … WHERE id = $1` would
+        // take that run and its transcript with the row; the guarded one
+        // declines, and the place comes back to the sweep when it is finished
+        // for real.
+        match state.db.purge_finished_workspace(workspace).await {
+            // Not finished after all, or somebody else got there first. Both
+            // are fine and neither is worth counting.
+            Ok(false) => {}
+            Ok(true) => {
                 freed += 1;
                 if bytes > 1_000_000 {
                     tracing::info!(
