@@ -1,5 +1,54 @@
 # Changelog
 
+## [0.30.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.29.1...desktop-v0.30.0) (2026-11-15)
+
+
+### Features
+
+* **desktop:** a schedule you create is on ([960722c](https://github.com/firetower-cloud/firetower/commit/960722caef7f57d37fd315ff493fcf3c5d82af14))
+* **desktop:** Linux, as an experimental tier ([0720e9d](https://github.com/firetower-cloud/firetower/commit/0720e9dee924685ad9102055706deb53ae4bc051))
+* **desktop:** Schedules moves to ⌘5, after Customize ([3108c90](https://github.com/firetower-cloud/firetower/commit/3108c90b401cf6a464999909edae8c5713775cdf))
+* **desktop:** Schedules, the seventh destination ([ed36a62](https://github.com/firetower-cloud/firetower/commit/ed36a62355212df150bbcadae8a936656bcb0d57))
+* **desktop:** six examples to start a schedule from, not eight ([5cd4645](https://github.com/firetower-cloud/firetower/commit/5cd46452d9caf34d74ada1aed18363551e145920))
+* **desktop:** the schedules screens have styles to be drawn with ([a197f23](https://github.com/firetower-cloud/firetower/commit/a197f23b3d17c9e5e67c26c71bb7fbfedfdc5704))
+* Linux as a released tier, and the white window fixed at its cause ([3b5fa45](https://github.com/firetower-cloud/firetower/commit/3b5fa4542d8dc0c27db9dec54fb70bd11fda1def))
+* **schedules:** check out several repositories, and name the machine ([10ad06a](https://github.com/firetower-cloud/firetower/commit/10ad06a5ce38653fa6dcb9a209b49d8a78aff58a))
+* **schedules:** edit one, in the sheet that made it ([35a1cc8](https://github.com/firetower-cloud/firetower/commit/35a1cc81a4072bcdf3c2babfa3d1c82db6e021ee))
+* **schedules:** page the run history, ten at a time ([118827f](https://github.com/firetower-cloud/firetower/commit/118827f89497e7c5f15bb5c1c0545668f4eb06f3))
+* **server:** run an agent on a clock ([0eb398b](https://github.com/firetower-cloud/firetower/commit/0eb398b7cfdbd0e1390edd21333b86df396ac53e))
+
+
+### Bug Fixes
+
+* **ci:** pin the AppImage runtime, the sixth download and the one inside the signature ([f155f20](https://github.com/firetower-cloud/firetower/commit/f155f20e07164673cb1b276c03946f681470c24e))
+* **ci:** refuse to advance desktop-latest when its state cannot be read ([267bd7e](https://github.com/firetower-cloud/firetower/commit/267bd7e7cd1909267f10975cf591571279fcd3ba))
+* **desktop:** "Next three runs" says which day on the create sheet ([03db7e1](https://github.com/firetower-cloud/firetower/commit/03db7e1f4ee7633ce47965284b35b90e39ec1a56))
+* **desktop:** a monthly schedule can say "the first Monday" ([f3c59cc](https://github.com/firetower-cloud/firetower/commit/f3c59cc6c88da1279de815ee090b9ffc03d09114))
+* **desktop:** a refused run is not drawn as a finished one ([848017e](https://github.com/firetower-cloud/firetower/commit/848017e02f0604721af223f7f08a640e6f52f763))
+* **desktop:** align the schedule page's switch, and make its menu a menu ([78b5851](https://github.com/firetower-cloud/firetower/commit/78b5851118b40e96c22a6fff2dac2fc414b16c4b))
+* **desktop:** an update that cannot replace its own file says so ([3e8d2de](https://github.com/firetower-cloud/firetower/commit/3e8d2deba53e2a381899134fcc86a56444072276))
+* **desktop:** ask for a password once, where no row can vouch for the keychain ([0ba2ba3](https://github.com/firetower-cloud/firetower/commit/0ba2ba351b6bb66de854126ff9b8efe1c1785328))
+* **desktop:** build the create sheet from the product's own controls ([c3bc100](https://github.com/firetower-cloud/firetower/commit/c3bc10012cbe97b02299149e52fa8f5ed929b0e5))
+* **desktop:** draw the window's door instead of an empty window ([0adaa3f](https://github.com/firetower-cloud/firetower/commit/0adaa3f0077104fc456d3cdf3dd0930fc7461fdf))
+* **desktop:** drop New schedule from the Schedules panel ([e05363e](https://github.com/firetower-cloud/firetower/commit/e05363ec9018714063378ebf3dbcfd5223962cd1))
+* **desktop:** drop the "On a clock" cell from the cadence row ([979506f](https://github.com/firetower-cloud/firetower/commit/979506f23e9ede1aee32aa0cb0d4835366722d72))
+* **desktop:** drop the consequence summary from the create sheet ([dc91cda](https://github.com/firetower-cloud/firetower/commit/dc91cdaf23a14922db540628b47518dbe429789c))
+* **desktop:** no shebang on latest-json.mjs, which Windows could not parse ([c083375](https://github.com/firetower-cloud/firetower/commit/c083375d8a9711d1473b7c2184696b03dca55346))
+* **desktop:** only restore a sign-in this machine can prove it may ([93b7192](https://github.com/firetower-cloud/firetower/commit/93b7192a93acdd7d3fe3c836feed4f045904c0c7))
+* **desktop:** pair each signature to the payload its URL names ([2536ea0](https://github.com/firetower-cloud/firetower/commit/2536ea00f48500db97d0800d33c1f4f924ed564a))
+* **desktop:** read ETXTBSY and EPERM as the failure that waiting cannot fix ([6082ca7](https://github.com/firetower-cloud/firetower/commit/6082ca7d3ad62fa898fb98fda53fc79a126c02a5))
+* **desktop:** share the composer's pickers, and offer a way to make a profile ([675ab44](https://github.com/firetower-cloud/firetower/commit/675ab445fbd50fc598a1675d3470b2e0ec144e56))
+* **desktop:** Stop the run stops it ([26d0a81](https://github.com/firetower-cloud/firetower/commit/26d0a813dba06d16dbd1daec9c858b16aa7207e9))
+* **desktop:** the cadence row uses the product's menus, with one search box ([17d6abb](https://github.com/firetower-cloud/firetower/commit/17d6abb372026510ef8bfb6155e11af3646cf5e4))
+* **desktop:** the Environment card stops saying things that are not so ([cc28f9b](https://github.com/firetower-cloud/firetower/commit/cc28f9b53577c035a8d159e88855300d87ae50d6))
+* **desktop:** the facts cards whose values are sentences do not truncate ([bcb8fb3](https://github.com/firetower-cloud/firetower/commit/bcb8fb35f284440436b31c08ece65c450a305a65))
+* **desktop:** the schedules destinations scroll ([9dcf605](https://github.com/firetower-cloud/firetower/commit/9dcf60596887a5ad3fd9305cd89cc3a4b6a23316))
+* **desktop:** the schedules panel offers a way to make one ([62c1f4c](https://github.com/firetower-cloud/firetower/commit/62c1f4c0b2fd67fb57e629b3c8f87a5763685334))
+* **desktop:** the workflow-shape tests read a CRLF checkout too ([08f3c8c](https://github.com/firetower-cloud/firetower/commit/08f3c8c2eadad8b8af54c4a4eb4481cfc0eec077))
+* **desktop:** verify each signature against the payload, not its name ([8cf2fc5](https://github.com/firetower-cloud/firetower/commit/8cf2fc574ec63607c97380203f802fe44b86bde6))
+* **server:** a scheduled launch inherits nothing a person picked later ([89ca42d](https://github.com/firetower-cloud/firetower/commit/89ca42d3963745d83090fbb0b5b92dbaf3304ca6))
+* **server:** approving says which revision was read ([21d0507](https://github.com/firetower-cloud/firetower/commit/21d0507827cded745cc19680ddecc7e30b29ea15))
+
 ## [0.29.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.29.0...desktop-v0.29.1) (2026-11-11)
 
 
