@@ -1,5 +1,63 @@
 # Changelog
 
+## [0.55.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.54.1...firetower-v0.55.0) (2026-11-15)
+
+
+### Features
+
+* **desktop:** a schedule you create is on ([960722c](https://github.com/firetower-cloud/firetower/commit/960722caef7f57d37fd315ff493fcf3c5d82af14))
+* **desktop:** Linux, as an experimental tier ([0720e9d](https://github.com/firetower-cloud/firetower/commit/0720e9dee924685ad9102055706deb53ae4bc051))
+* Linux as a released tier, and the white window fixed at its cause ([3b5fa45](https://github.com/firetower-cloud/firetower/commit/3b5fa4542d8dc0c27db9dec54fb70bd11fda1def))
+* **schedules:** check out several repositories, and name the machine ([10ad06a](https://github.com/firetower-cloud/firetower/commit/10ad06a5ce38653fa6dcb9a209b49d8a78aff58a))
+* **schedules:** edit one, in the sheet that made it ([35a1cc8](https://github.com/firetower-cloud/firetower/commit/35a1cc81a4072bcdf3c2babfa3d1c82db6e021ee))
+* **schedules:** page the run history, ten at a time ([118827f](https://github.com/firetower-cloud/firetower/commit/118827f89497e7c5f15bb5c1c0545668f4eb06f3))
+* **server:** refuse a launch on a machine that is low on disk ([f8d5b22](https://github.com/firetower-cloud/firetower/commit/f8d5b22d24037653cace0cb306be9a753985c3ed))
+* **server:** run an agent on a clock ([0eb398b](https://github.com/firetower-cloud/firetower/commit/0eb398b7cfdbd0e1390edd21333b86df396ac53e))
+* **server:** the schedules schema ([6a38198](https://github.com/firetower-cloud/firetower/commit/6a3819814b5c68bf0da1a449ce752fd1b653df92))
+* **web:** Linux on the Download card, and three states instead of one ([2360bde](https://github.com/firetower-cloud/firetower/commit/2360bde1d1a31e47cc47204a5ff99cdbb8793dae))
+
+
+### Bug Fixes
+
+* **ci:** pin the AppImage runtime, the sixth download and the one inside the signature ([f155f20](https://github.com/firetower-cloud/firetower/commit/f155f20e07164673cb1b276c03946f681470c24e))
+* **ci:** refuse to advance desktop-latest when its state cannot be read ([267bd7e](https://github.com/firetower-cloud/firetower/commit/267bd7e7cd1909267f10975cf591571279fcd3ba))
+* **desktop:** pair each signature to the payload its URL names ([2536ea0](https://github.com/firetower-cloud/firetower/commit/2536ea00f48500db97d0800d33c1f4f924ed564a))
+* **desktop:** verify each signature against the payload, not its name ([8cf2fc5](https://github.com/firetower-cloud/firetower/commit/8cf2fc574ec63607c97380203f802fe44b86bde6))
+* **schedules:** a deferred teardown re-reads the world before destroying it ([6fc4672](https://github.com/firetower-cloud/firetower/commit/6fc4672e2e9a00d011190bfc29d94ff7eb6344f0))
+* **schedules:** a disconnected worker is not a stopped creation ([49c69b4](https://github.com/firetower-cloud/firetower/commit/49c69b467f89ab5d3af1a619d4c968a062b07ee0))
+* **schedules:** a finished run says so at once, and gets its words later ([00fb837](https://github.com/firetower-cloud/firetower/commit/00fb83752eadcde8427daff4e0d66da48dd06e52))
+* **schedules:** a launch permit waits for an acknowledgement, not a reading ([550479e](https://github.com/firetower-cloud/firetower/commit/550479e1a62a0d2f631ac5004a4aa9f73ca1b9c9))
+* **schedules:** a refusal reason is a sentence this feature will put its name to ([1cad66b](https://github.com/firetower-cloud/firetower/commit/1cad66bf7e4b2b20fc67dbafb4a4bddf83876276))
+* **schedules:** a teardown is claimed, not decided ([c5316bb](https://github.com/firetower-cloud/firetower/commit/c5316bb5629b11238770455b0800e337a69efdef))
+* **schedules:** an approved skill set is delivered or the run does not start ([b273d42](https://github.com/firetower-cloud/firetower/commit/b273d421f83569a12803ae7b30097abbc8ab85d1))
+* **schedules:** the launch cap is a throttle past the creation wait, and says so ([e1466ef](https://github.com/firetower-cloud/firetower/commit/e1466ef51949ed847da0fb284d5daf59cfe18945))
+* **server:** a failed disk probe is not a full disk ([fbe7634](https://github.com/firetower-cloud/firetower/commit/fbe7634731b70ebdb9448553ff60155316246afb))
+* **server:** a pause lands before the run the sweep was about to start ([a34a8f8](https://github.com/firetower-cloud/firetower/commit/a34a8f8a4a0ed55fc35a01ca7d84d2125bd1d313))
+* **server:** a place holds still while it decides whether it is finished ([9347db6](https://github.com/firetower-cloud/firetower/commit/9347db6d6b3f1bd464371e5900ecd2354cdf3aaa))
+* **server:** a run stops offering a workspace reclaim has purged ([48f33a9](https://github.com/firetower-cloud/firetower/commit/48f33a928d80bc344c83dbab0564f5c07d9ad407))
+* **server:** a schedule cannot be left to pick a subscription later ([d67201f](https://github.com/firetower-cloud/firetower/commit/d67201fa2be458aa6ee1a9e4ae69d17a67da18a3))
+* **server:** a scheduled launch inherits nothing a person picked later ([89ca42d](https://github.com/firetower-cloud/firetower/commit/89ca42d3963745d83090fbb0b5b92dbaf3304ca6))
+* **server:** a shared profile cannot rewrite an approved schedule ([3b648dd](https://github.com/firetower-cloud/firetower/commit/3b648ddbf80c7dceb5e072bc62a48aa949b002a5))
+* **server:** a workspace whose first agent has ended can still be ended ([934af93](https://github.com/firetower-cloud/firetower/commit/934af93d64abe6db33d5758a9b6905db2f0a9f40))
+* **server:** a workspace with no sessions left in it is reclaimed ([77d31ed](https://github.com/firetower-cloud/firetower/commit/77d31ed7b9ef0973dc3ab2737b90fee2b3a1d16e))
+* **server:** an approved skill that cannot be delivered stops the run ([8e4c668](https://github.com/firetower-cloud/firetower/commit/8e4c668638054428b200dcb73aa80172d18e2dec))
+* **server:** an unattended run is not given the machine's git identity ([def3217](https://github.com/firetower-cloud/firetower/commit/def3217dcd1f7ff2dbfb22492b05cc0a7f23591f))
+* **server:** approve a schedule in one statement, or not at all ([81f47f3](https://github.com/firetower-cloud/firetower/commit/81f47f3955c1c1f58d67560923eb9242a9a1fb06))
+* **server:** approving says which revision was read ([21d0507](https://github.com/firetower-cloud/firetower/commit/21d0507827cded745cc19680ddecc7e30b29ea15))
+* **server:** ask the engine whether a subscription is needed, not a flag ([976f6ca](https://github.com/firetower-cloud/firetower/commit/976f6caf0c4da1c823fb45a4f007750943f78fcc))
+* **server:** check a schedule against the engine that will actually run ([3fd4c6e](https://github.com/firetower-cloud/firetower/commit/3fd4c6ec87fd1b96b2a6dae3f690f078e34290be))
+* **server:** hold a launch permit until the worker has the workspace ([01c0e71](https://github.com/firetower-cloud/firetower/commit/01c0e71cc5e885ce8b312a8b73cb8800bc6fea85))
+* **server:** hold a schedule's fences to the catalogue, not its model ([fdc958f](https://github.com/firetower-cloud/firetower/commit/fdc958fba699e27b9f14d9a54b4d90c34faa2007))
+* **server:** look a repository up as the person who named it ([6ea768f](https://github.com/firetower-cloud/firetower/commit/6ea768fa2f797835f29a34d32fc929285deff3ed))
+* **server:** refuse a scheduled run on a transport that cannot carry the owner ([0b4eed7](https://github.com/firetower-cloud/firetower/commit/0b4eed73317e58bb0aaf9131700a3eacacc02a7d))
+* **server:** Run now works on a schedule somebody paused ([8f7ceb3](https://github.com/firetower-cloud/firetower/commit/8f7ceb35d9876afb760a6c4707d34d6c29c95439))
+* **server:** say when a machine is too small rather than low on disk ([17e41c2](https://github.com/firetower-cloud/firetower/commit/17e41c23b464503cd6a701b604e973c62d89291a))
+* **server:** the launch cap bounds the machine it actually lands on ([bd8644c](https://github.com/firetower-cloud/firetower/commit/bd8644c2292a1a36fe86a130285d270abc258975))
+* **server:** two assertions this branch wrote fail clippy ([80b2cf8](https://github.com/firetower-cloud/firetower/commit/80b2cf8f75012a25eb1c87c38dae039b73f528ed))
+* **web:** keep On Linux when the release lookup failed ([652bcf6](https://github.com/firetower-cloud/firetower/commit/652bcf6f3682da3cefb11ae5e7a38fe24eb2878a))
+* **worker:** quote the helper path in the askpass bridge ([3ec3285](https://github.com/firetower-cloud/firetower/commit/3ec328505303492462141d4724ffd87a7c3a6289))
+* **worker:** say why an agent did not start ([29eecd0](https://github.com/firetower-cloud/firetower/commit/29eecd0caa2e0eb0f3d08af41bfad547c4d944dd))
+
 ## [0.54.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.54.0...firetower-v0.54.1) (2026-11-11)
 
 
