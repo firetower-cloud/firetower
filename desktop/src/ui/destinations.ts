@@ -1,5 +1,5 @@
 /**
- * The six places you can be.
+ * The seven places you can be.
  *
  * The index used to live in `config/panes.ts` as twelve panes in seven groups
  * behind a Configuration screen, and in `Rail.tsx` as three nav links. Both
@@ -11,6 +11,28 @@
  * them reads cleanly and is one fewer icon, but there is no honest name for
  * the pair that is not a category word, and it buries reachability a level
  * down. If six ever feels like too many, that is the first merge to make.
+ *
+ * **Schedules sits at `⌘5`, after Customize**, and Repositories and Machines
+ * moved down one to make room. The rail reads top to bottom as *what is
+ * happening* and then *what is set up*, and a schedule is the most
+ * set-up-and-leave object in the product — so it belongs with Customize
+ * rather than after the machines.
+ *
+ * This was first shipped appended at `⌘7`, on the argument that the numbers
+ * here are written down so they do not move: a remap is paid by everybody,
+ * every day, while the grouping cost is paid once by somebody reading the
+ * rail for the first time. Both halves of that are still true, and the
+ * decision went the other way once both arrangements had been seen — the
+ * insertion here renumbers two destinations rather than the four that
+ * inserting after Tasks would have. **The cost is real and it is paid once:**
+ * anybody's muscle memory for `⌘5` and `⌘6` now lands one place further
+ * down.
+ *
+ * It is a destination rather than a pane under Customize, which was asked for
+ * twice and declined twice. What was refused was Schedules living *inside*
+ * Customize, not Schedules living beside it. The merge above stays available,
+ * and taking it here would spend the escape hatch on the seventh rather than
+ * the eighth.
  *
  * Labels do not rest under the icons. They double the rail's width to say what
  * hover, focus and the tooltip already say, and six destinations are few
@@ -33,10 +55,10 @@
  * drawn inside the page by `config/SettingsIndex.tsx` — and the update signal
  * is a mark on the avatar, which `ProfileMenu.tsx` explains.
  */
-import { type LucideIcon, FolderGit2, House, ListTodo, Puzzle, Server, Shapes } from "lucide-react";
+import { type LucideIcon, Clock, FolderGit2, House, ListTodo, Puzzle, Server, Shapes } from "lucide-react";
 import { paneAt } from "~/ui/config/panes";
 
-export type DestinationId = "home" | "tasks" | "artifacts" | "customize" | "repos" | "machines";
+export type DestinationId = "home" | "tasks" | "artifacts" | "customize" | "repos" | "machines" | "schedules";
 
 export type Destination = {
   id: DestinationId;
@@ -44,19 +66,20 @@ export type Destination = {
   icon: LucideIcon;
   /** Where pressing it lands. The panel beside it offers the rest. */
   href: string;
-  /** `⌘1`–`⌘6`. Required, now that the two keyless doors have gone: a place
+  /** `⌘1`–`⌘7`. Required, now that the two keyless doors have gone: a place
    *  in the rail with no number was the thing that made them read as doors. */
   key: string;
 };
 
-/** The six. Order is the keyboard's order, so ⌘3 is always Artifacts. */
+/** The seven. Order is the keyboard's order, so ⌘3 is always Artifacts. */
 export const DESTINATIONS: Destination[] = [
   { id: "home", label: "Dashboard", icon: House, href: "/", key: "1" },
   { id: "tasks", label: "Tasks", icon: ListTodo, href: "/tasks", key: "2" },
   { id: "artifacts", label: "Artifacts", icon: Shapes, href: "/artifacts", key: "3" },
   { id: "customize", label: "Customize", icon: Puzzle, href: "/configuration/skills", key: "4" },
-  { id: "repos", label: "Repositories", icon: FolderGit2, href: "/configuration/repositories", key: "5" },
-  { id: "machines", label: "Machines", icon: Server, href: "/configuration/machines", key: "6" },
+  { id: "schedules", label: "Schedules", icon: Clock, href: "/schedules", key: "5" },
+  { id: "repos", label: "Repositories", icon: FolderGit2, href: "/configuration/repositories", key: "6" },
+  { id: "machines", label: "Machines", icon: Server, href: "/configuration/machines", key: "7" },
 ];
 
 /**

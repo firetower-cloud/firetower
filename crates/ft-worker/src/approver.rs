@@ -81,6 +81,17 @@ pub const CREATE_SKILL: &str = "create_skill";
 pub const UPDATE_SKILL: &str = "update_skill";
 /// List the saved skills, so the agent builds on them rather than beside.
 pub const LIST_SKILLS: &str = "list_skills";
+/// Propose work on a clock, for a person to approve. **It never runs until
+/// they do** — the same rule `create_skill` applies to a bundle that ships a
+/// script.
+pub const PROPOSE_SCHEDULE: &str = "propose_schedule";
+/// List the schedules the person has, so a proposal builds on them rather than
+/// duplicating one.
+pub const LIST_SCHEDULES: &str = "list_schedules";
+/// Stop a schedule's future runs. An agent may pause one; it may not turn one
+/// back on, which is the asymmetry — stopping is safe and starting is the act
+/// that needs a person.
+pub const PAUSE_SCHEDULE: &str = "pause_schedule";
 
 /// What a delegation call is named on its way to the control plane.
 ///
@@ -574,6 +585,38 @@ async fn answer(
                         "name": LIST_SKILLS,
                         "description": "List the skills the person can see — name, description, whether it ships a script, and whether it's held for their review. Read this before creating one, to build on what exists rather than make a near-duplicate.",
                         "inputSchema": { "type": "object", "properties": {} },
+                    }, {
+                        "name": PROPOSE_SCHEDULE,
+                        "description": "Propose work that runs on a clock — a dependency audit every Monday, a flaky-test hunt overnight. IT IS OFF WHEN YOU CREATE IT AND NEVER RUNS UNTIL THE PERSON TURNS IT ON, so say that when you tell them: it appears on the Schedules screen for them to read and approve. Each run starts its OWN NEW WORKSPACE and follows `prompt` with nobody present, so write `prompt` for somebody who cannot ask you a follow-up question: say what to do and what to leave alone. AGREE THE SHAPE FIRST unless they already said — what it should do, how often, which repository, and that nobody will be there to answer it. Runs cannot be closer together than 15 minutes. Check `list_schedules` first so you refine one rather than duplicate it. YOU CANNOT turn one on, edit one, or delete one, and there is no way to end a workspace a run left behind — that is theirs to do.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "What it is called in the list. Short and plain — \"Dependency audit\", not \"Automated weekly dependency and advisory scan\"." },
+                                "prompt": { "type": "string", "description": "What each run is asked to do. Nobody is there to clarify it, so describe the result expected and say what not to touch." },
+                                "cadence": { "type": "string", "enum": ["daily", "weekdays", "weekly", "monthly"], "description": "How often. `weekdays` is Monday to Friday." },
+                                "at": { "type": "string", "description": "The time of day, as HH:MM on a 24-hour clock, in `timezone`." },
+                                "day": { "type": "string", "enum": ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"], "description": "For `weekly`: which day." },
+                                "dayOfMonth": { "type": "integer", "description": "For `monthly`: which date, 1 to 31." },
+                                "timezone": { "type": "string", "description": "An IANA name, like Europe/Paris. Ask rather than guess: \"09:00\" means nothing without saying whose nine." },
+                                "repo": { "type": "string", "description": "The repository each run checks out, by slug as the person knows it. Omit for a bare agent with nothing checked out — and note that nothing is ever deleted automatically then, because git never saw the directory." },
+                                "profile": { "type": "string", "description": "A saved profile to run as, by name as `list_profiles` shows it." },
+                            },
+                            "required": ["name", "prompt", "cadence", "at", "timezone"],
+                        },
+                    }, {
+                        "name": LIST_SCHEDULES,
+                        "description": "List the person's schedules — name, what it runs, how often, whether it is on, and how many of its runs are still holding a workspace. Read this before proposing one.",
+                        "inputSchema": { "type": "object", "properties": {} },
+                    }, {
+                        "name": PAUSE_SCHEDULE,
+                        "description": "Stop a schedule's future runs, by name. It does NOT touch a run that is already going, and you CANNOT turn it back on — only the person can, which is why pausing is yours to do and resuming is not. Say so when you report it.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The schedule to stop, by name as `list_schedules` shows it." },
+                            },
+                            "required": ["name"],
+                        },
                     }]
                 }),
             ))
@@ -592,7 +635,9 @@ async fn answer(
             let text = match name {
                 SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
                 | LIST_PROFILES | GET_PROFILE | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL
-                | LIST_SKILLS => delegate(session_id, name, &id, &arguments).await,
+                | LIST_SKILLS | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
+                    delegate(session_id, name, &id, &arguments).await
+                }
                 // Every call used to be a permission question, and an agent
                 // from before the other tools existed still only knows this
                 // one — so anything unnamed is still that.
@@ -894,7 +939,10 @@ mod tests {
                 LIST_COMPUTE,
                 CREATE_SKILL,
                 UPDATE_SKILL,
-                LIST_SKILLS
+                LIST_SKILLS,
+                PROPOSE_SCHEDULE,
+                LIST_SCHEDULES,
+                PAUSE_SCHEDULE
             ]
         );
         assert_eq!(tool_name(), "mcp__firetower__approve");

@@ -11,7 +11,20 @@
 use ft_core::{Agent, AgentPresence, EventKind, SessionId, Share, WorkspaceSize};
 use serde::{Deserialize, Serialize};
 
-/// Bumped when a frame changes shape incompatibly. Checked during the handshake.
+/// Bumped when a frame changes shape incompatibly. Checked during the
+/// handshake, and **checked for equality**: `fleet.rs` refuses a worker whose
+/// number is not this one, the host goes to *needs setup* with a diagnosis
+/// whose remedy is a reinstall, and nothing upgrades a worker by itself.
+///
+/// **So a bump is a decision about operators, not only about frames.** Moving
+/// this number stops every worker in every fleet until somebody reinstalls
+/// it. The notes below say what each version added and why a worker without
+/// it cannot be trusted with the work — they are not descriptions of what
+/// happens on an older worker, because what happens is that it is refused
+/// before a frame is exchanged. Several of them were written as though an
+/// old worker would carry on with the feature missing; it will not, and
+/// believing it does is how somebody plans a merge that takes a fleet
+/// offline.
 ///
 /// 6 — `CreateWorkspace` gathered the checkout into an optional `RepoSpec`, so
 /// a session can have no repository. An older worker accepts the handshake and
@@ -66,7 +79,19 @@ use serde::{Deserialize, Serialize};
 ///      command line and a long persona no longer fits in it. A worker older
 ///      than this reads the field as nothing, and a session started as a
 ///      profile on one would come up as a plain agent with no indication why.
-pub const PROTOCOL_VERSION: u32 = 22;
+/// 23 — a scheduled run's two properties, which both need the worker's half.
+///      A session can **require** its skills (`CreateWorkspace.skills_required`):
+///      the initial agent is not launched unless every approved skill is
+///      installed, and a worker that treats the set as best effort cannot
+///      give even that. It is the initial launch that is covered, not the
+///      run — see the field. And a
+///      worker **says when a workspace has been made**
+///      (`ToServer::WorkspaceCreated`): the scheduler's launch permit waits
+///      for that acknowledgement rather than for resource accounting, which
+///      answers before a checkout starts on Linux and never at all on macOS.
+///      One number for both because they landed hours apart in one branch and
+///      nothing was ever released between them.
+pub const PROTOCOL_VERSION: u32 = 23;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -634,6 +659,42 @@ pub struct CreateWorkspace {
     /// The whole selection, never a delta — see [`ToWorker::SetSkills`].
     #[serde(default)]
     pub skills: Vec<SkillBundle>,
+    /// **Whether every one of those skills has to be installed for this
+    /// session to run at all.**
+    ///
+    /// Writing them is best effort by default, and that is right for a
+    /// session somebody is sitting in front of: a skill shaped in a way one
+    /// filesystem refuses should cost that skill rather than the session, and
+    /// whoever is there can see what is missing.
+    ///
+    /// An *approved* session is the other case. A schedule is approved
+    /// against a named set of skill versions — a safety skill among them, as
+    /// often as not — with nobody present to notice one is absent, so **the
+    /// initial agent is not launched unless every approved skill is
+    /// installed**. Not "the workspace is not created": the directory and the
+    /// workspace record both exist by the time skills are written, and what
+    /// this stops is the agent starting in one that is missing them. The
+    /// server
+    /// already refuses to dispatch unless every approved bundle is in the
+    /// frame; this is the other half, because **the server deciding something
+    /// is required does not make the worker install it**.
+    ///
+    /// **It covers this frame and nothing after it, and that is narrower than
+    /// it sounds.** Two paths start an agent in a workspace without one:
+    /// `RunAction::StartAgent` carries no requirement of its own, so a run
+    /// relaunched or joined by a second agent comes up best effort; and an
+    /// agent that spawns a child during a run goes through
+    /// `create_session_as` with no approved versions, so the child's skills
+    /// are best effort too, with nobody present either way. Neither is closed
+    /// here. Read this as "the approved workspace is created with its skills
+    /// or not at all", not as a property of everything that later runs in it.
+    ///
+    /// `#[serde(default)]` for the shape of the type, not as a fallback: a
+    /// worker old enough to lack this is refused at the handshake, so no
+    /// frame carrying it is ever read by one. See [`PROTOCOL_VERSION`], which
+    /// moved for this.
+    #[serde(default)]
+    pub skills_required: bool,
     /// The system prompt this session carries, when it was started as a
     /// profile. Empty for a plain agent, which is the ordinary case.
     ///
@@ -1055,6 +1116,33 @@ pub enum ToServer {
     ActionDone {
         req: ReqId,
         result: Result<String, String>,
+    },
+    /// **This workspace has been made, or has failed to be.**
+    ///
+    /// Not an answer to a request — `CreateWorkspace` is one-way, and the
+    /// events it emits are what a person watches. This is for the one caller
+    /// that has to know *when it is over*: the scheduler holds a launch
+    /// permit, capped at three per pass, and releasing it any earlier than
+    /// this means the next three launches start while the last three are
+    /// still cutting worktrees.
+    ///
+    /// It replaces reading `Usage`, which is resource accounting and not
+    /// completion. On Linux the workspace is recorded and its cgroup made
+    /// *before* checkout, so usage answers while the disk is still filling;
+    /// on macOS per-workspace usage is omitted entirely, so it never answers
+    /// and every permit was held to the timeout. Neither is a fact about
+    /// whether the work is done.
+    ///
+    /// `ok` is false for a creation that failed, and it is still an
+    /// acknowledgement: a failed creation holds nothing and the permit should
+    /// go back at once.
+    ///
+    /// A worker old enough not to send this is refused at the handshake
+    /// rather than quietly holding permits — see [`PROTOCOL_VERSION`], which
+    /// moved for this and for `CreateWorkspace::skills_required` together.
+    WorkspaceCreated {
+        session_id: SessionId,
+        ok: bool,
     },
     /// The answer to [`ToWorker::Summarize`].
     Summarized {

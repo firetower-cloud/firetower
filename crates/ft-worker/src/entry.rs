@@ -28,7 +28,31 @@ fn persona_for(workspace: &std::path::Path, session: &str) -> Option<String> {
 }
 
 /// Supervise one session's agent until it exits.
+///
+/// **Every failure is written down before it is returned.** This runs inside
+/// tmux, and a command that exits takes its window and everything it printed
+/// with it — so a worker that could not start an agent left nothing behind,
+/// and the only thing the control plane could say was that the agent "did not
+/// start". See [`crate::agentd::failure_path`].
 pub async fn run_agent(session: &str, workspace: PathBuf, agent: &str) -> Result<()> {
+    let note = crate::agentd::failure_path(session);
+    // Anything from a previous attempt goes first: a stale reason read back
+    // for a launch that is merely slow would be worse than no reason at all.
+    let _ = tokio::fs::remove_file(&note).await;
+    let ran = supervise(session, workspace, agent).await;
+    if let Err(e) = &ran {
+        // The whole chain, which is where the cause is: "supervising the
+        // agent: starting claude: No such file or directory" says what to do;
+        // its last line alone does not.
+        if let Some(dir) = note.parent() {
+            let _ = tokio::fs::create_dir_all(dir).await;
+        }
+        let _ = tokio::fs::write(&note, format!("{e:#}")).await;
+    }
+    ran
+}
+
+async fn supervise(session: &str, workspace: PathBuf, agent: &str) -> Result<()> {
     let kind =
         ft_core::Agent::from_name(agent).with_context(|| format!("no agent called {agent}"))?;
 

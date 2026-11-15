@@ -4,7 +4,7 @@ import { isGlobalMod, isLocalMod, isMac } from "./platform";
 /**
  * The two modifiers, and the one property that matters about them.
  *
- * ⌘1–⌘6 are the rail's six destinations; ⌃1–⌃3 are the inspector's tabs
+ * ⌘1–⌘7 are the rail's destinations; ⌃1–⌃3 are the inspector's tabs
  * inside one workspace. They are different gestures and they have to stay
  * different — the window handler used to accept `metaKey || ctrlKey`, so on a
  * Mac ⌃2 reached the rail first and navigated away instead of switching a tab.

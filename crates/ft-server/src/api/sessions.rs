@@ -30,6 +30,83 @@ use utoipa::ToSchema;
 /// that "it didn't work" arrives while you still remember asking for it.
 const RECONNECT_GRACE: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How much room a machine must have left before it is given more work.
+///
+/// **Headroom, not a percentage.** A worktree's size is an absolute quantity,
+/// so "will the next one fit" is an absolute question. Ten per cent of a 4 TB
+/// build server is 400 GB and means nothing; ten per cent of a 40 GB VM is
+/// 4 GB and is not enough for one dependency install.
+///
+/// Ten is several times the largest ordinary worktree — a checkout plus
+/// whatever its setup script produces is commonly 0.5–2 GB — and it leaves
+/// room for the agents already running. Refusing to start is only worth doing
+/// if it protects the work in flight; a floor set at the size of one worktree
+/// would admit the twentieth run and break the nineteen before it.
+///
+/// Where it is wrong: a small VM, where 10 GB is a third of the machine and
+/// work that would have fitted is refused. That is the safe direction —
+/// refusing a run that would have fitted costs one run, admitting one that
+/// does not costs everybody on the machine — but it is a real cost and it is
+/// stated rather than discovered. Deliberately not configurable: one
+/// documented number is explainable, and a per-host override is a column, a
+/// control and a support answer.
+///
+/// And it measures the filesystem the Docker daemon keeps images on, "which
+/// on most workers is also" the one the worktrees are on — [`ft_core::Capacity`]'s
+/// own words. On a machine with Docker on a separate volume this is the wrong
+/// disk. Not fixable from here, and the first thing to check if somebody
+/// reports a refusal that makes no sense on a machine with plenty of room.
+const DISK_FLOOR_MB: u64 = 10_240;
+
+/// What a machine's disk says about taking another worktree.
+///
+/// **Three answers, because two of them refuse for different reasons and the
+/// difference is the whole of what somebody can do about it.** A full machine
+/// is a machine to clear space on. A machine whose *entire* disk is smaller
+/// than the floor can never pass it, however empty it is — and told it was
+/// "low on disk", somebody goes and frees space that will never be enough.
+/// That is a real report: a 9.6 GB worker refused at 1.8 GB free, with 12 GB
+/// then cleared on a different disk entirely.
+///
+/// The predicate is unchanged: `Fine` admits and both others refuse, which is
+/// what it did when it was a `bool`. What is new is that the refusal can say
+/// which.
+#[derive(Clone, Copy)]
+enum Disk {
+    /// Room for another worktree — or no reading at all, which is unknown
+    /// rather than low. See the note on `room` below.
+    Fine,
+    /// Under the floor, on a machine big enough that clearing space would
+    /// lift it over.
+    Low,
+    /// **Smaller than one run needs, in total.** Nothing to clear.
+    TooSmall { total_mb: u64 },
+}
+
+impl Disk {
+    /// `free` is `None` for a machine with no usable reading, which fails
+    /// open; `total_mb` is `0` for the same case and is only read when there
+    /// is a reading to read it beside.
+    fn of(free: Option<u64>, total_mb: u64) -> Self {
+        match free {
+            None => Self::Fine,
+            Some(mb) if mb >= DISK_FLOOR_MB => Self::Fine,
+            // Order matters only for readability: a disk under the floor
+            // cannot have the floor free.
+            Some(_) if total_mb < DISK_FLOOR_MB => Self::TooSmall { total_mb },
+            Some(_) => Self::Low,
+        }
+    }
+}
+
+/// Megabytes as somebody reads them, for a sentence about a whole disk.
+///
+/// One decimal, because the number this exists for is 9853 and "9 GB" of a
+/// 10 GB floor reads as a rounding argument rather than as a fact.
+fn in_gb(mb: u64) -> String {
+    format!("{:.1} GB", mb as f64 / 1024.0)
+}
+
 /// Sessions, newest first.
 ///
 /// Without `limit` this returns everything, which is what the dashboard wants —
@@ -320,7 +397,7 @@ pub(super) async fn create_session(
         .map(|u| u.username.clone())
         .unwrap_or_else(|| owner.clone());
 
-    let session = create_session_as(state, owner, whose, req, None).await?;
+    let session = create_session_as(state, owner, whose, req, Launch::default()).await?;
     Ok((StatusCode::CREATED, Json(session)))
 }
 
@@ -338,6 +415,83 @@ pub(crate) struct Lineage {
     pub req: Option<String>,
 }
 
+/// What a caller knows about a launch that the request body cannot carry.
+///
+/// Two optional things rather than two more parameters, because at three of
+/// the four call sites both are absent and `None, None` says nothing about
+/// which is which.
+pub(crate) struct Launch {
+    /// Which session asked for this one, when a session did.
+    pub lineage: Option<Lineage>,
+    /// The id to give the session, when the caller has already written it
+    /// down somewhere.
+    ///
+    /// **For a caller that has to be able to ask "did this start?" after a
+    /// crash.** A scheduled run is claimed in one statement and launched in
+    /// another, and `create_session_as` is not idempotent — so a control plane
+    /// replaced between the two (which is the ordinary way it ends) would
+    /// leave a claim with nothing to match it against. Minting the id in the
+    /// caller and writing it onto the claim first makes one question
+    /// answerable that was not before: does a session with this id exist?
+    /// `insert_session` is the first thing below that commits anything, so
+    /// that question separates "nothing happened" from the rest cleanly.
+    ///
+    /// It does not tell the caller whether the worker received the frame.
+    /// Nothing in the database records that, and nothing could.
+    pub id: Option<SessionId>,
+    /// Whether this launch may start on what its owner was last working with.
+    ///
+    /// **`false` is what closes the `carry_preferences` trap**, and closing
+    /// the channel is the fix rather than racing to fill every field.
+    /// `carry_preferences` fills any unset control from
+    /// `preferred_controls(person, agent)` — so a schedule approved with an
+    /// unset sandbox would start with whatever that person later picked in an
+    /// unrelated interactive session, which for Codex includes *Everything*:
+    /// no filesystem fence, unattended, on their credentials. Pinning the
+    /// fields the server can resolve does not close it, because the set of
+    /// applicable controls is per engine and one of them lists its models at
+    /// runtime.
+    ///
+    /// With this off, an unset field falls to the **agent's own** default,
+    /// which is a fixed and documented thing rather than a record of
+    /// somebody's afternoon.
+    ///
+    /// `true` for a person: starting work where you left off is the whole
+    /// point of that behaviour, and somebody is present.
+    pub inherit_settings: bool,
+    /// The system prompt this run was **approved** to carry, rather than one
+    /// composed from the profile as it stands now.
+    ///
+    /// A writer of a shared profile — or an agent with Writer on it calling
+    /// `update_profile` — can change its instructions after somebody has
+    /// approved a schedule that uses it. Composing at launch meant later runs
+    /// executed the changed behaviour on the owner's credentials. This is the
+    /// same discipline `sessions.persona` already follows for a different
+    /// reason: keep the system prompt this run was actually given.
+    pub persona: Option<String>,
+    /// The skill versions this run was approved to read.
+    ///
+    /// `set_for_session` pins whatever is current, which is right for a
+    /// person and wrong for an approved run: adding a version to a selected
+    /// skill substituted it silently.
+    pub skill_versions: Option<Vec<String>>,
+}
+
+impl Default for Launch {
+    /// Written out rather than derived, because `bool` derives `false` and
+    /// the default here is `true`: every existing caller is a person or a
+    /// lead acting as one, and they inherit.
+    fn default() -> Self {
+        Self {
+            lineage: None,
+            id: None,
+            inherit_settings: true,
+            persona: None,
+            skill_versions: None,
+        }
+    }
+}
+
 /// Start a session as somebody — whether they asked in person, or a session
 /// of theirs did.
 ///
@@ -351,13 +505,21 @@ pub(crate) async fn create_session_as(
     owner: String,
     whose: String,
     mut req: NewSession,
-    lineage: Option<Lineage>,
+    launch: Launch,
 ) -> ApiResult<Session> {
+    let Launch {
+        lineage,
+        id: given,
+        inherit_settings,
+        persona: approved_persona,
+        skill_versions: approved_versions,
+    } = launch;
     // Another agent in a place that already exists, which is a different job
     // from making one: the host, the repositories, the branch and the directory
     // are all decided, and everything below about choosing them does not apply.
     if let Some(workspace_id) = req.workspace_id.clone() {
-        return start_another_agent(state, owner, workspace_id, req, lineage).await;
+        return start_another_agent(state, owner, workspace_id, req, lineage, inherit_settings)
+            .await;
     }
 
     // The profile this is started as, if any. Resolved before anything is
@@ -385,9 +547,13 @@ pub(crate) async fn create_session_as(
     {
         req.agent = pinned;
     }
-    let persona = match &profile {
-        Some(p) => Some(persona_for(&state, &owner, p).await?),
-        None => None,
+    // **The persona this run was approved to carry**, where a caller has
+    // one, rather than one composed from the profile as it stands now. See
+    // [`Launch::persona`].
+    let persona = match (&approved_persona, &profile) {
+        (Some(approved), _) => Some(approved.clone()),
+        (None, Some(p)) => Some(persona_for(&state, &owner, p).await?),
+        (None, None) => None,
     };
 
     // What was actually asked for, if anything. A workspace may be created
@@ -441,12 +607,27 @@ pub(crate) async fn create_session_as(
     // out, which is still a workspace and still a session.
     let mut repos: Vec<(ft_core::Repo, Option<String>)> = Vec::new();
     for asked in &wanted {
-        let found = state.db.repo(&asked.repo_id).await?.ok_or_else(|| {
-            ApiError::new(
-                ErrorCode::RepoNotConnected,
-                "that repository isn't connected",
-            )
-        })?;
+        // **The owner's, or it is not connected as far as this is concerned.**
+        // `Db::repo` answers for any id in the installation, and what happens
+        // next is a checkout, that repository's setup script, and `repo_env`
+        // reading its vault secrets into the worker's environment — so an id
+        // from a request has to be looked up as somebody's. Not a check added
+        // beside the lookup, which is a check the next caller has to
+        // remember: the lookup is the one that takes the person.
+        //
+        // The same function serves every caller, including the ones with
+        // nobody present, which is why it takes an owner id rather than a
+        // `Principal`.
+        let found = state
+            .db
+            .repo_of(&owner, &asked.repo_id)
+            .await?
+            .ok_or_else(|| {
+                ApiError::new(
+                    ErrorCode::RepoNotConnected,
+                    "that repository isn't connected",
+                )
+            })?;
         repos.push((found, asked.base.clone()));
     }
 
@@ -490,6 +671,74 @@ pub(crate) async fn create_session_as(
         .iter()
         .filter(|h| h.state == ft_core::HostState::Online && !h.drained)
         .collect();
+
+    // Whether a machine has room for another worktree.
+    //
+    // **Capacity is not authorization**, and the two sit in different places
+    // for a reason: authorization is about the person and is settled before a
+    // host is chosen, while "is there room" is a fact about one machine that
+    // is not knowable until one is being picked. So the floor belongs here,
+    // beside `drained`, in the one function every launch goes through — a
+    // schedule is the fastest way to a full disk and not the only one, and a
+    // full machine breaks everybody on it rather than whoever filled it.
+    //
+    // Read once for the whole list: `capacity_of` takes the fleet's lock, and
+    // a `find` would take it per candidate.
+    //
+    // **Fail open — unknown is unknown, not low.** A host with no reading is
+    // still a candidate, which is the same answer this function already gives
+    // twenty lines down about a machine that has never said which engines it
+    // has: never having said is not the same as having said no, and refusing
+    // on silence would empty the fleet of a fresh install. What that costs is
+    // bounded, because a reading cannot go quietly stale — `Fleet.capacity`
+    // has no timestamp, but a worker that stops talking is disconnected at
+    // `SILENCE` and an offline host is already out of `up`. So a reading in
+    // front of this is absent or it is about a minute old; it is never older.
+    let mut room = std::collections::HashMap::new();
+    for h in &hosts {
+        let total_mb = state
+            .fleet
+            .capacity_of(&h.id)
+            .await
+            .map(|c| c.disk_total_mb)
+            .unwrap_or(0);
+        let free = state.fleet.capacity_of(&h.id).await.and_then(|c| {
+            // **A total of zero is a probe that failed, not a disk with
+            // nothing left on it.** `capacity.rs` answers `(0, 0)` when `df`
+            // or `docker system df` cannot be read at all — a machine with no
+            // Docker, a wedged daemon, a command that is not there — so a
+            // failed reading arrives here looking exactly like a full disk.
+            //
+            // Failing open on an *absent* report was never enough, because
+            // this is a *present* report of nothing. Read literally it refused
+            // every launch on that machine, interactive work as much as
+            // scheduled, which is the one direction this floor must never
+            // fail in: refusing a run that would have fitted costs one run,
+            // and refusing every run costs the machine.
+            //
+            // There is no machine whose disk is genuinely zero megabytes, so
+            // the sentinel is unambiguous. The better shape is for the worker
+            // to report an explicit unknown rather than a zero, and that is
+            // worth doing — it is a change to `Capacity`, which is a contract
+            // type three clients are generated from, and it does not belong
+            // inside a guard that has to stay revertible on its own.
+            match c.disk_total_mb {
+                0 => None,
+                total => Some(total.saturating_sub(c.disk_used_mb)),
+            }
+        });
+        room.insert(h.id.as_str().to_string(), Disk::of(free, total_mb));
+    }
+    let disk = |id: &ft_core::HostId| room.get(id.as_str()).copied().unwrap_or(Disk::Fine);
+    let has_room = |id: &ft_core::HostId| matches!(disk(id), Disk::Fine);
+
+    // Narrowed separately from `up` rather than folded into it, so the refusal
+    // below can tell "every machine is low on disk" from "no machine can run
+    // this engine". They are different problems with different answers, and
+    // one must never borrow the other's sentence: that line on a fleet merely
+    // missing an engine would send somebody to look at a disk that is fine.
+    let roomy: Vec<&ft_core::Host> = up.iter().copied().filter(|h| has_room(&h.id)).collect();
+
     let host = match &req.host_id {
         // Named explicitly, so a drained one is still refused below rather
         // than silently swapped for another.
@@ -501,12 +750,17 @@ pub(crate) async fn create_session_as(
         // A machine that has never reported is still a candidate: never having
         // said is not the same as having said no, and refusing on silence
         // would empty the fleet of a fresh install.
-        None => up
+        //
+        // Low on disk narrows the list the same way the engine does, so an
+        // installation with several machines routes around a full one by
+        // itself and is only refused when every candidate is low.
+        None => roomy
             .iter()
             .copied()
             .find(|h| installed(&h.id, req.agent) == Some(true))
             .or_else(|| {
-                up.iter()
+                roomy
+                    .iter()
                     .copied()
                     .find(|h| installed(&h.id, req.agent).is_none())
             }),
@@ -531,6 +785,25 @@ pub(crate) async fn create_session_as(
         // for reasons that have nothing to do with the engine — it is retired,
         // or it is somebody else's — and the vague answer there is deliberate.
         match (req.host_id.is_none(), up.is_empty()) {
+            // Machines are up and nobody named one, and the disk predicate is
+            // what emptied the list. Only then: `roomy` is checked before the
+            // engine sentence precisely so this cannot be said about a fleet
+            // whose disks are fine.
+            (true, false) if roomy.is_empty() => ApiError::new(
+                ErrorCode::NoCapacity,
+                // Same distinction, said of a fleet rather than a machine.
+                // Only when *every* one is too small: a mixture is a fleet
+                // that is full today, which is what clearing space fixes.
+                match up
+                    .iter()
+                    .all(|h| matches!(disk(&h.id), Disk::TooSmall { .. }))
+                {
+                    true => "No machine has enough disk for a run. Clearing space cannot change \
+                             that."
+                        .to_string(),
+                    false => "No machine had room on disk.".to_string(),
+                },
+            ),
             (true, false) => ApiError::new(
                 ErrorCode::NoCapacity,
                 format!(
@@ -539,15 +812,63 @@ pub(crate) async fn create_session_as(
                     what_runs_where(&up, &presence)
                 ),
             ),
-            _ => ApiError::new(ErrorCode::NoCapacity, "no host is available to take this"),
+            // **A sentence, because this is drawn to people.** It read "no
+            // host is available to take this" — lowercase, unpunctuated,
+            // written for whoever was reading a log — and a scheduled run's
+            // history line is this message under the word *Refused*, so it
+            // arrived on screen as "Refused. no host is available to take
+            // this". Still deliberately vague about *why*: a machine named by
+            // hand and not found is retired, or is somebody else's, and
+            // saying which would confirm it exists.
+            _ => ApiError::new(
+                ErrorCode::NoCapacity,
+                "No machine was available to take this.",
+            ),
         }
     })?;
 
     if host.drained {
         return Err(ApiError::new(
             ErrorCode::NoCapacity,
-            format!("{} is draining and isn't taking new work", host.name),
+            format!("{} is draining and isn't taking new work.", host.name),
         ));
+    }
+
+    // A machine was asked for by name, so it is refused by name rather than
+    // silently swapped for another — the person asked for that one, and moving
+    // their work is not a kindness. Nothing reaches this from the branch
+    // above, which only ever picks a machine with room; it is here for the
+    // named path, the same shape and the same place `drained` refuses in.
+    //
+    // Past tense, and the sentence is written once here rather than composed
+    // again by each caller: a scheduled run's history line is this message
+    // under the word `Refused`, and a reading that was low a moment ago is not
+    // a present fact anything can claim afterwards.
+    match disk(&host.id) {
+        Disk::Fine => {}
+        Disk::Low => {
+            return Err(ApiError::new(
+                ErrorCode::NoCapacity,
+                format!("{} was low on disk.", host.name),
+            ))
+        }
+        // **A different condition, and it needs its own sentence.** "Low on
+        // disk" sends somebody to free space; on a machine whose whole disk
+        // is smaller than the floor there is no amount of space to free, and
+        // the report that found this was somebody doing exactly that — 12 GB
+        // cleared on the control plane's own Mac, which is not the disk this
+        // reading is of.
+        Disk::TooSmall { total_mb } => {
+            return Err(ApiError::new(
+                ErrorCode::NoCapacity,
+                format!(
+                    "{} has {} of disk in total, which is less than a run is given room for. \
+                     Clearing space cannot change that.",
+                    host.name,
+                    in_gb(total_mb)
+                ),
+            ))
+        }
     }
 
     // A host that has just dropped is usually seconds from being back — a wifi
@@ -572,7 +893,7 @@ pub(crate) async fn create_session_as(
                 .await?
                 .and_then(|h| h.diagnosis)
                 .map(|d| d.summary)
-                .unwrap_or_else(|| format!("{} isn't responding", host.name));
+                .unwrap_or_else(|| format!("{} isn't responding.", host.name));
 
             return Err(ApiError::new(ErrorCode::HostUnreachable, why));
         }
@@ -684,7 +1005,8 @@ pub(crate) async fn create_session_as(
         });
     }
 
-    let id = SessionId::new();
+    // The caller's, when it had already written one down — see [`Launch::id`].
+    let id = given.unwrap_or_else(SessionId::new);
     // What the work is called in a list. The prompt says it best when there is
     // one; otherwise the name is all there is, and it was chosen for this.
     let title = if prompt.is_empty() {
@@ -861,28 +1183,104 @@ pub(crate) async fn create_session_as(
                 }),
         },
     };
-    if !wanted.is_empty() {
-        if let Err(e) = state
-            .skills
-            .set_for_session(id.as_str(), &owner, &wanted)
-            .await
-        {
-            tracing::warn!("seeding this session's skills: {e:#}");
+    // Named versions where the caller was approved against particular ones,
+    // and whatever is current otherwise.
+    //
+    // **The two halves are not best-effort in the same way, and that is the
+    // whole of it.** Seeding a set somebody picked a moment ago may fail and
+    // leave a workspace they can fix in one click. An *approved* set is a
+    // decision taken when nobody was watching, against named versions, and a
+    // launch that quietly reads fewer of them than were approved — or none —
+    // is the thing approval exists to stop. So this path fails closed, and
+    // the error reaches the caller rather than a log line.
+    match &approved_versions {
+        Some(versions) => {
+            state
+                .skills
+                .pin_versions(id.as_str(), &owner, versions)
+                .await
+                .map_err(|e| {
+                    ApiError::new(
+                        ErrorCode::ActionFailed,
+                        format!(
+                            "could not pin the skill versions this run was approved with: {e:#}"
+                        ),
+                    )
+                })?;
+        }
+        None => {
+            if !wanted.is_empty() {
+                if let Err(e) = state
+                    .skills
+                    .set_for_session(id.as_str(), &owner, &wanted)
+                    .await
+                {
+                    tracing::warn!("seeding this session's skills: {e:#}");
+                }
+            }
         }
     }
 
-    // The bundles themselves, each from the version its pin names. Best
-    // effort for the same reason the seeding is: a workspace that comes up
-    // without them is one somebody can fix, and one that refuses to start is
-    // not.
-    let skills = state
-        .skills
-        .bundles_for_session(id.as_str())
-        .await
-        .unwrap_or_else(|e| {
+    // The bundles themselves, each from the version its pin names.
+    let loaded = state.skills.bundles_for_session(id.as_str()).await;
+    let skills = match &approved_versions {
+        // **Counted against what was approved, not against what was found.**
+        // A pin that was never written, a version whose blob has gone, two
+        // skills sharing a name — each of them ends here as a bundle that is
+        // not in this list, and each of them used to be an empty folder on a
+        // worker that nothing mentioned. The count is the one check that does
+        // not depend on knowing in advance which way it could go wrong.
+        Some(versions) => {
+            let got = loaded.map_err(|e| {
+                ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!("could not read the skills this run was approved with: {e:#}"),
+                )
+            })?;
+            if got.len() != versions.len() {
+                return Err(ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!(
+                        "this run was approved to read {} skills and only {} can be delivered, \
+                         so it has not been started. Open the schedule, check what it would read \
+                         now, and approve it again.",
+                        versions.len(),
+                        got.len()
+                    ),
+                ));
+            }
+            // **And no two of them may want the same folder.** A bundle is
+            // written under its skill's *current* name, so renaming one
+            // approved skill to match another leaves two bundles in the frame
+            // — the count is satisfied — and one folder on the worker. The
+            // count cannot see it, because nothing was lost on the way here.
+            //
+            // Folded, because the folder is a filename: `Dataviz` and
+            // `dataviz` are two names on Linux and one on a Mac, and a
+            // guarantee that holds on one filesystem is not one.
+            let mut folders: Vec<String> = got.iter().map(|b| b.name.to_lowercase()).collect();
+            folders.sort();
+            if let Some(clash) = folders.windows(2).find(|two| two[0] == two[1]) {
+                return Err(ApiError::new(
+                    ErrorCode::ActionFailed,
+                    format!(
+                        "two of the skills this run was approved to read are both called \
+                         “{}”, and they would be one folder on the machine — so only one of them \
+                         would be read. Rename one and approve this again.",
+                        clash[0]
+                    ),
+                ));
+            }
+            got
+        }
+        // Best effort for the reason the seeding is: a workspace that comes
+        // up without them is one somebody can fix, and one that refuses to
+        // start is not.
+        None => loaded.unwrap_or_else(|e| {
             tracing::warn!("reading this session's skill bundles: {e:#}");
             Vec::new()
-        });
+        }),
+    };
 
     // Each repository's own variables, opened once. Every read is a line in the
     // vault's log naming the session it was for.
@@ -900,7 +1298,21 @@ pub(crate) async fn create_session_as(
     // there is nothing better to do: one process, one environment. What each
     // repository asked for in a *file* stays its own, inside its own checkout.
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings).await;
+    // **`inherit_settings`, not `true`.** This is the path a scheduled run
+    // takes — a new workspace — and it was the one still passing a literal,
+    // so turning inheritance off in the caller closed it only for a second
+    // agent in an existing workspace. See [`Launch::inherit_settings`];
+    // `a_scheduled_run_is_handed_the_sandbox_it_was_approved_with` is what
+    // fails if this goes back to a literal.
+    carry_preferences(
+        &state,
+        &mut env,
+        &owner,
+        req.agent,
+        &req.settings,
+        inherit_settings,
+    )
+    .await;
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);
@@ -1016,6 +1428,20 @@ pub(crate) async fn create_session_as(
                 env,
                 agent_home,
                 skills,
+                // **And the worker has to install all of them.** The count
+                // above refuses to dispatch unless every approved bundle is
+                // in this frame; this is the other half, because the server
+                // deciding something is required does not make the worker
+                // install it. Writing them is best effort otherwise, which is
+                // right for a session somebody is sitting in front of.
+                //
+                // This frame only. An agent started in this workspace
+                // afterwards — relaunched, or a second one joined to it —
+                // goes over `RunAction::StartAgent`, which carries no
+                // requirement; and a child this run spawns reaches
+                // `create_session_as` with no approved versions at all. Both
+                // are best effort with nobody present, and both are open.
+                skills_required: approved_versions.is_some(),
                 persona: persona.clone().unwrap_or_default(),
             })),
         )
@@ -1220,13 +1646,23 @@ async fn carry_preferences(
     user_id: &str,
     agent: ft_core::Agent,
     overrides: &ft_core::controls::Preferred,
+    inherit: bool,
 ) {
-    let pairs = match state.db.preferred_controls(user_id, agent).await {
-        Ok(pairs) => pairs,
-        Err(e) => {
-            tracing::warn!("reading remembered settings for {}: {e:#}", agent.label());
-            Vec::new()
-        }
+    // **Nothing remembered, for a launch with nobody present.** This read is
+    // the whole of the trap: it fills any unset control from what that person
+    // was last working with, so an approved schedule would start on a choice
+    // made in an unrelated session afterwards — including, for Codex, a
+    // sandbox of *Everything*. Skipping it leaves an unset field to the
+    // agent's own default, which is fixed and documented.
+    let pairs = match inherit {
+        false => Vec::new(),
+        true => match state.db.preferred_controls(user_id, agent).await {
+            Ok(pairs) => pairs,
+            Err(e) => {
+                tracing::warn!("reading remembered settings for {}: {e:#}", agent.label());
+                Vec::new()
+            }
+        },
     };
     // What was remembered, then whatever this start chose on top — the New
     // page's picker wins over the last session's, field by field.
@@ -1314,7 +1750,15 @@ pub(crate) async fn relaunch(
     };
 
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(state, &mut env, owner, session.agent, &Default::default()).await;
+    carry_preferences(
+        state,
+        &mut env,
+        owner,
+        session.agent,
+        &Default::default(),
+        true,
+    )
+    .await;
     // Re-composed from the stored profile, so a session that resumes after a
     // restart comes back as the profile it was started as. Best effort: a
     // persona that cannot be read is a plain restart, not a refusal to restart.
@@ -1451,6 +1895,7 @@ async fn start_another_agent(
     workspace_id: ft_core::WorkspaceId,
     req: NewSession,
     lineage: Option<Lineage>,
+    inherit_settings: bool,
 ) -> ApiResult<Session> {
     if !req.agent.speaks_a_protocol() {
         return Err(ApiError::new(
@@ -1598,7 +2043,15 @@ async fn start_another_agent(
     // Its own credential and its own environment, resolved against this session
     // so the vault's log names the run that spent it.
     let mut env: Vec<(String, String)> = Vec::new();
-    carry_preferences(&state, &mut env, &owner, req.agent, &req.settings).await;
+    carry_preferences(
+        &state,
+        &mut env,
+        &owner,
+        req.agent,
+        &req.settings,
+        inherit_settings,
+    )
+    .await;
     if let Some(account) = &req.account_id {
         super::accounts::pin(&state, &owner, &id, account, req.agent).await?;
     }
@@ -1709,10 +2162,32 @@ pub(super) async fn destroy_session(
     Path(id): Path<String>,
     Query(req): Query<Removal>,
 ) -> ApiResult<StatusCode> {
-    let id = SessionId::from_stored(id);
+    let me = principal
+        .user
+        .as_ref()
+        .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
+    destroy_as(state, me, SessionId::from_stored(id), req).await
+}
+
+/// End an agent, or the whole workspace, as somebody.
+///
+/// The handler above is this with a principal unwrapped — the same shape
+/// [`create_session_as`] has, and for the same reason: a scheduled run ends
+/// the workspace it made, and nobody is present to be a `Principal`.
+///
+/// Takes the `User` rather than an owner id because the `workspace: true`
+/// branch asks [`super::access::may_share`], which wants the row. A caller
+/// with only an id loads it first; that is one read rather than a second
+/// authorization path.
+pub(crate) async fn destroy_as(
+    state: AppState,
+    me: &crate::accounts::User,
+    id: SessionId,
+    req: Removal,
+) -> ApiResult<StatusCode> {
     let session = state
         .db
-        .session_to_work_in(owner(&principal)?, &id)
+        .session_to_work_in(me.id.as_str(), &id)
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
@@ -1742,10 +2217,6 @@ pub(super) async fn destroy_session(
     // whose own space it sits in or an administrator of the directory it was
     // handed to. That is `may_share`, the same question as moving it.
     if req.workspace {
-        let me = principal
-            .user
-            .as_ref()
-            .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
         let place = session
             .workspace_id
             .as_ref()
@@ -1760,7 +2231,7 @@ pub(super) async fn destroy_session(
                      whoever it belongs to",
                 )
             })?;
-    } else if session.owner.as_str() != owner(&principal)? {
+    } else if session.owner.as_str() != me.id.as_str() {
         return Err(ApiError::not_found("session"));
     }
     let the_whole_place = req.workspace;
@@ -1839,7 +2310,7 @@ pub(super) async fn destroy_session(
         if let (true, Some(workspace)) = (the_whole_place, session.workspace_id.as_ref()) {
             for run in state
                 .db
-                .live_runs_beside(owner(&principal)?, workspace, &id)
+                .live_runs_beside(me.id.as_str(), workspace, &id)
                 .await?
             {
                 state.db.forget_session(&run).await?;
@@ -1868,7 +2339,7 @@ pub(super) async fn destroy_session(
     if let (true, Some(workspace)) = (the_whole_place, workspace.as_ref()) {
         for run in state
             .db
-            .live_runs_beside(owner(&principal)?, workspace, &id)
+            .live_runs_beside(me.id.as_str(), workspace, &id)
             .await?
         {
             state
@@ -1934,7 +2405,7 @@ async fn end_children(state: &AppState, lead: &SessionId) -> ApiResult<()> {
 
 /// Removing a session whose host has stopped answering.
 #[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
-pub(super) struct Removal {
+pub(crate) struct Removal {
     /// Take it off the inbox without the machine being told.
     #[serde(default)]
     force: bool,
@@ -1946,6 +2417,27 @@ pub(super) struct Removal {
     /// first agent was to end everybody's.
     #[serde(default)]
     pub workspace: bool,
+}
+
+impl Removal {
+    /// End the whole workspace, and never force.
+    ///
+    /// For a caller with nobody present. **Forcing is an operator's judgement
+    /// and not a timer's** — it marks the session `Ended` here without the
+    /// machine being told, which is what puts the workspace in front of
+    /// `reclaim::sweep`, and the sweep deletes the conversation inside the
+    /// minute. A machine that is merely away is worth waiting for, and
+    /// deciding that it is not is a thing somebody looks at.
+    ///
+    /// A constructor rather than a public `force` field, so that "a schedule
+    /// never forces" is a property of the type rather than something every
+    /// caller has to remember.
+    pub(crate) fn the_workspace() -> Self {
+        Self {
+            force: false,
+            workspace: true,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -3209,12 +3701,20 @@ pub(super) async fn add_repo(
     let id = SessionId::from_stored(id);
     let (session, host) = working_context(&state, &principal, &id).await?;
 
-    let repo = state.db.repo(&req.repo_id).await?.ok_or_else(|| {
-        ApiError::new(
-            ErrorCode::RepoNotConnected,
-            "that repository isn't connected",
-        )
-    })?;
+    // `working_context` above answered that the *session* is theirs. Nothing
+    // answered that the repository is, and `repo_env` below reads its secrets
+    // — the same secrets, through a different door from bring-up. One id from
+    // the request body, looked up as the person who sent it.
+    let repo = state
+        .db
+        .repo_of(owner(&principal)?, &req.repo_id)
+        .await?
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::RepoNotConnected,
+                "that repository isn't connected",
+            )
+        })?;
 
     if session.checkouts.iter().any(|c| c.slug == repo.slug) {
         return Err(ApiError::new(
@@ -3916,7 +4416,9 @@ async fn require_ready(
         .map_err(|e| {
             ApiError::new(
                 ErrorCode::HostUnreachable,
-                format!("Checking requirements: {e:#}"),
+                // Named and punctuated: this is a sentence on a history row
+                // as often as it is a line in a log.
+                format!("Firetower could not check that machine's requirements: {e:#}."),
             )
         })?;
     if !readiness.ready() {
@@ -4082,8 +4584,17 @@ pub(super) async fn continue_with_account(
         // not that call arriving again. A fresh continuation is a new row.
         req: None,
     });
-    let next =
-        start_another_agent(state.clone(), owner.to_string(), workspace, req, lineage).await?;
+    // A continuation of a session a person is in: it inherits what they were
+    // working with, exactly as the session it continues did.
+    let next = start_another_agent(
+        state.clone(),
+        owner.to_string(),
+        workspace,
+        req,
+        lineage,
+        true,
+    )
+    .await?;
     Ok(next.id)
 }
 

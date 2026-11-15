@@ -3169,6 +3169,27 @@ impl Skills {
         .context("reading somebody's default skills")
     }
 
+    /// The version each of these skills is on right now.
+    ///
+    /// For a caller that has to pin what it resolved and check later that the
+    /// pins still resolve — a schedule approved against a set of versions must
+    /// fail closed when one has gone rather than reading whatever is current.
+    /// A skill with no current version contributes nothing, which is the same
+    /// thing a session gets from it.
+    pub async fn current_versions(&self, skills: &[String]) -> Result<Vec<String>> {
+        if skills.is_empty() {
+            return Ok(Vec::new());
+        }
+        sqlx::query_scalar(
+            "SELECT current_version_id FROM skills \
+              WHERE id = ANY($1) AND current_version_id IS NOT NULL",
+        )
+        .bind(skills)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading the versions a set of skills is on")
+    }
+
     // ── what a session is running ───────────────────────────────────────
 
     /// The skills a session is reading, in the version it pinned.
@@ -3349,6 +3370,89 @@ impl Skills {
     /// method's promise is that a session reads exactly what it is allowed to
     /// of what it was handed. Whoever has somebody to tell says so first —
     /// `api::roles::check_skills` refuses the write outright.
+    /// Pin a session to **named versions**, not to whatever is current.
+    ///
+    /// [`Skills::set_for_session`] pins `k.current_version_id`, which is right
+    /// for a person starting work: they get the library as it is. It is wrong
+    /// for a run that was approved against a particular set of instructions —
+    /// adding a version to a selected skill substituted it silently, and the
+    /// recorded old version still passed an existence check, so nothing
+    /// noticed.
+    ///
+    /// Visibility is still asked, with the same predicate: a version of a
+    /// skill that has since been filed somewhere this person cannot reach is
+    /// not deliverable to them, whatever was approved.
+    pub async fn pin_versions(
+        &self,
+        session: &str,
+        person: &str,
+        versions: &[String],
+    ) -> Result<()> {
+        if versions.is_empty() {
+            return Ok(());
+        }
+        let insert = format!(
+            "INSERT INTO skill_pins (session_id, skill_id, version_id, added_by) \
+             SELECT $1, k.id, v.id, $3 FROM skill_versions v \
+               JOIN skills k ON k.id = v.skill_id \
+              WHERE v.id = $2 AND {visible} \
+             ON CONFLICT (session_id, skill_id) DO NOTHING",
+            visible = filed_where("k", 3, Level::Viewer),
+        );
+        let mut tx = self.pool.begin().await?;
+        for version in versions {
+            sqlx::query(&insert)
+                .bind(session)
+                .bind(version)
+                .bind(person)
+                .execute(&mut *tx)
+                .await?;
+        }
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// Which of these approved versions could **not** be handed over, and why
+    /// is the same question as "would this session read what was approved".
+    ///
+    /// **A pin that cannot be written is not an error anywhere.**
+    /// [`Skills::pin_versions`] inserts `SELECT … WHERE v.id = $2 AND
+    /// {visible}`, so a version whose skill this person can no longer reach
+    /// writes no row and answers `Ok(())`; the session then comes up with one
+    /// fewer skill, or with none, and nothing says so. A safety skill whose
+    /// visibility was taken away is exactly that case, and the run reached
+    /// `running` with an empty set.
+    ///
+    /// Asking the existence question alone was not enough either: the
+    /// `skill_versions` row is still there after the skill moves out of
+    /// reach. So this asks both at once, as one predicate, and returns the
+    /// ids that fail it — the ids rather than a bool, because the refusal has
+    /// to be able to say which.
+    pub async fn undeliverable(&self, person: &str, versions: &[String]) -> Result<Vec<String>> {
+        if versions.is_empty() {
+            return Ok(Vec::new());
+        }
+        let sql = format!(
+            "SELECT v.id FROM skill_versions v \
+               JOIN skills k ON k.id = v.skill_id \
+              WHERE v.id = ANY($1) AND {visible}",
+            visible = filed_where("k", 2, Level::Viewer),
+        );
+        let can: std::collections::HashSet<String> = sqlx::query_scalar(&sql)
+            .bind(versions)
+            .bind(person)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading which approved skill versions can still be delivered")?
+            .into_iter()
+            .collect();
+        Ok(versions
+            .iter()
+            .filter(|id| !can.contains(*id))
+            .cloned()
+            .collect())
+    }
+
     pub async fn set_for_session(
         &self,
         session: &str,
