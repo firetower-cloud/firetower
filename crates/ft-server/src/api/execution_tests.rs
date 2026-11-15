@@ -7624,6 +7624,67 @@ async fn let_a_teardown_arrive() {
     tokio::time::sleep(std::time::Duration::from_millis(400)).await;
 }
 
+/// **A scheduled teardown of a place whose agent has already ended.**
+///
+/// `destroy_as` has two callers since the schedules work: the endpoint, and
+/// `settle::delete_workspace`, where a scheduled run tears down the workspace
+/// it made as the schedule's owner. The status gate was in front of both — and
+/// nothing about a scheduled teardown stops the agent from having ended on its
+/// own first, because `classify` asks git what is in the workspace and never
+/// looks at a status. So the sweep would ask for the teardown, be told "already
+/// ended", put the claim back and write *The workspace could not be deleted:
+/// already ended* on the run, every pass, for ever — a schedule quietly
+/// accumulating undeletable workspaces, which is the reported defect with
+/// nobody pressing a button.
+///
+/// The authorization is the endpoint's, unchanged: a real `User` row,
+/// `session_to_work_in`, then `may_share` on the place.
+#[tokio::test]
+async fn a_scheduled_teardown_is_not_refused_by_an_agent_that_already_ended() {
+    let (state, principal, host, ready, owner, _created, _frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let (schedule, session) = a_run_awaiting_teardown(&state, &principal, &host, &owner).await;
+
+    // The agent ends on its own before the teardown it is owed comes round.
+    state
+        .fleet
+        .set_status(&session, ft_core::SessionStatus::Ended, None)
+        .await;
+
+    // And the words arrive, which is what releases the deferral.
+    state
+        .db
+        .record_proposal(&session, "Bumped four patch versions", "")
+        .await
+        .unwrap();
+    crate::schedules::settle::owed(&state, Utc::now())
+        .await
+        .unwrap();
+
+    assert!(
+        state.db.session(&session).await.unwrap().is_none(),
+        "the place was finished, so ending it is the row going"
+    );
+    let row = runs_of(&state, &schedule)
+        .await
+        .into_iter()
+        .next()
+        .expect("the run is there");
+    assert!(
+        !row.workspace_kept,
+        "the teardown is not still owed: {:?}",
+        row.detail
+    );
+    assert!(
+        !row.detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("could not be deleted"),
+        "and nothing is recorded as a failure: {:?}",
+        row.detail
+    );
+}
+
 /// A clean run that has settled and is still owed its teardown.
 ///
 /// The window the deferral opens: the state is `finished`, the outcome is
