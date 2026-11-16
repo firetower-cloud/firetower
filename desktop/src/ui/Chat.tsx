@@ -62,6 +62,7 @@ import { elapsed, minutesSince } from "~/api/view";
 import { Composer } from "~/ui/Composer";
 import { why } from "~/data";
 import { Dropping, type Hand } from "~/ui/attach";
+import { atEnd, below, follows } from "~/ui/follow";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
@@ -140,7 +141,14 @@ export function Chat({
   const mentionable = useMemo(() => ({ artifacts, open: onOpenArtifact }), [artifacts, onOpenArtifact]);
   const scroller = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
+  /* Whether the end of the transcript is being followed. Intent, not
+     proximity: see `ui/follow.ts` for the rule and what it replaced. */
   const following = useRef(true);
+  /* Where the scroller was the last time anybody looked — a scroll event, or
+     one of this file's own writes, read back after the browser clamped it.
+     The rule reads the *sign* of the movement since, so this is what tells a
+     hand from one of this file's own pins. */
+  const at = useRef(0);
   /* The sentinel above the transcript. Seeing it is a request for the
      exchanges before the ones drawn. */
   const earlier = useRef<HTMLDivElement>(null);
@@ -362,8 +370,16 @@ export function Chat({
     const el = scroller.current;
     const inner = body.current;
     if (!el || !inner) return;
+    /* Every write to `scrollTop` in this file reads the value back into `at`
+       immediately afterwards, because the browser clamps what it was given
+       and the rule compares against what it actually took. Written out at
+       each site rather than funnelled through a helper: `scripts/pinned.mjs`
+       attributes a write by the name of the function that made it, and one
+       shared writer would make all four of them look like the same one. */
     const toEnd = () => {
-      if (following.current) el.scrollTop = el.scrollHeight;
+      if (!following.current) return;
+      el.scrollTop = el.scrollHeight;
+      at.current = el.scrollTop;
     };
     toEnd();
     const watch = new ResizeObserver(toEnd);
@@ -374,7 +390,9 @@ export function Chat({
      gets none, so the count moving is a second cue for the same thing. */
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && following.current) el.scrollTop = el.scrollHeight;
+    if (!el || !following.current) return;
+    el.scrollTop = el.scrollHeight;
+    at.current = el.scrollTop;
   }, [rows.length, working, asked.length, questions.length]);
 
   /* The top of the transcript coming into view is a request for the exchanges
@@ -411,7 +429,10 @@ export function Chat({
       return;
     }
     if (held.current === null) return;
-    if (!following.current) el.scrollTop = el.scrollHeight - held.current;
+    if (!following.current) {
+      el.scrollTop = el.scrollHeight - held.current;
+      at.current = el.scrollTop;
+    }
     held.current = null;
   }, [conversation.loadingOlder, conversation.items.length]);
 
@@ -423,18 +444,92 @@ export function Chat({
 
      And nothing runs while ⌘F is up. Opening the find bar is saying you are
      reading rather than watching, and a pin that fights the jump to a match
-     is the one thing that would make searching a live session useless. */
+     is the one thing that would make searching a live session useless.
+
+     This loop was the whole of the fault. It is unchanged in what it does and
+     changed in what it is allowed to do it to: it writes only while
+     `following`, which is now cleared by the gesture itself, so the frame
+     after somebody scrolls up it has nothing to say — and keeps having
+     nothing to say for as long as they are reading. Measured at 60 writes a
+     second against a trackpad before, and zero after. */
   useEffect(() => {
     if (!working || finding) return;
     let raf = 0;
     const loop = () => {
       const el = scroller.current;
-      if (el && following.current && el.scrollHeight - el.scrollTop - el.clientHeight > 1) el.scrollTop = el.scrollHeight;
+      if (el && following.current && below(el) > 1) {
+        el.scrollTop = el.scrollHeight;
+        at.current = el.scrollTop;
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [working, finding]);
+
+  /** Let go of the end. Called by the gesture, so size does not come into it. */
+  const letGo = () => {
+    following.current = false;
+  };
+
+  /** Take the end back: a push down at the last line. */
+  const take = () => {
+    following.current = true;
+  };
+
+  /* Letting go, on the gesture rather than on the distance.
+     The wheel and the finger are listened for directly, because a scroll
+     event cannot be relied on to arrive before the frame that would undo it.
+     Chrome dispatches the scroll before that frame's callbacks — which is why
+     `follows` on its own is enough there — and the app ships in WKWebView,
+     where this repository has measured no such ordering and does not claim
+     one. Clearing the flag on the event means the per-frame pin has already
+     stood down whichever way round the two arrive, on any webview, at any
+     scroll rate, for a gesture of any size. */
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) letGo();
+      /* Pushing down at the last line is an arrival, and it is what gives a
+         gesture that ended there somewhere to come back from. Anywhere else,
+         reaching the end is the scroll handler's to notice. */
+      else if (e.deltaY > 0 && atEnd(el)) take();
+    };
+    /* A finger going *down* drags the content down the screen, which is
+       reading back up the transcript. */
+    let finger = 0;
+    const land = (e: TouchEvent) => void (finger = e.touches[0]?.clientY ?? 0);
+    const drag = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? finger;
+      if (y > finger + 0.5) letGo();
+      finger = y;
+    };
+    /* The keys that take a pane upwards. Bound to the scroller rather than the
+       window, so a caret moving in the composer — which is outside it — is not
+       read as somebody scrolling the transcript; a keyboard scroll that lands
+       here with the focus elsewhere moves far more than a pixel, and
+       `follows` has it either way. */
+    const UP = new Set(["ArrowUp", "PageUp", "Home"]);
+    const key = (e: KeyboardEvent) => {
+      if (!UP.has(e.key)) return;
+      /* Not somebody answering a question: a caret inside the card's own
+         textarea scrolls nothing. */
+      if ((e.target as HTMLElement | null)?.closest("input, textarea, [contenteditable]")) return;
+      letGo();
+    };
+    const how = { passive: true, capture: true } as const;
+    el.addEventListener("wheel", wheel, how);
+    el.addEventListener("touchstart", land, how);
+    el.addEventListener("touchmove", drag, how);
+    el.addEventListener("keydown", key, { capture: true });
+    return () => {
+      el.removeEventListener("wheel", wheel, how);
+      el.removeEventListener("touchstart", land, how);
+      el.removeEventListener("touchmove", drag, how);
+      el.removeEventListener("keydown", key, { capture: true });
+    };
+  }, []);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" {...surface}>
@@ -446,7 +541,8 @@ export function Chat({
         className="scroll-slim min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
         onScroll={(e) => {
           const el = e.currentTarget;
-          following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          following.current = follows(following.current, el, at.current);
+          at.current = el.scrollTop;
         }}
       >
         <SessionContext.Provider value={{ session: session.id, mayAct }}>
