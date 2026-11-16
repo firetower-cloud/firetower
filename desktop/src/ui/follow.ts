@@ -26,16 +26,38 @@ export type Edge = { scrollHeight: number; scrollTop: number; clientHeight: numb
 export const below = (e: Edge) => Math.max(0, e.scrollHeight - e.scrollTop - e.clientHeight);
 
 /**
- * What counts as the end: two pixels, for sub-pixel layout and a fractional
- * zoom.
+ * What counts as the end: **less than one pixel** from it.
  *
  * Deliberately not a band anybody can sit inside. "Near the bottom" taking
- * hold again was the weaker version of the same complaint, and it is the
- * decision this whole change rests on.
+ * hold again was the weaker version of the original complaint, and it is the
+ * decision this whole change rests on — so this started at two pixels and was
+ * wrong at two pixels, because two pixels is a place you can stop: scroll up
+ * 400, back down 399, and the next thing the agent wrote took the viewport
+ * the remaining 501px without being asked.
+ *
+ * It is not zero either, and that is the other half of it. The arithmetic
+ * above is two integers off the CSSOM and one double — `scrollHeight` and
+ * `clientHeight` are rounded, `scrollTop` is not — so there is no guarantee
+ * the three of them land on exactly 0 at a genuine arrival, and a rule that
+ * demanded it could leave somebody unable to take hold again *at all*, which
+ * is the same bug pointing the other way and a worse one for being silent.
+ *
+ * So it is measured rather than guessed. `scripts/at-the-end.mjs` drives the
+ * real app and reads the distance at a real arrival: **0.000 in all 360
+ * readings**, over three scenes, six device scales from 1 to 3, and ten
+ * window heights, reached both by hand and by writing past the end. One pixel
+ * short reads exactly 1.000, and *half* a pixel short is not a place the
+ * scroller will sit — the browser quantises the offset and snaps it back to
+ * the maximum. So every value in `(0, 1)` behaves identically here, and half
+ * a pixel is the middle of that band: it cannot swallow a whole pixel, and it
+ * absorbs any sub-pixel residual a layout or another webview produces. The
+ * app has no page zoom — `bridge.zoom` is the window's, not the page's —
+ * which is the condition that was measured; under CSS zoom the arithmetic
+ * drifts past a pixel and no constant in this file would be right.
  */
-export const END = 2;
+export const END = 0.5;
 
-export const atEnd = (e: Edge) => below(e) <= END;
+export const atEnd = (e: Edge) => below(e) < END;
 
 /**
  * How far up before the jump pill is worth having — about a third of the pane.
@@ -58,9 +80,9 @@ export const BACK = 240;
  *   one notch of a wheel, one frame of a trackpad.
  * - **Arriving at the end on the way down takes hold again.** Only there.
  * - **A clamp does neither.** Content collapsing under a reader who is already
- *   at the end moves `scrollTop` up with no hand involved, and leaves the
- *   distance to the bottom at zero — so it reads as neither a let-go nor an
- *   arrival, and somebody watching a stream keeps watching it.
+ *   at the end moves `scrollTop` up with no hand involved, and leaves them
+ *   still at the end — so it reads as neither a let-go nor an arrival, and
+ *   somebody watching a stream keeps watching it.
  *
  * Whatever a gesture handler has already decided survives: the fall-through
  * returns what it was given, so a `wheel` that cleared following a moment

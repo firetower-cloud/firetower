@@ -35,6 +35,9 @@ describe("letting go", () => {
     // signal, and 40px is the tick that moved 0px for five runs.
     expect(follows(true, at(40), at(0).scrollTop)).toBe(false);
     expect(follows(true, at(3), at(0).scrollTop)).toBe(false);
+    // Including one whole pixel, which is the smallest move there is: the
+    // browser will not sit half a pixel short of the end, it snaps back.
+    expect(follows(true, at(1), at(0).scrollTop)).toBe(false);
   });
 
   it("stays let go while the agent writes underneath", () => {
@@ -58,9 +61,42 @@ describe("letting go", () => {
 describe("taking hold again", () => {
   it("takes hold at the last line and nowhere short of it", () => {
     expect(follows(false, at(0), at(40).scrollTop)).toBe(true);
-    expect(follows(false, at(2), at(40).scrollTop)).toBe(true);
-    // "Near the bottom" is not the bottom. The old rule took hold at 79px.
-    for (const n of [3, 8, 20, 40, 79, 240]) expect(follows(false, at(n), at(n + 40).scrollTop)).toBe(false);
+    // "Near the bottom" is not the bottom. The first rule took hold at 79px;
+    // this one took hold at 2px, which is still a place you can stop.
+    for (const n of [1, 2, 3, 8, 20, 40, 79, 240]) expect(follows(false, at(n), at(n + 40).scrollTop)).toBe(false);
+  });
+
+  it("does not take hold a pixel short of it, however the stream grows", () => {
+    /* The scenario a review reproduced against the first version of this:
+       detach by 400px, scroll back down 399 of them, and the next thing the
+       agent wrote took the viewport the remaining 501px. Nobody asked for
+       that move, which is the whole complaint this change exists to answer,
+       in miniature. */
+    let following = follows(false, at(1), at(400).scrollTop);
+    expect(following).toBe(false);
+    // 500px arrives below. `scrollTop` has not moved, so the end is further
+    // away than it was, and the rule is asked again on the next scroll.
+    const grown = { scrollHeight: 5500, scrollTop: at(1).scrollTop, clientHeight: 600 };
+    expect(below(grown)).toBe(501);
+    following = follows(following, grown, grown.scrollTop);
+    expect(following).toBe(false);
+  });
+
+  it("does not take hold two pixels short of it either", () => {
+    const following = follows(false, at(2), at(400).scrollTop);
+    expect(following).toBe(false);
+    const grown = { scrollHeight: 5500, scrollTop: at(2).scrollTop, clientHeight: 600 };
+    expect(follows(following, grown, grown.scrollTop)).toBe(false);
+  });
+
+  it("takes hold on any sub-pixel residual, because that is not a place to stop", () => {
+    /* `scrollHeight` and `clientHeight` are rounded and `scrollTop` is not,
+       so a genuine arrival is not guaranteed to read exactly 0 — measured at
+       0.000 everywhere in Chrome, but this app ships in a webview nobody has
+       measured. A fraction of a pixel is the end; a whole one is not. */
+    for (const n of [0, 0.1, 0.25, 0.49]) expect(follows(false, at(n), at(40).scrollTop)).toBe(true);
+    expect(atEnd(at(0.49))).toBe(true);
+    expect(atEnd(at(1))).toBe(false);
   });
 
   it("holds what it was given when nothing has happened", () => {

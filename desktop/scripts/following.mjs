@@ -149,6 +149,10 @@ async function rebottom(page) {
 
 let failed = 0;
 const near = (got, want, slack = 3) => Math.abs(got - want) <= slack;
+/* Arrival is asserted exactly rather than loosely: `at-the-end.mjs` measures
+   it as 0.000 in all 360 readings it takes, so slack here would only hide a
+   drift of exactly the kind this change is about. */
+const ended = (got) => got === 0;
 
 function ok(label, pass, said) {
   if (!pass) failed++;
@@ -170,7 +174,7 @@ for (const scene of ["scroll-idle", "scroll-working", "scroll-asking"]) {
   console.log(`  ${scene}`);
   const { page } = await open(scene);
 
-  ok("opens at the end", near(await below(page), 0), `${await below(page)}px below`);
+  ok("opens at the end", ended(await below(page)), `${await below(page)}px below`);
 
   await start(page);
   await up(page, 40);
@@ -212,7 +216,7 @@ for (const scene of ["scroll-idle", "scroll-working", "scroll-asking"]) {
   await start(page);
   await grow(page, 600, "end");
   await page.waitForTimeout(400);
-  ok("at the last line, it follows new content", near(await below(page), 0), `${await below(page)}px below`);
+  ok("at the last line, it follows new content", ended(await below(page)), `${await below(page)}px below`);
   ok("which is the pin doing it", (await stop(page)).length > 0);
 
   await page.close();
@@ -238,7 +242,30 @@ for (const scene of ["scroll-idle", "scroll-working", "scroll-asking"]) {
   await rebottom(page);
   await grow(page, 500, "end");
   await page.waitForTimeout(400);
-  ok("the very bottom does", near(await below(page), 0), `${await below(page)}px below`);
+  ok("the very bottom does", ended(await below(page)), `${await below(page)}px below`);
+
+  /* One pixel short, which is the smallest distance there is: the browser
+     will not sit at half a pixel, it snaps back to the end. A review
+     reproduced the whole of the original complaint in this gap — detach by
+     400, come back down 399, and the next thing the agent wrote took the
+     viewport the remaining 501px without being asked. */
+  for (const short of [1, 2]) {
+    await rebottom(page);
+    await up(page, 400);
+    await page.mouse.wheel(0, 400 - short);
+    await page.waitForTimeout(300);
+    const stopped = await below(page);
+    const held = await top(page);
+    await start(page);
+    await grow(page, 500, "end");
+    await page.waitForTimeout(500);
+    ok(
+      `${short}px short is not the end, and 500px arriving does not move it`,
+      stopped === short && (await top(page)) === held,
+      `stopped ${stopped}px short, viewport ${await top(page)} was ${held}`,
+    );
+    ok("and the pin wrote nothing from there", (await stop(page)).length === 0);
+  }
 
   /* A reader going back up the transcript, two pixels at a time: the gesture
      that could not escape the old 80px band however long it ran. */
@@ -323,7 +350,7 @@ for (const scene of ["scroll-idle", "scroll-working", "scroll-asking"]) {
   await page.waitForTimeout(600);
   const travel = await stop(page);
   const span = travel.length > 1 ? travel.at(-1).t - travel[0].t : 0;
-  ok("clicking it lands at the end", near(await below(page), 0), `${await below(page)}px below`);
+  ok("clicking it lands at the end", ended(await below(page)), `${await below(page)}px below`);
   ok("the pill goes with it", (await pill(page).count()) === 0);
   ok("the travel is animated, not a teleport", travel.length >= 4, `${travel.length} writes over ${Math.round(span)}ms`);
   ok("and over about --dur-native", span > 40 && span < 420, `${Math.round(span)}ms`);
@@ -331,7 +358,7 @@ for (const scene of ["scroll-idle", "scroll-working", "scroll-asking"]) {
   await start(page);
   await grow(page, 600, "end");
   await page.waitForTimeout(400);
-  ok("and it follows again afterwards", near(await below(page), 0), `${await below(page)}px below`);
+  ok("and it follows again afterwards", ended(await below(page)), `${await below(page)}px below`);
   ok("which is the pin, not the travel", (await stop(page)).some((w) => w.by === "loop"));
 
   await page.close();
@@ -348,7 +375,7 @@ for (const scene of ["scroll-idle", "scroll-working", "scroll-asking"]) {
   await page.waitForTimeout(400);
   const writes = await stop(page);
   ok("the jump is one write and done", writes.length === 1, `${writes.length} writes`);
-  ok("and it is at the end", near(await below(page), 0));
+  ok("and it is at the end", ended(await below(page)), `${await below(page)}px below`);
   await page.close();
 }
 
