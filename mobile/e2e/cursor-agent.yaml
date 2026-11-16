@@ -15,7 +15,10 @@ appId: com.usefiretower.app
     id: "address"
 - inputText: "${ADDRESS}"
 - tapOn: "Connect"
-- assertVisible: "Sign in"
+# The field, not the "Sign in" button: the button is under the keyboard that
+# the username field's own `autoFocus` raises. See `connect.yaml`.
+- assertVisible:
+    id: "username"
 - tapOn:
     id: "username"
 - inputText: "${USER}"

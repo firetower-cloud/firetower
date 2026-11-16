@@ -29,7 +29,19 @@ appId: com.usefiretower.app
 
 # `/bootstrap` is unauthenticated, so the organisation is named before anybody
 # is asked for a password. That is the whole reason the address is asked first.
-- assertVisible: "Sign in"
+#
+# The landmark is the username field and **not the "Sign in" button**, which
+# is a race this lost. The button sits below the password field, and the
+# username field above it carries `autoFocus` (`app/connect.tsx`), so the
+# keyboard comes up over the button the moment the screen arrives. Whether
+# the assertion or the keyboard animation got there first decided the run: on
+# a CI emulator the keyboard won, and a flow whose server had answered and
+# whose screen was perfectly correct failed on a keyboard. The field is above
+# it either way — and an id rather than a caption, so copy cannot move it.
+# `hideKeyboard` below is what makes the button tappable when it is wanted.
+- assertVisible:
+    id: "username"
+    label: "The server answered, and it is asking who you are"
 - tapOn:
     id: "username"
 - inputText: "${USER}"
