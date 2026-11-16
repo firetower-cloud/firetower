@@ -194,6 +194,13 @@ struct Progress {
     /// put the resting tick on a session that was still producing transcript
     /// — and took away the stop button while work nobody could reach carried
     /// on running.
+    ///
+    /// **Subagents only, and the word is load-bearing.** A subagent is
+    /// bounded: it finishes and reports. A shell the agent backgrounded is
+    /// not, and Claude Code announces both with the same line — see
+    /// [`ft_core::turn::TurnEvent::TaskStarted`]. Holding a hand-back for a
+    /// shell holds it for ever, which is a child whose work is done and whose
+    /// lead will never be told.
     running: HashSet<String>,
     /// How the turn ended, held back until the last subagent reports.
     ///
@@ -469,8 +476,16 @@ impl Progress {
                     moved = Some((SessionStatus::Working, None));
                 }
                 E::RequestResolved { req, .. } => resolved.push(req.to_string()),
-                E::TaskStarted { task, .. } => {
-                    self.running.insert(task.to_string());
+                // Only a subagent. A shell the agent put in the background
+                // is work it asked for and then stopped waiting on — and it
+                // may never end at all, so nothing may be held for it. This
+                // is the bug: a child that backgrounded a process and handed
+                // back sat `Working` until somebody killed that process by
+                // hand, hours later, with its deliverable long since written.
+                E::TaskStarted { task, shell, .. } => {
+                    if !shell {
+                        self.running.insert(task.to_string());
+                    }
                 }
                 E::TaskCompleted { task, .. } => {
                     self.running.remove(task.as_str());
@@ -3779,7 +3794,11 @@ impl Fleet {
         let mut readers = self.progress.write().await;
         self.asked.write().await.remove(session_id.as_str());
         let held = readers.remove(session_id.as_str());
-        if let Some(note) = held.and_then(|p| p.resting) {
+        let parked = held.and_then(|progress| {
+            let note = progress.resting?;
+            Some((note, progress.said))
+        });
+        if let Some((note, _)) = &parked {
             announce_status(
                 &self.db,
                 &self.events,
@@ -3804,6 +3823,13 @@ impl Fleet {
             announce_status(&self.db, &self.events, session_id, SessionStatus::Failed, Some("The agent process exited. Restart it to continue; pending permissions were cancelled.")).await;
         }
         drop(readers);
+        // A rest this agent died holding is still a child's report, and a lead
+        // is waiting on the message, not on the status. Announcing the one and
+        // not sending the other left the child reading `HandedBack` with its
+        // lead blocked for ever — the same silence, one row further on.
+        if let Some((note, said)) = parked {
+            self.deliver_rest(session_id, said, note).await;
+        }
         // Whatever a child handed back and this agent was given on the way out
         // did not get read: its process is gone. After the lock, because
         // putting it back touches the database and nothing should wait on the
@@ -4103,10 +4129,78 @@ impl Fleet {
             },
             // Nothing to stop is not a failure. Somebody pressed stop on a
             // session that was already resting, and there is no turn to end.
-            Stop::Nothing => return Ok(()),
+            //
+            // Unless its rest is parked on a subagent that has not reported.
+            // Then there is no turn to end *and* the session is still drawn
+            // as working, so stop is the only button there is — and pressing
+            // it has to do something. It delivers the rest the subagent never
+            // did. Without this, a lead that noticed its child was stuck and
+            // stopped it was no better off: the stop was a no-op, and the
+            // child's result stayed in memory on the control plane.
+            Stop::Nothing => {
+                self.rest_parked(session_id, "a stop").await;
+                return Ok(());
+            }
         };
 
         self.send(host_id, frame).await
+    }
+
+    /// Deliver a rest that was parked on a subagent, because nothing else is
+    /// going to.
+    ///
+    /// A turn that ends with a subagent still running leaves its note in
+    /// [`Progress::resting`], and the subagent reporting is what delivers it.
+    /// When that report never comes the note is the only copy of what the
+    /// agent said, and it is held in memory on the control plane: not written
+    /// down, not sent, not visible. This is the way out.
+    async fn rest_parked(&self, session_id: &SessionId, after: &str) {
+        // Taken under the lock and used outside it: `deliver_rest` reaches the
+        // database and the readers again, and holding this across that would
+        // deadlock against the drain.
+        let parked = {
+            let mut readers = self.progress.write().await;
+            readers.get_mut(session_id.as_str()).and_then(|progress| {
+                let note = progress.resting.take()?;
+                Some((note, progress.said.clone()))
+            })
+        };
+        let Some((note, said)) = parked else {
+            return;
+        };
+        tracing::info!(
+            session = %session_id,
+            "delivering a rest that was waiting on a subagent, after {after}"
+        );
+        announce_status(
+            &self.db,
+            &self.events,
+            session_id,
+            SessionStatus::HandedBack,
+            note.as_deref(),
+        )
+        .await;
+        self.deliver_rest(session_id, said, note).await;
+    }
+
+    /// Give a lead the result its child has come to rest on.
+    ///
+    /// The tail of the ordinary path — the `read.moved` arm of
+    /// [`Fleet::connection`] — for the two places that reach a rest without a
+    /// line of transcript to carry it: somebody pressing stop, and the agent
+    /// process going away. Announcing the status was never enough on its own.
+    /// A status is what a *person* reads; a lead is an agent, and the only
+    /// thing it reads is a message.
+    async fn deliver_rest(&self, session_id: &SessionId, said: String, note: Option<String>) {
+        match self.db.parent_of(session_id).await.ok().flatten() {
+            Some(lead) => {
+                self.hand_back_to_lead(&lead, session_id, Some(said), note)
+                    .await
+            }
+            // Not a child. Its status moving is still as good a moment as any
+            // for anything its own children handed back meanwhile.
+            None => self.drain_deliveries(session_id).await,
+        }
     }
 
     pub async fn send_input(
@@ -4614,6 +4708,58 @@ mod progress_tests {
             }
         }
         assert_eq!(last, Some(SessionStatus::HandedBack));
+    }
+
+    /// A turn that backgrounded a *shell* hands back, with the shell running.
+    ///
+    /// The incident: a child researched something for half an hour, wrote an
+    /// 822-line deliverable to disk, and went silent. Its lead saw `Working`
+    /// for two hours and in the end read the file off the disk by hand.
+    /// Nothing had failed. A Bash command had run past its timeout, Claude
+    /// Code had moved it to the background, and the process it was waiting on
+    /// — a request to a server the child had itself already torn down — never
+    /// answered. Claude Code announces a backgrounded shell with the same
+    /// `task_started` line as a subagent, so the turn's end was parked for it,
+    /// and only the task reporting takes a parked rest. It never reported.
+    /// Killing that process by hand, two hours later, released the hand-back.
+    ///
+    /// This asserts the *outcome* rather than the bookkeeping: the session
+    /// hands back on its own turn's completion, with the shell still running
+    /// and no `task_notification` ever arriving. Any rewiring that put the
+    /// wait back fails here, however it is spelled.
+    #[test]
+    fn a_turn_that_backgrounded_a_shell_still_hands_back() {
+        // Claude Code 2.1.273, verbatim — see
+        // `ft-core/tests/streams/bash_background.ndjson` for the whole
+        // recording. `task_type` is the only thing that tells this from a
+        // subagent's line.
+        let lines = [
+            r#"{"type":"user","message":{"role":"user","content":[{"text":"go","type":"text"}]}}"#,
+            r#"{"type":"system","subtype":"task_started","task_id":"bkmjv1n0v","tool_use_id":"toolu_01TunF2BaGRcVhbCGKrGoJuw","description":"Sleep for 900 seconds","is_backgrounded":true,"task_type":"local_bash"}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"stop_reason":"end_turn"}"#,
+        ];
+
+        let mut progress = Progress::for_agent(ft_core::Agent::ClaudeCode, String::new());
+        let mut last = None;
+        for line in lines {
+            if let Some(moved) = progress.read(line).moved {
+                last = Some(moved.0);
+            }
+        }
+
+        assert_eq!(
+            last,
+            Some(SessionStatus::HandedBack),
+            "the work is done: a `sleep` nobody is waiting for is not a reason to withhold it"
+        );
+        assert!(
+            progress.running.is_empty(),
+            "a backgrounded shell is not a subagent, and is not waited on"
+        );
+        assert!(
+            progress.resting.is_none(),
+            "so nothing is parked for a report that may never come"
+        );
     }
 
     /// The deferred rest is reachable from outside the reader, because the
@@ -5268,6 +5414,290 @@ mod tests {
             owner,
             frames,
         }
+    }
+
+    /// A lead and a child of its own, on one host, with the real connection
+    /// loop running between them.
+    ///
+    /// [`lead_with_a_worker`] registers a channel and no loop, which is right
+    /// for testing what a host is handed. This needs the loop: the fault is in
+    /// what the control plane makes of a line of the *child's* output, and
+    /// that only happens on the way through [`Fleet::connection`].
+    struct ChildUnderTest {
+        fleet: Fleet,
+        lead: SessionId,
+        child: SessionId,
+        host: HostId,
+        worker: Arc<crate::forward::testing::Worker>,
+    }
+
+    impl ChildUnderTest {
+        async fn new() -> Self {
+            let (db, owner) = Db::open_for_test_owned().await.unwrap();
+            let host = db
+                .ensure_test_host("fire-01", owner.as_str())
+                .await
+                .unwrap();
+            let (lead, child) = (SessionId::new(), SessionId::new());
+            for (id, title) in [(&lead, "Lead"), (&child, "Child")] {
+                db.insert_session(
+                    id,
+                    &host.id,
+                    owner.as_str(),
+                    None,
+                    title,
+                    "go",
+                    None,
+                    None,
+                    "ClaudeCode",
+                    ft_core::WorkspaceSize::Medium,
+                    ft_core::Share::Equal,
+                    &[],
+                    None,
+                )
+                .await
+                .unwrap();
+            }
+            db.set_lineage(
+                &child,
+                &lead,
+                Some("research something"),
+                Some("toolu_spawn"),
+            )
+            .await
+            .unwrap();
+
+            // Both at work, which is where a lead and a running child are: the
+            // worker announces `Working` when it launches an agent, long
+            // before that agent's first line. Without this the rows would sit
+            // in `Starting` and every status below would be reading a session
+            // that had never been started.
+            for id in [&lead, &child] {
+                db.record_local_event(
+                    id,
+                    &ft_core::EventKind::StatusChanged {
+                        status: SessionStatus::Working,
+                        note: None,
+                    },
+                    chrono::Utc::now(),
+                )
+                .await
+                .unwrap();
+            }
+
+            let fleet = Fleet::new(db);
+            let worker = crate::forward::testing::worker();
+            fleet.supervise(host.id.clone(), worker.clone()).await;
+            Self {
+                fleet,
+                lead,
+                child,
+                host: host.id,
+                worker,
+            }
+        }
+
+        /// The child's agent, saying its lines in order, as a worker relays
+        /// them.
+        async fn child_says(&self, lines: &[&str]) {
+            for (n, line) in lines.iter().enumerate() {
+                self.worker.says(&self.child, n as u64 + 1, line).await;
+            }
+        }
+
+        /// What the lead's agent has been handed, once it arrives.
+        ///
+        /// Polled because a hand-back crosses two tasks and the database on
+        /// the way, and the frame it ends as is the only proof it went.
+        async fn handed_to_the_lead(&self) -> Vec<String> {
+            for _ in 0..100 {
+                let seen: Vec<String> = self
+                    .worker
+                    .turns
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|turn| turn.to_string())
+                    .collect();
+                if !seen.is_empty() {
+                    return seen;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Vec::new()
+        }
+
+        /// Whether the lead is still pinned `Working` by this child.
+        ///
+        /// Not incidental: a lead's own turn ending while a child is in flight
+        /// is rewritten to `Working`, so a child that never comes to rest
+        /// takes its lead's hand-back with it — and the lead above that, all
+        /// the way up.
+        async fn lead_still_waiting(&self) -> bool {
+            self.fleet.db.children_in_flight(&self.lead).await.unwrap() > 0
+        }
+
+        /// What the child's row says, which is what a `children list` reads.
+        async fn child_status(&self) -> SessionStatus {
+            self.fleet
+                .db
+                .session_status(&self.child)
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    }
+
+    /// The whole fault, end to end: a child that backgrounded a process and
+    /// finished hands its work to its lead.
+    ///
+    /// Every link, because the links are what broke. Lines of the child's
+    /// agent output go in at the worker, the control plane's own reader makes
+    /// sense of them, and what comes out is a message on the lead's host.
+    /// Before the fix this test hangs at `handed_to_the_lead` with the child
+    /// `Working` — which is exactly what a person watching a stuck child sees.
+    #[tokio::test]
+    async fn a_child_that_backgrounded_a_shell_hands_back_to_its_lead() {
+        let it = ChildUnderTest::new().await;
+        assert!(it.lead_still_waiting().await, "the child is at work");
+
+        it.child_says(&[
+            r#"{"type":"user","message":{"role":"user","content":[{"text":"research something","type":"text"}]}}"#,
+            r#"{"type":"system","subtype":"task_started","task_id":"bkmjv1n0v","tool_use_id":"toolu_01TunF2BaGRcVhbCGKrGoJuw","description":"Sleep for 900 seconds","is_backgrounded":true,"task_type":"local_bash"}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Here is what I found."}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"stop_reason":"end_turn"}"#,
+        ])
+        .await;
+
+        let handed = it.handed_to_the_lead().await;
+        let handback = handed
+            .iter()
+            .find(|turn| turn.contains("ft:handback"))
+            .unwrap_or_else(|| {
+                panic!("the lead should have been handed the child's work, got {handed:?}")
+            });
+        assert!(
+            handback.contains(it.child.as_str()),
+            "and it says which child, so a lead with several can tell them apart: {handback}"
+        );
+        assert!(
+            handback.contains("Here is what I found."),
+            "carrying what the child actually said: {handback}"
+        );
+        assert_eq!(
+            it.child_status().await,
+            SessionStatus::HandedBack,
+            "and the row agrees, so `children list` stops saying it is working"
+        );
+        assert!(
+            !it.lead_still_waiting().await,
+            "and the lead is free to come to rest itself"
+        );
+    }
+
+    /// Stop releases a hand-back parked on a subagent that has not reported.
+    ///
+    /// The escape hatch, and it was not one. `Progress::stop` answers
+    /// `Stop::Nothing` when no turn is open — which is the case for a session
+    /// whose turn ended and whose rest is parked — so stopping a child that
+    /// had gone quiet did nothing at all. The lead that noticed, stopped it,
+    /// and waited was no better off than the lead that did not notice.
+    ///
+    /// A genuine subagent here, not a shell: after the fix above a shell never
+    /// parks anything, and this is about what happens when something that
+    /// *may* legitimately park one goes wrong anyway.
+    #[tokio::test]
+    async fn stopping_a_child_whose_rest_is_parked_hands_it_back() {
+        let it = ChildUnderTest::new().await;
+
+        it.child_says(&[
+            r#"{"type":"user","message":{"role":"user","content":[{"text":"research something","type":"text"}]}}"#,
+            r#"{"type":"system","subtype":"task_started","task_id":"aee2f7eaa4cbfabae","tool_use_id":"toolu_1","description":"Look around","subagent_type":"Explore","is_backgrounded":true,"task_type":"local_agent"}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Done, with a helper still going."}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"stop_reason":"end_turn"}"#,
+        ])
+        .await;
+
+        // Settle, then check the premise: parked, and drawn as working.
+        for _ in 0..100 {
+            if it.child_status().await == SessionStatus::Working
+                && it
+                    .fleet
+                    .progress
+                    .read()
+                    .await
+                    .get(it.child.as_str())
+                    .is_some_and(|p| p.resting.is_some())
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(
+            it.child_status().await,
+            SessionStatus::Working,
+            "a subagent is still going, so the turn ending is not the session stopping"
+        );
+
+        it.fleet.interrupt(&it.host, &it.child).await.unwrap();
+
+        let handed = it.handed_to_the_lead().await;
+        assert!(
+            handed.iter().any(|turn| turn.contains("ft:handback")
+                && turn.contains("Done, with a helper still going.")),
+            "stopping it should give the lead what it was holding, got {handed:?}"
+        );
+        assert_eq!(it.child_status().await, SessionStatus::HandedBack);
+    }
+
+    /// And an agent that dies holding a parked rest hands it over too.
+    ///
+    /// `agent_closed` already announced `HandedBack` for this case — but a
+    /// status is what a *person* reads. A lead is an agent, and the only thing
+    /// it reads is a message. So the child's row said it had handed back while
+    /// its lead went on waiting for ever: the same silence, one row further
+    /// on.
+    #[tokio::test]
+    async fn an_agent_that_exits_holding_a_rest_hands_it_to_the_lead() {
+        let it = ChildUnderTest::new().await;
+
+        it.child_says(&[
+            r#"{"type":"user","message":{"role":"user","content":[{"text":"research something","type":"text"}]}}"#,
+            r#"{"type":"system","subtype":"task_started","task_id":"aee2f7eaa4cbfabae","tool_use_id":"toolu_1","description":"Look around","subagent_type":"Explore","is_backgrounded":true,"task_type":"local_agent"}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"All done."}}}"#,
+            r#"{"type":"stream_event","event":{"type":"content_block_stop","index":0}}"#,
+            r#"{"type":"result","subtype":"success","is_error":false,"num_turns":2,"stop_reason":"end_turn"}"#,
+        ])
+        .await;
+
+        for _ in 0..100 {
+            if it
+                .fleet
+                .progress
+                .read()
+                .await
+                .get(it.child.as_str())
+                .is_some_and(|p| p.resting.is_some())
+            {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+
+        it.fleet.agent_closed(&it.child).await;
+
+        let handed = it.handed_to_the_lead().await;
+        assert!(
+            handed
+                .iter()
+                .any(|turn| turn.contains("ft:handback") && turn.contains("All done.")),
+            "the lead should be told what the child came to rest on, got {handed:?}"
+        );
     }
 
     /// A child's hand-back that never reached its lead is held again.

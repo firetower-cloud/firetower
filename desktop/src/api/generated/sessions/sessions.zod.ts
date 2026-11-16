@@ -773,6 +773,7 @@ export const GetConversationResponse = zod.object({
   "agent": zod.string().nullish(),
   "description": zod.string(),
   "item": zod.string().describe('The tool call that spawned it, which is how its items find their way\nhome.'),
+  "shell": zod.boolean().optional().describe('A shell the agent put in the background, rather than an agent of\nits own.\n\nClaude Code reports both through the same `task_started` line, and\nthe difference is the difference between a task that will report\nand one that may not. A subagent is a bounded piece of work: it\nfinishes, and says so. A backgrounded shell is a process — a dev\nserver, a `tail -f`, a request to something that never answers —\nand it may outlive the session that started it.\n\nSo nothing may *wait* on one. Reading a backgrounded shell as a\nsubagent is what left a child session `Working` for ever with its\nwork finished and written to disk, because the turn\'s end was held\nback for a `sleep` that nobody was ever going to see end. See\n`Progress::running` in `ft-server`.'),
   "task": zod.string().describe('One subagent run, from the moment it was spawned to its report.'),
   "type": zod.enum(['TaskStarted'])
 }),zod.object({

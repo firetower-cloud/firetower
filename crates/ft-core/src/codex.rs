@@ -1024,6 +1024,8 @@ impl CodexNormaliser {
                     item: ItemId::new(id),
                     description: prompt.unwrap_or_default().to_string(),
                     agent: model.map(str::to_string),
+                    // A thread of its own, which is an agent by construction.
+                    shell: false,
                 });
             }
         }
@@ -1092,6 +1094,7 @@ impl CodexNormaliser {
                     item: ItemId::new(id),
                     description: path.unwrap_or_default().to_string(),
                     agent: path.map(str::to_string),
+                    shell: false,
                 }]
             }
             Some("interacted") if self.agents.contains_key(thread) => {
@@ -1579,17 +1582,22 @@ mod tests {
                 item,
                 description,
                 agent,
+                shell,
             } => Some((
                 task.clone(),
                 item.clone(),
                 description.clone(),
                 agent.clone(),
+                *shell,
             )),
             _ => None,
         });
-        let Some((task, item, description, agent)) = started else {
+        let Some((task, item, description, agent, shell)) = started else {
             panic!("spawning an agent should start a task, got {seen:?}");
         };
+        // An agent of its own, and so something a turn's end may wait for.
+        // Codex has no backgrounded-shell equivalent to confuse it with.
+        assert!(!shell);
         // The subagent's *own* thread, because that is what its work is
         // labelled with when it arrives.
         assert_eq!(task.as_str(), "th_sub");
