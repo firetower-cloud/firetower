@@ -281,8 +281,43 @@ for (const scene of ["scroll-idle", "scroll-working", "scroll-asking"]) {
   await page.waitForTimeout(300);
   ok("back when the find bar closes", (await pill(page).count()) === 1);
 
+  /* ⌘F, with the bar up. The per-frame pin already stood down for `finding`
+     and still does; what is checked here is that the new rule does not fight
+     the jump to a match either — the view goes where the find bar sends it
+     and stays there. A match already on screen is deliberately left alone, so
+     each term below is one from a different part of the transcript. */
+  const wasAt = await top(page);
+  await page.keyboard.press("Meta+f");
+  await page.waitForTimeout(300);
+  await page.keyboard.type("runbook");
+  await page.waitForTimeout(700);
+  const found = await top(page);
+  ok("⌘F goes to a match", found !== wasAt, `${wasAt} → ${found}`);
+
+  await start(page);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(500);
+  const stepped = await top(page);
+  await page.waitForTimeout(900);
+  ok("and nothing pins the view away from it", (await top(page)) === stepped, `${stepped}, a second later ${await top(page)}`);
+  ok("with no writes from the pin", !(await stop(page)).some((w) => w.by === "loop"));
+
+  /* A second term, from the first exchange, which is a long way above the
+     first one: the bar keeps working while it is open. */
+  await page.keyboard.press("Meta+a");
+  await page.keyboard.type("rotated");
+  await page.waitForTimeout(700);
+  ok("and a new term moves again", (await top(page)) < stepped - 200, `${stepped} → ${await top(page)}`);
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(300);
+  await rebottom(page);
+  await up(page, 400);
+  await page.waitForTimeout(260);
+
   /* The travel: driven by hand, over `--dur-native`, re-reading the end every
      frame — and its own writes must not read as a hand and detach it. */
+  await up(page, 400);
+  await page.waitForTimeout(260);
   await start(page);
   await pill(page).click();
   await page.waitForTimeout(600);
