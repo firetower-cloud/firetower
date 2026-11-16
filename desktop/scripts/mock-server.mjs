@@ -402,6 +402,93 @@ const subagent = (reported) => [
 ];
 
 /**
+ * A transcript several screens tall, in the three states its scroller behaves
+ * differently in.
+ *
+ * `pinned.mjs` measures what happens to `scrollTop` when somebody scrolls up,
+ * and the measurement needs three things no other scene here has: a body far
+ * taller than the viewport, a turn that is still open, and a question nobody
+ * has answered. `how` picks which:
+ *
+ *   `scroll-idle`     the turn finished — nothing in `Chat.tsx` is watching
+ *   `scroll-working`  the turn is open, so the per-frame pin is running
+ *   `scroll-asking`   the turn is open *and* a question is on screen, which is
+ *                     the state the report is about: `UserInputRequested`
+ *                     never clears `working`, so the pin runs for as long as
+ *                     the question goes unanswered rather than for the
+ *                     seconds of a stream
+ *
+ * Twenty exchanges of real-length prose, because what is being measured is a
+ * scroll offset and a transcript that fits on one screen has none.
+ */
+const TALK = [
+  ["The signing key rotated. Move session tokens onto the new one, in the web app and the API both.",
+   "I've read `web/src/auth/session.ts` and `api/src/tokens.rs`. They share the key id but not the code that reads it, so this is two changes that have to land together.\n\nStarting with the API, since the web app follows whatever it accepts."],
+  ["Does the old key have to keep working?",
+   "For as long as the longest-lived token signed with it, yes. The refresh window is fourteen days, so the verifier has to accept both key ids until the last of those expires and only the signer moves immediately.\n\nThat is the whole shape of the change: one signer, two verifiers."],
+  ["Fine. Do that.",
+   "Done in `api/src/tokens.rs`. `verify` now walks a list of keys oldest-last and returns which one matched, so a token signed with the retired key is still good and the metric can say how many of those are left.\n\nThe signer takes the first entry and nothing else."],
+  ["What does the web app have to do?",
+   "Less than I expected. It never reads the key — it reads the key *id* out of the token header to decide which cached public key to check against, and that lookup is already a map.\n\nSo the only change there is the fetch that fills the map: it asked for one key and now asks for the set."],
+  ["Is the key set cached anywhere that will go stale?",
+   "Two places. The service worker holds a copy for offline verification and the edge config holds another for the redirect check. The service worker's expires in an hour, which is fine. The edge config does not expire at all, which is not.\n\nI'll make the edge read go through the same fetch rather than hold its own copy."],
+  ["Go on.",
+   "That removed the second copy entirely. `edge/verify.ts` now imports the same `keys()` the app uses and the config entry is gone, so there is one fetch, one cache and one expiry rather than three of each.\n\nThe redirect check got about forty lines shorter as a result."],
+  ["Any tests covering the two-verifier case?",
+   "None, which is why I wrote four. A token signed with the retired key verifies; one signed with a key that was never in the set does not; the signer never picks a retired key however the list is ordered; and the fourteen-day boundary is checked from both sides.\n\nThe fourth is the one that would have caught the bug this change is for."],
+  ["What was the bug?",
+   "The original rotation dropped the old key the moment the new one landed, so every session older than that deploy was signed with a key nothing would accept any more. Everybody was signed out at once and the only way back in was a fresh login.\n\nThat is what the fourteen-day overlap is for."],
+  ["Does anything else read tokens?",
+   "The worker transport does, and it was the one I nearly missed: it verifies the token it was handed before it opens a shell, and it had its own copy of the verify code rather than calling into the crate.\n\nTwo copies of a verifier is how a rotation half-lands."],
+  ["Fix that too.",
+   "`crates/ft-worker/src/auth.rs` now calls `ft_core::tokens::verify` and its local copy is gone. The signatures differed slightly — the worker's returned a bool and the crate's returns which key matched — so three call sites moved with it."],
+  ["Is there anything that signs tokens outside the API?",
+   "The install script does, for the first-run bootstrap token, and it shells out to `openssl` rather than using the crate at all. It will keep working because it reads the key file the signer reads, but it hardcodes the key id.\n\nI have left it alone and written the line down; changing the installer in the same change as the verifier is how both get reverted together."],
+  ["Agreed, leave it. What is left?",
+   "The metric and the runbook. `tokens_verified_total` wants a `key_id` label so somebody can actually watch the old key drain, and the rotation runbook still says *replace the key* where it now has to say *prepend the key*.\n\nBoth are small and neither is code anybody calls."],
+  ["Do the metric, skip the runbook — I'll write that.",
+   "The label is in. It is the key id and not the key, and it is the *matched* id rather than the requested one, so the graph answers how many sessions are still on the retired key rather than how many asked about it."],
+  ["Show me what the graph would say today.",
+   "Against the fixture set, 0.4% of verifies match the retired key and all of them are refresh calls rather than API calls — which is what you would expect four days in, because an active session re-signs on every refresh and only an idle one still carries the old signature.\n\nIt should reach zero on day fourteen rather than tapering."],
+  ["Why not tapering?",
+   "Because nothing re-signs an idle session. It sits on the old key until somebody opens the tab, at which point it either refreshes or it has expired. So the curve is flat and then it falls off the end.\n\nIf it tapers at all, something is re-signing without a request, and that would be worth knowing."],
+  ["Right. Is the deploy order sensitive?",
+   "Verifier first, signer second, and there is a window between them where it does not matter — a verifier that accepts both keys is safe against a signer that only uses the old one. The other order is not: a signer on the new key against a verifier that has never heard of it signs tokens nothing accepts.\n\nSo: API verify, then edge, then signer."],
+  ["Is that written down anywhere a deploy would read?",
+   "Only in the commit message, which is the wrong place. I have put it at the top of the runbook section you said you would write, as three lines and nothing else, so that it is in the file even if the prose around it changes."],
+  ["Good. Run the suite.",
+   "`just test` is green — 1,284 tests, 41 seconds. The four new ones are in `api/src/tokens.rs` and the three that moved with the worker's verifier pass unchanged.\n\n`just gen-check` is clean too; nothing in this change touched a handler signature."],
+  ["Anything you are unsure about?",
+   "One thing. The service worker's hour-long cache means a client can hold a key set that predates a rotation for up to an hour, and during that hour a token signed with the newest key will fail *offline* verification and fall back to the network.\n\nThat is the correct behaviour and it is also invisible, so if somebody reports a slow first load after a rotation, that is what it is."],
+  ["Note it and we're done.",
+   "Noted in `web/src/auth/session.ts` next to the cache, where somebody debugging that will be reading.\n\nThat is the change: one signer, a verifier that accepts the set, one cache instead of three, and a label that says when the old key is finally unused."],
+];
+
+const QUESTIONS = [
+  {
+    header: "Retire the key",
+    question: "When should the retired key stop being accepted?",
+    multiSelect: false,
+    options: [
+      { label: "Day fourteen, on a timer", description: "The refresh window closes and the key goes, whether or not anything is still using it." },
+      { label: "When the metric reads zero", description: "Watch `tokens_verified_total{key_id}` and remove it by hand once nothing matches." },
+      { label: "Leave it in", description: "Keep accepting it indefinitely. Costs one extra verify on a miss and nothing else." },
+    ],
+  },
+];
+
+const scrolling = (how) => [
+  { lineNo: 0, type: "SessionConfigured", model: "claude-opus-5", mode: "acceptEdits", tools: [], commands: [] },
+  { lineNo: 1, type: "TurnStarted", turn: "t_1" },
+  ...TALK.flatMap(([mine, theirs], i) => [...asked(`u_${i}`, mine), ...say(`a_${i}`, theirs)]),
+  /* The turn only ends in the idle state. Left open, `working` stays true —
+     which is the whole point of the other two. */
+  ...(how === "idle" ? [{ lineNo: 900, type: "TurnCompleted", turn: "t_1", status: "Completed", usage: null }] : []),
+  /* Requested and never resolved: the card stays on screen. */
+  ...(how === "asking" ? [{ lineNo: 901, type: "UserInputRequested", req: "req_1", questions: QUESTIONS }] : []),
+];
+
+/**
  * The Codex scenes, normalised by the real thing.
  *
  * Not written by hand: `crates/ft-core/tests/streams/codex_subagent.ndjson` is
@@ -417,7 +504,10 @@ const CODEX_DONE = JSON.parse(
 const conversation = () => ({
   lastLine: 42,
   events:
-    scene === "subagent"
+    /* `scroll-idle`, `scroll-working`, `scroll-asking` — see `scrolling`. */
+    scene.startsWith("scroll-")
+      ? scrolling(scene.slice("scroll-".length))
+    : scene === "subagent"
       ? subagent(false)
       : scene === "subagent-done"
         ? subagent(true)
