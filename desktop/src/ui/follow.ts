@@ -38,6 +38,15 @@ export const END = 2;
 export const atEnd = (e: Edge) => below(e) <= END;
 
 /**
+ * How far up before the jump pill is worth having — about a third of the pane.
+ *
+ * Nearer than this the last line is still on screen and two flicks of the
+ * wheel get you there, so a pill would be noise. Chosen against flicker rather
+ * than measured.
+ */
+export const BACK = 240;
+
+/**
  * The rule, for a scroll this app did not make itself.
  *
  * `from` is where the scroller was the last time anybody looked, so the sign
@@ -61,4 +70,49 @@ export function follows(following: boolean, e: Edge, from: number): boolean {
   const up = e.scrollTop < from - 0.5;
   if (up) return atEnd(e) ? following : false;
   return atEnd(e) ? true : following;
+}
+
+/**
+ * Whether the pill is worth drawing: detached, and far enough up that getting
+ * back by hand is real work.
+ *
+ * A transcript shorter than its pane has nothing below the fold, so this is
+ * false there and nothing renders at all.
+ */
+export const back = (following: boolean, e: Edge) => !following && below(e) > BACK;
+
+/**
+ * `--dur-native`, which the pill's own travel is driven at.
+ *
+ * Here rather than read off the sheet because this module is a function of
+ * numbers and nothing else; the token is the source and this is a copy of it,
+ * in the one place that needs it as a number.
+ */
+export const DUR = 140;
+
+/**
+ * `--ease-swift` — `cubic-bezier(.16, 1, .3, 1)` — solved for y at x.
+ *
+ * The window owns its curve everywhere else, so the jump is driven by hand
+ * rather than handed to `behavior: "smooth"`, whose duration belongs to the
+ * browser and runs several hundred milliseconds on a transcript this long.
+ * Bisection rather than Newton: 24 halvings land inside a ten-thousandth over
+ * the whole domain, and it cannot diverge on a curve this steep at the end.
+ */
+export function swift(x: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const [x1, y1, x2, y2] = [0.16, 1, 0.3, 1];
+  const on = (a: number, b: number, t: number) => 3 * a * t * (1 - t) ** 2 + 3 * b * t * t * (1 - t) + t ** 3;
+  let lo = 0;
+  let hi = 1;
+  let t = x;
+  for (let i = 0; i < 24; i++) {
+    const at = on(x1, x2, t);
+    if (Math.abs(at - x) < 1e-4) break;
+    if (at < x) lo = t;
+    else hi = t;
+    t = (lo + hi) / 2;
+  }
+  return on(y1, y2, t);
 }

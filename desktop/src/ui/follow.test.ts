@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { atEnd, below, follows } from "./follow";
+import { atEnd, back, BACK, below, DUR, follows, swift } from "./follow";
 
 /**
  * The contract the transcript's scroll was reported against: "it's like if
@@ -74,5 +74,52 @@ describe("taking hold again", () => {
     const grown = { scrollHeight: 5400, scrollTop: 4400, clientHeight: 600 };
     expect(atEnd(grown)).toBe(false);
     expect(below(grown)).toBe(400);
+  });
+});
+
+describe("the pill", () => {
+  it("is worth having only once getting back is real work", () => {
+    expect(back(false, at(BACK + 1))).toBe(true);
+    expect(back(false, at(BACK))).toBe(false);
+    expect(back(false, at(40))).toBe(false);
+  });
+
+  it("is never drawn while following, however far up the content goes", () => {
+    expect(back(true, at(4000))).toBe(false);
+  });
+
+  it("is nothing at all on a transcript shorter than its pane", () => {
+    const short = { scrollHeight: 300, scrollTop: 0, clientHeight: 600 };
+    expect(below(short)).toBe(0);
+    expect(back(false, short)).toBe(false);
+  });
+});
+
+describe("the travel", () => {
+  it("starts where you are and ends at the end", () => {
+    expect(swift(0)).toBe(0);
+    expect(swift(1)).toBe(1);
+    expect(swift(-1)).toBe(0);
+    expect(swift(2)).toBe(1);
+  });
+
+  it("only ever goes forwards", () => {
+    let last = -1;
+    for (let p = 0; p <= 1.0001; p += 0.01) {
+      const y = swift(p);
+      expect(y).toBeGreaterThanOrEqual(last);
+      last = y;
+    }
+  });
+
+  it("covers most of the distance early, which is what `--ease-swift` is", () => {
+    // Half the time, nearly all of the way: a long jump reads as "it moved, a
+    // long way, down" and then settles.
+    expect(swift(0.5)).toBeGreaterThan(0.8);
+    expect(swift(0.25)).toBeGreaterThan(0.5);
+  });
+
+  it("is the window's own duration", () => {
+    expect(DUR).toBe(140);
   });
 });
