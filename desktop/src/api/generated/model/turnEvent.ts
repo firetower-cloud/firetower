@@ -134,6 +134,24 @@ export type TurnEvent = {
      * home.
      */
   item: ItemId;
+  /**
+     * A shell the agent put in the background, rather than an agent of
+     * its own.
+     *
+     * Claude Code reports both through the same `task_started` line, and
+     * the difference is the difference between a task that will report
+     * and one that may not. A subagent is a bounded piece of work: it
+     * finishes, and says so. A backgrounded shell is a process — a dev
+     * server, a `tail -f`, a request to something that never answers —
+     * and it may outlive the session that started it.
+     *
+     * So nothing may *wait* on one. Reading a backgrounded shell as a
+     * subagent is what left a child session `Working` for ever with its
+     * work finished and written to disk, because the turn's end was held
+     * back for a `sleep` that nobody was ever going to see end. See
+     * `Progress::running` in `ft-server`.
+     */
+  shell?: boolean;
   task: TaskId;
   type: 'TaskStarted';
 } | {

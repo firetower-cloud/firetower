@@ -861,6 +861,7 @@ impl AcpNormaliser {
                             item: item.clone(),
                             description: update["title"].as_str().unwrap_or("Task").to_owned(),
                             agent: Some("Cursor subagent".into()),
+                            shell: false,
                         });
                     }
                 }

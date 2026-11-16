@@ -557,6 +557,95 @@ fn a_subagents_work_is_attributed_to_it_rather_than_to_the_main_thread() {
     );
 }
 
+/// A shell the agent put in the background is not a subagent.
+///
+/// `bash_background.ndjson` was captured with the flags the worker launches
+/// Claude Code with, which is the only way the echoed user message — and so
+/// the turn — is there at all:
+///
+/// ```sh
+/// printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"text",
+///   "text":"Use the Bash tool with run_in_background true to run exactly: sleep 900 .
+///    Do not wait for it. Then reply with just the shell id and stop."}]}}' \
+///   | claude -p --input-format stream-json --output-format stream-json \
+///       --include-partial-messages --verbose --replay-user-messages \
+///       --permission-mode bypassPermissions
+/// ```
+///
+/// The capture is cut off after its `result` line, because that is genuinely
+/// the last thing a long-lived session hears: `claude -p` exiting is what
+/// kills the shell and produces the `task_notification` that follows in the
+/// raw output, and Firetower keeps the process alive between turns.
+///
+/// Both arrive as `task_started`, and until this was read the control plane
+/// could not tell them apart — so it waited for a `sleep` the way it waits for
+/// a subagent, and a child that had finished its work sat `Working` until
+/// somebody killed that process by hand. The two fixtures are the same line
+/// recorded from the same version of Claude Code; `task_type` is the whole of
+/// the difference.
+#[test]
+fn a_backgrounded_shell_is_told_from_a_subagent() {
+    let shell = replay("bash_background")
+        .into_iter()
+        .find_map(|e| match e {
+            TurnEvent::TaskStarted { shell, agent, .. } => Some((shell, agent)),
+            _ => None,
+        })
+        .expect("backgrounding a command should start a task");
+    assert_eq!(
+        shell,
+        (true, None),
+        "`task_type: local_bash` names no agent: it is a shell, and nothing may wait on one"
+    );
+
+    let subagent = replay("subagent")
+        .into_iter()
+        .find_map(|e| match e {
+            TurnEvent::TaskStarted { shell, agent, .. } => Some((shell, agent)),
+            _ => None,
+        })
+        .expect("delegating should start a task");
+    assert_eq!(
+        subagent,
+        (false, Some("Explore".to_string())),
+        "`task_type: local_agent` is an agent of its own, and does report"
+    );
+}
+
+/// And the turn in that recording ends, with the shell still running.
+///
+/// The fixture stops at the `result` line on purpose: Firetower keeps the
+/// agent process alive between turns, so that is genuinely the last thing it
+/// hears. `claude -p` exiting is what produced the `task_notification` that
+/// follows in the raw capture, and a long-lived session never gets it. See
+/// `fleet.rs`, `a_turn_that_backgrounded_a_shell_still_hands_back`.
+#[test]
+fn a_backgrounded_shell_does_not_report_before_the_turn_ends() {
+    let events = replay("bash_background");
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e, TurnEvent::TaskStarted { shell: true, .. })),
+        "the shell starts"
+    );
+    assert!(
+        !events
+            .iter()
+            .any(|e| matches!(e, TurnEvent::TaskCompleted { .. })),
+        "and never reports"
+    );
+    assert!(
+        events.iter().any(|e| matches!(
+            e,
+            TurnEvent::TurnCompleted {
+                status: TurnStatus::Completed,
+                ..
+            }
+        )),
+        "and the turn ends anyway, which is the whole situation"
+    );
+}
+
 // ---- classification -----------------------------------------------------
 
 #[test]

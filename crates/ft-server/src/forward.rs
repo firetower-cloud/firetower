@@ -368,6 +368,9 @@ pub mod testing {
     /// silence.
     pub struct Worker {
         once: std::sync::Mutex<Option<Connection>>,
+        /// What this worker sends up, for a test that has to say something *as*
+        /// the agent rather than only watch what arrives.
+        up: tokio::sync::mpsc::Sender<ToServer>,
         pub turns: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
         /// Every action asked of it, in order.
         ///
@@ -385,11 +388,15 @@ pub mod testing {
             let actions = Arc::new(std::sync::Mutex::new(Vec::new()));
             let asked = actions.clone();
 
+            // Made out here so a test can hold the sending end: `says` puts a
+            // frame on the same queue the loop below writes from.
+            let (out, mut pending) = tokio::sync::mpsc::channel::<ToServer>(256);
+            let speaks = out.clone();
+
             tokio::spawn(async move {
                 let tunnels = Arc::new(ft_worker::tunnel::Tunnels::new());
                 let (r, w) = tokio::io::split(theirs);
                 let (mut inbound, mut outbound) = Codec::new(r, w).split();
-                let (out, mut pending) = tokio::sync::mpsc::channel::<ToServer>(256);
 
                 loop {
                     tokio::select! {
@@ -451,9 +458,27 @@ pub mod testing {
             let (r, w) = tokio::io::split(ours);
             Arc::new(Self {
                 once: std::sync::Mutex::new(Some(Connection::piped(Box::new(r), Box::new(w)))),
+                up: speaks,
                 turns,
                 actions,
             })
+        }
+
+        /// One line of an agent's output, relayed the way a real worker
+        /// relays it.
+        ///
+        /// So the control plane's own reader is what makes sense of it. A test
+        /// that reached past it into `Fleet::progress` would prove only that
+        /// the reaching works.
+        pub async fn says(&self, session_id: &ft_core::SessionId, line_no: u64, line: &str) {
+            let _ = self
+                .up
+                .send(ToServer::AgentLine {
+                    session_id: session_id.clone(),
+                    line_no,
+                    line: line.to_string(),
+                })
+                .await;
         }
     }
 

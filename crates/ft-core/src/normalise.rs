@@ -501,11 +501,26 @@ impl ClaudeNormaliser {
                 };
                 let task = TaskId::new(task_id);
                 self.tasks.insert(tool_use_id.to_string(), task.clone());
+                // A subagent and a shell the agent backgrounded arrive as the
+                // same line. Only the first says which agent it is, and
+                // `task_type` names the second `local_bash`:
+                //
+                //   {"subtype":"task_started","task_type":"local_agent",
+                //    "subagent_type":"Explore","is_backgrounded":true,...}
+                //   {"subtype":"task_started","task_type":"local_bash",
+                //    "description":"sleep 900","is_backgrounded":true,...}
+                //
+                // Read by identifying the subagent, not the shell: a task
+                // whose shape we have never seen is then *not* waited on,
+                // which is the side to be wrong on. See `TurnEvent::TaskStarted`.
+                let agent = str_at(v, "subagent_type");
+                let shell = agent.is_none() && str_at(v, "task_type") != Some("local_agent");
                 out.push(TurnEvent::TaskStarted {
                     task,
                     item: ItemId::new(tool_use_id),
                     description: str_at(v, "description").unwrap_or_default().to_string(),
-                    agent: str_at(v, "subagent_type").map(str::to_string),
+                    agent: agent.map(str::to_string),
+                    shell,
                 });
             }
             Some("task_progress") => {

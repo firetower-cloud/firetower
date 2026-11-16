@@ -17519,6 +17519,10 @@
                 "$ref": "#/components/schemas/ItemId",
                 "description": "The tool call that spawned it, which is how its items find their way\nhome."
               },
+              "shell": {
+                "type": "boolean",
+                "description": "A shell the agent put in the background, rather than an agent of\nits own.\n\nClaude Code reports both through the same `task_started` line, and\nthe difference is the difference between a task that will report\nand one that may not. A subagent is a bounded piece of work: it\nfinishes, and says so. A backgrounded shell is a process — a dev\nserver, a `tail -f`, a request to something that never answers —\nand it may outlive the session that started it.\n\nSo nothing may *wait* on one. Reading a backgrounded shell as a\nsubagent is what left a child session `Working` for ever with its\nwork finished and written to disk, because the turn's end was held\nback for a `sleep` that nobody was ever going to see end. See\n`Progress::running` in `ft-server`."
+              },
               "task": {
                 "$ref": "#/components/schemas/TaskId"
               },
