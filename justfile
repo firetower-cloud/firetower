@@ -63,19 +63,46 @@ db:
     echo "  postgres did not come up. Try: docker compose logs postgres"
     exit 1
 
-# Everything in containers, the way a server would run it.
+# Everything in containers: the database and the development image, with reload.
 up:
     docker compose --profile full up --build
 
-# Control plane and web application, both with reload.
+# Control plane and web application, both with reload. The database first.
+dev: db _dev
+
+# The same two processes, for somewhere the database is already running —
+# `dev` above is this with `db` in front of it.
+#
+# The compose file runs this one: there `postgres` is a service beside the
+# control plane and `depends_on` has waited for it, so starting it again would
+# be `docker compose up -d postgres` from inside a container of that very
+# stack — compose re-entering itself, which the development image has no
+# docker client to even attempt. Underscored because it is the wrong thing to
+# run by hand on a machine: the control plane would come up with nothing to
+# connect to. Use `just dev`.
 #
 # Whichever half exits first takes the other down, so a crash is visible
 # immediately rather than leaving you with half a running system and the error
 # scrolled off the top. Only our own children are killed — `kill 0` would take
 # the calling shell with it.
-dev: db
+_dev:
     #!/usr/bin/env bash
     set -uo pipefail
+
+    # The interface's dependencies, if nothing has installed them yet. On a
+    # machine that is `just setup`'s job and this costs one directory check;
+    # in the compose stack web/node_modules is a volume of its own, which
+    # starts empty, and nothing else there would ever fill it.
+    #
+    # `cd` rather than `--dir`, because pnpm's own version is pinned in
+    # web/package.json and a pnpm that came from corepack resolves that pin
+    # from the working directory instead of from `--dir`. Run from the
+    # repository root — which has no package.json — it fetches its own newest
+    # pnpm and then refuses to use it on `web/`.
+    if [ ! -d web/node_modules ]; then
+        (cd web && pnpm install) || exit 1
+    fi
+
     pids=()
     cleanup() {
         trap - EXIT INT TERM
@@ -90,7 +117,15 @@ dev: db
     # A worker built here is what "Install the worker" sends to a machine of
     # this shape, so a checkout can be tried on a real host without a release.
     FIRETOWER_WORKER_ARTIFACTS=target/artifacts cargo watch -x 'run -p ft-cli -- serve --dev' & pids+=($!)
-    NEXT_PUBLIC_FIRETOWER_API=http://localhost:4400 pnpm --dir web dev & pids+=($!)
+    # The API's address lives in web/.env.development, committed, so that one
+    # file answers it wherever the interface runs — and so that an environment
+    # variable can override it, which is what the compose stack needs: there
+    # the browser is on the host and the control plane behind a published port.
+    #
+    # `cd` for the reason above, and `exec` so that this is still one process
+    # rather than a subshell holding one: the cleanup reaps `$!` and its
+    # children, and a layer in between would leave the dev server running.
+    (cd web && exec pnpm dev) & pids+=($!)
 
     # `wait -n` would be tidier but needs bash 4.3, and macOS ships 3.2.
     # Polling is portable and a second of latency is irrelevant here.
