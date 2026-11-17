@@ -123,7 +123,16 @@ async function dictate(page) {
   await pause(page, 1000);
 }
 
-/** The first-run flow: type an address and press Connect. */
+/**
+ * The first-run flow: type an address and submit it.
+ *
+ * **Enter, not the button** — and the button is *Continue* (`Connect.tsx`),
+ * which is worth saying because this comment used to claim it pressed
+ * *Connect*. Nothing here ever named that button, so the prose was the only
+ * trace of the old label left in the file; #381 was filed against the two
+ * `/^Connect$/` handles below on the strength of it, and those are the git
+ * host screen's, where *Connect* is still what the application draws.
+ */
 async function address(page, typed, settle) {
   await page.goto(`${APP}/#/`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(700);
@@ -369,9 +378,16 @@ export const SHOTS = [
   { id: "artifacts-and-skills__artifacts-the-library", go: (p) => at(p, "/artifacts", 1600) },
   {
     id: "artifacts-and-skills__reading-one",
+    /* **Either look, because the library picks one and the harness is not
+       the machine it picks for.** `.art` is the grid's poster and `.ar` is
+       the list's row; `ArtifactsPage` defaults to `posters ? "grid" : "list"`
+       until somebody chooses, and in a browser driven by the mock nothing
+       expects a poster — so the library draws rows and `.art` matched
+       nothing at all. What this state is of is the *reader*, not the way in,
+       so it takes whichever the library drew rather than forcing a view. */
     go: async (p) => {
       await at(p, "/artifacts", 1600);
-      await p.locator(".art").first().click();
+      await p.locator(".art, .ar").first().click();
       await pause(p, 1400);
     },
   },
@@ -485,16 +501,25 @@ export const SHOTS = [
       await pause(p, 1200);
     },
   },
-  {
-    id: "sources__connect-paste-a-token",
-    go: async (p) => {
-      await at(p, "/configuration/git-hosts", 1400);
-      await p.getByRole("button", { name: /^Connect$/ }).first().click();
-      await pause(p, 900);
-      await p.getByRole("button", { name: /token|paste/i }).first().click();
-      await pause(p, 900);
-    },
-  },
+  /**
+   * **There is no button that chooses the token, and there never was.**
+   *
+   * `useConnect` branches on `host.auth === "token"` and asks inline; the
+   * device code takes over the screen. So the way in is *which host's*
+   * Connect you press, not a second press after it — and the handle here
+   * was `/token|paste/i`, which matches nothing on the page. It cost the
+   * sweep thirty seconds a theme and photographed the device-code modal,
+   * which is the state above.
+   *
+   * It cannot be pressed on the right host either, because `mock-server.mjs`
+   * leaves `auth` off its git hosts altogether — one of four fields
+   * `ProviderStatus` requires and the mock does not send (`appPage`, `auth`,
+   * `baseUrl`, `tokenPage`), and its `authModes` say `deviceCode` where the
+   * contract's enum is `device`. `host.auth` is therefore `undefined` for
+   * every host the mock serves, the token branch is unreachable, and this is
+   * the gap recorded rather than the nearest screen shot in its place.
+   */
+  { id: "sources__connect-paste-a-token", skip: "the token field opens on a host whose `auth` is `token`; the mock omits `auth` from every git host, so only the device-code branch can be reached" },
   { id: "sources__connect-connected", scene: "host-connected", go: (p) => at(p, "/configuration/git-hosts", 1600) },
   { id: "sources__machines", go: (p) => at(p, "/configuration/machines", 1400) },
   {
