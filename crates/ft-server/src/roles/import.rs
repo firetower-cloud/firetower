@@ -3755,4 +3755,479 @@ mod tests {
         assert_eq!(plan.limits.total_bytes, BIGGEST_DROP);
         assert_eq!(plan.limits.depth, DEEPEST);
     }
+
+    // ── The desktop's fixtures, generated ──────────────────────────────
+    //
+    // **The review screen draws these, and it has no sentences of its own.**
+    //
+    // `desktop/src/ui/config/import-plans.json` is written here and imported
+    // there, so every string the import review puts on screen — every refusal,
+    // every warning, every `whyNot` — is one this planner actually produced.
+    //
+    // The alternative was a TypeScript fixture holding sentences somebody had
+    // read off this file, and it failed exactly as a second copy does: the
+    // first version of that screen shipped seven states of invented copy that
+    // passed a hundred and twenty assertions, because every one of them checked
+    // shape rather than words. A constant transcribed into the other language
+    // is not a source of truth, it is a place to drift.
+    //
+    // Regenerate with `UPDATE_SPECIMENS=1 cargo test -p ft-server specimens`.
+    // Without it this asserts the committed file is what the planner now says,
+    // so a wording change here fails on all three platforms until the fixture
+    // and its screenshots are brought along.
+    mod specimens {
+        use super::*;
+        use std::collections::BTreeMap;
+
+        /// The library every specimen resolves against.
+        fn library() -> Here {
+            Here {
+                profiles: vec![
+                    row("ro_designer", "Designer", Some("designer")),
+                    row("ro_engineer", "Engineer", Some("engineer")),
+                    row("ro_manager", "Engineering Manager", Some("engineering-manager")),
+                    // No key: it predates the format, which is what makes the
+                    // name fallback — and the candidate — necessary.
+                    row("ro_qa", "QA", None),
+                    row("ro_advisor", "Security Advisor", Some("security-advisor")),
+                ],
+                machines: vec![
+                    machine("h_1", "build-01"),
+                    machine("h_2", "build-02"),
+                    machine("h_3", "dev-mini"),
+                ],
+                accounts: vec![
+                    subscription("ac_1", "kevin-claude-max", "ClaudeCode"),
+                    subscription("ac_2", "team-codex", "Codex"),
+                ],
+                directories: vec![
+                    folder("firetower", true),
+                    folder("eng", true),
+                    folder("Platform", false),
+                ],
+                skills: vec![
+                    skill("sk_1", "code-review", "d/firetower/code-review"),
+                    skill("sk_2", "run", "d/firetower/run"),
+                    skill("sk_3", "dataviz", "d/firetower/dataviz"),
+                    skill("sk_4", "dataviz", "d/eng/dataviz"),
+                    skill("sk_5", "security-review", "d/firetower/security-review"),
+                    skill("sk_6", "prototype", "d/firetower/prototype"),
+                ],
+                ..Default::default()
+            }
+        }
+
+        /// An empty installation: nothing here answers to anything.
+        fn bare() -> Here {
+            Here {
+                machines: library().machines,
+                accounts: library().accounts,
+                directories: library().directories,
+                skills: library().skills,
+                ..Default::default()
+            }
+        }
+
+        fn file(key: &str, frontmatter: &str) -> DroppedFile {
+            at(&format!("profiles/{key}/PROFILE.md"), frontmatter, "")
+        }
+
+        fn with_body(key: &str, frontmatter: &str, body: &str) -> DroppedFile {
+            at(&format!("profiles/{key}/PROFILE.md"), frontmatter, body)
+        }
+
+        /// A loose file that is part of no bundle.
+        fn loose(path: &str) -> DroppedFile {
+            DroppedFile {
+                path: path.into(),
+                text: "nothing to read here\n".into(),
+            }
+        }
+
+        fn made(drop: ProfileDrop, here: &Here) -> ImportPlan {
+            plan(&drop, here).expect("a specimen is a plan, not a refusal")
+        }
+
+        /// Five profiles, none of them here yet.
+        fn all_new() -> ImportPlan {
+            made(
+                dropped(vec![
+                    file("designer", "name: Designer\ndoes: designs and prototypes\n"),
+                    file("engineer", "name: Engineer\ndoes: turns a ticket into code\n"),
+                    file(
+                        "engineering-manager",
+                        "name: Engineering Manager\ndoes: hands work out and takes it back\n\
+                         can_delegate: true\ndelegates_to:\n  - Designer\n  - Engineer\n",
+                    ),
+                    file("qa", "name: QA\ndoes: checks it against the criteria\n"),
+                    file(
+                        "security-advisor",
+                        "name: Security Advisor\ndoes: reads a diff for risk\n",
+                    ),
+                ]),
+                &bare(),
+            )
+        }
+
+        /// The usual second drop: overwrites, a candidate, a refusal, and two
+        /// files in the folder that were never profiles.
+        fn mixed() -> ImportPlan {
+            let mut here = library();
+            here.profiles[0].instructions = "One.\nTwo.\nThree.\n".into();
+            here.profiles[0].agent = Some("ClaudeCode".into());
+            here.profiles[0].settings.model = Some("haiku".into());
+            here.profiles[0].can_delegate = true;
+            made(
+                dropped(vec![
+                    // A changed body, a changed engine, and `can_delegate`
+                    // deleted — which is the reset.
+                    with_body(
+                        "designer",
+                        "name: Designer\ndoes: designs and prototypes\nengine: ClaudeCode\n",
+                        "One.\nTwo, rewritten.\nThree.\nFour.\n",
+                    ),
+                    file("engineer", "name: Engineer\ndoes: reads a branch and reports problems\n"),
+                    file(
+                        "engineering-manager",
+                        "name: Engineering Manager\ndoes: reads a branch and reports problems\n\
+                         can_delegate: true\ndelegates_to:\n  - Designer\n  - Engineer\n  - QA\n",
+                    ),
+                    // No key of this name, and `QA Engineer` is like `QA`.
+                    file("qa-engineer", "name: QA Engineer\ndoes: checks it against the criteria\n"),
+                    file(
+                        "security-advisor",
+                        "name: Security Advisor\ndoes: reads a diff for risk\nmachine: mac-studio\n",
+                    ),
+                    loose("profiles/README.md"),
+                    loose("profiles/.DS_Store"),
+                ]),
+                &here,
+            )
+        }
+
+        /// Six of the error table's blocking conditions at once.
+        fn all_blocked() -> ImportPlan {
+            made(
+                dropped(vec![
+                    // Unknown frontmatter key — the silently-ignored
+                    // `placment:` this whole feature exists to stop.
+                    file(
+                        "designer",
+                        "name: Designer\ndoes: designs and prototypes\nplacment: lead\n",
+                    ),
+                    // Invalid enum, on a top-level field.
+                    file(
+                        "engineer",
+                        "name: Engineer\ndoes: turns a ticket into code\nplacement: sideways\n",
+                    ),
+                    // An unknown teammate and a skill that is not reachable.
+                    file(
+                        "engineering-manager",
+                        "name: Engineering Manager\ndoes: hands work out\ncan_delegate: true\n\
+                         delegates_to:\n  - Designer\n  - Tech Writer\nskills:\n  - to-tickets\n",
+                    ),
+                    // Malformed YAML: no name, and so no field panel.
+                    file("qa-engineer", "name: QA Engineer\ndoes: checks: it: badly\n"),
+                    // Missing `does`.
+                    file("security-advisor", "name: Security Advisor\n"),
+                ]),
+                &library(),
+            )
+        }
+
+        /// The rest of the error table, each on its own row.
+        fn more_conditions() -> ImportPlan {
+            let mut here = library();
+            here.profiles.push(row("ro_other", "Other", Some("other")));
+            made(
+                dropped(vec![
+                    // A subscription that is not available to you.
+                    file(
+                        "cost-watcher",
+                        "name: Cost Watcher\ndoes: reads the month's spend\nengine: ClaudeCode\n\
+                         account: team-anthropic\n",
+                    ),
+                    // A directory that is not available to you, which reads
+                    // the same whether it is hidden or absent.
+                    file(
+                        "accessibility-reviewer",
+                        "name: Accessibility Reviewer\ndoes: checks focus and contrast\n\
+                         directory: Archive\n",
+                    ),
+                    // A directory you may read and not write.
+                    file(
+                        "infra-engineer",
+                        "name: Infra Engineer\ndoes: changes the deploy\ndirectory: Platform\n",
+                    ),
+                    // A skill name two reachable skills answer to.
+                    file(
+                        "docs-writer",
+                        "name: Docs Writer\ndoes: writes the docs\nskills:\n  - dataviz\n",
+                    ),
+                    // The qualified form, which is how a file says which.
+                    file(
+                        "data-analyst",
+                        "name: Data Analyst\ndoes: answers with a query\nskills:\n  - eng/dataviz\n",
+                    ),
+                    // A profile naming itself in its own team.
+                    file(
+                        "release-manager",
+                        "name: Release Manager\ndoes: cuts a release\ncan_delegate: true\n\
+                         delegates_to:\n  - Release Manager\n",
+                    ),
+                    // A machine that is not available to you.
+                    file(
+                        "perf-engineer",
+                        "name: Perf Engineer\ndoes: profiles a slow path\nmachine: mac-studio\n",
+                    ),
+                ]),
+                &here,
+            )
+        }
+
+        /// Two bundles sharing a `name`: the error table's one *warn* row.
+        fn same_name() -> ImportPlan {
+            made(
+                dropped(vec![
+                    file("designer", "name: Designer\ndoes: designs and prototypes\n"),
+                    file("designer-v2", "name: Designer\ndoes: a second copy, kept while the first was rewritten\n"),
+                ]),
+                &bare(),
+            )
+        }
+
+        /// Two bundles carrying the same key. A filesystem drop cannot make
+        /// one, which is why an earlier draft called it impossible; an archive
+        /// or a direct call can, so it is refused rather than assumed away.
+        fn same_key() -> ImportPlan {
+            made(
+                dropped(vec![
+                    at("teamA/designer/PROFILE.md", "name: Designer\ndoes: designs\n", ""),
+                    at("teamB/designer/PROFILE.md", "name: Designer\ndoes: designs too\n", ""),
+                ]),
+                &bare(),
+            )
+        }
+
+        /// Two different keys selecting one existing profile. The last write
+        /// would silently win, so both are blocked.
+        fn same_target() -> ImportPlan {
+            made(
+                dropped(vec![
+                    file("qa", "name: QA\ndoes: checks it against the criteria\n"),
+                    file("quality-assurance", "name: QA\ndoes: checks it against the criteria\n"),
+                ]),
+                &library(),
+            )
+        }
+
+        /// One folder, kept, under a different name.
+        fn rename() -> ImportPlan {
+            made(
+                dropped(vec![file(
+                    "designer",
+                    "name: Product Designer\ndoes: designs and prototypes\n",
+                )]),
+                &library(),
+            )
+        }
+
+        /// A name differing from an existing profile's by one capital.
+        fn near_match() -> ImportPlan {
+            let mut here = library();
+            here.profiles[0].key = None;
+            made(
+                dropped(vec![file(
+                    "designer",
+                    "name: designer\ndoes: designs and prototypes\n",
+                )]),
+                &here,
+            )
+        }
+
+        /// The same drop, after the person said it is that profile.
+        fn near_match_answered() -> ImportPlan {
+            let mut here = library();
+            here.profiles[0].key = None;
+            let mut drop = dropped(vec![file(
+                "designer",
+                "name: designer\ndoes: designs and prototypes\n",
+            )]);
+            drop.answers = vec![CandidateAnswer {
+                key: "designer".into(),
+                answer: CandidateDecision::SameProfile {
+                    profile: "ro_designer".into(),
+                },
+            }];
+            made(drop, &here)
+        }
+
+        /// Twenty-three, so the filter pills and the sticky foot are under load.
+        fn large() -> ImportPlan {
+            let says = [
+                ("release-manager", "Release Manager", "cuts a release and watches the deploy"),
+                ("docs-writer", "Docs Writer", "turns a change into documentation"),
+                ("support-triage", "Support Triage", "decides whether a report is a bug"),
+                ("data-analyst", "Data Analyst", "answers a question with a query"),
+                ("perf-engineer", "Perf Engineer", "profiles a slow path"),
+                ("accessibility-reviewer", "Accessibility Reviewer", "checks focus and contrast"),
+                ("infra-engineer", "Infra Engineer", "changes the deploy carefully"),
+                ("api-reviewer", "API Reviewer", "reads a diff for the contract it changes"),
+                ("localiser", "Localiser", "finds the strings a change orphaned"),
+                ("dependency-keeper", "Dependency Keeper", "takes an upgrade and says what moved"),
+                ("incident-lead", "Incident Lead", "runs an incident and writes it up"),
+                ("onboarding-guide", "Onboarding Guide", "walks a new person through the repo"),
+                ("spec-reviewer", "Spec Reviewer", "reads a specification as its first reader"),
+                ("prompt-reviewer", "Prompt Reviewer", "reads instructions for how they misfire"),
+                ("cost-watcher", "Cost Watcher", "names the three things that moved the spend"),
+                ("flake-hunter", "Flake Hunter", "finds the test that fails one run in forty"),
+                ("schema-reviewer", "Schema Reviewer", "reads a migration for what it locks"),
+                ("changelog-keeper", "Changelog Keeper", "keeps the changelog honest"),
+            ];
+            let mut files = vec![
+                file("designer", "name: Designer\ndoes: reads a branch and reports problems\nengine: ClaudeCode\n"),
+                file("engineer", "name: Engineer\ndoes: reads a branch and reports problems\nmachine: build-02\n"),
+                file(
+                    "engineering-manager",
+                    "name: Engineering Manager\ndoes: reads a branch and reports problems\n\
+                     can_delegate: true\ndelegates_to:\n  - Designer\n  - Engineer\n  - QA\n",
+                ),
+                file("qa", "name: QA\ndoes: reads a branch and reports problems\n"),
+                file(
+                    "security-advisor",
+                    "name: Security Advisor\ndoes: reads a diff for risk\nmachine: mac-studio\n",
+                ),
+            ];
+            for (key, name, does) in says {
+                let frontmatter = match key {
+                    // One blocked late in the folder, so a refusal has to stay
+                    // findable in a list long enough to scroll.
+                    "cost-watcher" => format!("name: {name}\ndoes: {does}\nengine: ClaudeCode\naccount: team-anthropic\n"),
+                    _ => format!("name: {name}\ndoes: {does}\n"),
+                };
+                files.push(file(key, &frontmatter));
+            }
+            let mut here = library();
+            here.profiles[0].agent = Some("ClaudeCode".into());
+            here.profiles[0].settings.model = Some("haiku".into());
+            made(dropped(files), &here)
+        }
+
+        /// Every specimen, and the one refusal that is not a plan.
+        ///
+        /// A drop past a bound comes back as [`Refused`] — an `ApiError` at the
+        /// edge, never an `ImportPlan` — so the review cannot be handed one and
+        /// the sentence belongs to whatever made the call. Recorded here beside
+        /// the plans because the screen still has to draw it.
+        fn everything() -> (BTreeMap<&'static str, ImportPlan>, BTreeMap<&'static str, String>) {
+            let mut plans = BTreeMap::new();
+            plans.insert("all-new", all_new());
+            plans.insert("mixed", mixed());
+            plans.insert("all-blocked", all_blocked());
+            plans.insert("more-conditions", more_conditions());
+            plans.insert("same-name", same_name());
+            plans.insert("same-key", same_key());
+            plans.insert("same-target", same_target());
+            plans.insert("rename", rename());
+            plans.insert("near-match", near_match());
+            plans.insert("near-match-answered", near_match_answered());
+            plans.insert("large", large());
+
+            let mut refusals = BTreeMap::new();
+            let many: Vec<DroppedFile> = (0..=MOST_FILES)
+                .map(|n| file(&format!("p{n}"), "name: P\ndoes: d\n"))
+                .collect();
+            refusals.insert(
+                "too-many-files",
+                plan(&dropped(many), &bare())
+                    .expect_err("past the file bound")
+                    .to_string(),
+            );
+            let huge = vec![DroppedFile {
+                path: "profiles/designer/PROFILE.md".into(),
+                text: "x".repeat(BIGGEST_FILE + 1),
+            }];
+            refusals.insert(
+                "file-too-big",
+                plan(&dropped(huge), &bare())
+                    .expect_err("past the per-file bound")
+                    .to_string(),
+            );
+            (plans, refusals)
+        }
+
+        /// The fixture the desktop imports, and the proof it is current.
+        #[test]
+        fn the_desktop_fixture_is_what_this_planner_produces() {
+            let (plans, refusals) = everything();
+            let doc = serde_json::json!({
+                "note": "Generated by `cargo test -p ft-server specimens`. Do not edit by hand.",
+                "plans": plans,
+                "refusals": refusals,
+            });
+            let mut text = serde_json::to_string_pretty(&doc).expect("serialisable");
+            text.push('\n');
+
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../desktop/src/ui/config/import-plans.json");
+            if std::env::var("UPDATE_SPECIMENS").is_ok() {
+                std::fs::write(&path, &text).expect("writable");
+                return;
+            }
+            let committed = std::fs::read_to_string(&path).unwrap_or_default();
+            assert_eq!(
+                committed, text,
+                "the desktop's fixture is stale. Regenerate it, re-shoot the evidence, and \
+                 commit both:\n\n    UPDATE_SPECIMENS=1 cargo test -p ft-server specimens\n"
+            );
+        }
+
+        /// The thirteen conditions of the specification's error table are all
+        /// drawable, because a specimen produces each one.
+        #[test]
+        fn every_error_table_condition_has_a_specimen() {
+            let (plans, refusals) = everything();
+            let said: String = plans
+                .values()
+                .flat_map(|p| {
+                    p.entries.iter().flat_map(|e| {
+                        let blocks = match &e.outcome {
+                            PlanOutcome::Blocked(b) => b.problems.clone(),
+                            _ => vec![],
+                        };
+                        blocks.into_iter().chain(e.warnings.clone())
+                    })
+                })
+                .map(|p| p.says)
+                .chain(plans.values().flat_map(|p| p.why_not.clone()))
+                .chain(refusals.values().cloned())
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            for (what, needle) in [
+                ("unknown machine", "no machine named"),
+                ("unknown subscription", "no subscription named"),
+                ("unknown directory", "no directory named"),
+                ("unknown teammate", "no profile named"),
+                ("unreachable skill", "no skill named"),
+                ("ambiguous skill", "skills you can see are called"),
+                ("unknown frontmatter key", "placment"),
+                ("invalid enum", "sideways"),
+                ("missing does", "does"),
+                ("read-only directory", "but not file anything there"),
+                ("naming itself", "cannot be one of the teammates"),
+                ("malformed yaml", "mapping values"),
+                ("same name warns", "is also called"),
+                ("same key blocks", "is also a bundle for"),
+                ("unanswered candidate", "answer"),
+                ("a bound, named", "at most"),
+            ] {
+                assert!(
+                    said.contains(needle),
+                    "no specimen produces the {what} condition (looked for {needle:?})"
+                );
+            }
+        }
+    }
+
 }

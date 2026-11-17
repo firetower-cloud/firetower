@@ -116,7 +116,22 @@ const shot = async (page, id) => {
   await page.locator(".pg").screenshot({ path: `${OUT}/${id}.png` });
 };
 
-const STATES = ["all-new", "mixed", "all-blocked", "rename", "near-match", "large", "over-limit"];
+/* Every specimen the generator writes, plus the two states that are not
+   plans: a drop past a bound, and a drop holding no bundle at all. */
+const STATES = [
+  "all-new",
+  "mixed",
+  "all-blocked",
+  "more-conditions",
+  "same-name",
+  "same-key",
+  "same-target",
+  "rename",
+  "near-match",
+  "large",
+  "refused",
+  "empty",
+];
 
 for (const theme of ["dark", "light"]) {
   console.log(`\n  ── ${theme} ──`);
@@ -125,6 +140,7 @@ for (const theme of ["dark", "light"]) {
   const AMBER = await token(probe, "--color-amber");
   const SAGE = await token(probe, "--color-sage");
   const SLATE = await token(probe, "--color-slate");
+  const AMBER_SOFT = await token(probe, "--color-amber-soft");
   const DIM = await token(probe, "--color-dim");
   await probe.close();
 
@@ -217,12 +233,12 @@ for (const theme of ["dark", "light"]) {
     ok(
       "mixed · the blocked reason names the file, the key and the line",
       /machine/.test(await blockedRow.innerText()) &&
-        /PROFILE\.md:8/.test(await blockedRow.innerText()),
+        /PROFILE\.md:\d+/.test(await blockedRow.innerText()),
       (await blockedRow.innerText()).slice(0, 80),
     );
     ok(
       "mixed · and reads the same whether hidden or absent",
-      /is not available to you/.test(await blockedRow.innerText()),
+      /is available to you/.test(await blockedRow.innerText()),
       (await blockedRow.innerText()).slice(0, 120),
     );
 
@@ -291,14 +307,89 @@ for (const theme of ["dark", "light"]) {
     await page.close();
   }
 
-  /* ── A drop refused whole names the limit ───────────────────────────── */
+  /* ── A drop past a bound names the limit ─────────────────────────────
+     Not a plan: `plan()` returns `Refused` and the API makes it an
+     `InvalidRequest`, so the screen is handed a sentence rather than an
+     `ImportPlan` with no entries in it. */
   {
-    const page = await open(theme, "over-limit");
+    const page = await open(theme, "refused");
     const banner = await page.locator(".review").innerText();
-    ok("over limit · the limit is named", /The limit is 200 files/.test(banner), banner.slice(0, 90));
-    ok("over limit · and there is something to do", /Drop the folder/.test(banner), banner.slice(-60));
+    ok("refused · the limit is named", /at most 200/.test(banner), banner.slice(0, 110));
+    ok("refused · and there is something to do", /Drop fewer/.test(banner), banner.slice(-70));
+    ok("refused · and no list is drawn", (await page.locator(".imp").count()) === 0, "rows drawn");
     const rule = await colourOf(page, ".review", "borderLeftColor");
-    ok(`over limit · brick (${BRICK})`, rule === BRICK, rule);
+    ok(`refused · brick (${BRICK})`, rule === BRICK, rule);
+    await page.close();
+  }
+
+  /* ── A dead primary never appears without a sentence ──────────────────
+     QA's empty-drop case, and #349 in a new place: something was accepted,
+     nothing happened, and the screen had no answer. */
+  {
+    const page = await open(theme, "empty");
+    const msg = (await page.locator(".formfoot .msg").innerText()).trim();
+    ok("empty · the primary is unavailable", await page.locator(".formfoot .btn.primary").isDisabled(), "live");
+    ok("empty · and a sentence says why", msg.length > 20 && /PROFILE\.md/.test(msg), msg);
+    await shot(page, `empty-${theme}`);
+    await page.close();
+  }
+
+  /* ── The banner leads with the diagnosis, not with "blocked" ─────────── */
+  {
+    const page = await open(theme, "mixed");
+    const head = (await page.locator(".review h3").innerText()).trim();
+    ok("banner · names the profile and the condition", /^Security Advisor: /.test(head), head);
+    ok("banner · and not the word the pip already carries", !/is blocked/.test(head), head);
+    const body = (await page.locator(".review p").first().innerText()).trim();
+    ok("banner · the body does not repeat the heading", !body.includes(head), body.slice(0, 90));
+    await page.close();
+  }
+
+  /* ── Amber is spent on a duplicate name, and on nothing else ──────────
+     The accepted rule is amber for exactly two things with one meaning: a
+     reset, and a name that may be a duplicate. Asserted as *which* elements
+     resolve to it, because a count of them cannot fail. */
+  {
+    const page = await open(theme, "same-name");
+    const marked = await page.locator("[data-warn]").evaluateAll((ns) =>
+      ns.map((n) => [n.dataset.warn, getComputedStyle(n).borderLeftColor]),
+    );
+    ok("amber · both duplicate-name warnings are drawn", marked.length === 2, `${marked.length}`);
+    ok(
+      "amber · each is the duplicate-name kind",
+      marked.every(([kind]) => kind === "duplicate-name"),
+      marked.map(([k]) => k).join(","),
+    );
+    ok(
+      `amber · and each wears amber (${AMBER_SOFT})`,
+      marked.every(([, c]) => c === AMBER_SOFT),
+      marked.map(([, c]) => c).join(" · "),
+    );
+    /* Nothing else on this page may take it. A zero-width border computes to
+       `currentColor`, so a border is only counted where there is one to see —
+       the naive scan counted each amber word twice and would have hidden a
+       third mark appearing. */
+    /* Two tokens, counted separately. `--color-amber-soft` is the non-text
+       step and `--color-amber` is the text one — the same value in dark and
+       deliberately not in light, where a mark and a word need different
+       contrast. Counting both against one would pass in dark and say nothing. */
+    const marks = await page.evaluate(([soft, text]) => {
+      const flat = (v) => (v ?? "").replace(/\s/g, "");
+      const out = { rule: 0, text: 0, fill: 0 };
+      for (const el of document.querySelectorAll(".pg *")) {
+        const s = getComputedStyle(el);
+        if (parseFloat(s.borderLeftWidth) > 0 && flat(s.borderLeftColor) === flat(soft)) out.rule++;
+        if (flat(s.color) === flat(text) && el.textContent.trim()) out.text++;
+        if ([soft, text].some((w) => flat(s.backgroundColor) === flat(w))) out.fill++;
+      }
+      return out;
+    }, [AMBER_SOFT, AMBER]);
+    ok(
+      "amber · two rules, two words, no fill, and nothing else",
+      marks.rule === 2 && marks.text === 2 && marks.fill === 0,
+      JSON.stringify(marks),
+    );
+    await shot(page, `same-name-${theme}`);
     await page.close();
   }
 

@@ -46,7 +46,9 @@ import {
 import type { CandidateDecision, FieldDiff, ImportPlan, PlanEntry, PlanProblem } from "~/api/generated/model";
 import {
   FILTER_AT,
+  aboutADuplicateName,
   appliability,
+  conditionOf,
   bucketOf,
   composition,
   diffOf,
@@ -69,12 +71,24 @@ import {
 
 export function ImportProfiles({
   plan,
+  refused = null,
   applying = false,
   onClose,
   onApply,
   onAnswer,
 }: {
   plan: ImportPlan;
+  /**
+   * The drop was refused whole, as the sentence to show.
+   *
+   * **Not a plan.** A drop past one of `PlanLimits`' bounds comes back from
+   * `plan()` as `Refused`, which the API returns as an `InvalidRequest` — so
+   * there is no `ImportPlan` with no entries and a reason, and a review handed
+   * one would be drawing a shape the server cannot produce. The refusal is a
+   * fact about the drop rather than about any one profile, and it arrives here
+   * from whoever made the call.
+   */
+  refused?: string | null;
   /** The apply is in flight. One call, applying the plan that was shown. */
   applying?: boolean;
   onClose: () => void;
@@ -106,6 +120,26 @@ export function ImportProfiles({
   }
 
   const sel: Selection = useMemo(() => ({ excluded, answers }), [excluded, answers]);
+
+  if (refused)
+    return (
+      <div className="pg">
+        <Back onClose={onClose} />
+        <h2 className="mt-3 text-display text-bone">Nothing in this drop was read</h2>
+        <Block tone="brick" icon={<ShieldAlert className="h-4 w-4" strokeWidth={1.75} />}>
+          <h3>Too much was dropped at once</h3>
+          <p>{refused}</p>
+        </Block>
+        <div className="formfoot">
+          <span className="msg bad" aria-live="polite">
+            Nothing was written. Drop a smaller folder and this screen comes back.
+          </span>
+          <button onClick={onClose} className="btn quiet">
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
   const t = tally(plan, sel);
   const can = appliability(plan, sel);
   const f = footSays(plan, sel);
@@ -116,9 +150,11 @@ export function ImportProfiles({
     return next;
   };
 
-  const answer = (key: string, a: CandidateDecision) => {
-    setAnswers((was) => ({ ...was, [key]: a }));
-    onAnswer?.(key, a);
+  const answer = (entry: PlanEntry, a: CandidateDecision) => {
+    setAnswers((was) => ({ ...was, [entry.path]: a }));
+    /* Held by path, because that is the row; handed up by key, because that is
+       what `CandidateAnswer` carries back. */
+    onAnswer?.(entry.key, a);
   };
 
   /* Every condition as `path:line — message`, because the next thing anybody
@@ -136,7 +172,7 @@ export function ImportProfiles({
   const excludeBlocked = () =>
     setExcluded((was) => {
       const next = new Set(was);
-      for (const e of plan.entries) if (outcomeOf(e, sel) === "blocked") next.add(e.key);
+      for (const e of plan.entries) if (outcomeOf(e, sel) === "blocked") next.add(e.path);
       return next;
     });
 
@@ -144,10 +180,7 @@ export function ImportProfiles({
 
   return (
     <div className="pg">
-      <button onClick={onClose} className="flex items-center gap-1 text-meta text-mute hover:text-bone">
-        <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
-        All profiles
-      </button>
+      <Back onClose={onClose} />
 
       <h2 className="mt-3 text-display text-bone">{heading(plan)}</h2>
       <p className="mt-2 max-w-[62ch] text-body text-dim">
@@ -188,16 +221,16 @@ export function ImportProfiles({
         <div className={`mt-5 ${applying ? "pointer-events-none opacity-45" : ""}`}>
           {shown.map((entry) => (
             <Entry
-              key={entry.key}
+              key={entry.path}
               entry={entry}
               sel={sel}
               on={included(sel, entry)}
-              open={open.has(entry.key)}
-              bodyOpen={bodies.has(entry.key)}
-              onToggle={() => setExcluded((was) => flip(was, entry.key))}
-              onOpen={() => setOpen((was) => flip(was, entry.key))}
-              onBody={() => setBodies((was) => flip(was, entry.key))}
-              onAnswer={(a) => answer(entry.key, a)}
+              open={open.has(entry.path)}
+              bodyOpen={bodies.has(entry.path)}
+              onToggle={() => setExcluded((was) => flip(was, entry.path))}
+              onOpen={() => setOpen((was) => flip(was, entry.path))}
+              onBody={() => setBodies((was) => flip(was, entry.path))}
+              onAnswer={(a) => answer(entry, a)}
             />
           ))}
         </div>
@@ -240,6 +273,13 @@ export function ImportProfiles({
   );
 }
 
+const Back = ({ onClose }: { onClose: () => void }) => (
+  <button onClick={onClose} className="flex items-center gap-1 text-meta text-mute hover:text-bone">
+    <ChevronLeft className="h-3.5 w-3.5" strokeWidth={2} />
+    All profiles
+  </button>
+);
+
 /**
  * One banner, in the order of what stops you: a refusal, then a reset, then
  * the standing note on a drop with nothing to flag.
@@ -267,12 +307,13 @@ function Banner({
 }) {
   const t = tally(plan, sel);
 
-  /* A drop refused whole. The limit is a fact about the drop rather than about
-     any one profile, so it has no row to live on and the banner names it. */
-  if (plan.entries.length === 0 && reasons.length > 0)
+  /* A drop with nothing in it. The reason is the server's when it has one and
+     the screen's own when it does not, but there is always one: a dead primary
+     with no sentence beside it is the failure this feature exists to remove. */
+  if (plan.entries.length === 0)
     return (
       <Block tone="brick" icon={<ShieldAlert className="h-4 w-4" strokeWidth={1.75} />}>
-        <h3>Too much was dropped at once</h3>
+        <h3>Nothing here was read</h3>
         {reasons.map((r) => (
           <p key={r}>{r}</p>
         ))}
@@ -281,10 +322,20 @@ function Banner({
 
   if (t.blocking > 0) {
     const one = plan.entries.find((e) => included(sel, e) && outcomeOf(e, sel) === "blocked");
+    /* **The heading is the diagnosis, not the word "blocked".** The pip on the
+       row already says blocked; what a scan needs from the top of the page is
+       which profile and what is wrong with it. The body then carries the
+       all-or-nothing consequence, which is a different fact rather than this
+       one said twice. */
+    const condition = one ? conditionOf(one) : null;
     return (
       <Block tone="brick" icon={<ShieldAlert className="h-4 w-4" strokeWidth={1.75} />}>
         <h3>
-          {t.blocking === 1 && one ? `${labelOf(one)} is blocked` : `${t.blocking} profiles are blocked`}
+          {t.blocking === 1 && one
+            ? condition
+              ? `${labelOf(one)}: ${condition}`
+              : `${labelOf(one)} cannot be imported`
+            : `${t.blocking} profiles cannot be imported`}
         </h3>
         {reasons.map((r) => (
           <p key={r}>{r}</p>
@@ -447,16 +498,26 @@ function Entry({
               </span>
             ))}
 
-          {entry.warnings.map((w) => (
-            <span
-              key={`${w.path}:${w.line}:${w.says}`}
-              className="mt-2 block max-w-[76ch] border-l-2 border-amber-soft pl-3 text-meta leading-relaxed text-text"
-            >
-              {w.key && <span className="font-mono text-amber">{w.key}</span>}
-              {w.key && " "}
-              {w.says}
-            </span>
-          ))}
+          {/* **Amber only where amber means something.** A name that may be a
+              duplicate is the one warning it is spent on; anything else takes
+              the neutral rule, so a second kind of warning cannot quietly
+              become a third thing wearing the screen's one caution colour. */}
+          {entry.warnings.map((w) => {
+            const amber = aboutADuplicateName(w);
+            return (
+              <span
+                key={`${w.path}:${w.line}:${w.says}`}
+                data-warn={amber ? "duplicate-name" : "other"}
+                className={`mt-2 block max-w-[76ch] border-l-2 pl-3 text-meta leading-relaxed text-text ${
+                  amber ? "border-amber-soft" : "border-line"
+                }`}
+              >
+                {w.key && <span className={`font-mono ${amber ? "text-amber" : "text-dim"}`}>{w.key}</span>}
+                {w.key && " "}
+                {w.says}
+              </span>
+            );
+          })}
         </Open>
 
         {diff && (
@@ -590,7 +651,7 @@ function Candidate({
 }) {
   if (entry.outcome.kind !== "candidate") return null;
   const name = labelOf(entry);
-  const chosen = sel.answers[entry.key];
+  const chosen = sel.answers[entry.path];
   return (
     <div className="pb-3 pl-7">
       {entry.outcome.proposals.map((p) => (

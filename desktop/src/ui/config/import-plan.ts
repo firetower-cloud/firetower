@@ -21,6 +21,7 @@ import type {
   ImportPlan,
   PlanEntry,
   PlanOutcome,
+  PlanProblem,
 } from "~/api/generated/model";
 
 /** The five kinds, as the discriminant spells them. */
@@ -34,9 +35,16 @@ export type Kind = PlanOutcome["kind"];
  * and is never asked to.
  */
 export type Selection = {
-  /** Entry keys the person has unticked. */
+  /**
+   * Entries the person has unticked, **by path**.
+   *
+   * The path is the entry's identity and the key is not: two bundles in one
+   * archive can carry the same folder name, which is a blocking condition the
+   * plan draws rather than prevents — and keyed by `key`, those two rows would
+   * share one checkbox.
+   */
   excluded: ReadonlySet<string>;
-  /** Answers to candidates, by entry key. */
+  /** Answers to candidates, by entry path. */
   answers: Readonly<Record<string, CandidateDecision>>;
 };
 
@@ -60,7 +68,7 @@ export const UNTOUCHED: Selection = { excluded: new Set(), answers: {} };
 export const untouched = (sel: Selection): boolean =>
   sel.excluded.size === 0 && Object.keys(sel.answers).length === 0;
 
-export const included = (sel: Selection, entry: PlanEntry): boolean => !sel.excluded.has(entry.key);
+export const included = (sel: Selection, entry: PlanEntry): boolean => !sel.excluded.has(entry.path);
 
 /**
  * What an entry would do, after the person's answer.
@@ -78,7 +86,7 @@ export const included = (sel: Selection, entry: PlanEntry): boolean => !sel.excl
  */
 export function outcomeOf(entry: PlanEntry, sel: Selection): Kind {
   if (entry.outcome.kind !== "candidate") return entry.outcome.kind;
-  const answer = sel.answers[entry.key];
+  const answer = sel.answers[entry.path];
   if (!answer) return "candidate";
   if (answer.kind === "newProfile") return "new";
   const to = entry.outcome.proposals.find((p) => p.profile.id === answer.profile);
@@ -88,7 +96,7 @@ export function outcomeOf(entry: PlanEntry, sel: Selection): Kind {
 /** The profile an answered *same profile* would write onto. */
 export function answeredTarget(entry: PlanEntry, sel: Selection) {
   if (entry.outcome.kind !== "candidate") return null;
-  const answer = sel.answers[entry.key];
+  const answer = sel.answers[entry.path];
   if (!answer || answer.kind === "newProfile") return null;
   return entry.outcome.proposals.find((p) => p.profile.id === answer.profile)?.profile ?? null;
 }
@@ -146,15 +154,36 @@ const firstBlocked = (plan: ImportPlan, sel: Selection): PlanEntry | undefined =
 export const labelOf = (entry: PlanEntry): string => entry.name ?? entry.key;
 
 /**
- * Whether the drop would be refused whole, rather than entry by entry.
+ * The diagnosis, for a banner heading that can be acted on in a scan.
  *
- * A breached limit is a fact about the drop: four hundred files is not any one
- * profile's problem, and there is no entry to hang it on. The plan says it the
- * only way it can — no entries, and `whyNot` holding the sentence — so that is
- * what this reads.
+ * The first sentence of the first problem: the server writes `says` as a
+ * condition followed by what to do about it, so the condition is the half a
+ * heading wants and the remainder belongs beside the line it is about.
+ *
+ * Cut here rather than asked for, because `PlanProblem` has no field for it.
+ * The alternative is a heading reading "Designer is blocked", which repeats
+ * the word the pip already carries and says nothing about *what* is wrong —
+ * the failure this screen's copy pass fixed once already.
  */
-export const refusedWhole = (plan: ImportPlan): boolean =>
-  plan.entries.length === 0 && plan.whyNot.length > 0;
+export function conditionOf(entry: PlanEntry): string | null {
+  if (entry.outcome.kind !== "blocked") return null;
+  const first = entry.outcome.problems[0];
+  if (!first) return null;
+  const stop = first.says.indexOf(". ");
+  return stop === -1 ? first.says.replace(/\.$/, "") : first.says.slice(0, stop);
+}
+
+/**
+ * Whether a warning is the one amber is allowed to be spent on.
+ *
+ * **Amber means one thing here: a name that may be a duplicate.** It is spent
+ * on a reset in the diff and on this, and on nothing else — so a warning takes
+ * it by passing a test rather than by being a warning. The alternative, which
+ * shipped first, was to colour `warnings` amber wholesale; that is right only
+ * for as long as the server emits one kind of warning, and it over-spends the
+ * screen's one remaining signal the moment it emits a second.
+ */
+export const aboutADuplicateName = (w: PlanProblem): boolean => w.key === "name";
 
 /**
  * Whether the primary action is available, and why it is not.
@@ -164,7 +193,19 @@ export const refusedWhole = (plan: ImportPlan): boolean =>
  * about a selection that no longer exists.
  */
 export function appliability(plan: ImportPlan, sel: Selection): { appliable: boolean; reasons: string[] } {
-  if (refusedWhole(plan)) return { appliable: false, reasons: plan.whyNot };
+  /* **A dead primary never appears without a sentence.** A drop holding no
+     bundle at all comes back unappliable with nothing in `whyNot`, and a
+     disabled button beside an empty explanation is this product's oldest
+     failure wearing a new hat: something was accepted and nothing happened,
+     with no way to find out why. The server's reason is better than this one
+     and is being added; until then the screen still answers the question. */
+  if (plan.entries.length === 0)
+    return {
+      appliable: false,
+      reasons: plan.whyNot.length
+        ? plan.whyNot
+        : ["Nothing in that folder is a profile. A profile is a folder with a PROFILE.md in it."],
+    };
   if (untouched(sel)) return { appliable: plan.appliable, reasons: plan.whyNot };
 
   const t = tally(plan, sel);
@@ -213,8 +254,12 @@ export type Foot = {
 };
 
 export function foot(plan: ImportPlan, sel: Selection): Foot {
-  if (refusedWhole(plan))
-    return { tone: "bad", lead: "Nothing in this drop was read.", rest: plan.whyNot.join(" "), excluded: 0 };
+  /* Same defence as `appliability`: the foot is the sentence beside the
+     button, so it is the one that may never be blank while the button is. */
+  if (plan.entries.length === 0) {
+    const [lead, ...rest] = appliability(plan, sel).reasons;
+    return { tone: "bad", lead: lead ?? "", rest: rest.join(" "), excluded: 0 };
+  }
 
   const t = tally(plan, sel);
   const excluded = t.out;
@@ -282,7 +327,7 @@ export function foot(plan: ImportPlan, sel: Selection): Foot {
  * put a row beside a line in the file without translating.
  */
 export const FIELD_GROUPS: { group: string; fields: string[] }[] = [
-  { group: "Identity", fields: ["name", "does", "body"] },
+  { group: "Identity", fields: ["name", "does", "instructions"] },
   {
     group: "Where and how its children run",
     fields: ["engine", "placement", "machine", "account", "directory"],
@@ -387,11 +432,11 @@ export function openOnArrival(plan: ImportPlan): Set<string> {
   const open = new Set<string>();
   for (const entry of plan.entries) {
     if (entry.outcome.kind === "blocked" || plan.entries.length === 1) {
-      open.add(entry.key);
+      open.add(entry.path);
       continue;
     }
     const diff = diffOf(entry);
-    if (diff && moved(diff).some((m) => m.reset)) open.add(entry.key);
+    if (diff && moved(diff).some((m) => m.reset)) open.add(entry.path);
   }
   return open;
 }
@@ -432,8 +477,8 @@ export const oracleWording = (says: string): string[] =>
 
 /** How many were found, which is the first thing to know. */
 export function heading(plan: ImportPlan): string {
-  if (refusedWhole(plan)) return "Nothing in this drop was read";
   const n = plan.entries.length;
+  if (n === 0) return "Nothing in this drop is a profile";
   return n === 1 ? "One profile found" : `${n} profiles found`;
 }
 

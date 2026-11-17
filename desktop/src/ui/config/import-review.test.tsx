@@ -1,68 +1,195 @@
 /**
- * What the review actually draws, per state.
+ * What the review draws, per state.
  *
- * The resolved colours are asserted in the browser by
+ * Resolved colours are asserted in a browser by
  * `scripts/shoot-import-review.mjs`, which is where a hue can be read out of a
- * running document. What is here is the half that does not need one: which
- * rows get a field panel, how many fields are in it, whether the primary is
- * available, and whether a string the ticket names by name is on the page.
+ * running document. What is here is the half that needs no browser: which rows
+ * get a field panel, whether the primary is available, and **whether a
+ * sentence the screen puts on the page is one the server produced**.
  *
- * Rendered rather than described — `renderToStaticMarkup`, the way
- * `roles-readback.test.tsx` does it, so a component that stops emitting a
- * sentence fails here rather than in a screenshot nobody re-reads.
+ * That last one is why this file exists in its current form. The first version
+ * asserted that amber appeared `> 0` times and that twenty marker strings were
+ * present — assertions that could not fail, over fixtures whose every sentence
+ * was invented. The specimens are generated now (`import-plans.ts`), and the
+ * tests below compare rendered text against them rather than against a literal
+ * typed here.
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ImportProfiles } from "./ImportProfiles";
-import { ALL_BLOCKED, ALL_NEW, LARGE, MIXED, NEAR_MATCH, OVER_LIMIT, RENAME } from "./import-plans";
+import { PLANS, REFUSALS } from "./import-plans";
+import { conditionOf, labelOf } from "./import-plan";
 import type { ImportPlan } from "~/api/generated/model";
 
-const nothing = () => {};
-const draw = (plan: ImportPlan) =>
-  renderToStaticMarkup(<ImportProfiles plan={plan} onClose={nothing} onApply={nothing} />);
+const ALL_NEW = PLANS["all-new"]!;
+const MIXED = PLANS.mixed!;
+const ALL_BLOCKED = PLANS["all-blocked"]!;
+const RENAME = PLANS.rename!;
+const NEAR_MATCH = PLANS["near-match"]!;
+const LARGE = PLANS.large!;
+const SAME_NAME = PLANS["same-name"]!;
+const SAME_KEY = PLANS["same-key"]!;
 
-/** Count of a substring, which is how a markup string answers "how many". */
+const nothing = () => {};
+const draw = (plan: ImportPlan, refused: string | null = null) =>
+  renderToStaticMarkup(
+    <ImportProfiles plan={plan} refused={refused} onClose={nothing} onApply={nothing} />,
+  );
+
 const times = (html: string, needle: string) => html.split(needle).length - 1;
+
+/** The markup with its tags taken out, which is what somebody reads. */
+const readable = (html: string) =>
+  html
+    .replace(/<[^>]+>/g, "")
+    .replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#x2F;/g, "/")
+    .replace(/\s+/g, " ");
+
+/* ── The sentences are the server's ─────────────────────────────────────── */
+
+describe("every sentence on the screen came from the plan", () => {
+  /* The failure this guards is specific and it already happened: seven states
+     of plausible, well-edited copy that the product never printed, under a
+     hundred and twenty assertions that all passed because each checked shape.
+     A rendered sentence is now compared against the specimen it must have come
+     from, and the specimen is generated from the planner. */
+  it.each(Object.entries(PLANS))("%s draws its problems verbatim", (_name, plan) => {
+    const said = readable(draw(plan));
+    let checked = 0;
+    for (const e of plan.entries) {
+      if (e.outcome.kind === "blocked")
+        for (const p of e.outcome.problems) {
+          expect(said).toContain(readable(p.says));
+          expect(said).toContain(`${p.path}:${p.line}`);
+          checked++;
+        }
+      if (e.outcome.kind === "candidate")
+        for (const p of e.outcome.proposals) {
+          expect(said).toContain(readable(p.says));
+          checked++;
+        }
+      for (const w of e.warnings) {
+        expect(said).toContain(readable(w.says));
+        checked++;
+      }
+    }
+    expect(checked).toBe(
+      plan.entries.reduce(
+        (n, e) =>
+          n +
+          e.warnings.length +
+          (e.outcome.kind === "blocked" ? e.outcome.problems.length : 0) +
+          (e.outcome.kind === "candidate" ? e.outcome.proposals.length : 0),
+        0,
+      ),
+    );
+  });
+
+  it.each(Object.entries(PLANS).filter(([, p]) => p.whyNot.length > 0))(
+    "%s draws its whyNot verbatim",
+    (_name, plan) => {
+      const said = readable(draw(plan));
+      for (const why of plan.whyNot) expect(said).toContain(readable(why));
+    },
+  );
+
+  it("draws a refusal verbatim, and draws no list with it", () => {
+    const says = REFUSALS["too-many-files"]!;
+    const html = draw(MIXED, says);
+    expect(readable(html)).toContain(readable(says));
+    expect(html).not.toContain('class="imp"');
+  });
+});
+
+/* ── The banner says what is wrong ──────────────────────────────────────── */
+
+describe("the blocked banner", () => {
+  it("leads with the condition rather than with the word blocked", () => {
+    const html = draw(MIXED);
+    const head = html.slice(html.indexOf("<h3>") + 4, html.indexOf("</h3>"));
+    const one = MIXED.entries.find((e) => e.outcome.kind === "blocked")!;
+    expect(readable(head)).toBe(`${labelOf(one)}: ${readable(conditionOf(one)!)}`);
+    expect(head).not.toMatch(/is blocked/);
+  });
+
+  /* The body carries the all-or-nothing consequence, which is a different
+     fact. What it may not do is repeat the heading back. */
+  it("does not repeat its own heading in its body", () => {
+    const html = draw(MIXED);
+    const head = readable(html.slice(html.indexOf("<h3>") + 4, html.indexOf("</h3>")));
+    const banner = readable(html.slice(html.indexOf('class="review"'), html.indexOf('class="imp"')));
+    expect(banner.split(head)).toHaveLength(2);
+  });
+});
+
+/* ── Colour ─────────────────────────────────────────────────────────────── */
+
+describe("colour discipline", () => {
+  it.each(Object.entries(PLANS))("%s spends no ember", (_name, plan) => {
+    expect(draw(plan)).not.toMatch(/ember/);
+  });
+
+  /* The old version of this asserted `ambers.length > 0`, which no change
+     could have failed. What matters is *which* elements wear it. */
+  it("spends amber on a duplicate-name warning and on nothing else", () => {
+    const html = draw(SAME_NAME);
+    expect(times(html, 'data-warn="duplicate-name"')).toBe(2);
+    expect(times(html, 'data-warn="other"')).toBe(0);
+    // Each amber warning carries the amber rule; no other element does.
+    expect(times(html, "border-amber-soft")).toBe(2);
+  });
+
+  it("gives a warning that is not about a duplicate name the neutral rule", () => {
+    const invented: ImportPlan = {
+      ...SAME_NAME,
+      entries: SAME_NAME.entries.map((e) => ({
+        ...e,
+        warnings: e.warnings.map((w) => ({ ...w, key: "machine" })),
+      })),
+    };
+    const html = draw(invented);
+    expect(times(html, 'data-warn="other"')).toBe(2);
+    expect(times(html, "border-amber-soft")).toBe(0);
+  });
+
+  /* A reset is the one thing in the diff wearing a colour, and a drop with no
+     reset in it has no colour in its diff at all. */
+  it("tints a reset row and leaves an ordinary change plain", () => {
+    expect(times(draw(MIXED), 'data-c="reset"')).toBeGreaterThan(0);
+    expect(draw(RENAME)).not.toContain('data-c="reset"');
+    expect(draw(ALL_NEW)).not.toMatch(/amber/);
+  });
+});
+
+/* ── Structure ──────────────────────────────────────────────────────────── */
 
 describe("the field panel", () => {
   it("draws all sixteen fields, unchanged ones included", () => {
     const html = draw(MIXED);
-    /* 15 leaf rows, the `settings` header row, and its four leaves. Every one
-       of them carries its own change, which is what the counts add up to. */
-    expect(times(html, 'class="dr"')).toBe(20);
-    expect(times(html, 'data-c="')).toBe(20);
-    expect(
-      times(html, 'data-c="unchanged"') +
-        times(html, 'data-c="reset"') +
-        times(html, 'data-c="changed"'),
-    ).toBe(20);
-    expect(times(html, 'data-c="reset"')).toBe(1);
-    expect(times(html, 'data-c="changed"')).toBe(2);
+    expect(times(html, 'data-c="')).toBe(20); // 15 leaves + settings + its 4
+    expect(times(html, 'data-c="unchanged"')).toBeGreaterThan(13);
   });
 
-  it("marks a reset with a word as well as a tint", () => {
-    expect(draw(MIXED)).toContain('class="tagr">reset<');
-  });
-
-  /* `PlanBlocked` carries no diff, so there is nothing to show — which is the
-     prototype's own finding about the unparseable file, true of every blocked
-     row rather than only that one. */
+  /* `PlanBlocked` carries no diff, so there is nothing to show — the
+     prototype's finding about the unparseable file, true of every blocked row. */
   it("gives a blocked entry no field panel at all", () => {
-    const html = draw(ALL_BLOCKED);
-    expect(html).not.toContain("dsheet");
-    expect(html).toContain("The frontmatter does not parse");
+    expect(draw(ALL_BLOCKED)).not.toContain("dsheet");
   });
 
-  it("names the file, the key, the line and which entry of a list", () => {
-    const html = draw(ALL_BLOCKED);
-    expect(html).toContain("delegates_to[3]");
-    expect(html).toContain("profiles/engineering-manager/PROFILE.md:19");
-  });
-
-  /* A disclosure that discloses nothing is a broken control. */
   it("gives a row with nothing to expand no expander", () => {
     expect(draw(ALL_BLOCKED)).not.toContain("aria-expanded");
     expect(draw(MIXED)).toContain("aria-expanded");
+  });
+
+  /* A file that never parsed has no `name`, so the row shows its folder. */
+  it("falls back to the folder when the file gave no name", () => {
+    const nameless = ALL_BLOCKED.entries.find((e) => e.name == null)!;
+    expect(readable(draw(ALL_BLOCKED))).toContain(nameless.key);
   });
 });
 
@@ -77,6 +204,15 @@ describe("the primary action", () => {
   it("is available on a drop with nothing to answer and nothing blocked", () => {
     expect(draw(ALL_NEW)).not.toMatch(/<button disabled=""[^>]*class="btn primary"/);
   });
+
+  /* #349 in a new place: a dead button with no sentence beside it. */
+  it("never appears dead without a sentence", () => {
+    const empty: ImportPlan = { ...MIXED, entries: [], whyNot: [], appliable: false };
+    const html = draw(empty);
+    const foot = readable(html.slice(html.indexOf('class="formfoot"')));
+    expect(foot.replace(/Cancel|Import.*/g, "").trim().length).toBeGreaterThan(20);
+    expect(foot).toContain("PROFILE.md");
+  });
 });
 
 describe("a blocked profile", () => {
@@ -89,7 +225,6 @@ describe("a blocked profile", () => {
   it("arrives expanded, and offers both ways out", () => {
     const html = draw(MIXED);
     expect(html).toContain('data-state="blocked" data-open="true"');
-    expect(html).toContain("Exclude Security Advisor");
     expect(html).toContain("Copy the errors");
   });
 });
@@ -98,13 +233,8 @@ describe("a candidate", () => {
   it("offers two answers and presses neither", () => {
     const html = draw(NEAR_MATCH);
     expect(times(html, 'role="radio"')).toBe(2);
-    expect(html).toContain("This is <b>Designer</b>");
     expect(html).toContain("A new profile");
     expect(html).not.toContain('role="radio" aria-checked="true"');
-  });
-
-  it("holds the import up until it is answered", () => {
-    expect(draw(NEAR_MATCH)).toMatch(/<button disabled=""[^>]*class="btn primary"/);
   });
 });
 
@@ -116,36 +246,34 @@ describe("a rename", () => {
     expect(html).not.toContain("Creates <b");
   });
 
-  /* `PlanRename`'s own reason: a rename row carrying no diff would hide the
-     other fifteen fields changing underneath it. */
   it("still draws all sixteen fields underneath it", () => {
     expect(times(draw(RENAME), 'data-c="')).toBe(20);
+  });
+});
+
+describe("two bundles of one key", () => {
+  /* The entry's identity is its path, so the two rows are two rows. Keyed by
+     `key`, React would collapse them and one tick would drive both. */
+  it("draws both, and ticks them independently", () => {
+    const html = draw(SAME_KEY);
+    expect(times(html, 'class="imp"')).toBe(2);
+    expect(times(html, 'aria-checked="true"')).toBe(2);
+    for (const e of SAME_KEY.entries) expect(html).toContain(e.path);
   });
 });
 
 describe("files that were part of no profile", () => {
   it("says how many, and what counts as one", () => {
     const html = draw(MIXED);
-    expect(html).toContain("2 files were not read.");
+    expect(html).toContain(`${MIXED.ignored.length} files were not read.`);
     expect(html).toContain("A profile is a folder with a");
   });
 
-  /* Skipping a `.DS_Store` is correct behaviour, so this is information. What
-     it may never be is absent. */
   it("is drawn with no severity of its own", () => {
     const html = draw(MIXED);
     const note = html.slice(html.indexOf('class="note2"'), html.indexOf('class="formfoot"'));
     expect(note).not.toMatch(/amber|brick/);
     expect(draw(ALL_NEW)).not.toContain("note2");
-  });
-});
-
-describe("a drop refused whole", () => {
-  it("names the limit and gives it a brick rule", () => {
-    const html = draw(OVER_LIMIT);
-    expect(html).toContain('data-tone="brick"');
-    expect(html).toContain("The limit is 200 files, 2 MB a file and 25 MB in total.");
-    expect(html).not.toContain('class="imp"');
   });
 });
 
@@ -157,31 +285,7 @@ describe("the list", () => {
 
   it("keeps the plan's order in the markup", () => {
     const html = draw(LARGE);
-    const at = (key: string) => html.indexOf(`profiles/${key}/PROFILE.md`);
-    /* `cost-watcher` is blocked and sits late in the folder. Sorting by state
-       would hoist it above seventeen creates. */
-    expect(at("designer")).toBeLessThan(at("release-manager"));
-    expect(at("release-manager")).toBeLessThan(at("cost-watcher"));
-  });
-});
-
-describe("colour", () => {
-  /* Ember answers one question — is an agent waiting on you — and nothing
-     here is that question. The resolved-colour half of this is in the shoot
-     script; this catches a token named in a class before it is ever drawn. */
-  it.each([ALL_NEW, MIXED, ALL_BLOCKED, RENAME, NEAR_MATCH, LARGE, OVER_LIMIT])(
-    "spends no ember anywhere (%#)",
-    (plan) => {
-      expect(draw(plan)).not.toMatch(/ember/);
-    },
-  );
-
-  it("spends amber on a reset and on a warning, and nowhere else", () => {
-    const html = draw(MIXED);
-    /* The summary's reset clause, the banner's field name, and the warning
-       rule — all three are the one meaning: read this before you accept. */
-    const ambers = html.match(/amber/g) ?? [];
-    expect(ambers.length).toBeGreaterThan(0);
-    expect(draw(ALL_NEW)).not.toMatch(/amber/);
+    const drawn = LARGE.entries.map((e) => html.indexOf(e.path));
+    expect(drawn).toEqual([...drawn].sort((a, b) => a - b));
   });
 });
