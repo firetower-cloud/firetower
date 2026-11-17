@@ -1,0 +1,115 @@
+# `docker compose --profile full`, brought up and asked for a 200.
+#
+# This is the only thing that runs the profile. Before #347 it had never
+# worked — five independent blockers, each sufficient on its own, and the
+# first exited in under a second so the other four were never reached. Five do
+# not accumulate in something anybody runs; they accumulate in something
+# nothing checks. #352 is the decision to keep the profile and cover it rather
+# than delete it, and this is the cover.
+#
+# Deliberately not thorough. It builds the development image, starts the
+# stack and asserts `GET /api/v1/bootstrap` answers — the same acceptance #347
+# proved by hand. The value is that it runs at all.
+#
+# A workflow of its own rather than a job in `backend-ci`, because `paths:` is
+# per workflow and not per job: putting this in `backend-ci.yml` would mean
+# adding compose.yaml and the justfile to that filter, and a one-line compose
+# edit would then also run the test suite, the installer and two builds. It
+# would work the other way too — every `crates/**` change would build this
+# image. The filter the profile needs is this narrow one, so it needs a file.
+name: compose
+
+on:
+  workflow_dispatch:
+  pull_request:
+    # Not on a release PR: it changes versions and changelogs, nothing a
+    # stack coming up would catch.
+    branches-ignore:
+      - "release-please--branches--**"
+    paths:
+      # The four files the profile is made of...
+      - "compose.yaml"
+      - "Dockerfile.development"
+      - "justfile"
+      - ".env.example"
+      # ...and this one, so a change to the check runs the check.
+      - ".github/workflows/compose.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compose-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full:
+    # Not on release-please's own pull request. `branches-ignore` above filters
+    # the *target* branch, so this is the check that actually skips it.
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
+    runs-on: depot-ubuntu-22.04
+    # Measured at 130s from `up` to a 200 on an M-series laptop, with the image
+    # layers cached and the cargo, pnpm and node_modules volumes empty. A
+    # runner starts colder than that: it builds the image as well — `cargo
+    # install just cargo-watch` is most of it — and then compiles the
+    # workspace from nothing inside the container. Well above either number on
+    # purpose, because a slow runner should be slow rather than red. What this
+    # catches is a profile that never answers, and that fails the poll below
+    # long before the clock here runs out.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # No ports set, so this is the profile exactly as a contributor gets it:
+      # 4400, 3000 and 5433, published on 127.0.0.1.
+      - name: the whole stack, in containers
+        run: docker compose --profile full up -d --build
+
+      # Quietly, because the first minutes of this are the container
+      # compiling the workspace and several hundred connection errors are not
+      # a log. Twenty minutes of patience, which the job's own timeout bounds:
+      # a cold workspace build on a slow runner should be slow rather than red.
+      #
+      # The one thing not worth waiting for is a container that is no longer
+      # running. That is how this profile failed for its whole existence —
+      # `just dev` exited 127 in 0.89s — and it would otherwise poll a dead
+      # stack until the clock ran out and then report a timeout for it.
+      - name: the control plane answers on the published port
+        run: |
+          for _ in $(seq 1 600); do
+            if curl -fsS -o /dev/null http://127.0.0.1:4400/api/v1/bootstrap 2>/dev/null; then
+              echo "bootstrap answered after ${SECONDS}s"
+              curl -sS -i http://127.0.0.1:4400/api/v1/bootstrap
+              exit 0
+            fi
+            if [ -z "$(docker compose --profile full ps -q --status running firetower)" ]; then
+              echo "the firetower container stopped after ${SECONDS}s without answering"
+              exit 1
+            fi
+            sleep 2
+          done
+          echo "no 200 from /api/v1/bootstrap in ${SECONDS}s"
+          exit 1
+
+      # The host side of every published port is loopback on purpose, so that
+      # the development stack answers the machine running it and not the
+      # network around it. One line, so that publishing it to the world again
+      # fails here rather than in somebody's review.
+      - name: and only on loopback
+        run: |
+          for binding in firetower:4400 firetower:3000 postgres:5432; do
+            published=$(docker compose --profile full port "${binding%:*}" "${binding#*:}")
+            echo "$binding -> $published"
+            case "$published" in
+              127.0.0.1:*) ;;
+              *) echo "expected a mapping on 127.0.0.1"; exit 1 ;;
+            esac
+          done
+
+      - name: what it said, if it did not answer
+        if: failure()
+        run: docker compose --profile full logs
+
+      - name: down, and the volumes with it
+        if: always()
+        run: docker compose --profile full down -v
