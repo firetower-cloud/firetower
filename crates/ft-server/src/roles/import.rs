@@ -4310,7 +4310,11 @@ mod tests {
                 profiles: vec![
                     row("ro_designer", "Designer", Some("designer")),
                     row("ro_engineer", "Engineer", Some("engineer")),
-                    row("ro_manager", "Engineering Manager", Some("engineering-manager")),
+                    row(
+                        "ro_manager",
+                        "Engineering Manager",
+                        Some("engineering-manager"),
+                    ),
                     // No key: it predates the format, which is what makes the
                     // name fallback — and the candidate — necessary.
                     row("ro_qa", "QA", None),
@@ -4378,7 +4382,10 @@ mod tests {
             made(
                 dropped(vec![
                     file("designer", "name: Designer\ndoes: designs and prototypes\n"),
-                    file("engineer", "name: Engineer\ndoes: turns a ticket into code\n"),
+                    file(
+                        "engineer",
+                        "name: Engineer\ndoes: turns a ticket into code\n",
+                    ),
                     file(
                         "engineering-manager",
                         "name: Engineering Manager\ndoes: hands work out and takes it back\n\
@@ -4452,7 +4459,10 @@ mod tests {
                          delegates_to:\n  - Designer\n  - Tech Writer\nskills:\n  - to-tickets\n",
                     ),
                     // Malformed YAML: no name, and so no field panel.
-                    file("qa-engineer", "name: QA Engineer\ndoes: checks: it: badly\n"),
+                    file(
+                        "qa-engineer",
+                        "name: QA Engineer\ndoes: checks: it: badly\n",
+                    ),
                     // Missing `does`.
                     file("security-advisor", "name: Security Advisor\n"),
                 ]),
@@ -4515,7 +4525,10 @@ mod tests {
             made(
                 dropped(vec![
                     file("designer", "name: Designer\ndoes: designs and prototypes\n"),
-                    file("designer-v2", "name: Designer\ndoes: a second copy, kept while the first was rewritten\n"),
+                    file(
+                        "designer-v2",
+                        "name: Designer\ndoes: a second copy, kept while the first was rewritten\n",
+                    ),
                 ]),
                 &bare(),
             )
@@ -4567,8 +4580,16 @@ mod tests {
         fn same_key() -> ImportPlan {
             made(
                 dropped(vec![
-                    at("teamA/designer/PROFILE.md", "name: Designer\ndoes: designs\n", ""),
-                    at("teamB/designer/PROFILE.md", "name: Designer\ndoes: designs too\n", ""),
+                    at(
+                        "teamA/designer/PROFILE.md",
+                        "name: Designer\ndoes: designs\n",
+                        "",
+                    ),
+                    at(
+                        "teamB/designer/PROFILE.md",
+                        "name: Designer\ndoes: designs too\n",
+                        "",
+                    ),
                 ]),
                 &bare(),
             )
@@ -4580,7 +4601,10 @@ mod tests {
             made(
                 dropped(vec![
                     file("qa", "name: QA\ndoes: checks it against the criteria\n"),
-                    file("quality-assurance", "name: QA\ndoes: checks it against the criteria\n"),
+                    file(
+                        "quality-assurance",
+                        "name: QA\ndoes: checks it against the criteria\n",
+                    ),
                 ]),
                 &library(),
             )
@@ -4630,24 +4654,92 @@ mod tests {
         /// Twenty-three, so the filter pills and the sticky foot are under load.
         fn large() -> ImportPlan {
             let says = [
-                ("release-manager", "Release Manager", "cuts a release and watches the deploy"),
-                ("docs-writer", "Docs Writer", "turns a change into documentation"),
-                ("support-triage", "Support Triage", "decides whether a report is a bug"),
-                ("data-analyst", "Data Analyst", "answers a question with a query"),
+                (
+                    "release-manager",
+                    "Release Manager",
+                    "cuts a release and watches the deploy",
+                ),
+                (
+                    "docs-writer",
+                    "Docs Writer",
+                    "turns a change into documentation",
+                ),
+                (
+                    "support-triage",
+                    "Support Triage",
+                    "decides whether a report is a bug",
+                ),
+                (
+                    "data-analyst",
+                    "Data Analyst",
+                    "answers a question with a query",
+                ),
                 ("perf-engineer", "Perf Engineer", "profiles a slow path"),
-                ("accessibility-reviewer", "Accessibility Reviewer", "checks focus and contrast"),
-                ("infra-engineer", "Infra Engineer", "changes the deploy carefully"),
-                ("api-reviewer", "API Reviewer", "reads a diff for the contract it changes"),
-                ("localiser", "Localiser", "finds the strings a change orphaned"),
-                ("dependency-keeper", "Dependency Keeper", "takes an upgrade and says what moved"),
-                ("incident-lead", "Incident Lead", "runs an incident and writes it up"),
-                ("onboarding-guide", "Onboarding Guide", "walks a new person through the repo"),
-                ("spec-reviewer", "Spec Reviewer", "reads a specification as its first reader"),
-                ("prompt-reviewer", "Prompt Reviewer", "reads instructions for how they misfire"),
-                ("cost-watcher", "Cost Watcher", "names the three things that moved the spend"),
-                ("flake-hunter", "Flake Hunter", "finds the test that fails one run in forty"),
-                ("schema-reviewer", "Schema Reviewer", "reads a migration for what it locks"),
-                ("changelog-keeper", "Changelog Keeper", "keeps the changelog honest"),
+                (
+                    "accessibility-reviewer",
+                    "Accessibility Reviewer",
+                    "checks focus and contrast",
+                ),
+                (
+                    "infra-engineer",
+                    "Infra Engineer",
+                    "changes the deploy carefully",
+                ),
+                (
+                    "api-reviewer",
+                    "API Reviewer",
+                    "reads a diff for the contract it changes",
+                ),
+                (
+                    "localiser",
+                    "Localiser",
+                    "finds the strings a change orphaned",
+                ),
+                (
+                    "dependency-keeper",
+                    "Dependency Keeper",
+                    "takes an upgrade and says what moved",
+                ),
+                (
+                    "incident-lead",
+                    "Incident Lead",
+                    "runs an incident and writes it up",
+                ),
+                (
+                    "onboarding-guide",
+                    "Onboarding Guide",
+                    "walks a new person through the repo",
+                ),
+                (
+                    "spec-reviewer",
+                    "Spec Reviewer",
+                    "reads a specification as its first reader",
+                ),
+                (
+                    "prompt-reviewer",
+                    "Prompt Reviewer",
+                    "reads instructions for how they misfire",
+                ),
+                (
+                    "cost-watcher",
+                    "Cost Watcher",
+                    "names the three things that moved the spend",
+                ),
+                (
+                    "flake-hunter",
+                    "Flake Hunter",
+                    "finds the test that fails one run in forty",
+                ),
+                (
+                    "schema-reviewer",
+                    "Schema Reviewer",
+                    "reads a migration for what it locks",
+                ),
+                (
+                    "changelog-keeper",
+                    "Changelog Keeper",
+                    "keeps the changelog honest",
+                ),
             ];
             let mut files = vec![
                 file("designer", "name: Designer\ndoes: reads a branch and reports problems\nengine: ClaudeCode\n"),
@@ -4667,7 +4759,9 @@ mod tests {
                 let frontmatter = match key {
                     // One blocked late in the folder, so a refusal has to stay
                     // findable in a list long enough to scroll.
-                    "cost-watcher" => format!("name: {name}\ndoes: {does}\nengine: ClaudeCode\naccount: team-anthropic\n"),
+                    "cost-watcher" => format!(
+                        "name: {name}\ndoes: {does}\nengine: ClaudeCode\naccount: team-anthropic\n"
+                    ),
                     _ => format!("name: {name}\ndoes: {does}\n"),
                 };
                 files.push(file(key, &frontmatter));
@@ -4684,7 +4778,10 @@ mod tests {
         /// edge, never an `ImportPlan` — so the review cannot be handed one and
         /// the sentence belongs to whatever made the call. Recorded here beside
         /// the plans because the screen still has to draw it.
-        fn everything() -> (BTreeMap<&'static str, ImportPlan>, BTreeMap<&'static str, String>) {
+        fn everything() -> (
+            BTreeMap<&'static str, ImportPlan>,
+            BTreeMap<&'static str, String>,
+        ) {
             let mut plans = BTreeMap::new();
             plans.insert("all-new", all_new());
             plans.insert("mixed", mixed());
@@ -4798,5 +4895,4 @@ mod tests {
             }
         }
     }
-
 }
