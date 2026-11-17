@@ -140,7 +140,12 @@ _dev:
 
     # A worker built here is what "Install the worker" sends to a machine of
     # this shape, so a checkout can be tried on a real host without a release.
-    FIRETOWER_WORKER_ARTIFACTS=target/artifacts cargo watch -x 'run -p ft-cli -- serve --dev' & pids+=($!)
+    #
+    # `CARGO_INCREMENTAL=1` because this is the one build that rebuilds in a
+    # loop: `[profile.dev]` turns incremental off for the many throwaway trees
+    # that build once and are deleted, and the environment variable outranks
+    # the profile, so the interactive loop here keeps its fast rebuild.
+    CARGO_INCREMENTAL=1 FIRETOWER_WORKER_ARTIFACTS=target/artifacts cargo watch -x 'run -p ft-cli -- serve --dev' & pids+=($!)
     # The API's address lives in web/.env.development, committed, so that one
     # file answers it wherever the interface runs — and so that an environment
     # variable can override it, which is what the compose stack needs: there
