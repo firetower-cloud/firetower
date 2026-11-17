@@ -2,8 +2,9 @@
  * Live Cursor smoke test against an isolated Firetower server and worker.
  *
  * Start the desktop Vite renderer and a Firetower server with a real database,
- * then set FIRETOWER_E2E_PASSWORD and run `node desktop/e2e/cursor-live.mjs`.
- * No API route is mocked. The provider sign-in itself needs browser approval.
+ * then set FIRETOWER_E2E_SERVER and FIRETOWER_E2E_PASSWORD and run
+ * `node desktop/e2e/cursor-live.mjs`. No API route is mocked. The provider
+ * sign-in itself needs browser approval.
  *
  * **A fresh database is the condition this is run under**, and a fresh
  * database holds a sign-in behind two gates before the app is drawn: the
@@ -22,43 +23,58 @@ import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { chromium } from "playwright-core";
+import { origin, refusal } from "./target.mjs";
 
-const server = process.env.FIRETOWER_E2E_SERVER ?? "127.0.0.1:4400";
+// **No default.** This run replaces an administrator's password and names an
+// organisation, and the address it would have guessed — `127.0.0.1:4400` — is
+// where a developer's own control plane listens. A harness that writes is told
+// what to write to or it does not run, which is how the password beside it has
+// always been handled.
+const server = process.env.FIRETOWER_E2E_SERVER;
 // `desktop/vite.config.ts` hardcodes this port with `strictPort`, so a plain
-// `pnpm --dir desktop dev` is what this default expects.
+// `pnpm --dir desktop dev` is what this default expects. Still defaulted,
+// because the default is this checkout's own renderer on loopback — but the
+// page is handed the password through the sign-in form, so a second renderer
+// is this variable as well as a port.
 const renderer = process.env.FIRETOWER_E2E_RENDERER ?? "http://localhost:5273";
 const password = process.env.FIRETOWER_E2E_PASSWORD;
 const output = process.env.FIRETOWER_E2E_OUTPUT ?? "/tmp/firetower-cursor-playwright";
+if (!server) {
+  throw new Error(
+    "Set FIRETOWER_E2E_SERVER to the isolated server's address — this run writes to it and will not guess",
+  );
+}
 if (!password) throw new Error("Set FIRETOWER_E2E_PASSWORD for the isolated server");
 
 /**
- * The control plane's own origin, settled on the way the app settles on it.
+ * The control plane, and the proof that it is one this run may write to.
  *
- * `desktop/src/probe.ts` adds a scheme to a bare address — https first,
- * except for a loopback address, which is never https — and keeps whichever
- * answers `/api/v1/bootstrap`. Finding it the same way is what keeps the one
- * call below pointed at the same server the window is talking to.
+ * `origin()` settles the scheme — the app's rule for a bare address, less the
+ * silent fall back to http that would carry the password in clear — and
+ * `refusal()` reads the unauthenticated `/api/v1/bootstrap` and will not go on
+ * against a server somebody has already set up. Both are before the first
+ * write, which is the only place they are worth anything, and both are in
+ * `target.mjs` so `target.test.mjs` can hold them to it.
  */
-const candidates = (() => {
-  const raw = server.trim().replace(/\/+$/, "");
-  if (/^https?:\/\//i.test(raw)) return [raw];
-  if (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(raw)) return [`http://${raw}`];
-  return [`https://${raw}`, `http://${raw}`];
-})();
-let control;
-for (const url of candidates) {
-  const answered = await fetch(`${url}/api/v1/bootstrap`).then((r) => r.ok, () => false);
-  if (answered) {
-    control = url;
-    break;
-  }
-}
-if (!control) throw new Error(`Nothing answered as a Firetower at ${server}`);
+const control = origin(server);
+const found = await fetch(`${control}/api/v1/bootstrap`, { redirect: "error" }).catch((e) => {
+  throw new Error(`Nothing answered as a Firetower at ${control}: ${e.message}`);
+});
+if (!found.ok) throw new Error(`${control} answered ${found.status} to /api/v1/bootstrap`);
+const refused = refusal(await found.json().catch(() => null), control);
+if (refused) throw new Error(refused);
 
-/** One call to the control plane, for what the app cannot do or cannot say. */
+/**
+ * One call to the control plane, for what the app cannot do or cannot say.
+ *
+ * `redirect: "error"`, because the origin above is the one that was checked:
+ * a 30x carrying this POST to somewhere else would carry the password with it
+ * and arrive at a server nothing has asked anything about.
+ */
 const call = async (path, body, token) => {
   const answer = await fetch(`${control}${path}`, {
     method: body ? "POST" : "GET",
+    redirect: "error",
     headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -102,7 +118,10 @@ try {
   const failures = [];
   page.on("pageerror", (error) => failures.push(error.message));
   await page.goto(renderer);
-  await page.getByPlaceholder("ft-e1.tail9c2b.ts.net").fill(server);
+  // The settled origin rather than what was typed: `probe.ts` keeps an address
+  // that carries a scheme as it is, so the window reaches the same server this
+  // script checked, by the same scheme, instead of deciding again.
+  await page.getByPlaceholder("ft-e1.tail9c2b.ts.net").fill(control);
   await page.getByRole("button", { name: "Continue", exact: true }).click();
 
   await page.getByPlaceholder("Username").fill("admin");
