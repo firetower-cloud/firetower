@@ -2939,6 +2939,7 @@ mod tests {
             id: "role_x".into(),
             path: "u/kevin/reviewer".into(),
             name: "reviewer".into(),
+            key: None,
             does: "reads a branch and reports problems".into(),
             placement: "here".into(),
             agent: None,

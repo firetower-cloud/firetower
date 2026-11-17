@@ -14943,6 +14943,13 @@
             "type": "boolean",
             "description": "Whether this person starts a new workspace as this profile by default.\nAt most one of theirs is, so setting another unsets this one."
           },
+          "key": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key its author gave it: the name of the folder its `PROFILE.md` sits\nin. Absent on every profile made in the interface, which is all of them\nuntil an import adopts one — see\n`migrations/server/20261117120000_profile_key.sql` for why `slug` cannot\nserve."
+          },
           "machine": {
             "type": [
               "string",

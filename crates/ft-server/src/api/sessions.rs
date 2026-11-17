@@ -4743,6 +4743,7 @@ mod tests {
             id: "role_x".into(),
             path: "u/kevin/reviewer".into(),
             name: "reviewer".into(),
+            key: None,
             does: "reviews a branch".into(),
             placement: "here".into(),
             agent: Some("ClaudeCode".into()),
