@@ -327,15 +327,27 @@ pub struct ProfileFile {
 /// whole export.** An exported file carries the *names* of the machines,
 /// subscriptions, directories, teammates and skills a profile points at, so
 /// somebody who may read a profile but not the machine it pins would learn
-/// that machine's name. The threat model on #354 asked for a policy, and this
-/// repository had already chosen one: `list_accounts` lists at Viewer "because
-/// a screen saying a colleague has one is telling you it exists", while
-/// `accounts::usable` demands Writer "because picking somebody's subscription
-/// spends their quota". **Knowing a resource exists is a Viewer act; using it
-/// is a Writer act**, and a name is the first of those. So Viewer is the bar —
-/// not "a name travels with the profile", which would be a new decision, and
-/// not Writer, which would refuse an export to somebody who may start the
-/// profile and watch it run on that very machine.
+/// that machine's name.
+///
+/// **The reimport argument settles it on its own**: substituting `~` or
+/// dropping the line gives a file that imports cleanly and silently changes
+/// the profile, so the only safe answers are "resolve it" or "refuse", and
+/// refusing is the one that discloses nothing.
+///
+/// Viewer is the level because this module is not the first to need the
+/// distinction. Three functions in `api/accounts.rs` draw it with
+/// `filed_where` and say why in their own words: `list_accounts` reads at
+/// `Level::Viewer` (:334) "because a screen saying a colleague has one is
+/// telling you it exists", while `usable` (:190) and `spendable` (:286) demand
+/// `Level::Writer`, the first of them noting "being allowed to see that it
+/// exists is deliberately not enough". **Knowing a resource exists is a Viewer
+/// act; using it is a Writer act**, and a name is the first of those.
+///
+/// Not the `usable` in `desktop/src/api/accounts.ts`, which is a different
+/// function with the same name: a readiness predicate over `enabled`, `state`
+/// and `credentialSet` that holds no grant and never asks who is asking. Said
+/// here because the two are easy to mistake for each other, and this paragraph
+/// is the one that would be wrong if they were.
 ///
 /// **What it must not do is degrade.** Writing `~` or dropping the line for a
 /// reference this person cannot see would produce a file that imports cleanly
