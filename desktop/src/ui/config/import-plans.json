@@ -2101,14 +2101,7 @@
             ]
           },
           "path": "teamA/designer/PROFILE.md",
-          "warnings": [
-            {
-              "key": "name",
-              "line": 1,
-              "path": "teamA/designer/PROFILE.md",
-              "says": "`teamB/designer/PROFILE.md` in this drop is also called `Designer`. They are told apart by their folders, so both can exist; this is only worth knowing."
-            }
-          ]
+          "warnings": []
         },
         {
           "key": "designer",
@@ -2124,14 +2117,7 @@
             ]
           },
           "path": "teamB/designer/PROFILE.md",
-          "warnings": [
-            {
-              "key": "name",
-              "line": 1,
-              "path": "teamB/designer/PROFILE.md",
-              "says": "`teamA/designer/PROFILE.md` in this drop is also called `Designer`. They are told apart by their folders, so both can exist; this is only worth knowing."
-            }
-          ]
+          "warnings": []
         }
       ],
       "ignored": [],
@@ -2206,19 +2192,12 @@
               {
                 "line": 1,
                 "path": "profiles/qa/PROFILE.md",
-                "says": "this bundle and `profiles/quality-assurance/PROFILE.md` both resolve to the profile `QA`. One of them would overwrite the other, so neither is applied — leave one out, or answer the match differently."
+                "says": "this bundle and `profiles/quality-assurance/PROFILE.md` both resolve to the profile `QA`. One of them would overwrite the other, so neither is applied. Leave one out, or answer the match differently."
               }
             ]
           },
           "path": "profiles/qa/PROFILE.md",
-          "warnings": [
-            {
-              "key": "name",
-              "line": 1,
-              "path": "profiles/qa/PROFILE.md",
-              "says": "`profiles/quality-assurance/PROFILE.md` in this drop is also called `QA`. They are told apart by their folders, so both can exist; this is only worth knowing."
-            }
-          ]
+          "warnings": []
         },
         {
           "key": "quality-assurance",
@@ -2229,19 +2208,12 @@
               {
                 "line": 1,
                 "path": "profiles/quality-assurance/PROFILE.md",
-                "says": "this bundle and `profiles/qa/PROFILE.md` both resolve to the profile `QA`. One of them would overwrite the other, so neither is applied — leave one out, or answer the match differently."
+                "says": "this bundle and `profiles/qa/PROFILE.md` both resolve to the profile `QA`. One of them would overwrite the other, so neither is applied. Leave one out, or answer the match differently."
               }
             ]
           },
           "path": "profiles/quality-assurance/PROFILE.md",
-          "warnings": [
-            {
-              "key": "name",
-              "line": 1,
-              "path": "profiles/quality-assurance/PROFILE.md",
-              "says": "`profiles/qa/PROFILE.md` in this drop is also called `QA`. They are told apart by their folders, so both can exist; this is only worth knowing."
-            }
-          ]
+          "warnings": []
         }
       ],
       "ignored": [],
@@ -2258,8 +2230,8 @@
   },
   "refusals": {
     "climbs-out": "`../outside/PROFILE.md` is not a path inside the folder that was dropped",
-    "drop-too-big": "this drop is over the 8 MB an import takes. Drop fewer folders at once.",
-    "file-too-big": "`profiles/designer/PROFILE.md` is 256 KB, and a file in a drop is at most 256 KB",
+    "drop-too-big": "this drop is 8447 KB, and an import takes at most 8192 KB. Drop fewer folders at once.",
+    "file-too-big": "`profiles/designer/PROFILE.md` is 262145 bytes, and a file in a drop is at most 262144 bytes. Shorten the instructions below the frontmatter.",
     "no-name": "a file in this drop has no name",
     "path-too-long": "`profiles/ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp…` is 277 bytes long, and a path inside a drop is at most 256. Drop the folder that holds the bundles rather than the tree above it.",
     "same-path-twice": "`profiles/designer/PROFILE.md` is in this drop twice, so there is no saying which of the two to read",

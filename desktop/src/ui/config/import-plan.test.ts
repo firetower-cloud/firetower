@@ -413,9 +413,13 @@ describe("a drop past a bound", () => {
   /* Not a plan: `plan()` returns `Refused` and the API makes it an
      `InvalidRequest`, so there is no `ImportPlan` with no entries and a limit
      in `whyNot` — which is the shape this screen drew before it was checked. */
-  it("is a sentence, and it names the limit", () => {
-    expect(REFUSALS["too-many-files"]).toMatch(/at most 200/);
-    expect(REFUSALS["file-too-big"]).toMatch(/at most 256 KB/);
+  /* The figure, from `plan.limits` rather than from a format this test
+     happens to remember — the per-file bound was "256 KB" and is now
+     "262144 bytes", and an assertion spelling it out went red for a wording
+     change rather than for a broken promise. */
+  it("names the bound it breached, as the number the plan carries", () => {
+    expect(REFUSALS["too-many-files"]).toContain(String(MIXED.limits.files));
+    expect(REFUSALS["file-too-big"]).toContain(String(MIXED.limits.fileBytes));
   });
 
   /**
@@ -438,17 +442,35 @@ describe("a drop past a bound", () => {
     const stop = says.indexOf(". ");
     return stop === -1 ? "" : says.slice(stop + 2).trim();
   };
-  const IMPERATIVE = /^(Drop|Split|Remove|Rename|Write|Put|Ask|Fix|Take|Use|Name|Add)\b/;
+  /**
+   * An allowlist, and **failing on a verb it has not met is the point.**
+   *
+   * There is no way to ask whether a word is an imperative, so the choice is
+   * between this and "the clause is non-empty", which the original defect
+   * would have passed. A new verb makes this red until somebody reads the
+   * sentence and agrees it is a remedy — loudly, which is the opposite of what
+   * happened last time. `Shorten` arrived exactly that way, when the server
+   * gave the per-file bound an instruction.
+   */
+  const IMPERATIVE =
+    /^(Drop|Split|Remove|Rename|Write|Put|Ask|Fix|Take|Use|Name|Add|Shorten|Give|Keep|Move)\b/;
 
   it.each(Object.entries(REFUSALS))("%s tells somebody what to do about it", (_which, says) => {
     expect(remedy(says)).toMatch(IMPERATIVE);
   });
 
-  /* The guard above is only worth having if it can tell the two apart, so the
-     ones that already carry a remedy are asserted to pass it. */
-  it("recognises the refusals that already carry one", () => {
-    const withRemedy = Object.values(REFUSALS).filter((s) => IMPERATIVE.test(remedy(s)));
-    expect(withRemedy.length).toBeGreaterThan(0);
-    for (const says of withRemedy) expect(remedy(says)).toMatch(/^(Drop|Split|Remove|Write)\b/);
+  /* The guard is only worth having if it tells the two apart rather than
+     failing everything, so this pins the half that passes. It is a count and
+     not a list: the server is adding remedies to the rest, and a test naming
+     today's five would go red for the fix landing. */
+  it("tells a remedy from a bare diagnosis", () => {
+    const sentences = Object.values(REFUSALS);
+    const withRemedy = sentences.filter((s) => IMPERATIVE.test(remedy(s)));
+    expect(withRemedy.length).toBeGreaterThanOrEqual(5);
+    expect(withRemedy.length).toBeLessThanOrEqual(sentences.length);
+    /* And a diagnosis with its remedy cut off does not pass, which is the
+       mutation QA used to prove the old assertion was hollow. */
+    const cut = sentences.map((s) => s.split(". ")[0] + ".");
+    for (const says of cut) expect(remedy(says)).not.toMatch(IMPERATIVE);
   });
 });
