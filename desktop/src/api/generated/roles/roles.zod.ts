@@ -332,3 +332,19 @@ export const SetDefaultRoleBody = zod.object({
 
 export const SetDefaultRoleResponse = zod.void()
 
+/**
+ * Read access and nothing more: this writes a file and changes nothing. What
+ * it carries about the things the profile points at is `named_for`'s
+ * business, and the policy is stated there.
+ * @summary A profile as a `PROFILE.md`, so it can be committed and read in a diff.
+ */
+export const ExportRoleParams = zod.object({
+  "id": zod.string().describe('Role id')
+})
+
+export const ExportRoleResponse = zod.object({
+  "key": zod.string().describe('The folder name, which is the profile\'s identity.'),
+  "path": zod.string().describe('Where the bundle belongs: `profiles/<key>/PROFILE.md`.'),
+  "text": zod.string().describe('The file.')
+}).describe('A profile as the file that describes it, ready to be written into a\nrepository.\n\nThe text and the path it belongs at, rather than a download: the folder\nname is the profile\'s identity, so a client that is handed only\n`PROFILE.md` has to work out where to put it, and this is the one place\nthat knows.')
+

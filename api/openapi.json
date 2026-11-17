@@ -3731,6 +3731,59 @@
         }
       }
     },
+    "/api/v1/roles/{id}/export": {
+      "get": {
+        "tags": [
+          "roles"
+        ],
+        "summary": "A profile as a `PROFILE.md`, so it can be committed and read in a diff.",
+        "description": "Read access and nothing more: this writes a file and changes nothing. What\nit carries about the things the profile points at is `named_for`'s\nbusiness, and the policy is stated there.",
+        "operationId": "export_role",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileFile"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/schedule-runs": {
       "get": {
         "tags": [
@@ -14678,6 +14731,29 @@
               "$ref": "#/components/schemas/DroppedFile"
             },
             "description": "Every file in what was dropped, with the path it had inside the drop."
+          }
+        }
+      },
+      "ProfileFile": {
+        "type": "object",
+        "description": "A profile as the file that describes it, ready to be written into a\nrepository.\n\nThe text and the path it belongs at, rather than a download: the folder\nname is the profile's identity, so a client that is handed only\n`PROFILE.md` has to work out where to put it, and this is the one place\nthat knows.",
+        "required": [
+          "key",
+          "path",
+          "text"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The folder name, which is the profile's identity."
+          },
+          "path": {
+            "type": "string",
+            "description": "Where the bundle belongs: `profiles/<key>/PROFILE.md`."
+          },
+          "text": {
+            "type": "string",
+            "description": "The file."
           }
         }
       },
