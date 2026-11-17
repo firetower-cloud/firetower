@@ -5103,10 +5103,30 @@ mod tests {
                 return;
             }
             let committed = std::fs::read_to_string(&path).unwrap_or_default();
-            assert_eq!(
-                committed, text,
-                "the desktop's fixture is stale. Regenerate it, re-shoot the evidence, and \
-                 commit both:\n\n    UPDATE_SPECIMENS=1 cargo test -p ft-server specimens\n"
+            if committed == text {
+                return;
+            }
+            /* **The first differing line, not the whole file.** `assert_eq!`
+            over seventy kilobytes of JSON is truncated by every log this
+            runs in, which is how a failure on CI that passed on a laptop
+            cost a round trip to understand rather than being read off the
+            output. */
+            let (mine, theirs): (Vec<&str>, Vec<&str>) =
+                (text.lines().collect(), committed.lines().collect());
+            let at = (0..mine.len().max(theirs.len()))
+                .find(|&n| mine.get(n) != theirs.get(n))
+                .unwrap_or(0);
+            panic!(
+                "the desktop's fixture is stale, from line {}:\n\
+                 \n  committed: {}\n  this run:  {}\n\
+                 \n({} lines committed, {} now)\n\
+                 \nRegenerate it, re-shoot the evidence, and commit both:\n\
+                 \n    UPDATE_SPECIMENS=1 cargo test -p ft-server specimens\n",
+                at + 1,
+                theirs.get(at).unwrap_or(&"<end of file>"),
+                mine.get(at).unwrap_or(&"<end of file>"),
+                theirs.len(),
+                mine.len(),
             );
         }
 
