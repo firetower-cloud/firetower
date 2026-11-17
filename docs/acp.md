@@ -172,14 +172,41 @@ Cursor account and are driven by hand:
 
 - **Desktop**, `desktop/e2e/cursor-live.mjs`. Run it against the Vite
   renderer, server and worker from one checkout, with an isolated Firetower
-  home and database. `FIRETOWER_E2E_SERVER` is the control plane's address and
-  `FIRETOWER_E2E_RENDERER` the renderer's origin — `127.0.0.1:4400` and
-  `http://localhost:5273` unless you say otherwise, which is where `firetower
-  serve --dev` and `pnpm --dir desktop dev` put them. The renderer's port is
-  flag-only: `desktop/vite.config.ts` hardcodes it with `strictPort`, so a
-  second one needs `pnpm --dir desktop dev -- --port <n>` and the variable to
-  match. `FIRETOWER_E2E_PASSWORD` is that server's administrator password,
-  and on a fresh database that is the one the first start printed — see below.
+  home and database.
+
+  **`FIRETOWER_E2E_SERVER` is the control plane's address, it is required, and
+  it has no default.** This run writes to whatever it is pointed at: it clears
+  the first administrator's forced password change over the API and it names
+  the organisation. The address it would otherwise have guessed —
+  `127.0.0.1:4400`, where `firetower serve --dev` listens — is a developer's
+  own control plane on any machine already running one, so the harness is told
+  its target or it refuses to start, exactly as it already refuses without
+  `FIRETOWER_E2E_PASSWORD`. Being wrong about a server you only read from
+  wastes a run; being wrong about this one replaces a real administrator's
+  password and names somebody's organisation.
+
+  Nor will it take a target it could not have created. `GET /api/v1/bootstrap`
+  is unauthenticated, creates nothing, and carries a `serverId` as soon as an
+  organisation has been named — which is what being set up means — so a server
+  that has one has been set up by somebody and is by definition not the fresh
+  backend this asks for. It is read before anything is sent and the refusal
+  names the organisation it found, which is what makes a mistyped port a
+  stopped run rather than a guess that happened to be wrong. For the same
+  reason a remote address must be `https`, with no fall back to plain http:
+  `probe.ts` tries http for the app because a laptop install has no
+  certificate and a person is reading the next screen, and nobody is reading
+  this one.
+
+  `FIRETOWER_E2E_RENDERER` is the renderer's origin, `http://localhost:5273`
+  unless you say otherwise, which is where `pnpm --dir desktop dev` puts it.
+  That port is flag-only and pnpm will not forward the flag:
+  `desktop/vite.config.ts` hardcodes it with `strictPort`, and `pnpm --dir
+  desktop dev -- --port <n>` runs `vite -- --port <n>` and binds 5273 anyway.
+  A second renderer needs `pnpm --dir desktop exec vite --port <n>
+  --strictPort`, and the variable to match.
+
+  `FIRETOWER_E2E_PASSWORD` is that server's administrator password, and on a
+  fresh database that is the one the first start printed — see below.
   With no other variable it checks installation only.
   `FIRETOWER_E2E_CONNECT=1` starts the provider sign-in and prints a
   short-lived approval URL to open in a browser signed in to the intended
@@ -207,9 +234,16 @@ So the only credential it needs is the one the server printed, once, at its
 first start — on **stderr**, and nowhere afterwards:
 
 ```sh
+FIRETOWER_E2E_SERVER=127.0.0.1:<your port> \
 FIRETOWER_E2E_PASSWORD=$(sed -n 's/^    password  //p' server.err) \
   node desktop/e2e/cursor-live.mjs
 ```
+
+The address is in there because there is nothing to leave it out of: the
+script refuses to run without it, and it refuses a server whose
+`/api/v1/bootstrap` says somebody has already set it up — so a stale port from
+the last stack stops the run instead of signing into the wrong Firetower and
+replacing its administrator's password.
 
 **Producing that password is still the caller's job; making it usable is
 not.** The script replaces it with itself over `POST /api/v1/auth/password` —
