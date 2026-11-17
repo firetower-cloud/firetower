@@ -692,8 +692,16 @@ pub fn plan(drop: &ProfileDrop, here: &Here) -> Result<ImportPlan, Refused> {
     })
 }
 
-/// The bounds. Every one names the limit it is, because a refusal that does not
-/// leaves somebody guessing which half of their drop to cut.
+/// The bounds.
+///
+/// **Every one names the limit it broke and then says what to do about it.**
+/// The first half is because a refusal that gives no figure leaves somebody
+/// guessing which half of their drop to cut. The second is the same bar every
+/// block is held to, and three of these were missing it — behind a test whose
+/// guard matched "drop" as a noun, so every refusal passed and the three that
+/// said nothing actionable looked exactly like the five that did.
+/// `every_refusal_says_what_to_do` is the version of that test that cannot be
+/// satisfied by a diagnosis.
 fn check(drop: &ProfileDrop) -> Result<(), Refused> {
     if drop.files.len() > MOST_FILES {
         return Err(Refused(format!(
@@ -706,7 +714,12 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
     let mut seen: BTreeSet<&str> = BTreeSet::new();
     for file in &drop.files {
         if file.path.trim().is_empty() {
-            return Err(Refused("a file in this drop has no name".into()));
+            return Err(Refused(
+                "a file in this drop has no path, so there is no saying which bundle it belongs \
+                 to. Send each file with the path it has inside the folder, or drop the folder \
+                 again."
+                    .into(),
+            ));
         }
         // One path, one file. Two rows for one path is a malformed request
         // rather than a bundle with a problem — there is no way to say which of
@@ -714,13 +727,15 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
         // order they arrived in.
         if !seen.insert(file.path.as_str()) {
             return Err(Refused(format!(
-                "`{}` is in this drop twice, so there is no saying which of the two to read",
+                "`{}` is in this drop twice, so there is no saying which of the two to read. \
+                 Send each path once, or unpack the archive and drop the folder it holds.",
                 briefly(&file.path)
             )));
         }
         if file.path.starts_with('/') || file.path.contains('\\') || file.path.contains("..") {
             return Err(Refused(format!(
-                "`{}` is not a path inside the folder that was dropped",
+                "`{}` is not a path inside the folder that was dropped. Drop the folder that \
+                 holds the bundles rather than something containing it.",
                 briefly(&file.path)
             )));
         }
@@ -1320,18 +1335,22 @@ fn resolve(
                 // create-only, so the two ways out are to name where the row
                 // already is — which only exists when it is in a directory —
                 // or to remove the line, which leaves it where it is.
+                // Each of the three ends in an instruction of its own rather
+                // than trailing off a clause, which is the shape every other
+                // block has: what is wrong, then what to do.
                 let ways_out = match theirs
                     .and_then(|slug| here.directories.iter().find(|d| d.slug == slug))
                 {
                     Some(dir) => format!(
-                        "it is in `{}`, so write `directory: {}` or remove the line.",
+                        "It is in `{}`. Write `directory: {}`, or remove the line and it stays \
+                         where it is.",
                         dir.name, dir.name
                     ),
-                    None if theirs.is_some() => "it is in a directory you cannot see, so remove \
-                                                 the line and it stays where it is."
+                    None if theirs.is_some() => "It is in a directory you cannot see. Remove the \
+                                                 line and it stays where it is."
                         .to_string(),
-                    None => "it is in your own space, which is what an absent `directory:` \
-                             means, so remove the line."
+                    None => "It is in your own space, which is what an absent `directory:` \
+                             means. Remove the line."
                         .to_string(),
                 };
                 out.push(PlanProblem::at(
@@ -1340,7 +1359,7 @@ fn resolve(
                     Some(Field::Directory.spelling().into()),
                     format!(
                         "this bundle is the profile `{}` and says `directory: {wrote}`, which \
-                         would move it. An import cannot move a profile, and {ways_out}",
+                         would move it. An import cannot move a profile. {ways_out}",
                         row.name
                     ),
                 ));
@@ -1530,7 +1549,7 @@ fn resolve(
                 key,
                 format!(
                     "{} profiles you can see are called `{wrote}`: {}. A profile delegates to \
-                     one of them, and a file has no way to say which: rename one of them in the \
+                     one of them, and a file has no way to say which. Rename one of them in the \
                      library, or remove the entry.",
                     many.len(),
                     many.iter()
@@ -4295,7 +4314,7 @@ mod tests {
         assert!(says.contains("`directory: Fstack`"), "{says}");
         assert!(says.contains("An import cannot move a profile"), "{says}");
         assert!(says.contains("your own space"), "{says}");
-        assert!(says.contains("remove the line"), "{says}");
+        assert!(says.contains("Remove the line."), "{says}");
         assert!(
             !says.contains("u/kevin"),
             "a path nobody types is not a sentence: {says}"
@@ -4317,7 +4336,7 @@ mod tests {
         .unwrap();
         let says = said(only(&plan));
         assert!(says.contains("`directory: House`"), "{says}");
-        assert!(says.contains("write `directory: Fstack`"), "{says}");
+        assert!(says.contains("Write `directory: Fstack`"), "{says}");
     }
 
     /// **An invalid value under `settings` blocks, listing what is accepted.**
@@ -4447,6 +4466,250 @@ mod tests {
             entry.warnings[0].says
         );
         assert!(codex.appliable);
+    }
+
+    // ── every refusal, not the ones somebody thought to look at ─────────
+
+    /// Every way `check` can refuse a whole drop.
+    ///
+    /// **An enum so the test below cannot be short of one.** `all()` is walked
+    /// from the first variant and `dropped()` is an exhaustive match, so a
+    /// bound added here does not compile until it has an input that trips it —
+    /// and the assertion then holds its sentence to the same bar as its
+    /// siblings. `the_enum_covers_every_refusal_in_the_source` is what keeps
+    /// the enum itself honest: a `Refused` added to `check` without a variant
+    /// here fails rather than passing unnoticed, which is how three refusals
+    /// with no instruction survived a round of fixing the other two.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    enum Bound {
+        Files,
+        Nameless,
+        Twice,
+        ClimbsOut,
+        LongPath,
+        Deep,
+        FileBytes,
+        DropBytes,
+    }
+
+    impl Bound {
+        fn then(self) -> Option<Self> {
+            Some(match self {
+                Self::Files => Self::Nameless,
+                Self::Nameless => Self::Twice,
+                Self::Twice => Self::ClimbsOut,
+                Self::ClimbsOut => Self::LongPath,
+                Self::LongPath => Self::Deep,
+                Self::Deep => Self::FileBytes,
+                Self::FileBytes => Self::DropBytes,
+                Self::DropBytes => return None,
+            })
+        }
+
+        fn all() -> Vec<Self> {
+            let mut out = vec![Self::Files];
+            while let Some(next) = out[out.len() - 1].then() {
+                out.push(next);
+            }
+            out
+        }
+
+        /// A drop that trips exactly this bound.
+        fn dropped(self) -> ProfileDrop {
+            let one = |path: &str, text: String| ProfileDrop {
+                files: vec![DroppedFile {
+                    path: path.into(),
+                    text,
+                }],
+                answers: vec![],
+            };
+            match self {
+                Self::Files => ProfileDrop {
+                    files: (0..MOST_FILES + 1)
+                        .map(|n| DroppedFile {
+                            path: format!("p{n}/PROFILE.md"),
+                            text: String::new(),
+                        })
+                        .collect(),
+                    answers: vec![],
+                },
+                Self::Nameless => one("   ", String::new()),
+                Self::Twice => ProfileDrop {
+                    files: vec![
+                        DroppedFile {
+                            path: "designer/PROFILE.md".into(),
+                            text: String::new(),
+                        },
+                        DroppedFile {
+                            path: "designer/PROFILE.md".into(),
+                            text: String::new(),
+                        },
+                    ],
+                    answers: vec![],
+                },
+                Self::ClimbsOut => one("../../etc/PROFILE.md", String::new()),
+                Self::LongPath => one(
+                    &format!("{}/PROFILE.md", "a".repeat(crate::skills::LONGEST_PATH)),
+                    String::new(),
+                ),
+                Self::Deep => one(
+                    &format!("{}designer/PROFILE.md", "a/".repeat(DEEPEST)),
+                    String::new(),
+                ),
+                Self::FileBytes => one("designer/PROFILE.md", "x".repeat(BIGGEST_FILE + 1)),
+                Self::DropBytes => ProfileDrop {
+                    files: (0..=BIGGEST_DROP / BIGGEST_FILE)
+                        .map(|n| DroppedFile {
+                            path: format!("p{n}/PROFILE.md"),
+                            text: "x".repeat(BIGGEST_FILE),
+                        })
+                        .collect(),
+                    answers: vec![],
+                },
+            }
+        }
+    }
+
+    /// Whether a sentence ends in something somebody can carry out.
+    ///
+    /// **The instruction has to be past the first clause.** The words overlap:
+    /// "drop" is a verb in "Drop fewer folders" and a noun in "this drop holds
+    /// 612 files", so a guard that looked anywhere in the sentence passed every
+    /// refusal in this file — including the three that said nothing actionable
+    /// at all. This is the stricter form, and it is what found them.
+    fn tells_somebody_what_to_do(says: &str) -> bool {
+        const DO: [&str; 12] = [
+            "Drop", "Send", "Unpack", "Split", "Remove", "Rename", "Write", "Put", "Shorten",
+            "Ask", "Pick", "Leave",
+        ];
+        let Some((_diagnosis, rest)) = says.split_once(". ") else {
+            return false;
+        };
+        // Any sentence past the first, not only the one right after it: a
+        // collision says what is wrong, why it cannot be delivered, and then
+        // what to do, and the middle sentence is not an instruction.
+        rest.split(". ")
+            .any(|sentence| DO.iter().any(|verb| sentence.starts_with(verb)))
+    }
+
+    /// **Every refusal says what to do about it**, over the whole set rather
+    /// than the ones somebody reproduced.
+    #[test]
+    fn every_refusal_says_what_to_do() {
+        for bound in Bound::all() {
+            let refused = plan(&bound.dropped(), &here(vec![]))
+                .expect_err(&format!("{bound:?} has to refuse the drop"));
+            assert!(
+                tells_somebody_what_to_do(&refused.0),
+                "{bound:?} stops at the diagnosis: {}",
+                refused.0
+            );
+            // And the diagnosis is still there: an instruction on its own is
+            // a sentence about nothing.
+            let (diagnosis, _) = refused.0.split_once(". ").expect("two halves");
+            assert!(diagnosis.len() > 20, "{bound:?}: {}", refused.0);
+        }
+    }
+
+    /// And [`Bound`] is not short of a refusal the source can emit.
+    ///
+    /// Reads this file rather than trusting the list, because the failure being
+    /// guarded against is somebody adding a ninth `Refused` to `check` and
+    /// nothing noticing. `include_str!` is the only way a test can ask that
+    /// question — the alternative is a convention in a comment, which is what
+    /// was there.
+    #[test]
+    fn the_enum_covers_every_refusal_in_the_source() {
+        let source = include_str!("import.rs");
+        // Spelled in pieces, because a needle written whole would be in the
+        // haystack: the first run of this counted nine sites for eight
+        // refusals, and the ninth was this line.
+        let sites = source.matches(concat!("Err(", "Refused(")).count();
+        assert_eq!(
+            sites,
+            Bound::all().len(),
+            "`check` has {sites} refusals and `Bound` names {}. Add the variant, and \
+             `dropped()` will not compile until it has an input that trips it.",
+            Bound::all().len()
+        );
+    }
+
+    /// The same bar for every **block** a bundle can carry, over drops whose
+    /// files all parse — so every problem in them is this module's own and not
+    /// the codec's, whose copy belongs to #353.
+    #[test]
+    fn every_block_this_module_raises_says_what_to_do() {
+        let mut library = here(vec![row("r1", "Designer", Some("designer"))]);
+        library.directories = vec![folder("Fstack", true), folder("Locked", false)];
+        library.skills = vec![
+            skill("sk1", "dataviz", "d/fstack/dataviz"),
+            skill("sk2", "dataviz", "d/locked/dataviz"),
+        ];
+        library.accounts = vec![subscription("aa1", "Personal", "Codex")];
+        library.machines = vec![machine("h1", "Mac-Studio"), machine("h2", "mac-studio")];
+        library.retired = vec![machine("h3", "this-mac")];
+        library.profiles.push(row("r2", "QA", None));
+        let mut other = row("r3", "QA", Some("qa-2"));
+        other.path = "u/kevin/qa_01m7nfq4".into();
+        library.profiles.push(other);
+
+        let bad = [
+            // Resolution, one condition per file.
+            "name: One\ndoes: x\nmachine: nowhere\n",
+            "name: Two\ndoes: x\nmachine: mac-studio\n",
+            "name: Three\ndoes: x\nmachine: this-mac\n",
+            "name: Four\ndoes: x\naccount: Personal\n",
+            "name: Five\ndoes: x\nengine: ClaudeCode\naccount: Personal\n",
+            "name: Six\ndoes: x\nengine: ClaudeCode\naccount: Nothing\n",
+            "name: Seven\ndoes: x\ndirectory: Nowhere\n",
+            "name: Eight\ndoes: x\ndirectory: Locked\n",
+            "name: Nine\ndoes: x\nskills:\n  - nothing\n",
+            "name: Ten\ndoes: x\nskills:\n  - dataviz\n",
+            "name: Eleven\ndoes: x\nskills:\n  - nowhere/dataviz\n",
+            "name: Twelve\ndoes: x\nskills:\n  - fstack/nothing\n",
+            "name: Thirteen\ndoes: x\nskills:\n  - fstack/dataviz\n  - locked/dataviz\n",
+            "name: Fourteen\ndoes: x\ndelegates_to:\n  - Nobody\n",
+            "name: Fifteen\ndoes: x\ndelegates_to:\n  - QA\n",
+            "name: Sixteen\ndoes: x\ndelegates_to:\n  - Sixteen\n",
+            "name: Seventeen\ndoes: x\nengine: ClaudeCode\nsettings:\n  effort: maximum\n",
+            // A profile that is already here, moved by a file that cannot
+            // move it.
+            "name: Designer\ndoes: x\ndirectory: Fstack\n",
+        ];
+        let mut seen = 0;
+        for (n, frontmatter) in bad.iter().enumerate() {
+            let key = if n == bad.len() - 1 {
+                "designer".to_string()
+            } else {
+                format!("b{n}")
+            };
+            let plan = plan(
+                &dropped(vec![at(
+                    &format!("{key}/PROFILE.md"),
+                    frontmatter,
+                    "Instructions.\n",
+                )]),
+                &library,
+            )
+            .unwrap();
+            let entry = only(&plan);
+            let PlanOutcome::Blocked(blocked) = &entry.outcome else {
+                panic!("`{key}` was expected to block: {:#?}", entry.outcome)
+            };
+            for problem in &blocked.problems {
+                assert!(
+                    tells_somebody_what_to_do(&problem.says),
+                    "`{key}` stops at the diagnosis: {}",
+                    problem.says
+                );
+                seen += 1;
+            }
+        }
+        assert!(
+            seen >= bad.len(),
+            "{seen} problems from {} drops",
+            bad.len()
+        );
     }
 
     /// The limits travel with the plan, so a client can refuse before it asks
