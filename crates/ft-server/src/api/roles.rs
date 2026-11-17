@@ -804,6 +804,9 @@ mod tests {
         let designer = made(&state, &admin, &asked_for("Designer")).await;
         let mut new = asked_for("Engineering Manager");
         new.delegate_scope = vec![designer.clone(), "role_deleted".into()];
+        // The same for a skill, which is the other `text[]` with no foreign key
+        // behind it — and the one `Skills::which_exist` answers for.
+        new.skill_scope = vec!["skill_deleted".into()];
         let id = made(&state, &admin, &new).await;
 
         let Json(file) = export_role(State(state), Extension(admin), Path(id))
@@ -811,6 +814,8 @@ mod tests {
             .expect("a stale id is not a reason to refuse a file");
         assert!(file.text.contains("- Designer"), "{}", file.text);
         assert!(!file.text.contains("role_deleted"), "{}", file.text);
+        assert!(file.text.contains("skills: []"), "{}", file.text);
+        assert!(!file.text.contains("skill_deleted"), "{}", file.text);
     }
 
     /// **A machine no list offers is still a machine with a name.**
