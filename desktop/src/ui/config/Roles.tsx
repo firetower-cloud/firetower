@@ -404,13 +404,17 @@ export function toDraft(r: Role): Settled {
  *
  * The server owns every one of them: four are identity or timestamps, two are
  * the answers to "may I" that the request is checked against rather than told,
- * and `isDefault` is set by its own endpoint so that setting one profile's can
- * unset another's. Exported for `role-draft.test.ts`, which treats anything
- * absent from a draft and absent from here as a field somebody forgot.
+ * `isDefault` is set by its own endpoint so that setting one profile's can
+ * unset another's, and `key` is written only by an import adopting the folder
+ * name a bundle came from — an editor that could change it would be an editor
+ * that can make one file describe a different profile. Exported for
+ * `role-draft.test.ts`, which treats anything absent from a draft and absent
+ * from here as a field somebody forgot.
  */
 export const SERVER_OWNED = [
   "id",
   "path",
+  "key",
   "createdAt",
   "updatedAt",
   "mayWrite",

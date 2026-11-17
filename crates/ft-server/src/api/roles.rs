@@ -9,7 +9,7 @@ use super::access::whoever;
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::access::Level;
 use crate::auth::Principal;
-use crate::roles::{NewRole, Role};
+use crate::roles::{import, NewRole, Role};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -301,4 +301,98 @@ pub(super) async fn delete_role(
         return Err(ApiError::not_found("role"));
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ── importing a folder of bundles ───────────────────────────────────────
+
+/// What this person can see, as the plan's resolution is allowed to know it.
+///
+/// **Six reads, every one of them already filtered**, which is the whole of the
+/// arrangement: `roles::visible`, `db::hosts_for`, `accounts::spendable`,
+/// `access::directories_for` and `skills::visible` each paste
+/// `access::filed_where` through their own query, so nothing reaches
+/// `import::plan` that the asker could not already list through an endpoint
+/// they have. Resolution therefore cannot distinguish "that does not exist"
+/// from "you may not have that" — it never learns the difference.
+///
+/// Subscriptions are read at **Editor** (`spendable`), not Viewer, and that is
+/// deliberate: a profile naming one spends somebody's quota, which is the bar
+/// `usable` and `check_account` already set on the write path. A plan that
+/// resolved a subscription the apply would then refuse has offered a choice
+/// that was never there.
+async fn visible_to(state: &AppState, me: &crate::accounts::User) -> ApiResult<import::Here> {
+    let who = me.id.as_str();
+    Ok(import::Here {
+        me: import::Who {
+            id: who.to_string(),
+            slug: me.slug.clone(),
+        },
+        profiles: state.roles.visible(who, Level::Viewer).await?,
+        machines: state
+            .db
+            .hosts_for(who, Level::Viewer)
+            .await?
+            .into_iter()
+            .map(|h| import::Named {
+                id: h.id.as_str().to_string(),
+                name: h.name,
+            })
+            .collect(),
+        accounts: super::accounts::spendable(state, who)
+            .await?
+            .into_iter()
+            .map(|a| import::Subscription {
+                id: a.id,
+                name: a.name,
+                engine: a.kind,
+            })
+            .collect(),
+        directories: state
+            .access
+            .directories_for(who)
+            .await?
+            .into_iter()
+            .map(|d| import::Dir {
+                may_write: matches!(d.level, Some(level) if level >= Level::Writer),
+                id: d.id.as_str().to_string(),
+                name: d.name,
+                slug: d.slug,
+            })
+            .collect(),
+        skills: state
+            .skills
+            .visible(who, Level::Viewer)
+            .await?
+            .into_iter()
+            .map(|s| import::SkillHere {
+                id: s.id.as_str().to_string(),
+                name: s.name,
+                path: s.path,
+            })
+            .collect(),
+    })
+}
+
+/// What a dropped folder of profile bundles would do.
+///
+/// **Read-only, with no exceptions.** It takes the files, says what each one is
+/// against the library, and writes nothing — see `roles::import` for why the
+/// plan it returns cannot be used as a capability by the apply (#356).
+#[utoipa::path(
+    post, path = "/api/v1/roles/import/plan", tag = "roles",
+    request_body = import::ProfileDrop,
+    responses(
+        (status = 200, body = import::ImportPlan),
+        (status = 400, body = ApiError),
+        (status = 401, body = ApiError),
+    ),
+)]
+pub(super) async fn plan_role_import(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(dropped): Json<import::ProfileDrop>,
+) -> ApiResult<Json<import::ImportPlan>> {
+    let me = whoever(&principal)?;
+    let here = visible_to(&state, me).await?;
+    import::plan(&dropped, &here).map(Json).map_err(refused)
 }

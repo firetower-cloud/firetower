@@ -17,6 +17,9 @@ use utoipa::ToSchema;
 
 use crate::access::{filed_where, Level};
 
+pub mod import;
+pub mod profile_md;
+
 /// "May this person move this role" as a SQL predicate: it is in their own
 /// space, or they administer the directory it is in, or they administer the
 /// organisation. The same answer `skills.rs` computes for a skill; kept local
@@ -70,6 +73,13 @@ pub struct Role {
     pub id: String,
     pub path: String,
     pub name: String,
+    /// The key its author gave it: the name of the folder its `PROFILE.md` sits
+    /// in. Absent on every profile made in the interface, which is all of them
+    /// until an import adopts one — see
+    /// `migrations/server/20261117120000_profile_key.sql` for why `slug` cannot
+    /// serve.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
     /// What it does and when to reach for it — the one line a lead reads to
     /// decide whether to hand it work, the way a skill's `description` is read.
     pub does: String,
@@ -463,7 +473,7 @@ fn nonblank(s: &Option<String>) -> Option<&str> {
     s.as_deref().filter(|v| !v.trim().is_empty())
 }
 
-const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.does, \
+const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.author_key, r.does, \
                       r.placement, r.agent, r.host_id, r.agent_account_id, \
                       r.pref_model, r.pref_effort, r.pref_mode, r.pref_sandbox, r.instructions, \
                       r.can_delegate, r.delegate_scope, r.skill_scope, \
@@ -479,6 +489,7 @@ fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
         // way it reads a skill's rather than seeing `d.backend.x` and giving up.
         path: ft_core::ResourcePath::from_stored(row.get::<String, _>("path")).to_string(),
         name: row.get("name"),
+        key: row.get("author_key"),
         does: row.get("does"),
         placement: row.get("placement"),
         agent: row.get("agent"),
@@ -756,6 +767,7 @@ mod tests {
             id: "role_x".into(),
             path: "u/kevin/reviewer".into(),
             name: "reviewer".into(),
+            key: None,
             does: "reviews a branch".into(),
             placement: "here".into(),
             agent: Some("ClaudeCode".into()),

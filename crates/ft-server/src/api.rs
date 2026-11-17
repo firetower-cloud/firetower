@@ -435,6 +435,8 @@ async fn credential_on(
     components(schemas(
         crate::roles::Role,
         crate::roles::NewRole,
+        crate::roles::import::ProfileDrop,
+        crate::roles::import::ImportPlan,
         crate::db::Bucket,
         crate::db::Dimension,
         crate::db::Direction,
@@ -652,6 +654,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(roles::list_roles, roles::create_role))
         .routes(routes!(roles::update_role, roles::delete_role))
         .routes(routes!(roles::set_default_role))
+        .routes(routes!(roles::plan_role_import))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))

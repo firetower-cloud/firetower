@@ -38,6 +38,7 @@ import { SERVER_OWNED, toDraft } from "./Roles";
 const EVERY_FIELD: Role & Record<keyof Role, unknown> = {
   id: "role_1",
   path: "d/firetower/reviewer",
+  key: "reviewer",
   name: "Reviewer",
   does: "reads a branch and reports problems",
   placement: "new",

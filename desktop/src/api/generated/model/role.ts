@@ -58,6 +58,15 @@ export interface Role {
      */
   isDefault: boolean;
   /**
+     * The key its author gave it: the name of the folder its `PROFILE.md` sits
+     * in. Absent on every profile made in the interface, which is all of them
+     * until an import adopts one — see
+     * `migrations/server/20261117120000_profile_key.sql` for why `slug` cannot
+     * serve.
+     * @nullable
+     */
+  key?: string | null;
+  /**
      * The machine its own workspace runs on, by host id, or absent to let the
      * lead choose. Meaningful only when `placement` is `new`.
      * @nullable

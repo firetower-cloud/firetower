@@ -635,7 +635,7 @@ const CLAUDE_CODE_BREAKS: [char; 2] = ['\n', '\r'];
 /// What a YAML 1.1 reader ends one on: **all five.** libyaml's `IS_BREAK_AT`,
 /// and so `serde_yaml` and pyyaml's `CSafeLoader`, both of which read an
 /// injected `allowed-tools` out of a single line.
-const YAML_1_1_BREAKS: [char; 5] = ['\n', '\r', '\u{0085}', '\u{2028}', '\u{2029}'];
+pub(crate) const YAML_1_1_BREAKS: [char; 5] = ['\n', '\r', '\u{0085}', '\u{2028}', '\u{2029}'];
 
 /// Every character some reader here ends a line on that this one does not.
 ///
