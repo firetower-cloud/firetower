@@ -4,6 +4,17 @@
  * Start the desktop Vite renderer and a Firetower server with a real database,
  * then set FIRETOWER_E2E_PASSWORD and run `node desktop/e2e/cursor-live.mjs`.
  * No API route is mocked. The provider sign-in itself needs browser approval.
+ *
+ * **A fresh database is the condition this is run under**, and a fresh
+ * database holds a sign-in behind two gates before the app is drawn: the
+ * first administrator's password is temporary, and the server is not set up
+ * until an organisation is named. Both are passed on the way in — the
+ * password over the API, which is the only place it can be replaced, and the
+ * wizard by going through it — so FIRETOWER_E2E_PASSWORD can be the password
+ * the server printed at its first start with nothing done to it by hand.
+ *
+ * What a fresh database cannot give back is a machine, and an agent is
+ * installed on one. See `docs/acp.md`.
  */
 import assert from "node:assert/strict";
 import { mkdir, readdir, readFile, access } from "node:fs/promises";
@@ -13,10 +24,75 @@ import { promisify } from "node:util";
 import { chromium } from "playwright-core";
 
 const server = process.env.FIRETOWER_E2E_SERVER ?? "127.0.0.1:4400";
-const renderer = process.env.FIRETOWER_E2E_RENDERER ?? "http://127.0.0.1:5281";
+// `desktop/vite.config.ts` hardcodes this port with `strictPort`, so a plain
+// `pnpm --dir desktop dev` is what this default expects.
+const renderer = process.env.FIRETOWER_E2E_RENDERER ?? "http://localhost:5273";
 const password = process.env.FIRETOWER_E2E_PASSWORD;
 const output = process.env.FIRETOWER_E2E_OUTPUT ?? "/tmp/firetower-cursor-playwright";
 if (!password) throw new Error("Set FIRETOWER_E2E_PASSWORD for the isolated server");
+
+/**
+ * The control plane's own origin, settled on the way the app settles on it.
+ *
+ * `desktop/src/probe.ts` adds a scheme to a bare address — https first,
+ * except for a loopback address, which is never https — and keeps whichever
+ * answers `/api/v1/bootstrap`. Finding it the same way is what keeps the one
+ * call below pointed at the same server the window is talking to.
+ */
+const candidates = (() => {
+  const raw = server.trim().replace(/\/+$/, "");
+  if (/^https?:\/\//i.test(raw)) return [raw];
+  if (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(raw)) return [`http://${raw}`];
+  return [`https://${raw}`, `http://${raw}`];
+})();
+let control;
+for (const url of candidates) {
+  const answered = await fetch(`${url}/api/v1/bootstrap`).then((r) => r.ok, () => false);
+  if (answered) {
+    control = url;
+    break;
+  }
+}
+if (!control) throw new Error(`Nothing answered as a Firetower at ${server}`);
+
+/** One call to the control plane, for what the app cannot do or cannot say. */
+const call = async (path, body, token) => {
+  const answer = await fetch(`${control}${path}`, {
+    method: body ? "POST" : "GET",
+    headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const said = await answer.json().catch(() => null);
+  if (!answer.ok) throw new Error(`${path} answered ${answer.status}: ${said?.message ?? "no message"}`);
+  return said;
+};
+
+/**
+ * **The password gate**, cleared before the window is opened.
+ *
+ * The first administrator's password is temporary (`must_change_password`),
+ * and the app deliberately carries no form to replace it — `ReplacePassword`
+ * points at a browser instead, so a sign-in that meets this stops dead. It is
+ * replaced over the API, which is one of the four calls a locked account may
+ * still make (`auth.rs`), with the same password: what stands in the way is
+ * the flag, not the secret, and a harness that invented a second credential
+ * would hand its caller back a server it can no longer sign in to.
+ */
+let { token, user } = await call("/api/v1/auth/login", { username: "admin", password });
+if (user.mustChangePassword) {
+  ({ token } = await call("/api/v1/auth/password", { current: password, new: password }, token));
+  console.log("PASS: replaced the first administrator's temporary password");
+}
+
+/**
+ * **The setup gate**, asked of the server rather than read off the screen.
+ *
+ * `Gate.tsx` draws the wizard until `/api/v1/setup` reports completed — but
+ * it draws the app while its two questions are still in flight, so a wait
+ * that races the screen walks straight past a gate that is about to appear.
+ * The server's answer is the one that cannot be early.
+ */
+const outstanding = await call("/api/v1/setup", undefined, token);
 
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({ headless: true });
@@ -27,17 +103,50 @@ try {
   page.on("pageerror", (error) => failures.push(error.message));
   await page.goto(renderer);
   await page.getByPlaceholder("ft-e1.tail9c2b.ts.net").fill(server);
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
+
   await page.getByPlaceholder("Username").fill("admin");
   await page.getByPlaceholder("Password", { exact: true }).fill(password);
-  await page.getByRole("button", { name: "Sign in" }).click();
-  await page.getByText("Configuration", { exact: true }).click();
-  await page.getByText("Agents", { exact: true }).click();
-  await page.getByText("Cursor Agent", { exact: true }).click();
-  if (await page.getByRole("button", { name: "Install", exact: true }).isVisible()) {
-    await page.getByRole("button", { name: "Install", exact: true }).click();
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+
+  // The wizard, which the app itself carries, and the rail behind it.
+  const naming = page.getByRole("heading", { name: "Name this Firetower" });
+  const finishing = page.getByRole("button", { name: "Open Firetower", exact: true });
+  const inside = page.getByRole("navigation", { name: "Destinations" });
+
+  if (!outstanding.completed) {
+    await naming.or(finishing).first().waitFor({ timeout: 30_000 });
+    if (await naming.isVisible()) {
+      await page.getByPlaceholder("Westlabs").fill("Cursor Playwright");
+      await page.getByRole("button", { name: "Continue", exact: true }).click();
+      await finishing.waitFor({ timeout: 30_000 });
+    }
+    await finishing.click();
+    console.log("PASS: finished setting up a server nobody had set up");
   }
-  await page.getByRole("button", { name: "Reinstall", exact: true }).waitFor({ timeout: 120_000 });
+  await inside.waitFor({ timeout: 30_000 });
+
+  await page.getByRole("button", { name: "Customize", exact: true }).click();
+  await page.getByRole("button", { name: "Agents", exact: true }).click();
+  await page.getByText("Cursor Agent", { exact: true }).click();
+  const install = page.getByRole("button", { name: "Install", exact: true }).first();
+  const reinstall = page.getByRole("button", { name: "Reinstall", exact: true }).first();
+  // An agent is installed *on a machine*, so `config/Agents.tsx` draws one of
+  // these per machine and a server with none has neither. Said plainly rather
+  // than waited for: a fresh database has no machine, and a two-minute wait
+  // for a control that cannot appear is the failure this script was taught to
+  // avoid on the way in. The message names the way out, because a fresh
+  // database is the documented condition for this run and this prerequisite
+  // is the one thing dropping the database cannot give back.
+  await install.or(reinstall).first().waitFor({ timeout: 30_000 }).catch(() => {
+    throw new Error(
+      "No machine to install the Cursor agent on, and an agent is installed on one — a fresh database has none. " +
+        "Add a machine first: an Alpine sshd container is the cheapest one that is not your own laptop, and " +
+        "firetower-cloud/firetower#332 has the measured recipe. See docs/acp.md.",
+    );
+  });
+  if (await install.isVisible()) await install.click();
+  await reinstall.waitFor({ timeout: 120_000 });
   if (process.env.FIRETOWER_E2E_TASKS === "1") {
     await page.getByText("2026.09.28-64d2043", { exact: false }).waitFor();
   }
