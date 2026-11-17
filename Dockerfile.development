@@ -13,12 +13,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Node for the interface, pinned by the same version the lockfile expects.
+#
+# pnpm from npm rather than `corepack enable`, which is what this used to do
+# and could not run a single command here. Corepack resolves `packageManager`
+# from the working directory — the repository root, which has no package.json —
+# so it fetched its own newest pnpm, and that pnpm then refused to touch `web/`:
+#
+#   × This project is configured to use 11.21.0 of pnpm. Your current pnpm is
+#   │ v12.21.0 ... pnpm does not switch versions when running under corepack.
+#
+# pnpm installed on its own does switch, reading `web/package.json` as a
+# standalone pnpm on a contributor's machine does. So the version still comes
+# from the lockfile's side of the repository and never from this file.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* \
-    && corepack enable
+    && npm install -g pnpm
 
-RUN cargo install just --locked
+# cargo-watch as well as just: `just dev` is what this image runs and it
+# rebuilds the control plane on save. Without it the container got as far as
+# starting and then said `cargo watch` was not a cargo subcommand — and
+# `just doctor`, which asks for it by name, reported it missing in here.
+RUN cargo install just cargo-watch --locked
 
 WORKDIR /workspace
 
