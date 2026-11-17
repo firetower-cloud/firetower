@@ -16,6 +16,5 @@ export const ProposalWhy = {
   name: 'name',
   nearName: 'nearName',
   likeName: 'likeName',
-  otherKey: 'otherKey',
   sameKey: 'sameKey',
 } as const;

@@ -323,10 +323,6 @@ pub(super) async fn delete_role(
 async fn visible_to(state: &AppState, me: &crate::accounts::User) -> ApiResult<import::Here> {
     let who = me.id.as_str();
     Ok(import::Here {
-        me: import::Who {
-            id: who.to_string(),
-            slug: me.slug.clone(),
-        },
         profiles: state.roles.visible(who, Level::Viewer).await?,
         machines: state
             .db
@@ -395,4 +391,306 @@ pub(super) async fn plan_role_import(
     let me = whoever(&principal)?;
     let here = visible_to(&state, me).await?;
     import::plan(&dropped, &here).map(Json).map_err(refused)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::Principal;
+    use crate::roles::import::{DroppedFile, PlanOutcome, ProfileDrop};
+    use std::sync::Arc;
+
+    /// A signed-in owner and the state to call handlers with — the arrangement
+    /// `artifacts.rs` uses, without a worker: nothing here reaches a machine.
+    async fn fixture() -> (AppState, Principal, String) {
+        let (db, who) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let user = accounts.user_by_name("admin").await.unwrap().unwrap();
+        let principal = Principal {
+            subject: "admin".into(),
+            via: crate::auth::Via::Session,
+            user: Some(user),
+        };
+        let fleet = crate::fleet::Fleet::new(db.clone());
+        let vault = Arc::new(crate::vault::Vault::new(
+            db.pool().clone(),
+            crate::vault::crypto::RootKey::generate(),
+        ));
+        let names = crate::preview::Names::from_vault(&vault);
+        let connections = crate::providers::Connections::opened(db.pool().clone())
+            .await
+            .unwrap();
+        (
+            AppState {
+                skills: crate::skills::Skills::new(db.pool().clone()),
+                roles: crate::roles::Roles::new(db.pool().clone()),
+                updates: crate::updates::Updates::new(db.pool().clone()),
+                policy: crate::auth::Policy::open(),
+                access: crate::access::Access::new(db.pool().clone()),
+                connections,
+                db,
+                accounts,
+                fleet,
+                vault,
+                names,
+                key_source: "test".into(),
+                home: std::env::temp_dir(),
+                pending: Default::default(),
+                renewals: Default::default(),
+                forwards: Default::default(),
+                previews: Default::default(),
+                public_url: "http://localhost:3000".into(),
+            },
+            principal,
+            who,
+        )
+    }
+
+    fn bundle(key: &str, name: &str) -> DroppedFile {
+        DroppedFile {
+            path: format!("profiles/{key}/PROFILE.md"),
+            text: format!("---\nname: {name}\ndoes: does the thing\n---\n\nInstructions.\n"),
+        }
+    }
+
+    fn plan_for(files: Vec<DroppedFile>) -> ProfileDrop {
+        ProfileDrop {
+            files,
+            answers: vec![],
+        }
+    }
+
+    /// Every row of `roles`, as a fingerprint — so "writes nothing" can be
+    /// asserted against the table rather than against the absence of a call.
+    async fn every_row(state: &AppState) -> Vec<(String, String, Option<String>, String)> {
+        sqlx::query_as("SELECT id, name, author_key, updated_at::text FROM roles ORDER BY id")
+            .fetch_all(state.db.pool())
+            .await
+            .unwrap()
+    }
+
+    /// **The property with no exceptions.** A plan that would create one
+    /// profile and overwrite another leaves the table exactly as it was.
+    #[tokio::test]
+    async fn the_plan_endpoint_writes_nothing() {
+        let (state, principal, _who) = fixture().await;
+        let made = create_role(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Json(NewRole {
+                name: "Designer".into(),
+                does: "designs".into(),
+                placement: "lead".into(),
+                agent: None,
+                machine: None,
+                account: None,
+                settings: Default::default(),
+                instructions: String::new(),
+                on_usage_limit: None,
+                on_child_limit: None,
+                can_delegate: false,
+                delegate_scope: vec![],
+                include_always_on: None,
+                include_repo_defaults: None,
+                skill_scope: vec![],
+                directory: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(made.0, StatusCode::CREATED);
+
+        let before = every_row(&state).await;
+        assert_eq!(before.len(), 1);
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Json(plan_for(vec![
+                bundle("designer", "Designer"),
+                bundle("engineer", "Engineer"),
+            ])),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        // It said it would overwrite the one that is here and create the one
+        // that is not...
+        let kinds: Vec<(&str, &str)> = plan
+            .entries
+            .iter()
+            .map(|e| {
+                (
+                    e.key.as_str(),
+                    match e.outcome {
+                        PlanOutcome::New(_) => "new",
+                        PlanOutcome::Overwrite(_) => "overwrite",
+                        PlanOutcome::Rename(_) => "rename",
+                        PlanOutcome::Blocked(_) => "blocked",
+                        PlanOutcome::Candidate(_) => "candidate",
+                    },
+                )
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [("designer", "overwrite"), ("engineer", "new")],
+            "{:#?}",
+            plan.entries
+        );
+        assert!(plan.appliable);
+
+        // ...and did neither.
+        assert_eq!(every_row(&state).await, before);
+    }
+
+    /// The column, against the index that holds it: unique within the parent
+    /// path, and every existing row's null colliding with nothing.
+    #[tokio::test]
+    async fn a_key_is_unique_within_its_parent_and_nulls_never_collide() {
+        let (state, _principal, who) = fixture().await;
+        let org = state.db.org().await.unwrap();
+        async fn mine(
+            state: &AppState,
+            org: &str,
+            who: &str,
+            path: &str,
+            key: Option<&str>,
+        ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+            sqlx::query(
+                "INSERT INTO roles (id, org_id, path, created_by, name, slug, does, author_key) \
+                 VALUES ($1, $2, $3::ltree, $4, 'Designer', $1, 'designs', $5)",
+            )
+            .bind(ft_core::RoleId::new().as_str())
+            .bind(org)
+            .bind(path)
+            .bind(who)
+            .bind(key)
+            .execute(state.db.pool())
+            .await
+        }
+        let mine = |path: &'static str, key: Option<&'static str>| {
+            let (state, org, who) = (&state, org.as_str(), who.as_str());
+            async move { mine(state, org, who, path, key).await }
+        };
+
+        mine("u.kevin.designer_1", Some("designer")).await.unwrap();
+        // The same key, in somebody else's space: the ordinary case, and the
+        // whole reason the index is per parent rather than per installation.
+        mine("u.ana.designer_2", Some("designer")).await.unwrap();
+        // ...and in the same space, refused.
+        let again = mine("u.kevin.designer_3", Some("designer")).await;
+        assert!(
+            again.is_err_and(|e| e
+                .as_database_error()
+                .is_some_and(|db| db.is_unique_violation())),
+            "a second `designer` in one space has to be refused"
+        );
+        // Every row that predates the format is null, and nulls are distinct.
+        mine("u.kevin.a_1", None).await.unwrap();
+        mine("u.kevin.b_1", None).await.unwrap();
+    }
+
+    /// A key written onto a row is read back as the identity: the plan matches
+    /// by it, and does not ask about the name.
+    #[tokio::test]
+    async fn a_row_that_carries_a_key_is_matched_by_it_and_not_by_its_name() {
+        let (state, principal, who) = fixture().await;
+        let org = state.db.org().await.unwrap();
+        let id = ft_core::RoleId::new();
+        sqlx::query(
+            "INSERT INTO roles (id, org_id, path, created_by, name, slug, does, author_key) \
+             VALUES ($1, $2, ('u.' || (SELECT slug FROM principals WHERE id = $3) || \
+             '.designer_x')::ltree, $3, 'Something Else', $1, 'designs', 'designer')",
+        )
+        .bind(id.as_str())
+        .bind(&org)
+        .bind(&who)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(principal),
+            Json(plan_for(vec![bundle("designer", "Designer")])),
+        )
+        .await
+        .unwrap()
+        .0;
+        let PlanOutcome::Rename(renamed) = &plan.entries[0].outcome else {
+            panic!("expected a rename, got {:#?}", plan.entries[0].outcome)
+        };
+        assert_eq!(renamed.from, "Something Else");
+        assert_eq!(renamed.to, "Designer");
+        assert_eq!(renamed.profile.key.as_deref(), Some("designer"));
+        assert!(!renamed.adopts_key, "it already had one");
+    }
+
+    /// **Visibility filters before resolution.** A colleague's profile of the
+    /// same name is not matched, not proposed, and not mentioned — the plan
+    /// cannot tell the asker that it exists, because it never saw it.
+    #[tokio::test]
+    async fn a_colleagues_profile_of_the_same_name_is_neither_matched_nor_named() {
+        let (state, principal, _who) = fixture().await;
+        let org = state.db.org().await.unwrap();
+        let them = state
+            .accounts
+            .create_user(
+                &ft_core::OrgId::from_stored(org.clone()),
+                "them",
+                "them@example.test",
+                "member",
+            )
+            .await
+            .unwrap()
+            .0;
+        let theirs = state
+            .roles
+            .create(
+                &org,
+                them.id.as_str(),
+                &them.slug,
+                &NewRole {
+                    name: "Designer".into(),
+                    does: "designs".into(),
+                    placement: "lead".into(),
+                    agent: None,
+                    machine: None,
+                    account: None,
+                    settings: Default::default(),
+                    instructions: String::new(),
+                    on_usage_limit: None,
+                    on_child_limit: None,
+                    can_delegate: false,
+                    delegate_scope: vec![],
+                    include_always_on: None,
+                    include_repo_defaults: None,
+                    skill_scope: vec![],
+                    directory: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(principal),
+            Json(plan_for(vec![bundle("designer", "Designer")])),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(
+            matches!(plan.entries[0].outcome, PlanOutcome::New(_)),
+            "{:#?}",
+            plan.entries[0].outcome
+        );
+        let drawn = serde_json::to_string(&plan).unwrap();
+        assert!(
+            !drawn.contains(theirs.as_str()),
+            "the plan named a profile the asker cannot see"
+        );
+    }
 }
