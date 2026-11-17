@@ -23,6 +23,7 @@ import { createContext, Fragment, useContext, useEffect, useLayoutEffect, useMem
 import { navigate } from "~/shims/next-navigation";
 import {
   AlertTriangle,
+  ArrowDown,
   Bot,
   Check,
   ChevronRight,
@@ -46,6 +47,7 @@ import {
 } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { HostMark, Icon } from "~/components/ui";
+import { Signal } from "~/components/Signal";
 import { useHostOf, useMachineGone } from "~/data";
 import { Markdown } from "~/components/Markdown";
 import { editFrom } from "~/components/EditCard";
@@ -53,7 +55,7 @@ import { stepLines } from "~/components/Steps";
 import { delegating, useConversation, type Asked, type Item, type Questionnaire, type Task } from "~/api/conversation";
 import { delegated, fold, mainline, summarise } from "~/api/steps";
 import { relays, type Relay } from "~/api/relay";
-import type { Artifact as ArtifactModel, Decision, Event, ItemKind, PlanStep, RequestKind, Session } from "~/api/generated/model";
+import type { Artifact as ArtifactModel, Decision, Event, ItemKind, PlanStep, RequestKind, Session, SessionStatus } from "~/api/generated/model";
 import { useAnswerRequest, useRelaunchSession, getGetSessionQueryKey, sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage, useNotes, type Note } from "~/api/notes";
 import { forgetCheckout, landed, refused, settled, useCheckouts, type Run } from "~/api/checkouts";
@@ -62,6 +64,7 @@ import { elapsed, minutesSince } from "~/api/view";
 import { Composer } from "~/ui/Composer";
 import { why } from "~/data";
 import { Dropping, type Hand } from "~/ui/attach";
+import { atEnd, back, below, DUR, follows, swift } from "~/ui/follow";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { AccountSwitcher } from "~/ui/AccountSwitcher";
 import { Annotate, type Anchor } from "~/ui/Annotate";
@@ -118,6 +121,9 @@ function what(asked: Asked): string {
   return JSON.stringify(asked.args ?? {}, null, 2);
 }
 
+/** Whether the window has been asked to hold still. */
+const unmoving = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 type Open = { onOpenDiff: () => void; onOpenFile: (path: string, keep?: boolean, line?: number) => void };
 
 export function Chat({
@@ -140,7 +146,20 @@ export function Chat({
   const mentionable = useMemo(() => ({ artifacts, open: onOpenArtifact }), [artifacts, onOpenArtifact]);
   const scroller = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
+  /* Whether the end of the transcript is being followed. Intent, not
+     proximity: see `ui/follow.ts` for the rule and what it replaced. */
   const following = useRef(true);
+  /* Where the scroller was the last time anybody looked — a scroll event, or
+     one of this file's own writes, read back after the browser clamped it.
+     The rule reads the *sign* of the movement since, so this is what tells a
+     hand from one of this file's own pins. */
+  const at = useRef(0);
+  /* The pill's travel, while it is in flight: the frame it is waiting on, or
+     0. Everything that looks at a scroll stands down while this is set. */
+  const jumping = useRef(0);
+  /* Far enough up for the pill to be worth having. The one piece of this that
+     is drawn, so the one piece that is state. */
+  const [away, setAway] = useState(false);
   /* The sentinel above the transcript. Seeing it is a request for the
      exchanges before the ones drawn. */
   const earlier = useRef<HTMLDivElement>(null);
@@ -362,8 +381,21 @@ export function Chat({
     const el = scroller.current;
     const inner = body.current;
     if (!el || !inner) return;
+    /* Every write to `scrollTop` in this file reads the value back into `at`
+       immediately afterwards, because the browser clamps what it was given
+       and the rule compares against what it actually took. Written out at
+       each site rather than funnelled through a helper: `scripts/pinned.mjs`
+       attributes a write by the name of the function that made it, and one
+       shared writer would make all four of them look like the same one. */
     const toEnd = () => {
-      if (following.current) el.scrollTop = el.scrollHeight;
+      /* Growth is the other way the end gets away from somebody: sitting
+         still 100px up while the agent writes a thousand words leaves them a
+         long way from it without a single scroll event, and the pill has to
+         arrive for that as well as for the gesture. */
+      setAway(back(following.current, el));
+      if (!following.current || jumping.current) return;
+      el.scrollTop = el.scrollHeight;
+      at.current = el.scrollTop;
     };
     toEnd();
     const watch = new ResizeObserver(toEnd);
@@ -374,7 +406,9 @@ export function Chat({
      gets none, so the count moving is a second cue for the same thing. */
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && following.current) el.scrollTop = el.scrollHeight;
+    if (!el || !following.current || jumping.current) return;
+    el.scrollTop = el.scrollHeight;
+    at.current = el.scrollTop;
   }, [rows.length, working, asked.length, questions.length]);
 
   /* The top of the transcript coming into view is a request for the exchanges
@@ -411,7 +445,10 @@ export function Chat({
       return;
     }
     if (held.current === null) return;
-    if (!following.current) el.scrollTop = el.scrollHeight - held.current;
+    if (!following.current) {
+      el.scrollTop = el.scrollHeight - held.current;
+      at.current = el.scrollTop;
+    }
     held.current = null;
   }, [conversation.loadingOlder, conversation.items.length]);
 
@@ -423,18 +460,152 @@ export function Chat({
 
      And nothing runs while ⌘F is up. Opening the find bar is saying you are
      reading rather than watching, and a pin that fights the jump to a match
-     is the one thing that would make searching a live session useless. */
+     is the one thing that would make searching a live session useless.
+
+     This loop was the whole of the fault. It is unchanged in what it does and
+     changed in what it is allowed to do it to: it writes only while
+     `following`, which is now cleared by the gesture itself, so the frame
+     after somebody scrolls up it has nothing to say — and keeps having
+     nothing to say for as long as they are reading. Measured at 60 writes a
+     second against a trackpad before, and zero after. */
   useEffect(() => {
     if (!working || finding) return;
     let raf = 0;
     const loop = () => {
       const el = scroller.current;
-      if (el && following.current && el.scrollHeight - el.scrollTop - el.clientHeight > 1) el.scrollTop = el.scrollHeight;
+      if (el && following.current && !jumping.current && below(el) > 1) {
+        el.scrollTop = el.scrollHeight;
+        at.current = el.scrollTop;
+      }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
   }, [working, finding]);
+
+  /** The pill's travel, stopped where it is. */
+  const halt = () => {
+    if (jumping.current) cancelAnimationFrame(jumping.current);
+    jumping.current = 0;
+  };
+
+  /** Let go of the end. Called by the gesture, so size does not come into it. */
+  const letGo = () => {
+    const el = scroller.current;
+    /* A hand during the travel is somebody who changed their mind, and they
+       win it. Note that this is the only thing that interrupts the jump — the
+       scroll handler stands down for its own writes. */
+    halt();
+    following.current = false;
+    if (el) setAway(back(false, el));
+  };
+
+  /** Take the end back: the pill's arrival, or a push down at the last line. */
+  const take = () => {
+    following.current = true;
+    setAway(false);
+  };
+
+  /* Letting go, on the gesture rather than on the distance.
+     The wheel and the finger are listened for directly, because a scroll
+     event cannot be relied on to arrive before the frame that would undo it.
+     Chrome dispatches the scroll before that frame's callbacks — which is why
+     `follows` on its own is enough there — and the app ships in WKWebView,
+     where this repository has measured no such ordering and does not claim
+     one. Clearing the flag on the event means the per-frame pin has already
+     stood down whichever way round the two arrive, on any webview, at any
+     scroll rate, for a gesture of any size. */
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const wheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) letGo();
+      /* Pushing down at the last line is an arrival, and it is what gives a
+         gesture that ended there somewhere to come back from. Anywhere else,
+         reaching the end is the scroll handler's to notice. */
+      else if (e.deltaY > 0 && atEnd(el)) take();
+    };
+    /* A finger going *down* drags the content down the screen, which is
+       reading back up the transcript. */
+    let finger = 0;
+    const land = (e: TouchEvent) => void (finger = e.touches[0]?.clientY ?? 0);
+    const drag = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY ?? finger;
+      if (y > finger + 0.5) letGo();
+      finger = y;
+    };
+    /* The keys that take a pane upwards. Bound to the scroller rather than the
+       window, so a caret moving in the composer — which is outside it — is not
+       read as somebody scrolling the transcript; a keyboard scroll that lands
+       here with the focus elsewhere moves far more than a pixel, and
+       `follows` has it either way. */
+    const UP = new Set(["ArrowUp", "PageUp", "Home"]);
+    const key = (e: KeyboardEvent) => {
+      if (!UP.has(e.key)) return;
+      /* Not somebody answering a question: a caret inside the card's own
+         textarea scrolls nothing. */
+      if ((e.target as HTMLElement | null)?.closest("input, textarea, [contenteditable]")) return;
+      letGo();
+    };
+    const how = { passive: true, capture: true } as const;
+    el.addEventListener("wheel", wheel, how);
+    el.addEventListener("touchstart", land, how);
+    el.addEventListener("touchmove", drag, how);
+    el.addEventListener("keydown", key, { capture: true });
+    return () => {
+      el.removeEventListener("wheel", wheel, how);
+      el.removeEventListener("touchstart", land, how);
+      el.removeEventListener("touchmove", drag, how);
+      el.removeEventListener("keydown", key, { capture: true });
+      halt();
+    };
+  }, []);
+
+  /* The way back: `--dur-native` on `--ease-swift`, from wherever you are.
+     A teleport from the top of a four-thousand-pixel transcript destroys any
+     sense of place — you were reading paragraph three and now you are at the
+     end, with nothing in between to say how far. 140ms of travel on a hard
+     ease-out says "it moved, a long way, down" and then settles.
+     Driven by hand rather than handed to `behavior: "smooth"`, whose duration
+     is the browser's and runs several hundred milliseconds on a transcript
+     this long; the window owns its curve everywhere else. Asked to hold
+     still, it is one write and done. */
+  const toLatest = () => {
+    const el = scroller.current;
+    if (!el) return;
+    halt();
+    if (unmoving()) {
+      el.scrollTop = el.scrollHeight;
+      at.current = el.scrollTop;
+      take();
+      return;
+    }
+    const from = el.scrollTop;
+    const t0 = performance.now();
+    const step = (now: number) => {
+      const p = Math.min(1, (now - t0) / DUR);
+      /* The end is read every frame, not captured once: while the agent is
+         writing it keeps moving, and a jump that lands short leaves the pill
+         up and reads as the button not working. */
+      el.scrollTop = from + (el.scrollHeight - el.clientHeight - from) * swift(p);
+      at.current = el.scrollTop;
+      if (p < 1) {
+        jumping.current = requestAnimationFrame(step);
+        return;
+      }
+      jumping.current = 0;
+      el.scrollTop = el.scrollHeight;
+      at.current = el.scrollTop;
+      take();
+    };
+    jumping.current = requestAnimationFrame(step);
+  };
+
+  /* What the pill's dot says, off the same two facts the mark in the left
+     margin has said all session. Waiting on you is a question nobody has
+     answered — not merely a turn that is open, which stays open for as long as
+     the question sits there. */
+  const beat: SessionStatus | null = questions.length + asked.length > 0 ? "NeedsYou" : working ? "Working" : null;
 
   return (
     <div className="relative flex h-full min-h-0 flex-col" {...surface}>
@@ -446,7 +617,14 @@ export function Chat({
         className="scroll-slim min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
         onScroll={(e) => {
           const el = e.currentTarget;
-          following.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          /* The pill's own travel is this file writing, and nothing here may
+             read it as a hand — that is what would detach the jump halfway
+             down and leave the pill up at the end of it. */
+          if (!jumping.current) {
+            following.current = follows(following.current, el, at.current);
+            setAway(back(following.current, el));
+          }
+          at.current = el.scrollTop;
         }}
       >
         <SessionContext.Provider value={{ session: session.id, mayAct }}>
@@ -579,6 +757,40 @@ export function Chat({
             window.getSelection()?.removeAllRanges();
           }}
         />
+      )}
+
+      {/* The way back, while somebody is reading up the transcript.
+          Drawn only while detached and more than `BACK` from the end — nearer
+          than that the last line is still on screen and two flicks of the
+          wheel get you there, so a pill would be noise. Nothing at all on a
+          transcript shorter than its pane, which has nothing below the fold
+          for `back` to measure, and nothing while ⌘F is up: the find bar
+          already means "I am reading, not watching", and a pill offering to
+          leave the match you have just jumped to argues with the same intent.
+
+          A dot, not a count. This transcript's unit is not a message — the
+          agent writes one long turn with its tool calls hanging off a
+          hairline, so "4 new" would read 0 while a thousand words arrived and
+          then jump to 3 because three greps landed. What somebody scrolled up
+          wants to know is narrower: whether anything is still happening down
+          there, and whether it has stopped to ask them something. Both already
+          have a mark in this window, so the pill carries that same mark and
+          its label never changes.
+
+          It rises above the notes bar, which does not move: see `.jump` in
+          `styles.css` for the offset and why it is this one that gives way. */}
+      {away && !finding && (
+        <button
+          type="button"
+          onClick={toLatest}
+          data-raised={notes.length > 0 && !drafting ? "" : undefined}
+          title={beat === "NeedsYou" ? "The agent is waiting on you below. Go to it" : beat === "Working" ? "The agent is still writing below. Go to the end" : "Go to the end of the conversation"}
+          className="jump control group absolute right-5 bottom-4 z-30 rounded-full border border-line lift text-text shadow-(--shadow-float) hover:bg-overlay hover:text-bone"
+        >
+          {beat && <Signal status={beat} size={6} />}
+          <ArrowDown className="h-3.5 w-3.5 text-dim group-hover:text-bone" strokeWidth={1.75} />
+          Jump to latest
+        </button>
       )}
 
       {notes.length > 0 && !drafting && (

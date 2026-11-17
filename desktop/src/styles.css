@@ -970,6 +970,52 @@
     color: var(--color-mute);
   }
 
+  /* ── The way back to the end of a transcript ───────────────────
+     `Jump to latest`, over the bottom of the conversation while somebody is
+     reading up it. The same family as the notes bar below it — a rounded-full
+     `lift` surface with a hairline and `--shadow-float`, at one control
+     height, so it is chrome rather than content — and visibly lighter than
+     that bar, which holds the only bone-filled primary down here.
+
+     It arrives while somebody is reading, so the entrance is the part that
+     can go wrong: it rises 6px into place over `--dur-native` on
+     `--ease-swift`, which arrives and settles rather than slides. Reduced
+     motion needs nothing of its own — `globals.css` collapses every duration
+     in the window, which lands this as a cross-fade in place.
+
+     **The rise clear of the notes bar is derived, not measured.** That bar's
+     own 30px control, its `py-1.5` and its hairline, plus the 8px between
+     them. The pill is the one that moves: the bar is a held state carrying an
+     action somebody is reaching for, and taking a target out from under a
+     cursor is worse than moving the thing that has just appeared. So the bar
+     keeps its markup and does not know this exists. */
+  .jump {
+    --lift-y: 0px;
+    transform: translateY(var(--lift-y));
+    animation: jump-in var(--dur-native) var(--ease-swift);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .jump[data-raised] {
+    --lift-y: calc((var(--control) + 14px + 8px) * -1);
+  }
+  .jump svg {
+    transition: color var(--dur-native) var(--ease-swift);
+  }
+  /* Pressed, it settles into the surface — and keeps the rise, which a bare
+     `scale()` in a second rule would drop on the way down. */
+  .jump:active {
+    transform: translateY(var(--lift-y)) scale(0.97);
+    transition: transform 110ms ease-out;
+  }
+  @keyframes jump-in {
+    from {
+      opacity: 0;
+      transform: translateY(calc(var(--lift-y) + 6px)) scale(0.96);
+    }
+  }
+
   /* ── A pane, and the things every pane is made of ──────────────
      The shape eleven configuration screens share. `config/bits.tsx` already
      had two thirds of it in `Section` and `Rows`; this is the rest, and it is

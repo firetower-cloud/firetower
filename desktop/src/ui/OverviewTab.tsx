@@ -94,8 +94,12 @@ const age = (at: string) => elapsed(minutesSince(at));
    there and a triangle here. */
 
 /** The manager at the top of the Team panel — the level above. The active card
- *  when it is this workspace, a link up when it is the parent of a child. */
-function ManagerRow({ manager, active }: { manager: Session; active: boolean }) {
+ *  when it is this workspace, a link up when it is the parent of a child.
+ *
+ *  Exported for `manager-row.test.tsx`, which pins the mark it draws: the row
+ *  held a literal where the status goes, and the only instrument that notices
+ *  a mark asserted rather than read is one that renders it. */
+export function ManagerRow({ manager, active }: { manager: Session; active: boolean }) {
   const inner = (
     <>
       {/* **The status leads, and every row has one.** It used to be the last
@@ -106,9 +110,19 @@ function ManagerRow({ manager, active }: { manager: Session; active: boolean }) 
           The active row carries a mark too. It was left bare on the argument
           that this is the workspace you are reading and its state is the
           title bar — but a row with no mark in a column of marks reads as
-          missing, and the manager's state is a fact like any other. */}
+          missing, and the manager's state is a fact like any other.
+
+          **And it is the manager's own status in both cases.** The row used
+          to assert `"Working"` whenever it was not the workspace being read,
+          on the assumption that a manager with a child open must be running.
+          A manager hands back, comes to rest, asks you something or fails,
+          and its children outlive none of that — so from inside a child the
+          row animated forever, and a manager that had *failed* or was
+          *waiting on an answer* read as healthy progress. `manager` is a
+          live `Session` off the polled list; its status was there all
+          along. */}
       <span className="lead">
-        <StatusMark status={active ? manager.status : "Working"} />
+        <StatusMark status={manager.status} />
       </span>
       <span className="tx one">
         <b>{agentName(manager.name)}</b>
