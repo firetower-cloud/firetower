@@ -693,6 +693,9 @@ pub fn parse(at: &Path, key: &str, text: &str) -> Result<Profile, Vec<Problem>> 
     }
     profile.key = key.to_string();
 
+    // A field nobody wrote has no line of its own, so both of these point at
+    // the first line of the frontmatter. That is where the field is missing
+    // from, and it is what the review can scroll to.
     if profile.name.is_empty() && !unread.contains(&Field::Name) {
         problems.push(said(
             FIRST,
@@ -1549,7 +1552,7 @@ mod tests {
     /// and none of them can be written plainly. They are here so the writer's
     /// quoting is asserted against libyaml rather than against a list of
     /// characters somebody thought of.
-    const AWKWARD: [&str; 18] = [
+    const AWKWARD: [&str; 19] = [
         "2026",
         "0x10",
         "1e3",
@@ -1567,6 +1570,7 @@ mod tests {
         "*anchor",
         "!tag",
         "'quoted'",
+        "\"double quoted\"",
         "ends with a colon:",
     ];
 
@@ -2417,17 +2421,13 @@ You own feature delivery.
             "---\nname: Designer\ndoes: Designs things.\n".into(),
             format!("---\nname: Desi{}gner\ndoes: Designs.\n---\n", '\u{2028}'),
         ];
-        for text in broken.iter().chain(
-            REAL.iter()
-                .map(|(_, t)| t)
-                .copied()
-                .map(
-                    // The real five, which are the only refusals not written for a test.
-                    |t| t.to_string(),
-                )
-                .collect::<Vec<_>>()
-                .iter(),
-        ) {
+        // The real five as well, which are the only refusals in this module
+        // that were not written to be one.
+        let broken: Vec<String> = broken
+            .into_iter()
+            .chain(REAL.iter().map(|(_, text)| (*text).to_string()))
+            .collect();
+        for text in &broken {
             let problems = refused("designer", text);
             assert!(!problems.is_empty());
             let lines = text.lines().count().max(1);
