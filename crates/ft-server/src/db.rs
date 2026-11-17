@@ -898,6 +898,21 @@ impl Db {
     /// reconnecting to a machine is not acting for anybody. This is the one an
     /// interface asks, and the difference between them is the whole reason both
     /// exist.
+    pub async fn hosts_for(&self, person: &str, at_least: Level) -> Result<Vec<Host>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts h
+              WHERE {visible} AND {fleet} ORDER BY h.created_at",
+            visible = filed_where("h", 1, at_least),
+            fleet = in_the_fleet("h")
+        ))
+        .bind(person)
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .filter_map(skip_unreadable_host)
+        .collect())
+    }
+
     /// What one machine is called, for somebody who may be told it exists.
     ///
     /// **Viewer, and deliberately not [`in_the_fleet`]** — which is the whole
@@ -924,21 +939,6 @@ impl Db {
         .fetch_optional(&self.pool)
         .await?
         .and_then(skip_unreadable_host))
-    }
-
-    pub async fn hosts_for(&self, person: &str, at_least: Level) -> Result<Vec<Host>> {
-        Ok(sqlx::query(&format!(
-            "SELECT {HOST_COLUMNS} FROM hosts h
-              WHERE {visible} AND {fleet} ORDER BY h.created_at",
-            visible = filed_where("h", 1, at_least),
-            fleet = in_the_fleet("h")
-        ))
-        .bind(person)
-        .fetch_all(&self.pool)
-        .await?
-        .into_iter()
-        .filter_map(skip_unreadable_host)
-        .collect())
     }
 
     /// Every host in the fleet, whoever may run on it: skipping the retired
