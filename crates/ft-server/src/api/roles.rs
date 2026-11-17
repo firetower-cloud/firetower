@@ -578,10 +578,16 @@ async fn visible_to(state: &AppState, me: &crate::accounts::User) -> ApiResult<i
             .hosts_for(who, Level::Viewer)
             .await?
             .into_iter()
-            .map(|h| import::Named {
-                id: h.id.as_str().to_string(),
-                name: h.name,
-            })
+            .map(named)
+            .collect(),
+        // Read separately rather than folded in, because a file may name one
+        // and it still blocks: see `import::Here::retired`.
+        retired: state
+            .db
+            .retired_hosts(who, Level::Viewer)
+            .await?
+            .into_iter()
+            .map(named)
             .collect(),
         accounts: super::accounts::spendable(state, who)
             .await?
@@ -616,6 +622,14 @@ async fn visible_to(state: &AppState, me: &crate::accounts::User) -> ApiResult<i
             })
             .collect(),
     })
+}
+
+/// A machine, as resolution needs it: an id and the name a file would write.
+fn named(host: ft_core::Host) -> import::Named {
+    import::Named {
+        id: host.id.as_str().to_string(),
+        name: host.name,
+    }
 }
 
 /// What a dropped folder of profile bundles would do.

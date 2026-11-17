@@ -515,6 +515,18 @@ pub struct Here {
     pub profiles: Vec<Role>,
     /// Every machine they may run on, by name.
     pub machines: Vec<Named>,
+    /// The machines they can see that were **removed from the fleet**.
+    ///
+    /// A separate list rather than a flag, because the two answer different
+    /// questions and only one of them is "may this profile run here". A
+    /// retired machine is not hidden — `20261106120000_retire_local_host.sql`
+    /// left every profile pinned to the retired local host pinned, because
+    /// nulling them "would silently repin somebody's profile" — so a file can
+    /// legitimately name one, and `Db::host_named` is export writing exactly
+    /// that. It still blocks, because nothing can run there; what it must not
+    /// do is say "not available to you" about a machine sitting on the asker's
+    /// own Compute screen.
+    pub retired: Vec<Named>,
     /// Every subscription they could actually spend.
     pub accounts: Vec<Subscription>,
     /// Every directory they may at least look in.
@@ -1271,6 +1283,20 @@ fn resolve(
         let key = Some(Field::Machine.spelling().to_string());
         match found.len() {
             1 => {}
+            // Retired is not hidden, and the sentence has to tell them apart:
+            // one is a machine they can see on their own Compute screen that
+            // nothing can run on any more, the other is a name this
+            // installation cannot answer for. Both block.
+            0 if !among(wrote, &here.retired, |m| &m.name).is_empty() => out.push(PlanProblem::at(
+                p,
+                line,
+                key,
+                format!(
+                    "`{wrote}` was removed from the fleet, so nothing runs there any more. \
+                         Write a machine that is still in it, or `~` to leave the choice to \
+                         whichever lead delegates to it."
+                ),
+            )),
             0 => out.push(PlanProblem::at(
                 p,
                 line,
@@ -1653,7 +1679,11 @@ fn one_field(field: Field, said: &Reading, row: &Role, here: &Here) -> FieldDiff
         Field::Machine => (
             seen(
                 row.machine.as_deref(),
-                &here.machines,
+                // The fleet and the retired together: a profile pinned to the
+                // retired local host names a machine the asker can see, and
+                // rendering it as one they cannot is the mistake
+                // `Db::host_named` exists to avoid on the export side.
+                &[here.machines.clone(), here.retired.clone()].concat(),
                 "a machine you cannot see",
                 open,
             ),
@@ -2791,6 +2821,50 @@ mod tests {
         // no grant on it, so it is not in what they can see.
         let theirs = plan(&dropped(vec![file]), &here(vec![])).unwrap();
         assert_eq!(said(only(&nowhere)), said(only(&theirs)));
+    }
+
+    /// A machine that was **removed from the fleet** is not a machine the asker
+    /// cannot see, and the two sentences have to differ.
+    ///
+    /// `20261106120000_retire_local_host.sql` left every profile pinned to the
+    /// retired local host pinned, so a profile really can name one and
+    /// `#354`'s export really does write its name. The import still blocks —
+    /// nothing runs there — and the stored pin still renders as the machine it
+    /// is, which is the same mistake `Db::host_named` exists to avoid from the
+    /// other side.
+    #[test]
+    fn a_retired_machine_is_told_apart_from_one_you_cannot_see() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.machine = Some("h_gone".into());
+        let mut library = here(vec![stored]);
+        library.retired = vec![machine("h_gone", "this-mac")];
+
+        let pinned = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nmachine: this-mac\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        let says = said(only(&pinned));
+        assert!(says.contains("was removed from the fleet"), "{says}");
+        assert!(
+            !says.contains("available to you"),
+            "a machine on their own Compute screen is not one they cannot see: {says}"
+        );
+
+        // And the stored pin is named rather than hidden, which is only
+        // visible once the file stops blocking.
+        let unpinned = plan(
+            &dropped(vec![at("designer/PROFILE.md", &smallest("Designer"), "")]),
+            &library,
+        )
+        .unwrap();
+        let diff = diff_of(only(&unpinned));
+        assert_eq!(field(diff, "machine").before, "this-mac");
+        assert_eq!(field(diff, "machine").change, FieldChange::Reset);
     }
 
     /// Criterion: a `directory` you may read but not write blocks **at plan
