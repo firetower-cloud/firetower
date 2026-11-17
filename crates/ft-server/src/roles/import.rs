@@ -677,9 +677,14 @@ pub fn plan(drop: &ProfileDrop, here: &Here) -> Result<ImportPlan, Refused> {
     same_target_blocks(&mut entries);
     same_name_warnings(&mut entries);
 
-    let why_not = why_not(&entries);
+    // **`appliable` is derived, never set.** It is exactly "there is no reason
+    // not to", so an unappliable plan with no reason in it cannot be
+    // constructed — which is the shape of #349 and was reachable here: an
+    // empty drop came back unappliable and silent, and a screen given no
+    // sentence draws a dead button with nothing beside it.
+    let why_not = why_not(&entries, &ignored);
     Ok(ImportPlan {
-        appliable: why_not.is_empty() && !entries.is_empty(),
+        appliable: why_not.is_empty(),
         why_not,
         entries,
         ignored,
@@ -897,7 +902,7 @@ fn classify(
         };
     }
 
-    let mut warnings = Vec::new();
+    let mut warnings = said_about_settings(bundle, said);
     let outcome = match matched {
         Matched::Create { answered } => {
             warnings.extend(same_name_as_the_library(bundle, said, here));
@@ -1276,7 +1281,9 @@ fn resolve(
         // un-share a shared profile on every import, silently, with nothing in
         // the diff to show it.
         (Some(wrote), Matched::Hit { row, .. }) => {
-            let filed = row.path.rsplit_once('/').map(|(up, _)| up).unwrap_or("");
+            // Where the row actually is, said the way a person reads it: the
+            // directory's **name**, or their own space. Never `u/admin`, which
+            // is a path the server computes and nobody types.
             let theirs = row
                 .path
                 .split('/')
@@ -1287,14 +1294,31 @@ fn resolve(
                 None => false,
             };
             if !agrees {
+                // And an instruction that can be followed. `directory` is
+                // create-only, so the two ways out are to name where the row
+                // already is — which only exists when it is in a directory —
+                // or to remove the line, which leaves it where it is.
+                let ways_out = match theirs
+                    .and_then(|slug| here.directories.iter().find(|d| d.slug == slug))
+                {
+                    Some(dir) => format!(
+                        "it is in `{}`, so write `directory: {}` or remove the line.",
+                        dir.name, dir.name
+                    ),
+                    None if theirs.is_some() => "it is in a directory you cannot see, so remove \
+                                                 the line and it stays where it is."
+                        .to_string(),
+                    None => "it is in your own space, which is what an absent `directory:` \
+                             means, so remove the line."
+                        .to_string(),
+                };
                 out.push(PlanProblem::at(
                     p,
                     line_of(&said.spelled, Spot::Field(Field::Directory)),
                     Some(Field::Directory.spelling().into()),
                     format!(
-                        "this bundle is `{}`, which is already filed at `{filed}`. An import \
-                         cannot move a profile — move it with sharing, or write the directory it \
-                         is in.",
+                        "this bundle is the profile `{}` and says `directory: {wrote}`, which \
+                         would move it. An import cannot move a profile, and {ways_out}",
                         row.name
                     ),
                 ));
@@ -1357,62 +1381,47 @@ fn resolve(
     }
 
     // The subscription its agent runs on.
+    //
+    // **Does it exist, then is it ambiguous, then is it for this engine.** In
+    // that order, because the engine question is about a subscription and
+    // asking it first says one exists: a name that resolves to nothing used to
+    // come back as "`X` *is* a subscription for one engine, so this profile has
+    // to pin one too", which is not unhelpful but false, and somebody would go
+    // looking for `X`. A name that resolves to nothing reads as nothing, the
+    // same way a hidden one does.
     if let Some(wrote) = profile.account.as_deref() {
         let found: Vec<&Subscription> = among(wrote, &here.accounts, |a| &a.name);
-        let one = match found.as_slice() {
-            [only] => Some(*only),
+        let line = line_of(&said.spelled, Spot::Field(Field::Account));
+        let key = Some(Field::Account.spelling().to_string());
+        let says = match (found.as_slice(), &profile.engine) {
+            ([], _) => Some(format!(
+                "no subscription named `{wrote}` is available to you. Write one you can spend, \
+                 or `~` to run on the owner's default for the engine."
+            )),
+            (many, _) if many.len() > 1 => Some(format!(
+                "{} subscriptions you can see are called `{wrote}`, so this cannot say which one \
+                 to spend. Rename one in Subscriptions.",
+                many.len()
+            )),
+            // One of that name, and nothing to check it against. A
+            // subscription authenticates one engine, and `agent_account_id` is
+            // refused without one on the write path too
+            // (`api::roles::check_account`), so the plan says it rather than
+            // the apply.
+            ([_], None) => Some(format!(
+                "`{wrote}` is a subscription for one engine, so this profile has to pin one too. \
+                 Write `engine:`, or remove the line and the owner's default for the engine is \
+                 used."
+            )),
+            ([one], Some(engine)) if one.engine != format!("{engine:?}") => Some(format!(
+                "`{wrote}` authenticates {} and this profile runs {engine:?}. Write a \
+                 subscription for {engine:?}, or change the engine.",
+                one.engine
+            )),
             _ => None,
         };
-        if found.len() > 1 {
-            out.push(PlanProblem::at(
-                p,
-                line_of(&said.spelled, Spot::Field(Field::Account)),
-                Some(Field::Account.spelling().to_string()),
-                format!(
-                    "{} subscriptions you can see are called `{wrote}`, so this cannot say which \
-                     one to spend. Rename one in Subscriptions.",
-                    found.len()
-                ),
-            ));
-        }
-        match (&profile.engine, one) {
-            // A subscription authenticates one engine, and `agent_account_id`
-            // is refused without one on the write path too
-            // (`api::roles::check_account`). Blocked here so the plan says it
-            // rather than the apply.
-            (None, _) => out.push(PlanProblem::at(
-                p,
-                line_of(&said.spelled, Spot::Field(Field::Account)),
-                Some(Field::Account.spelling().into()),
-                format!(
-                    "`{wrote}` is a subscription for one engine, so this profile has to pin one \
-                     too. Write `engine:`, or remove the account and the owner's default is used."
-                ),
-            )),
-            // Said only when there is nothing of that name at all: the
-            // ambiguous case has its own sentence above.
-            (Some(_), None) if found.is_empty() => out.push(PlanProblem::at(
-                p,
-                line_of(&said.spelled, Spot::Field(Field::Account)),
-                Some(Field::Account.spelling().into()),
-                format!(
-                    "no subscription named `{wrote}` is available to you. Write one you can \
-                     spend, or `~` to run on the owner's default for the engine."
-                ),
-            )),
-            (Some(engine), Some(account)) if account.engine != format!("{engine:?}") => {
-                out.push(PlanProblem::at(
-                    p,
-                    line_of(&said.spelled, Spot::Field(Field::Account)),
-                    Some(Field::Account.spelling().into()),
-                    format!(
-                        "`{wrote}` authenticates {} and this profile runs {engine:?}. Pick a \
-                         subscription for {engine:?}, or change the engine.",
-                        account.engine
-                    ),
-                ))
-            }
-            (Some(_), _) => {}
+        if let Some(says) = says {
+            out.push(PlanProblem::at(p, line, key, says));
         }
     }
 
@@ -1449,21 +1458,31 @@ fn resolve(
         // resolves to the very row it is about to overwrite, and
         // `delegate_scope` holds ids, so after the write that is a profile
         // pointing at itself.
-        let itself = folded(wrote) == folded(&profile.name)
-            || matches!(
-                (here_now.as_slice(), matched),
-                ([row], Matched::Hit { row: target, .. }) if row.id == target.id
-            );
-        if itself {
+        // Echoing what the file wrote, which under a rename is not the name
+        // the file gives: `delegates_to: [Designer]` beside `name: Product
+        // Designer` points at the row this bundle overwrites, and a refusal
+        // naming `Product Designer` would be about a line nobody wrote.
+        let itself = if folded(wrote) == folded(&profile.name) {
+            Some(format!(
+                "`{wrote}` is this profile, so it cannot be one of the teammates it hands work \
+                 to. Remove the entry."
+            ))
+        } else {
+            match (here_now.as_slice(), matched) {
+                ([row], Matched::Hit { row: target, .. }) if row.id == target.id => Some(format!(
+                    "`{wrote}` is the profile this bundle overwrites, now called `{}`, so this \
+                     would be a profile delegating to itself. Remove the entry.",
+                    profile.name
+                )),
+                _ => None,
+            }
+        };
+        if let Some(says) = itself {
             out.push(PlanProblem::at(
                 p,
                 line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
                 key,
-                format!(
-                    "`{}` is this profile, so it cannot be one of the teammates it hands work \
-                     to. Remove the entry.",
-                    profile.name
-                ),
+                says,
             ));
             continue;
         }
@@ -1607,6 +1626,58 @@ fn resolve(
                 clashing[0].0.name
             ),
         ));
+    }
+
+    // The four agent settings.
+    //
+    // **Checked against the engine's own offered set, and only when that set is
+    // knowable.** Parity with `POST /roles` would be no check at all, and that
+    // is not sufficient here for two reasons: the error table says an invalid
+    // enum value blocks and lists what is accepted, and a typo'd value does
+    // not fail at launch either — `Preferred::keeping_only` drops a value the
+    // agent no longer offers, so `effort: maximum` silently does nothing,
+    // which is the failure this whole format exists to remove.
+    //
+    // The asymmetry is the one a reset already has: with no engine pinned
+    // there is no valid set until a lead picks one, so the value is taken as
+    // written and the plan says so rather than guessing.
+    for setting in Setting::all() {
+        let Some(wrote) = written(setting, &said.profile.settings) else {
+            continue;
+        };
+        let line = line_of(&said.spelled, Spot::Setting(setting));
+        let key = Some(Spot::Setting(setting).spelling());
+        match offered(profile.engine, setting) {
+            Offer::Values(values) if !values.iter().any(|v| v == wrote) => {
+                out.push(PlanProblem::at(
+                    p,
+                    line,
+                    key,
+                    format!(
+                        "`{wrote}` is not {} {:?} offers. Write one of {}.",
+                        article(setting),
+                        profile.engine.expect("an offered set needs an engine"),
+                        values
+                            .iter()
+                            .map(|v| format!("`{v}`"))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                ));
+            }
+            // **A control the engine does not have is not an invalid value**,
+            // and it warns rather than blocking. Nothing is wrong with what
+            // the file says; the line simply has no effect, so refusing it
+            // would break the export round trip for a row Firetower itself
+            // produced — `pref_sandbox` is one column for every engine, and
+            // export writes what the row holds. The ruling is about checking a
+            // value "against that engine's offered set", and here there is no
+            // set to check against.
+            Offer::Values(_)
+            | Offer::WhenItStarts
+            | Offer::WhenALeadPicks
+            | Offer::NotThisEngine => {}
+        }
     }
 
     // An existing profile the asker may see and not write.
@@ -1964,6 +2035,115 @@ fn kind_of(setting: Setting) -> ft_core::controls::ControlKind {
     }
 }
 
+/// What cannot be checked about the settings, said rather than left silent.
+///
+/// The other half of the ruling in `resolve`: a value is **refused** when the
+/// engine's set is knowable and **accepted** when it is not, and accepting it
+/// quietly would leave somebody believing it was checked. So the two honest
+/// unknowns come back as warnings — a plan stays appliable, and the review can
+/// say which lines nobody has vouched for.
+fn said_about_settings(bundle: &Bundle, said: &Reading) -> Vec<PlanProblem> {
+    let mut out = Vec::new();
+    for setting in Setting::all() {
+        let Some(wrote) = written(setting, &said.profile.settings) else {
+            continue;
+        };
+        let says = match offered(said.profile.engine, setting) {
+            Offer::WhenALeadPicks => format!(
+                "`{}: {wrote}` is taken as written. Which values are on offer depends on the \
+                 engine, and this profile leaves that to whichever lead delegates to it.",
+                setting.spelling()
+            ),
+            Offer::WhenItStarts => format!(
+                "`{}: {wrote}` is taken as written. {:?} lists its own {}s when it starts, so \
+                 nothing here can say whether that is one of them.",
+                setting.spelling(),
+                said.profile
+                    .engine
+                    .expect("only a named engine lists its own"),
+                setting.spelling()
+            ),
+            Offer::NotThisEngine => format!(
+                "`{}: {wrote}` would do nothing: {:?} has no {} setting. Remove the line.",
+                setting.spelling(),
+                said.profile.engine.expect("a named engine has a named gap"),
+                setting.spelling()
+            ),
+            Offer::Values(_) => continue,
+        };
+        out.push(PlanProblem::at(
+            &bundle.path,
+            line_of(&said.spelled, Spot::Setting(setting)),
+            Some(Spot::Setting(setting).spelling()),
+            says,
+        ));
+    }
+    out
+}
+
+/// What the file wrote for one setting, if it wrote anything.
+fn written(setting: Setting, settings: &ft_core::controls::Preferred) -> Option<&str> {
+    match setting {
+        Setting::Model => settings.model.as_deref(),
+        Setting::Effort => settings.effort.as_deref(),
+        Setting::Mode => settings.mode.as_deref(),
+        Setting::Sandbox => settings.sandbox.as_deref(),
+    }
+}
+
+/// What can be said about one setting's value, for one engine.
+enum Offer {
+    /// These are the values that engine offers. Anything else is a mistake.
+    Values(Vec<String>),
+    /// The engine lists them itself, once it is running, so nothing here can
+    /// check the value. Codex's models and efforts, and only those.
+    WhenItStarts,
+    /// No engine is pinned, so which set applies is the lead's to decide.
+    WhenALeadPicks,
+    /// That engine has no such control, so the line would do nothing.
+    NotThisEngine,
+}
+
+/// Which of the four [`Offer`]s a setting is in.
+///
+/// Read off `controls::for_agent`, which is the one statement of what an engine
+/// can be asked to change — so a control added there is checked here without
+/// anybody remembering to come back. Its own doc carries the distinction this
+/// depends on: `models` and `efforts` are **passed in** "because one agent
+/// knows its own and the other does not", which is why an empty list for
+/// Codex's model is "not yet" and an absent sandbox for Claude Code is "never".
+fn offered(engine: Option<ft_core::Agent>, setting: Setting) -> Offer {
+    let Some(engine) = engine else {
+        return Offer::WhenALeadPicks;
+    };
+    let kind = kind_of(setting);
+    let values: Vec<String> = ft_core::controls::for_agent(engine, Vec::new(), Vec::new())
+        .into_iter()
+        .filter(|c| c.kind == kind)
+        .flat_map(|c| c.choices)
+        .map(|choice| choice.value)
+        .collect();
+    if !values.is_empty() {
+        return Offer::Values(values);
+    }
+    match (engine, kind) {
+        (
+            ft_core::Agent::Codex,
+            ft_core::controls::ControlKind::Model | ft_core::controls::ControlKind::Effort,
+        ) => Offer::WhenItStarts,
+        _ => Offer::NotThisEngine,
+    }
+}
+
+/// `a model`, `an effort` — so a refusal reads as a sentence.
+fn article(setting: Setting) -> String {
+    let word = setting.spelling();
+    match word.starts_with(['a', 'e', 'i', 'o', 'u']) {
+        true => format!("an {word}"),
+        false => format!("a {word}"),
+    }
+}
+
 /// What a setting resolves to: the value written, or the value an unset one
 /// takes for the engine this profile pins.
 fn resulting(
@@ -2174,7 +2354,30 @@ fn same_name_warnings(entries: &mut [PlanEntry]) {
 }
 
 /// Why this plan cannot be applied, in sentences.
-fn why_not(entries: &[PlanEntry]) -> Vec<String> {
+///
+/// **The whole of `appliable`.** Empty means it applies, and anything that
+/// makes a plan unappliable has to put a sentence here or it is not a reason —
+/// see the comment in [`plan`].
+fn why_not(entries: &[PlanEntry], ignored: &[String]) -> Vec<String> {
+    // Nothing to apply is a reason of its own, and the one a person meets
+    // first: they dropped the wrong folder, or a `.zip` that unpacked into a
+    // level they did not expect.
+    if entries.is_empty() {
+        return vec![match ignored.len() {
+            0 => "There is nothing in what you dropped. A profile bundle is a folder with a \
+                  `PROFILE.md` in it."
+                .to_string(),
+            1 => "Nothing in what you dropped is a profile bundle, and one file was ignored. A \
+                  bundle is a folder with a `PROFILE.md` in it, so drop the folder that holds \
+                  those folders."
+                .to_string(),
+            n => format!(
+                "Nothing in what you dropped is a profile bundle, and {n} files were ignored. A \
+                 bundle is a folder with a `PROFILE.md` in it, so drop the folder that holds \
+                 those folders."
+            ),
+        }];
+    }
     let blocked = entries
         .iter()
         .filter(|e| matches!(e.outcome, PlanOutcome::Blocked(_)))
@@ -3212,11 +3415,15 @@ mod tests {
             &here(vec![row("r1", "Designer", Some("designer"))]),
         )
         .unwrap();
+        // The value the **file wrote**, backticked, not the name the file
+        // gives: a regression that stopped naming the offending entry would
+        // pass an assertion on the sentence alone.
+        let says = said(only(&renamed));
         assert!(
-            said(only(&renamed)).contains("is this profile"),
-            "{}",
-            said(only(&renamed))
+            says.contains("`Designer` is the profile this bundle overwrites"),
+            "{says}"
         );
+        assert!(says.contains("`Product Designer`"), "{says}");
     }
 
     /// And a cycle **between** profiles resolves, because it is a library
@@ -3743,6 +3950,324 @@ mod tests {
         let plan = plan(&dropped(vec![]), &here(vec![])).unwrap();
         assert!(plan.entries.is_empty());
         assert!(!plan.appliable);
+    }
+
+    /// **If a plan cannot be applied, it says why.** The invariant, over every
+    /// shape of drop that produces one.
+    ///
+    /// `appliable` is derived from `why_not`, so this cannot be broken without
+    /// changing how the plan is built — but the test is the thing that says so,
+    /// and the case it was written for is the one that was broken: an empty
+    /// drop came back unappliable and silent, which is a dead button with no
+    /// sentence beside it.
+    #[test]
+    fn an_unappliable_plan_always_says_why() {
+        let library = here(vec![row("r1", "QA", None)]);
+        let drops = [
+            // Nothing in it at all.
+            dropped(vec![]),
+            // Nothing in it that is a bundle.
+            dropped(vec![DroppedFile {
+                path: "profiles/README.md".into(),
+                text: "Our profiles.".into(),
+            }]),
+            // A file that does not parse.
+            dropped(vec![DroppedFile {
+                path: "designer/PROFILE.md".into(),
+                text: "# Designer\n".into(),
+            }]),
+            // An unanswered candidate.
+            dropped(vec![at(
+                "qa-engineer/PROFILE.md",
+                &smallest("QA Engineer"),
+                "",
+            )]),
+            // A resolution failure.
+            dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nmachine: nowhere\n",
+                "",
+            )]),
+            // And one that applies.
+            dropped(vec![at("designer/PROFILE.md", &smallest("Designer"), "")]),
+        ];
+        for drop in drops {
+            let plan = plan(&drop, &library).unwrap();
+            assert_eq!(
+                plan.appliable,
+                plan.why_not.is_empty(),
+                "appliable and whyNot disagree: {plan:#?}"
+            );
+            if !plan.appliable {
+                assert!(
+                    plan.why_not.iter().all(|w| w.len() > 20),
+                    "a reason has to be a sentence: {:#?}",
+                    plan.why_not
+                );
+            }
+        }
+    }
+
+    /// An empty drop is told what a bundle is, because the likeliest cause is
+    /// dropping the wrong folder.
+    #[test]
+    fn a_drop_with_no_bundles_in_it_says_what_a_bundle_is() {
+        let nothing = plan(&dropped(vec![]), &here(vec![])).unwrap();
+        assert!(!nothing.appliable);
+        assert_eq!(nothing.why_not.len(), 1);
+        assert!(
+            nothing.why_not[0].contains("`PROFILE.md`"),
+            "{}",
+            nothing.why_not[0]
+        );
+
+        // And when files were ignored, how many — the difference between "you
+        // dropped nothing" and "you dropped the wrong level".
+        let wrong_level = plan(
+            &dropped(vec![
+                DroppedFile {
+                    path: "README.md".into(),
+                    text: "x".into(),
+                },
+                DroppedFile {
+                    path: "justfile".into(),
+                    text: "x".into(),
+                },
+            ]),
+            &here(vec![]),
+        )
+        .unwrap();
+        assert!(!wrong_level.appliable);
+        assert!(
+            wrong_level.why_not[0].contains("2 files were ignored"),
+            "{}",
+            wrong_level.why_not[0]
+        );
+    }
+
+    /// **A name that resolves to nothing reads as nothing.** It used to read as
+    /// *"`Startup` is a subscription for one engine"*, which is not unhelpful
+    /// but false: somebody would go looking for `Startup`.
+    #[test]
+    fn a_subscription_that_does_not_exist_is_never_described_as_existing() {
+        let mut library = here(vec![]);
+        library.accounts = vec![subscription("aa1", "Personal", "ClaudeCode")];
+
+        // No engine pinned, and the subscription does not exist. The engine
+        // question is about a subscription, so it cannot come first.
+        let unknown = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\naccount: Startup\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        let says = said(only(&unknown));
+        assert!(
+            says.contains("no subscription named `Startup` is available to you"),
+            "{says}"
+        );
+        assert!(
+            !says.contains("is a subscription"),
+            "a name that resolves to nothing must not be described as existing: {says}"
+        );
+
+        // One that does exist, with no engine to check it against, still gets
+        // the engine sentence.
+        let real = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\naccount: Personal\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert!(
+            said(only(&real)).contains("has to pin one too"),
+            "{}",
+            said(only(&real))
+        );
+    }
+
+    /// The directory block names what the file wrote and gives a way out that
+    /// can be taken. It used to show `u/admin` — a path the server computes —
+    /// and say "write the directory it is in" about a profile that is in none.
+    #[test]
+    fn the_directory_block_echoes_its_value_and_can_be_acted_on() {
+        let mut mine = row("r1", "Designer", Some("designer"));
+        mine.path = "u/kevin/designer_01m3qbzd".into();
+        let mut library = here(vec![mine]);
+        library.directories = vec![folder("Fstack", true)];
+        let says = {
+            let plan = plan(
+                &dropped(vec![at(
+                    "designer/PROFILE.md",
+                    "name: Designer\ndoes: does the thing\ndirectory: Fstack\n",
+                    "",
+                )]),
+                &library,
+            )
+            .unwrap();
+            said(only(&plan))
+        };
+        assert!(says.contains("`directory: Fstack`"), "{says}");
+        assert!(says.contains("An import cannot move a profile"), "{says}");
+        assert!(says.contains("your own space"), "{says}");
+        assert!(says.contains("remove the line"), "{says}");
+        assert!(
+            !says.contains("u/kevin"),
+            "a path nobody types is not a sentence: {says}"
+        );
+
+        // A row that *is* in a directory can be told which one to write.
+        let mut theirs = row("r2", "Engineer", Some("engineer"));
+        theirs.path = "d/fstack/engineer_01m3qbzd".into();
+        let mut library = here(vec![theirs]);
+        library.directories = vec![folder("Fstack", true), folder("House", true)];
+        let plan = plan(
+            &dropped(vec![at(
+                "engineer/PROFILE.md",
+                "name: Engineer\ndoes: does the thing\ndirectory: House\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        let says = said(only(&plan));
+        assert!(says.contains("`directory: House`"), "{says}");
+        assert!(says.contains("write `directory: Fstack`"), "{says}");
+    }
+
+    /// **An invalid value under `settings` blocks, listing what is accepted.**
+    ///
+    /// Parity with `POST /roles` would be no check at all, and that is not
+    /// enough: the error table says an invalid enum value blocks, and a typo'd
+    /// value does not fail at launch either, because `Preferred::keeping_only`
+    /// drops one the agent no longer offers. `effort: maximum` silently does
+    /// nothing, which is the failure the format exists to remove.
+    #[test]
+    fn an_invalid_setting_blocks_and_lists_what_the_engine_offers() {
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nengine: ClaudeCode\nsettings:\n  \
+                 model: not-a-model\n  effort: maximum\n",
+                "",
+            )]),
+            &here(vec![]),
+        )
+        .unwrap();
+        let problems = blocked(only(&plan));
+        assert_eq!(problems.len(), 2, "{problems:#?}");
+
+        let model = problems
+            .iter()
+            .find(|p| p.key.as_deref() == Some("settings.model"))
+            .expect("a problem about the model");
+        assert!(model.says.contains("`not-a-model`"), "{}", model.says);
+        assert!(model.says.contains("ClaudeCode offers"), "{}", model.says);
+        // The values a file writes, so the list can be copied into one.
+        assert!(model.says.contains("`opus[1m]`"), "{}", model.says);
+
+        let effort = problems
+            .iter()
+            .find(|p| p.key.as_deref() == Some("settings.effort"))
+            .expect("a problem about the effort");
+        assert!(effort.says.contains("`maximum`"), "{}", effort.says);
+        assert!(effort.says.contains("an effort"), "{}", effort.says);
+        // And it points at the line the value is on, not at `settings:`.
+        assert_eq!(effort.line, 7, "{effort:#?}");
+    }
+
+    /// A setting the engine has no picker for is **said and not refused**.
+    ///
+    /// Nothing is wrong with the value; the line has no effect. Blocking it
+    /// would break the export round trip for a row Firetower itself produced,
+    /// because `pref_sandbox` is one column for every engine and export writes
+    /// what the row holds — so this is the one setting condition that warns.
+    #[test]
+    fn a_setting_the_engine_does_not_have_is_said_rather_than_refused() {
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nengine: ClaudeCode\nsettings:\n  \
+                 sandbox: workspace\n",
+                "",
+            )]),
+            &here(vec![]),
+        )
+        .unwrap();
+        let entry = only(&plan);
+        assert!(
+            matches!(entry.outcome, PlanOutcome::New(_)),
+            "{:#?}",
+            entry.outcome
+        );
+        let says = &entry.warnings[0].says;
+        assert!(says.contains("ClaudeCode has no sandbox setting"), "{says}");
+        assert!(says.contains("would do nothing"), "{says}");
+        assert!(says.contains("Remove the line"), "{says}");
+        assert!(plan.appliable);
+    }
+
+    /// **And only what is knowable.** With no engine pinned there is no valid
+    /// set until a lead chooses, so the value is taken as written and the plan
+    /// says so — the same asymmetry a reset under `settings` already has.
+    #[test]
+    fn a_setting_is_taken_as_written_when_no_engine_decides_the_set() {
+        let open = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nsettings:\n  effort: maximum\n",
+                "",
+            )]),
+            &here(vec![]),
+        )
+        .unwrap();
+        let entry = only(&open);
+        assert!(
+            matches!(entry.outcome, PlanOutcome::New(_)),
+            "{:#?}",
+            entry.outcome
+        );
+        assert_eq!(entry.warnings.len(), 1, "{:#?}", entry.warnings);
+        let says = &entry.warnings[0].says;
+        assert!(
+            says.contains("`effort: maximum` is taken as written"),
+            "{says}"
+        );
+        assert!(says.contains("depends on the engine"), "{says}");
+        assert_eq!(entry.warnings[0].key.as_deref(), Some("settings.effort"));
+        assert!(open.appliable, "an unknowable set is not a refusal");
+
+        // Codex lists its own models when it starts, so that one is unknowable
+        // even with the engine pinned.
+        let codex = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nengine: Codex\nsettings:\n  model: o3\n",
+                "",
+            )]),
+            &here(vec![]),
+        )
+        .unwrap();
+        let entry = only(&codex);
+        assert!(
+            matches!(entry.outcome, PlanOutcome::New(_)),
+            "{:#?}",
+            entry.outcome
+        );
+        assert!(
+            entry.warnings[0]
+                .says
+                .contains("lists its own models when it starts"),
+            "{}",
+            entry.warnings[0].says
+        );
+        assert!(codex.appliable);
     }
 
     /// The limits travel with the plan, so a client can refuse before it asks
