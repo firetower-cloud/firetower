@@ -453,7 +453,7 @@ describe("a drop past a bound", () => {
    * gave the per-file bound an instruction.
    */
   const IMPERATIVE =
-    /^(Drop|Split|Remove|Rename|Write|Put|Ask|Fix|Take|Use|Name|Add|Shorten|Give|Keep|Move)\b/;
+    /^(Drop|Split|Remove|Rename|Write|Put|Ask|Fix|Take|Use|Name|Add|Shorten|Send|Give|Keep|Move|Unpack)\b/;
 
   it.each(Object.entries(REFUSALS))("%s tells somebody what to do about it", (_which, says) => {
     expect(remedy(says)).toMatch(IMPERATIVE);

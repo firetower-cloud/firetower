@@ -2229,12 +2229,12 @@
     }
   },
   "refusals": {
-    "climbs-out": "`../outside/PROFILE.md` is not a path inside the folder that was dropped",
+    "climbs-out": "`../outside/PROFILE.md` is not a path inside the folder that was dropped. Drop the folder that holds the bundles rather than something containing it.",
     "drop-too-big": "this drop is 8447 KB, and an import takes at most 8192 KB. Drop fewer folders at once.",
     "file-too-big": "`profiles/designer/PROFILE.md` is 262145 bytes, and a file in a drop is at most 262144 bytes. Shorten the instructions below the frontmatter.",
-    "no-name": "a file in this drop has no name",
+    "no-name": "a file in this drop has no path, so there is no saying which bundle it belongs to. Send each file with the path it has inside the folder, or drop the folder again.",
     "path-too-long": "`profiles/ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp…` is 277 bytes long, and a path inside a drop is at most 256. Drop the folder that holds the bundles rather than the tree above it.",
-    "same-path-twice": "`profiles/designer/PROFILE.md` is in this drop twice, so there is no saying which of the two to read",
+    "same-path-twice": "`profiles/designer/PROFILE.md` is in this drop twice, so there is no saying which of the two to read. Send each path once, or unpack the archive and drop the folder it holds.",
     "too-deep": "`profiles/a/a/a/a/a/a/a/a/a/a//PROFILE.md` is 12 folders deep, and an import reads at most 8. Drop the folder that holds the bundles rather than the repository around it.",
     "too-many-files": "this drop holds 201 files, and an import takes at most 200. Drop fewer folders at once."
   }
