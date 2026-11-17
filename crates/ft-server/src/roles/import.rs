@@ -604,7 +604,7 @@ fn read(path: &str, key: &str, text: &str) -> Result<Reading, Vec<PlanProblem>> 
 /// (`skills: [a, b]`) has no line of its own, and the honest answer is the key
 /// above it — then the first line of the frontmatter, which is where a key
 /// nobody wrote is missing from.
-fn at(spelled: &Spelled, spot: Spot) -> usize {
+fn line_of(spelled: &Spelled, spot: Spot) -> usize {
     let under = match spot {
         Spot::Field(_) => None,
         Spot::Entry(field, _) => Some(Spot::Field(field)),
@@ -922,7 +922,7 @@ fn same_name_as_the_library(bundle: &Bundle, said: &Reading, here: &Here) -> Vec
     }
     vec![PlanProblem::at(
         &bundle.path,
-        at(&said.spelled, Spot::Field(Field::Name)),
+        line_of(&said.spelled, Spot::Field(Field::Name)),
         Some(Field::Name.spelling().to_string()),
         format!(
             "`{name}` is already in your library, under the key `{}`. This folder is called \
@@ -1182,7 +1182,7 @@ fn resolve(
         (Some(wrote), Matched::Create { .. }) => match directory(wrote, here) {
             None => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Directory)),
+                line_of(&said.spelled, Spot::Field(Field::Directory)),
                 Some(Field::Directory.spelling().into()),
                 format!(
                     "no directory named `{wrote}` is available to you. Write one you can file \
@@ -1195,7 +1195,7 @@ fn resolve(
             // that does not apply.
             Some(dir) if !dir.may_write => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Directory)),
+                line_of(&said.spelled, Spot::Field(Field::Directory)),
                 Some(Field::Directory.spelling().into()),
                 format!(
                     "you can look in `{}` but not file anything there. Ask for Editor on it, or \
@@ -1223,7 +1223,7 @@ fn resolve(
             if !agrees {
                 out.push(PlanProblem::at(
                     p,
-                    at(&said.spelled, Spot::Field(Field::Directory)),
+                    line_of(&said.spelled, Spot::Field(Field::Directory)),
                     Some(Field::Directory.spelling().into()),
                     format!(
                         "this bundle is `{}`, which is already filed at `{filed}`. An import \
@@ -1244,7 +1244,7 @@ fn resolve(
     // The machine its own workspace runs on.
     if let Some(wrote) = profile.machine.as_deref() {
         let found: Vec<&Named> = among(wrote, &here.machines, |m| &m.name);
-        let line = at(&said.spelled, Spot::Field(Field::Machine));
+        let line = line_of(&said.spelled, Spot::Field(Field::Machine));
         let key = Some(Field::Machine.spelling().to_string());
         match found.len() {
             1 => {}
@@ -1282,7 +1282,7 @@ fn resolve(
         if found.len() > 1 {
             out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Account)),
+                line_of(&said.spelled, Spot::Field(Field::Account)),
                 Some(Field::Account.spelling().to_string()),
                 format!(
                     "{} subscriptions you can see are called `{wrote}`, so this cannot say which \
@@ -1298,7 +1298,7 @@ fn resolve(
             // rather than the apply.
             (None, _) => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Account)),
+                line_of(&said.spelled, Spot::Field(Field::Account)),
                 Some(Field::Account.spelling().into()),
                 format!(
                     "`{wrote}` is a subscription for one engine, so this profile has to pin one \
@@ -1309,7 +1309,7 @@ fn resolve(
             // ambiguous case has its own sentence above.
             (Some(_), None) if found.is_empty() => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Account)),
+                line_of(&said.spelled, Spot::Field(Field::Account)),
                 Some(Field::Account.spelling().into()),
                 format!(
                     "no subscription named `{wrote}` is available to you. Write one you can \
@@ -1319,7 +1319,7 @@ fn resolve(
             (Some(engine), Some(account)) if account.engine != format!("{engine:?}") => {
                 out.push(PlanProblem::at(
                     p,
-                    at(&said.spelled, Spot::Field(Field::Account)),
+                    line_of(&said.spelled, Spot::Field(Field::Account)),
                     Some(Field::Account.spelling().into()),
                     format!(
                         "`{wrote}` authenticates {} and this profile runs {engine:?}. Pick a \
@@ -1353,7 +1353,7 @@ fn resolve(
             [_] => {}
             [] => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
+                line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
                 key,
                 format!(
                     "no profile named `{wrote}` is available to you, and no bundle in this drop \
@@ -1363,7 +1363,7 @@ fn resolve(
             )),
             many => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
+                line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
                 key,
                 format!(
                     "{} profiles you can see are called `{wrote}` — {}. A profile delegates to \
@@ -1385,7 +1385,7 @@ fn resolve(
     let mut resolved: Vec<(&SkillHere, usize)> = Vec::new();
     for (n, wrote) in profile.skills.iter().enumerate() {
         let key = Some(format!("{}[{n}]", Field::Skills.spelling()));
-        let line = at(&said.spelled, Spot::Entry(Field::Skills, n));
+        let line = line_of(&said.spelled, Spot::Entry(Field::Skills, n));
         if let Some(qualifier) = wrote.directory.as_deref() {
             let Some(dir) = directory(qualifier, here) else {
                 out.push(PlanProblem::at(
@@ -1476,7 +1476,7 @@ fn resolve(
         let first = clashing[0].1;
         out.push(PlanProblem::at(
             p,
-            at(&said.spelled, Spot::Entry(Field::Skills, first)),
+            line_of(&said.spelled, Spot::Entry(Field::Skills, first)),
             Some(format!("{}[{first}]", Field::Skills.spelling())),
             format!(
                 "two of the skills named share the name `{}` — {where_each}. A skill's folder on \
