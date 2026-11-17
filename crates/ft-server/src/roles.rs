@@ -17,6 +17,8 @@ use utoipa::ToSchema;
 
 use crate::access::{filed_where, Level};
 
+pub mod profile_md;
+
 /// "May this person move this role" as a SQL predicate: it is in their own
 /// space, or they administer the directory it is in, or they administer the
 /// organisation. The same answer `skills.rs` computes for a skill; kept local
