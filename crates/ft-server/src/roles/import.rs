@@ -4521,6 +4521,46 @@ mod tests {
             )
         }
 
+        /// A drop with no bundle in it: somebody dropped the wrong folder.
+        ///
+        /// `appliable` is derived from `why_not`, so a reason-less refusal
+        /// cannot be built — which is what makes this specimen worth having
+        /// rather than a hand-made `{ entries: [], why_not: [] }`. The screen
+        /// keeps a sentence of its own underneath as a floor, because a
+        /// disabled primary beside an empty explanation is the failure this
+        /// whole feature exists to remove.
+        fn nothing_to_import() -> ImportPlan {
+            made(
+                dropped(vec![loose("notes/README.md"), loose("notes/.DS_Store")]),
+                &bare(),
+            )
+        }
+
+        /// An invalid value under `settings`, both ways it can go.
+        ///
+        /// With an engine pinned it is checked against that engine's own set
+        /// and blocks with the list. With none there is nothing to check it
+        /// against, so it is taken as written and **warned** about rather than
+        /// passed over in silence — which makes this the first warning in the
+        /// product that is not about a duplicate name, and so the first real
+        /// test of the rule that amber is not spent on "a warning".
+        fn bad_setting() -> ImportPlan {
+            made(
+                dropped(vec![
+                    file(
+                        "engineer",
+                        "name: Engineer\ndoes: turns a ticket into code\nengine: ClaudeCode\n\
+                         settings:\n  effort: maximum\n",
+                    ),
+                    file(
+                        "qa",
+                        "name: QA\ndoes: checks it against the criteria\nsettings:\n  effort: maximum\n",
+                    ),
+                ]),
+                &bare(),
+            )
+        }
+
         /// Two bundles carrying the same key. A filesystem drop cannot make
         /// one, which is why an earlier draft called it impossible; an archive
         /// or a direct call can, so it is refused rather than assumed away.
@@ -4651,6 +4691,8 @@ mod tests {
             plans.insert("all-blocked", all_blocked());
             plans.insert("more-conditions", more_conditions());
             plans.insert("same-name", same_name());
+            plans.insert("bad-setting", bad_setting());
+            plans.insert("nothing-to-import", nothing_to_import());
             plans.insert("same-key", same_key());
             plans.insert("same-target", same_target());
             plans.insert("rename", rename());
@@ -4738,6 +4780,8 @@ mod tests {
                 ("ambiguous skill", "skills you can see are called"),
                 ("unknown frontmatter key", "placment"),
                 ("invalid enum", "sideways"),
+                ("invalid setting", "maximum"),
+                ("nothing to import", "PROFILE.md"),
                 ("missing does", "does"),
                 ("read-only directory", "but not file anything there"),
                 ("naming itself", "cannot be one of the teammates"),

@@ -170,6 +170,56 @@
       },
       "whyNot": []
     },
+    "bad-setting": {
+      "appliable": false,
+      "entries": [
+        {
+          "key": "engineer",
+          "name": "Engineer",
+          "outcome": {
+            "kind": "blocked",
+            "problems": [
+              {
+                "key": "settings.effort",
+                "line": 6,
+                "path": "profiles/engineer/PROFILE.md",
+                "says": "`maximum` is not an effort ClaudeCode offers. Write one of `low`, `medium`, `high`, `xhigh`, `max`."
+              }
+            ]
+          },
+          "path": "profiles/engineer/PROFILE.md",
+          "warnings": []
+        },
+        {
+          "key": "qa",
+          "name": "QA",
+          "outcome": {
+            "answered": false,
+            "filed": "your own space",
+            "kind": "new"
+          },
+          "path": "profiles/qa/PROFILE.md",
+          "warnings": [
+            {
+              "key": "settings.effort",
+              "line": 5,
+              "path": "profiles/qa/PROFILE.md",
+              "says": "`effort: maximum` is taken as written. Which values are on offer depends on the engine, and this profile leaves that to whichever lead delegates to it."
+            }
+          ]
+        }
+      ],
+      "ignored": [],
+      "limits": {
+        "depth": 8,
+        "fileBytes": 262144,
+        "files": 200,
+        "totalBytes": 8388608
+      },
+      "whyNot": [
+        "One bundle is blocked. Nothing is imported until it is fixed or left out."
+      ]
+    },
     "large": {
       "appliable": false,
       "entries": [
@@ -1823,6 +1873,23 @@
         "totalBytes": 8388608
       },
       "whyNot": []
+    },
+    "nothing-to-import": {
+      "appliable": false,
+      "entries": [],
+      "ignored": [
+        "notes/.DS_Store",
+        "notes/README.md"
+      ],
+      "limits": {
+        "depth": 8,
+        "fileBytes": 262144,
+        "files": 200,
+        "totalBytes": 8388608
+      },
+      "whyNot": [
+        "Nothing in what you dropped is a profile bundle, and 2 files were ignored. A bundle is a folder with a `PROFILE.md` in it, so drop the folder that holds those folders."
+      ]
     },
     "rename": {
       "appliable": true,

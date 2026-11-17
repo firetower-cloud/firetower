@@ -123,6 +123,8 @@ const STATES = [
   "mixed",
   "all-blocked",
   "more-conditions",
+  "bad-setting",
+  "nothing-to-import",
   "same-name",
   "same-key",
   "same-target",
@@ -130,7 +132,6 @@ const STATES = [
   "near-match",
   "large",
   "refused",
-  "empty",
 ];
 
 for (const theme of ["dark", "light"]) {
@@ -326,11 +327,11 @@ for (const theme of ["dark", "light"]) {
      QA's empty-drop case, and #349 in a new place: something was accepted,
      nothing happened, and the screen had no answer. */
   {
-    const page = await open(theme, "empty");
+    const page = await open(theme, "nothing-to-import");
     const msg = (await page.locator(".formfoot .msg").innerText()).trim();
-    ok("empty · the primary is unavailable", await page.locator(".formfoot .btn.primary").isDisabled(), "live");
-    ok("empty · and a sentence says why", msg.length > 20 && /PROFILE\.md/.test(msg), msg);
-    await shot(page, `empty-${theme}`);
+    ok("nothing to import · the primary is unavailable", await page.locator(".formfoot .btn.primary").isDisabled(), "live");
+    ok("nothing to import · and a sentence says why", msg.length > 20 && /PROFILE\.md/.test(msg), msg);
+    await shot(page, `nothing-to-import-${theme}`);
     await page.close();
   }
 
@@ -390,6 +391,25 @@ for (const theme of ["dark", "light"]) {
       JSON.stringify(marks),
     );
     await shot(page, `same-name-${theme}`);
+    await page.close();
+  }
+
+  /* ── And a warning that is *not* about a duplicate name takes none ────
+     A setting the plan cannot check, because the profile pins no engine. The
+     first warning in the product that is not a duplicate name, which is what
+     makes this the rule's first real test rather than a mutation of one. */
+  {
+    const page = await open(theme, "bad-setting");
+    const kinds = await page.locator("[data-warn]").evaluateAll((ns) => ns.map((n) => n.dataset.warn));
+    ok("amber · the unchecked setting warns", kinds.length === 1, `${kinds.length}`);
+    ok("amber · and it is not the duplicate-name kind", kinds[0] === "other", `${kinds[0]}`);
+    const rule = await colourOf(page, "[data-warn]", "borderLeftColor");
+    ok(
+      `amber · so it wears the neutral rule, not amber (${AMBER_SOFT})`,
+      rule !== AMBER_SOFT && rule !== AMBER,
+      rule,
+    );
+    await shot(page, `bad-setting-${theme}`);
     await page.close();
   }
 

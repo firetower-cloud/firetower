@@ -29,6 +29,8 @@ const NEAR_MATCH = PLANS["near-match"]!;
 const LARGE = PLANS.large!;
 const SAME_NAME = PLANS["same-name"]!;
 const SAME_KEY = PLANS["same-key"]!;
+const BAD_SETTING = PLANS["bad-setting"]!;
+const NOTHING = PLANS["nothing-to-import"]!;
 
 const nothing = () => {};
 const draw = (plan: ImportPlan, refused: string | null = null) =>
@@ -144,16 +146,17 @@ describe("colour discipline", () => {
     expect(times(html, "border-amber-soft")).toBe(2);
   });
 
+  /* A setting the plan cannot check, because the profile pins no engine. The
+     first warning in the product that is not about a duplicate name, and so
+     the first real test of the rule — it must take the neutral rule. */
   it("gives a warning that is not about a duplicate name the neutral rule", () => {
-    const invented: ImportPlan = {
-      ...SAME_NAME,
-      entries: SAME_NAME.entries.map((e) => ({
-        ...e,
-        warnings: e.warnings.map((w) => ({ ...w, key: "machine" })),
-      })),
-    };
-    const html = draw(invented);
-    expect(times(html, 'data-warn="other"')).toBe(2);
+    const warned = BAD_SETTING.entries.flatMap((e) => e.warnings);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]!.key).toBe("settings.effort");
+
+    const html = draw(BAD_SETTING);
+    expect(times(html, 'data-warn="other"')).toBe(1);
+    expect(times(html, 'data-warn="duplicate-name"')).toBe(0);
     expect(times(html, "border-amber-soft")).toBe(0);
   });
 
@@ -205,12 +208,16 @@ describe("the primary action", () => {
     expect(draw(ALL_NEW)).not.toMatch(/<button disabled=""[^>]*class="btn primary"/);
   });
 
-  /* #349 in a new place: a dead button with no sentence beside it. */
+  /* #349 in a new place: a dead button with no sentence beside it. The server
+     supplies the reason now — `appliable` is derived from `why_not`, so a
+     reason-less refusal cannot be built — and this asserts the screen draws
+     it. The floor underneath, for a plan that somehow arrives without one, is
+     asserted in `import-plan.test.ts`. */
   it("never appears dead without a sentence", () => {
-    const empty: ImportPlan = { ...MIXED, entries: [], whyNot: [], appliable: false };
-    const html = draw(empty);
+    const html = draw(NOTHING);
+    expect(html).toMatch(/<button disabled=""[^>]*class="btn primary"/);
     const foot = readable(html.slice(html.indexOf('class="formfoot"')));
-    expect(foot.replace(/Cancel|Import.*/g, "").trim().length).toBeGreaterThan(20);
+    expect(foot).toContain(readable(NOTHING.whyNot[0]!));
     expect(foot).toContain("PROFILE.md");
   });
 });
