@@ -7,6 +7,15 @@
 //! profile's instructions. [`parse`] reads such a file into a [`Profile`];
 //! [`serialize`] writes a [`Profile`] back out as one.
 //!
+//! [`read`] is [`parse`] and one fact more: **which keys the file actually
+//! wrote, and the line each is on** ([`Spelled`]). A `Profile` cannot carry
+//! that, by design — it has a value for every field — and two things need it.
+//! A reset has to be distinguishable from a value that happens to equal the
+//! default, because the review draws the first in amber and nobody may lose a
+//! setting without having been shown it. And the plan resolves names into ids
+//! long after this module has finished, so its own errors need a line to
+//! attribute themselves to.
+//!
 //! Nothing here resolves a name into an id, touches the database, or decides
 //! what a drop would do. That is the plan (#355), and keeping it out means the
 //! hard cases in this file are a unit test over a function rather than a
@@ -73,7 +82,9 @@ use super::INHERITS;
 
 /// What a `PROFILE.md` says, with a value for every field.
 ///
-/// **No field means "the file did not say".** Where a value is [`Option`] it
+/// **No field means "the file did not say".** Which key the file wrote is a
+/// separate fact, kept in [`Spelled`] and returned beside this by [`read`].
+/// Where a value is [`Option`] it
 /// is because the field is nullable in the API too and null is a decision
 /// there: `engine`, `machine` and `placement` have a "let the lead choose"
 /// state, and `account` and `directory` have "whatever the owner's default
@@ -297,6 +308,107 @@ impl OnChildLimit {
     }
 }
 
+/// A place in a file something can be said about.
+///
+/// One type for two jobs that were drifting apart. A [`Problem`] names the key
+/// it is about, and [`Spelled`] records where the file wrote each one — so the
+/// plan (#355) can take a refusal it produced long after parsing and point at
+/// the same line this reader would have. `format!("{key}[{n}]")` in two places
+/// was how those two came to disagree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Spot {
+    /// A frontmatter key.
+    Field(Field),
+    /// One entry of a list, counting from 0. The error table requires naming
+    /// *which* entry is at fault, and the line of `skills:` cannot point at
+    /// the third item under it.
+    Entry(Field, usize),
+    /// One of the four settings under `settings`. They reset independently, so
+    /// `settings` being spelled is not the same fact as `settings.effort`
+    /// being spelled.
+    Setting(Setting),
+}
+
+impl Spot {
+    /// How this place is named in a refusal: `placement`, `skills[2]`,
+    /// `settings.model`.
+    pub fn spelling(self) -> String {
+        match self {
+            Self::Field(field) => field.spelling().to_string(),
+            Self::Entry(field, n) => format!("{}[{n}]", field.spelling()),
+            Self::Setting(setting) => {
+                format!("{}.{}", Field::Settings.spelling(), setting.spelling())
+            }
+        }
+    }
+}
+
+/// Which keys a file wrote, and the line each one is on.
+///
+/// **This is the fact [`Profile`] deliberately throws away.** A profile has a
+/// value for every field, because that is what makes a file the whole
+/// description — and the cost is that *nothing in it says whether the file
+/// mentioned a field or whether the default was supplied here.* The review
+/// needs that difference: an absent key is a **reset**, drawn in amber as
+/// something to read before accepting, and the governing rule is that nobody
+/// loses a setting without having been shown it.
+///
+/// **Spelled and equal to the default is an ordinary value, not a reset.**
+/// Somebody who writes `on_usage_limit: wait` has said something, the next
+/// export writes it back, and it is not an event. So this records what the
+/// file *wrote*, never what the value turned out to be.
+///
+/// Writing `~` is writing the key. `machine: ~` and an absent `machine` leave
+/// the same value on the profile and are not the same act: the first is a
+/// decision to let the lead choose, the second is a line somebody deleted.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Spelled {
+    fields: std::collections::BTreeMap<Field, usize>,
+    entries: std::collections::BTreeMap<Field, Vec<usize>>,
+    settings: std::collections::BTreeMap<Setting, usize>,
+    begins: usize,
+}
+
+impl Spelled {
+    /// The line this place is written on, or nothing if the file never wrote
+    /// it.
+    pub fn line(&self, spot: Spot) -> Option<usize> {
+        match spot {
+            Spot::Field(field) => self.fields.get(&field).copied(),
+            Spot::Entry(field, n) => self.entries.get(&field).and_then(|at| at.get(n)).copied(),
+            Spot::Setting(setting) => self.settings.get(&setting).copied(),
+        }
+    }
+
+    /// Whether the file wrote this place at all. An absent one is a reset.
+    pub fn wrote(&self, spot: Spot) -> bool {
+        self.line(spot).is_some()
+    }
+
+    /// How many entries the file wrote under a list.
+    pub fn entries(&self, field: Field) -> usize {
+        self.entries.get(&field).map_or(0, Vec::len)
+    }
+
+    /// Where to point at something the file never wrote.
+    ///
+    /// The first line of the frontmatter, which is where a missing field is
+    /// missing from. A `{path, line}` is required of every problem, and a
+    /// problem about a key nobody wrote still has to have one.
+    pub fn fields_begin(&self) -> usize {
+        self.begins
+    }
+}
+
+/// What a file said, and where it said it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reading {
+    /// The profile the file describes, with a value for every field.
+    pub profile: Profile,
+    /// Which of those values the file actually wrote.
+    pub spelled: Spelled,
+}
+
 /// Why a file is not a profile, in a sentence somebody can act on.
 ///
 /// **`path` and `line` are not optional.** An error that cannot say which of
@@ -414,7 +526,7 @@ impl Field {
 }
 
 /// One setting under `settings`, the same way [`Field`] is one key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Setting {
     Model,
     Effort,
@@ -567,7 +679,7 @@ const FOLDED: [char; 2] = ['\n', '\r'];
 /// nothing is allowed to use, and the one error the specification is explicit
 /// about — malformed YAML, which "has no values to show" — would be the odd
 /// case out rather than the rule.
-pub fn parse(at: &Path, key: &str, text: &str) -> Result<Profile, Vec<Problem>> {
+pub fn read(at: &Path, key: &str, text: &str) -> Result<Reading, Vec<Problem>> {
     let path = at.display().to_string();
     let at = path.as_str();
     let said = |line: usize, key: Option<&str>, says: String| problem(at, line, key, says);
@@ -649,8 +761,16 @@ pub fn parse(at: &Path, key: &str, text: &str) -> Result<Profile, Vec<Problem>> 
         }
     };
 
-    let mut profile = Profile::bare(key);
-    let mut seen: BTreeSet<Field> = BTreeSet::new();
+    let mut reader = Reader {
+        at,
+        lines: &lines,
+        first: FIRST,
+        profile: Profile::bare(key),
+        spelled: Spelled {
+            begins: FIRST,
+            ..Default::default()
+        },
+    };
     // A field whose value was refused keeps the default it was born with, so
     // `name` and `does` would read as missing as well as wrong. Two problems
     // for one mistake, and the second one is a lie: the field is there. So the
@@ -671,20 +791,25 @@ pub fn parse(at: &Path, key: &str, text: &str) -> Result<Profile, Vec<Problem>> 
             problems.push(said(line, Some(spelling), unknown(spelling)));
             continue;
         };
-        seen.insert(field);
-        if let Err(mut found) = read_field(field, value, &lines, FIRST, line, at, &mut profile) {
+        reader.spelled.fields.insert(field, line);
+        if let Err(mut found) = reader.field(field, value, line) {
             unread.insert(field);
             problems.append(&mut found);
         }
     }
+    let Reader {
+        mut profile,
+        spelled,
+        ..
+    } = reader;
 
     // `key:` is optional, and when it is there it says the same thing the
     // folder does. A disagreement is a refusal rather than a precedence rule:
     // the folder is the identity, and a file that contradicts it is a file
     // whose author believes something that is not true.
-    if seen.contains(&Field::Key) && !profile.key.is_empty() && profile.key != key {
+    if spelled.wrote(Spot::Field(Field::Key)) && !profile.key.is_empty() && profile.key != key {
         problems.push(said(
-            line_of(&lines, FIRST, "key", 0),
+            spelled.line(Spot::Field(Field::Key)).unwrap_or(FIRST),
             Some("key"),
             format!(
                 "This file says `key: {}` and its folder is called `{key}`. The folder name is \
@@ -718,11 +843,20 @@ pub fn parse(at: &Path, key: &str, text: &str) -> Result<Profile, Vec<Problem>> 
     profile.instructions = body.trim().to_string();
 
     if problems.is_empty() {
-        Ok(profile)
+        Ok(Reading { profile, spelled })
     } else {
         problems.sort_by(|a, b| a.line.cmp(&b.line).then(a.key.cmp(&b.key)));
         Err(problems)
     }
+}
+
+/// Read a `PROFILE.md` into the profile it describes, and nothing else.
+///
+/// [`read`] with the half most callers want. Everything that has to tell a
+/// reset from a value somebody wrote, or attribute an error of its own to a
+/// line, needs [`Reading::spelled`] and should call that instead.
+pub fn parse(at: &Path, key: &str, text: &str) -> Result<Profile, Vec<Problem>> {
+    read(at, key, text).map(|reading| reading.profile)
 }
 
 /// What to say about a key this format does not have.
@@ -808,179 +942,202 @@ fn problem(at: &str, line: usize, key: Option<&str>, says: impl Into<String>) ->
     }
 }
 
-/// Read one field's value onto the profile, or say why it could not be.
+/// One file, mid-read: where it came from, how its lines are numbered, and
+/// what has come out of it so far.
 ///
-/// An exhaustive match on [`Field`], so a field added to the enum does not
-/// compile until this knows how to read it. That is what makes "a field the
-/// parser drops" a compile error rather than a test failure.
-fn read_field(
-    field: Field,
-    value: &Value,
-    lines: &[&str],
+/// Four of these were arguments to [`Reader::field`] and belong to the file
+/// rather than to the field — which is what made that function eight
+/// parameters wide, three of them the same three every time.
+struct Reader<'a> {
+    /// The path, for a problem to name.
+    at: &'a str,
+    /// The frontmatter's lines, for working out which one a key is on.
+    lines: &'a [&'a str],
+    /// The file line [`Self::lines`] starts at.
     first: usize,
-    line: usize,
-    at: &str,
-    into: &mut Profile,
-) -> Result<(), Vec<Problem>> {
-    let said = |line: usize, key: Option<&str>, says: String| problem(at, line, key, says);
-    let key = field.spelling();
-    let one = |says: String| vec![said(line, Some(key), says)];
-    match field {
-        Field::Key => into.key = text(value, key, line, at)?,
-        Field::Name => into.name = text(value, key, line, at)?,
-        Field::Does => into.does = text(value, key, line, at)?,
-        Field::Directory => into.directory = maybe(value, key, line, at)?,
-        Field::Machine => into.machine = maybe(value, key, line, at)?,
-        Field::Account => into.account = maybe(value, key, line, at)?,
-        Field::Engine => {
-            into.engine = match maybe(value, key, line, at)? {
-                None => None,
-                Some(name) => match ft_core::Agent::from_name(&name) {
-                    Some(agent) => Some(agent),
-                    None => {
-                        let offered: Vec<String> = ft_core::Agent::all()
-                            .iter()
-                            .map(|a| format!("`{a:?}`"))
-                            .collect();
-                        return Err(one(format!(
+    profile: Profile,
+    spelled: Spelled,
+}
+
+impl Reader<'_> {
+    /// Read one field's value onto the profile, or say why it could not be.
+    ///
+    /// An exhaustive match on [`Field`], so a field added to the enum does not
+    /// compile until this knows how to read it. That is what makes "a field
+    /// the parser drops" a compile error rather than a test failure.
+    fn field(&mut self, field: Field, value: &Value, line: usize) -> Result<(), Vec<Problem>> {
+        // Copied out rather than borrowed: they are the file's, not this
+        // field's, and holding them apart from the two sinks below is what
+        // lets the arms write to both.
+        let (at, lines, first) = (self.at, self.lines, self.first);
+        let into = &mut self.profile;
+        let spelled = &mut self.spelled;
+        let said = |line: usize, key: Option<&str>, says: String| problem(at, line, key, says);
+        let key = field.spelling();
+        let one = |says: String| vec![said(line, Some(key), says)];
+        match field {
+            Field::Key => into.key = text(value, key, line, at)?,
+            Field::Name => into.name = text(value, key, line, at)?,
+            Field::Does => into.does = text(value, key, line, at)?,
+            Field::Directory => into.directory = maybe(value, key, line, at)?,
+            Field::Machine => into.machine = maybe(value, key, line, at)?,
+            Field::Account => into.account = maybe(value, key, line, at)?,
+            Field::Engine => {
+                into.engine = match maybe(value, key, line, at)? {
+                    None => None,
+                    Some(name) => match ft_core::Agent::from_name(&name) {
+                        Some(agent) => Some(agent),
+                        None => {
+                            let offered: Vec<String> = ft_core::Agent::all()
+                                .iter()
+                                .map(|a| format!("`{a:?}`"))
+                                .collect();
+                            return Err(one(format!(
                             "`{name}` is not an engine Firetower runs. Write one of {}, or `~` \
                              to let the lead choose.",
                             offered.join(", ")
                         )));
-                    }
-                },
+                        }
+                    },
+                }
             }
-        }
-        Field::Placement => {
-            into.placement = match maybe(value, key, line, at)? {
-                None => Placement::Lead,
-                Some(word) => Placement::from_spelling(&word).ok_or_else(|| {
-                    one(format!(
-                        "`{word}` is not a placement. Write `here` for the lead's workspace, \
+            Field::Placement => {
+                into.placement = match maybe(value, key, line, at)? {
+                    None => Placement::Lead,
+                    Some(word) => Placement::from_spelling(&word).ok_or_else(|| {
+                        one(format!(
+                            "`{word}` is not a placement. Write `here` for the lead's workspace, \
                          `new` for one of its own, or `lead` to let the lead choose."
-                    ))
-                })?,
+                        ))
+                    })?,
+                }
             }
-        }
-        Field::OnUsageLimit => {
-            into.on_usage_limit = match maybe(value, key, line, at)? {
-                None => OnUsageLimit::Wait,
-                Some(word) => OnUsageLimit::from_spelling(&word).ok_or_else(|| {
-                    one(format!(
-                        "`{word}` is not something that can happen at a usage limit. Write \
+            Field::OnUsageLimit => {
+                into.on_usage_limit = match maybe(value, key, line, at)? {
+                    None => OnUsageLimit::Wait,
+                    Some(word) => OnUsageLimit::from_spelling(&word).ok_or_else(|| {
+                        one(format!(
+                            "`{word}` is not something that can happen at a usage limit. Write \
                          `wait` to need a person, `same` to let the lead move the child to \
                          another subscription for the same engine, or `engine` to let it move \
                          to another engine."
-                    ))
-                })?,
+                        ))
+                    })?,
+                }
             }
-        }
-        Field::OnChildLimit => {
-            into.on_child_limit = match maybe(value, key, line, at)? {
-                None => OnChildLimit::Ask,
-                Some(word) => OnChildLimit::from_spelling(&word).ok_or_else(|| {
-                    one(format!(
+            Field::OnChildLimit => {
+                into.on_child_limit = match maybe(value, key, line, at)? {
+                    None => OnChildLimit::Ask,
+                    Some(word) => OnChildLimit::from_spelling(&word).ok_or_else(|| {
+                        one(format!(
                         "`{word}` is not something a Manager does when a child runs out. Write \
                          `ask` to put the choice to the person, or `reroute` to pick a \
                          subscription and carry on."
                     ))
-                })?,
-            }
-        }
-        Field::CanDelegate => into.can_delegate = flag(value, key, line, at, false)?,
-        Field::IncludeAlwaysOn => into.include_always_on = flag(value, key, line, at, INHERITS)?,
-        Field::IncludeRepoDefaults => {
-            into.include_repo_defaults = flag(value, key, line, at, INHERITS)?
-        }
-        Field::DelegatesTo => {
-            into.delegates_to = list(value, key, lines, first, line, at)?
-                .into_iter()
-                .map(|(name, _)| name)
-                .collect()
-        }
-        Field::Skills => {
-            let mut out = Vec::new();
-            let mut problems = Vec::new();
-            for (n, (name, entry)) in list(value, key, lines, first, line, at)?
-                .into_iter()
-                .enumerate()
-            {
-                let parts: Vec<&str> = name.split('/').collect();
-                let spelling = format!("{key}[{n}]");
-                match parts.as_slice() {
-                    [one] => out.push(SkillRef {
-                        directory: None,
-                        name: (*one).to_string(),
-                    }),
-                    [directory, one] if !directory.trim().is_empty() && !one.trim().is_empty() => {
-                        out.push(SkillRef {
-                            directory: Some(directory.trim().to_string()),
-                            name: one.trim().to_string(),
-                        })
-                    }
-                    _ => problems.push(said(
-                        entry,
-                        Some(&spelling),
-                        format!(
-                            "`{name}` is not a skill name. Write the skill's name on its own, \
-                             or put the directory it is in in front of it, like \
-                             `firetower/dataviz`."
-                        ),
-                    )),
+                    })?,
                 }
             }
-            if !problems.is_empty() {
-                return Err(problems);
+            Field::CanDelegate => into.can_delegate = flag(value, key, line, at, false)?,
+            Field::IncludeAlwaysOn => {
+                into.include_always_on = flag(value, key, line, at, INHERITS)?
             }
-            into.skills = out;
-        }
-        Field::Settings => {
-            let settings = match value {
-                Value::Null => serde_yaml::Mapping::new(),
-                Value::Mapping(m) => m.clone(),
-                other => {
-                    return Err(one(format!(
+            Field::IncludeRepoDefaults => {
+                into.include_repo_defaults = flag(value, key, line, at, INHERITS)?
+            }
+            Field::DelegatesTo => {
+                let (names, at_lines) = unzip(list(value, key, lines, first, line, at)?);
+                spelled.entries.insert(field, at_lines);
+                into.delegates_to = names;
+            }
+            Field::Skills => {
+                let mut out = Vec::new();
+                let mut problems = Vec::new();
+                let read = list(value, key, lines, first, line, at)?;
+                spelled
+                    .entries
+                    .insert(field, read.iter().map(|(_, at)| *at).collect());
+                for (n, (name, entry)) in read.into_iter().enumerate() {
+                    let parts: Vec<&str> = name.split('/').collect();
+                    let spelling = Spot::Entry(field, n).spelling();
+                    match parts.as_slice() {
+                        [one] => out.push(SkillRef {
+                            directory: None,
+                            name: (*one).to_string(),
+                        }),
+                        [directory, one]
+                            if !directory.trim().is_empty() && !one.trim().is_empty() =>
+                        {
+                            out.push(SkillRef {
+                                directory: Some(directory.trim().to_string()),
+                                name: one.trim().to_string(),
+                            })
+                        }
+                        _ => problems.push(said(
+                            entry,
+                            Some(&spelling),
+                            format!(
+                                "`{name}` is not a skill name. Write the skill's name on its own, \
+                             or put the directory it is in in front of it, like \
+                             `firetower/dataviz`."
+                            ),
+                        )),
+                    }
+                }
+                if !problems.is_empty() {
+                    return Err(problems);
+                }
+                into.skills = out;
+            }
+            Field::Settings => {
+                let settings = match value {
+                    Value::Null => serde_yaml::Mapping::new(),
+                    Value::Mapping(m) => m.clone(),
+                    other => {
+                        return Err(one(format!(
                         "`settings` holds {} where the four agent settings should be. Write them \
                          indented under `settings:`, like `model: opus`, or `~` to take the \
                          engine's defaults.",
                         shape_of(other)
                     )))
-                }
-            };
-            let mut problems = Vec::new();
-            for (spelling, value) in &settings {
-                let Some(spelling) = spelling.as_str() else {
-                    problems.push(said(
-                        line,
-                        Some(key),
-                        "A setting's name has to be text. Write it as `model: opus`.".into(),
-                    ));
-                    continue;
+                    }
                 };
-                let line_at = line_of(lines, first, spelling, line - first + 1);
-                let named = format!("{key}.{spelling}");
-                let Some(setting) = Setting::from_spelling(spelling) else {
-                    problems.push(said(
-                        line_at,
-                        Some(&named),
-                        format!(
-                            "`{spelling}` is not one of an agent's settings. Write one of {}.",
-                            Setting::accepted()
-                        ),
-                    ));
-                    continue;
-                };
-                match maybe(value, &named, line_at, at) {
-                    Ok(v) => *setting.of_mut(&mut into.settings) = v,
-                    Err(mut found) => problems.append(&mut found),
+                let mut problems = Vec::new();
+                for (spelling, value) in &settings {
+                    let Some(spelling) = spelling.as_str() else {
+                        problems.push(said(
+                            line,
+                            Some(key),
+                            "A setting's name has to be text. Write it as `model: opus`.".into(),
+                        ));
+                        continue;
+                    };
+                    let line_at = line_of(lines, first, spelling, line - first + 1);
+                    let Some(setting) = Setting::from_spelling(spelling) else {
+                        // Not a [`Spot`]: the whole point is that this is a key
+                        // the format does not have.
+                        problems.push(said(
+                            line_at,
+                            Some(&format!("{key}.{spelling}")),
+                            format!(
+                                "`{spelling}` is not one of an agent's settings. Write one of {}.",
+                                Setting::accepted()
+                            ),
+                        ));
+                        continue;
+                    };
+                    spelled.settings.insert(setting, line_at);
+                    match maybe(value, &Spot::Setting(setting).spelling(), line_at, at) {
+                        Ok(v) => *setting.of_mut(&mut into.settings) = v,
+                        Err(mut found) => problems.append(&mut found),
+                    }
                 }
-            }
-            if !problems.is_empty() {
-                return Err(problems);
+                if !problems.is_empty() {
+                    return Err(problems);
+                }
             }
         }
+        Ok(())
     }
-    Ok(())
 }
 
 /// A required line of text, with a blank reading as nothing written at all.
@@ -1176,6 +1333,11 @@ fn entry_lines(lines: &[&str], first: usize, line: usize, count: usize) -> Vec<u
         out.push(line);
     }
     out
+}
+
+/// The names and the lines they were written on, apart.
+fn unzip(read: Vec<(String, usize)>) -> (Vec<String>, Vec<usize>) {
+    read.into_iter().unzip()
 }
 
 /// What a value is, for a refusal to say so in words rather than in Rust.
@@ -1407,19 +1569,19 @@ mod tests {
             .join("PROFILE.md")
     }
 
-    fn read(key: &str, text: &str) -> Result<Profile, Vec<Problem>> {
+    fn tried(key: &str, text: &str) -> Result<Profile, Vec<Problem>> {
         parse(&at(key), key, text)
     }
 
     fn refused(key: &str, text: &str) -> Vec<Problem> {
-        match read(key, text) {
+        match tried(key, text) {
             Ok(p) => panic!("{key} parsed when it should not have: {p:#?}"),
             Err(problems) => problems,
         }
     }
 
     fn accepted(key: &str, text: &str) -> Profile {
-        match read(key, text) {
+        match tried(key, text) {
             Ok(p) => p,
             Err(problems) => panic!("{key} refused: {problems:#?}"),
         }
@@ -2513,5 +2675,210 @@ You own feature delivery.
             accepted("designer", "---\nname: D\ndoes: d\n---\n").instructions,
             ""
         );
+    }
+
+    // ── what the file wrote, and where ──────────────────────────────────
+
+    fn reading(key: &str, text: &str) -> Reading {
+        match read(&at(key), key, text) {
+            Ok(r) => r,
+            Err(problems) => panic!("{key} refused: {problems:#?}"),
+        }
+    }
+
+    /// **A reset and a value somebody wrote are different facts, and the
+    /// profile cannot tell them apart.**
+    ///
+    /// Both files below produce the identical profile: one writes the default
+    /// and the other leaves the key out. The review draws the second in amber
+    /// as a reset and the first as nothing at all, so this difference is the
+    /// whole reason `Spelled` exists.
+    #[test]
+    fn spelling_the_default_is_not_the_same_as_leaving_it_out() {
+        let wrote = reading(
+            "designer",
+            &with("on_usage_limit: wait\ninclude_always_on: true\n"),
+        );
+        let left_out = reading("designer", &with(""));
+
+        assert_eq!(
+            wrote.profile, left_out.profile,
+            "the values are the same, which is what makes the rest necessary"
+        );
+
+        assert!(wrote.spelled.wrote(Spot::Field(Field::OnUsageLimit)));
+        assert!(wrote.spelled.wrote(Spot::Field(Field::IncludeAlwaysOn)));
+        assert!(!left_out.spelled.wrote(Spot::Field(Field::OnUsageLimit)));
+        assert!(!left_out.spelled.wrote(Spot::Field(Field::IncludeAlwaysOn)));
+
+        assert_eq!(
+            wrote.spelled.line(Spot::Field(Field::OnUsageLimit)),
+            Some(4)
+        );
+        assert_eq!(
+            wrote.spelled.line(Spot::Field(Field::IncludeAlwaysOn)),
+            Some(5)
+        );
+    }
+
+    /// Writing the open mark is writing the key.
+    ///
+    /// `machine: ~` and an absent `machine` leave the same value on the
+    /// profile. The first is somebody deciding the lead may choose; the second
+    /// is a line that was deleted.
+    #[test]
+    fn the_open_mark_is_a_value_somebody_wrote() {
+        let open = reading("designer", &with("machine: ~\n"));
+        assert_eq!(open.profile.machine, None);
+        assert!(open.spelled.wrote(Spot::Field(Field::Machine)));
+        assert!(!reading("designer", &with(""))
+            .spelled
+            .wrote(Spot::Field(Field::Machine)));
+    }
+
+    /// **Which entry of a list, by line.** #355 resolves names long after
+    /// parsing and has to say which teammate or skill it could not find.
+    #[test]
+    fn every_entry_of_a_list_has_its_own_line() {
+        let lists = [
+            "delegates_to:",
+            "  - Designer",
+            "  - Engineer",
+            "  - QA",
+            "skills:",
+            "  - wayfinder",
+            "  - firetower/dataviz",
+            "",
+        ]
+        .join("\n");
+        let read = reading("engineering-manager", &with(&lists));
+        let spelled = &read.spelled;
+        assert_eq!(spelled.entries(Field::DelegatesTo), 3);
+        assert_eq!(spelled.line(Spot::Entry(Field::DelegatesTo, 0)), Some(5));
+        assert_eq!(spelled.line(Spot::Entry(Field::DelegatesTo, 1)), Some(6));
+        assert_eq!(spelled.line(Spot::Entry(Field::DelegatesTo, 2)), Some(7));
+        assert_eq!(spelled.line(Spot::Entry(Field::DelegatesTo, 3)), None);
+
+        assert_eq!(spelled.entries(Field::Skills), 2);
+        assert_eq!(spelled.line(Spot::Entry(Field::Skills, 0)), Some(9));
+        assert_eq!(spelled.line(Spot::Entry(Field::Skills, 1)), Some(10));
+
+        // A list written in flow style has one line, and saying so is more
+        // honest than inventing two.
+        let flow = reading("designer", &with("skills: [one, two]\n"));
+        assert_eq!(flow.spelled.line(Spot::Entry(Field::Skills, 0)), Some(4));
+        assert_eq!(flow.spelled.line(Spot::Entry(Field::Skills, 1)), Some(4));
+
+        // A list nobody wrote has no entries, and `skills: []` has none either
+        // — the difference between them is the key, not the entries.
+        let empty = reading("designer", &with("skills: []\n"));
+        assert_eq!(empty.spelled.entries(Field::Skills), 0);
+        assert!(empty.spelled.wrote(Spot::Field(Field::Skills)));
+        assert!(!reading("designer", &with(""))
+            .spelled
+            .wrote(Spot::Field(Field::Skills)));
+    }
+
+    /// **The four settings reset one at a time**, so `settings` being written
+    /// is not the fact the review needs.
+    #[test]
+    fn each_setting_is_spelled_on_its_own() {
+        let read = reading("designer", &with("settings:\n  model: opus\n  effort: ~\n"));
+        let spelled = &read.spelled;
+        assert!(spelled.wrote(Spot::Field(Field::Settings)));
+        assert_eq!(spelled.line(Spot::Setting(Setting::Model)), Some(5));
+        // Written as open, which is a decision rather than a deletion.
+        assert_eq!(spelled.line(Spot::Setting(Setting::Effort)), Some(6));
+        assert!(!spelled.wrote(Spot::Setting(Setting::Mode)));
+        assert!(!spelled.wrote(Spot::Setting(Setting::Sandbox)));
+        assert_eq!(read.profile.settings.model.as_deref(), Some("opus"));
+        assert_eq!(read.profile.settings.effort, None);
+
+        // `settings: ~` is the block written as open: the key is there and
+        // none of the four is.
+        let open = reading("designer", &with("settings: ~\n"));
+        assert!(open.spelled.wrote(Spot::Field(Field::Settings)));
+        for setting in Setting::all() {
+            assert!(!open.spelled.wrote(Spot::Setting(setting)));
+        }
+    }
+
+    /// Every spot a refusal can name, named the way the file names it.
+    #[test]
+    fn a_spot_is_spelled_the_way_a_refusal_names_it() {
+        assert_eq!(Spot::Field(Field::Placement).spelling(), "placement");
+        assert_eq!(Spot::Entry(Field::Skills, 2).spelling(), "skills[2]");
+        assert_eq!(Spot::Setting(Setting::Model).spelling(), "settings.model");
+        // The parser's own problems are named from the same type, so a key a
+        // refusal carries can be matched back to a line this reader recorded.
+        let problems = refused("designer", &with("skills:\n  - a/b/c\n"));
+        assert_eq!(
+            problems[0].key.as_deref(),
+            Some(Spot::Entry(Field::Skills, 0).spelling().as_str())
+        );
+    }
+
+    /// What the real five say about themselves, which is almost nothing.
+    ///
+    /// `designer` writes two keys and `engineer` writes none at all, so the
+    /// spelled set is tiny for one and empty for the other. Every other field
+    /// is a reset waiting to be drawn, which is what makes the amber rule
+    /// matter on the very first import.
+    #[test]
+    fn the_repaired_fixtures_spell_two_fields_and_no_more() {
+        for (key, text) in REPAIRED {
+            let read = reading(key, text);
+            let wrote: Vec<&'static str> = Field::all()
+                .into_iter()
+                .filter(|f| read.spelled.wrote(Spot::Field(*f)))
+                .map(Field::spelling)
+                .collect();
+            assert_eq!(wrote, vec!["name", "does"], "{key}");
+            for setting in Setting::all() {
+                assert!(!read.spelled.wrote(Spot::Setting(setting)), "{key}");
+            }
+            assert_eq!(read.spelled.entries(Field::DelegatesTo), 0, "{key}");
+            // Nothing to point at, and a problem still needs a line.
+            assert_eq!(read.spelled.fields_begin(), 2, "{key}");
+        }
+    }
+
+    /// `parse` is `read` with the half most callers want, and nothing else.
+    #[test]
+    fn parse_is_the_readings_profile() {
+        for (key, text) in REPAIRED {
+            assert_eq!(accepted(key, text), reading(key, text).profile);
+        }
+        for want in corpus() {
+            let written = serialize(&want);
+            assert_eq!(
+                accepted(&want.key, &written),
+                reading(&want.key, &written).profile
+            );
+        }
+    }
+
+    /// An exported file writes every field, so everything in it is spelled and
+    /// nothing in it is a reset. That is the whole of the no-drift decision,
+    /// said in the one place it can be asserted.
+    #[test]
+    fn an_exported_file_spells_everything() {
+        let written = serialize(&dense());
+        let read = reading("engineering-manager", &written);
+        for field in Field::all() {
+            assert!(
+                read.spelled.wrote(Spot::Field(field)),
+                "`{}` is not in a file this module wrote",
+                field.spelling()
+            );
+        }
+        for setting in Setting::all() {
+            assert!(read.spelled.wrote(Spot::Setting(setting)));
+        }
+        assert_eq!(
+            read.spelled.entries(Field::DelegatesTo),
+            dense().delegates_to.len()
+        );
+        assert_eq!(read.spelled.entries(Field::Skills), dense().skills.len());
     }
 }
