@@ -225,10 +225,13 @@ follow:
 ## Images, and the worker
 
 ```sh
-just updater-image       # the updater beside the control plane
-docker build -t firetower .   # the control plane, interface and all
-just build-worker        # the worker binary, packed as a release would
+docker build -t firetower .                                # the control plane, interface and all
+docker build -f Dockerfile.updater -t firetower-updater .  # the updater beside it
+just build-worker                                          # the worker binary, packed as a release would
 ```
+
+Neither image has a `just` recipe — `.github/workflows/images.yml` is what
+builds and publishes them, and the two lines above are that by hand.
 
 The two images and the worker binaries are published together on release: the
 control plane compares its version against each worker's on every handshake,
