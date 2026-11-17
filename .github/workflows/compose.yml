@@ -48,14 +48,20 @@ jobs:
     # the *target* branch, so this is the check that actually skips it.
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: depot-ubuntu-22.04
-    # Measured at 130s from `up` to a 200 on an M-series laptop, with the image
-    # layers cached and the cargo, pnpm and node_modules volumes empty. A
-    # runner starts colder than that: it builds the image as well — `cargo
-    # install just cargo-watch` is most of it — and then compiles the
-    # workspace from nothing inside the container. Well above either number on
-    # purpose, because a slow runner should be slow rather than red. What this
-    # catches is a profile that never answers, and that fails the poll below
-    # long before the clock here runs out.
+    # 5m26s and 7m56s for the whole job, on its first two runs
+    # (2026-11-17, depot-ubuntu-22.04). The faster one was 162s to build the
+    # image and start the stack, then 149s of the container installing 576
+    # packages and compiling the workspace from nothing before the control
+    # plane answered. The same thing on an M-series laptop with the image
+    # layers already built was 130s.
+    #
+    # Those two runs are the same commit and the same runner label, so the
+    # ~45% between them is the variance to expect: nothing here is cached
+    # between runs, and the whole cost is a cold build. Hence a limit nearly
+    # four times the slower of them — a slow runner should be slow rather than
+    # red — and hence judging a regression against the pair rather than
+    # against one of them. A stack that is dead rather than slow fails in
+    # seconds, which is the failure this is really for.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
