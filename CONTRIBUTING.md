@@ -88,8 +88,18 @@ sends the build from this checkout rather than fetching a release.
 
 Workers keep what happened on the machine they run on (for a machine that is
 your own laptop, that is `~/.firetower`). The control plane's cache is
-Postgres. Drop the database and
-it rebuilds from the workers on reconnect; `just reset` wipes both.
+Postgres. Drop the database and it rebuilds from the workers on reconnect, so
+`just reset` is the cheap way back to a clean slate: it drops the database and
+brings it back empty, and touches nothing else.
+
+**Worker state is a separate command, and it is not a cache.** Once this
+laptop is a machine in your own fleet, `~/.firetower/worker` holds the clone
+of every repository and the live worktree of every session running here —
+uncommitted work included, and not only the sessions you started. One laptop
+measured 80GB across 60 worktrees. `just worker-wipe` is the recipe that
+removes it, and it refuses while any worktree is still there rather than
+asking; see #339 for why it has no override. Ending a session takes its
+worktree with it, which is the ordinary way that directory gets smaller.
 
 ## Day to day
 
