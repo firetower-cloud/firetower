@@ -95,6 +95,168 @@ export const CreateRoleResponse = zod.object({
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A role, as the interface and the spawn tool read it.')
 
+/**
+ * **Read-only, with no exceptions.** It takes the files, says what each one is
+ * against the library, and writes nothing — see `roles::import` for why the
+ * plan it returns cannot be used as a capability by the apply (#356).
+ * @summary What a dropped folder of profile bundles would do.
+ */
+export const PlanRoleImportBody = zod.object({
+  "answers": zod.array(zod.object({
+  "answer": zod.union([zod.object({
+  "kind": zod.enum(['sameProfile']),
+  "profile": zod.string()
+}).describe('It is that profile: overwrite that row, and adopt the key onto it.\n\n`profile` is an id the client read off a [`PlanProposal`]. It is **not\ntrusted**: it is looked up in the asker\'s own visible set and checked\nfor Editor, here and again at apply. Any profile they could already\noverwrite through `PUT /api/v1/roles/{id}` is allowed, and nothing else.'),zod.object({
+  "kind": zod.enum(['newProfile'])
+}).describe('It is a new profile: create it, and leave the proposed row alone.')]).describe('The two answers a candidate takes.\n\nThere is no third and there is no default. An unanswered candidate blocks\nthe apply the way an unresolved name does, because a default answer is a\nguess with a nicer name.'),
+  "key": zod.string().describe('The bundle this answers for — its folder name.')
+}).describe('What somebody decided about one candidate.')).optional().describe('What the person said about each candidate the previous plan proposed,\nkeyed by the bundle\'s key. Empty on the first call.'),
+  "files": zod.array(zod.object({
+  "path": zod.string().describe('Relative, inside the drop: `designer/PROFILE.md`. Never absolute and\nnever climbing out.'),
+  "text": zod.string()
+}).describe('One file of a drop.\n\n`text`, not base64 — which is how a skill\'s bundle travels, because one may\nhold a font. A profile bundle is one UTF-8 markdown file; a `PROFILE.md`\nthat is not text is not a profile, and a client that cannot read it as text\nhas already found that out.')).describe('Every file in what was dropped, with the path it had inside the drop.')
+}).describe('A drop: the files, and the answers to anything the last plan proposed.\n\n**This is the apply\'s input too** (#356), which is the whole of why a plan\ncannot be used as a capability: the second call is handed the same files and\nthe same answers, and does the resolution again. Nothing it needs comes back\nthrough the client.')
+
+export const planRoleImportResponseEntriesItemOutcomeTwoOneDiffItemBodyTwoAddedMin = 0;
+
+export const planRoleImportResponseEntriesItemOutcomeTwoOneDiffItemBodyTwoChangedLinesMin = 0;
+
+export const planRoleImportResponseEntriesItemOutcomeTwoOneDiffItemBodyTwoRemovedMin = 0;
+
+export const planRoleImportResponseEntriesItemOutcomeThreeOneDiffItemBodyTwoAddedMin = 0;
+
+export const planRoleImportResponseEntriesItemOutcomeThreeOneDiffItemBodyTwoChangedLinesMin = 0;
+
+export const planRoleImportResponseEntriesItemOutcomeThreeOneDiffItemBodyTwoRemovedMin = 0;
+
+export const planRoleImportResponseEntriesItemOutcomeFourOneProblemsItemLineMin = 0;
+
+export const planRoleImportResponseEntriesItemWarningsItemLineMin = 0;
+
+export const planRoleImportResponseLimitsDepthMin = 0;
+
+export const planRoleImportResponseLimitsFileBytesMin = 0;
+
+export const planRoleImportResponseLimitsFilesMin = 0;
+
+export const planRoleImportResponseLimitsTotalBytesMin = 0;
+
+
+
+export const PlanRoleImportResponse = zod.object({
+  "appliable": zod.boolean().describe('Whether this drop could be applied as it stands.\n\nFalse while anything is blocked **or** any candidate is unanswered. It\nis a convenience for the review\'s footer and not a permission: the apply\nre-derives it, because this plan may be minutes old and a profile may\nhave moved since.'),
+  "entries": zod.array(zod.object({
+  "key": zod.string().describe('The folder\'s name: this bundle\'s key, and the profile\'s identity.'),
+  "name": zod.string().nullish().describe('The `name` the file gives. Absent when the file did not parse, which is\nalso when there are no field values to show.'),
+  "outcome": zod.union([zod.object({
+  "answered": zod.boolean().describe('Whether this is a create because somebody said so, rather than because\nnothing matched. Drawn differently: one is a finding, the other is an\ninstruction being carried out.'),
+  "filed": zod.string().describe('Where it would be filed: the directory the file names, or the person\'s\nown space when it names none.')
+}).describe('No profile in the library is this one. It would be created.').and(zod.object({
+  "kind": zod.enum(['new'])
+})).describe('No profile in the library is this one. It would be created.'),zod.object({
+  "adoptsKey": zod.boolean().describe('Whether the key would be written onto a row that has none — see\n[`PlanOverwrite::adopts_key`].'),
+  "answered": zod.boolean(),
+  "diff": zod.array(zod.object({
+  "after": zod.string().describe('What the file would make it, the same way.'),
+  "before": zod.string().describe('What the profile is now, in the file\'s own vocabulary: names rather than\nids, `here` rather than a column value. An id the asker cannot see\nrenders as what it is — "a machine you cannot see" — and never as a\nname.'),
+  "body": zod.union([zod.null(),zod.object({
+  "added": zod.int().min(planRoleImportResponseEntriesItemOutcomeTwoOneDiffItemBodyTwoAddedMin),
+  "changedLines": zod.int().min(planRoleImportResponseEntriesItemOutcomeTwoOneDiffItemBodyTwoChangedLinesMin).describe('Lines added plus lines removed: the one number a row can carry.'),
+  "removed": zod.int().min(planRoleImportResponseEntriesItemOutcomeTwoOneDiffItemBodyTwoRemovedMin),
+  "unified": zod.string().describe('The unified diff the count expands into. Empty when nothing changed.')
+}).describe('The instructions, when this is `instructions`: a changed-line count that\nexpands into a unified diff.')]).optional(),
+  "change": zod.enum(['unchanged', 'changed', 'reset']).describe('Which kind of change a field is.\n\n**A reset is not an ordinary change and the screen draws it differently.**\nIt is stated here rather than left for a client to re-derive by comparing\nagainst the defaults — that would be the server\'s knowledge of what an\nabsent key means leaking into every client that has to draw it.'),
+  "field": zod.string().describe('The field, spelled the way a `PROFILE.md` spells it.'),
+  "settings": zod.array(zod.object({
+  "after": zod.string(),
+  "before": zod.string().describe('What it is now — **the resulting value**, named, rather than the words\n"the engine\'s default": a profile with an engine pinned resolves one, so\na reset can say what will actually run.'),
+  "change": zod.enum(['unchanged', 'changed', 'reset']).describe('Which kind of change a field is.\n\n**A reset is not an ordinary change and the screen draws it differently.**\nIt is stated here rather than left for a client to re-derive by comparing\nagainst the defaults — that would be the server\'s knowledge of what an\nabsent key means leaking into every client that has to draw it.'),
+  "setting": zod.string().describe('`model`, `effort`, `mode`, `sandbox`.')
+}).describe('One agent setting under `settings`.')).optional().describe('The four agent settings, when this is `settings`. They reset\nindependently, so each carries its own [`FieldChange`].')
+}).describe('One of the sixteen fields, as what it is now against what the file would\nmake it.')).describe('Every one of the sixteen fields, the same as an overwrite\'s.\n\nA rename is an overwrite whose `name` happens to differ, and the write\nbehind it is the same whole-object update — so a rename row carrying no\ndiff would hide the other fifteen fields changing underneath it, which\nis the silent failure this whole feature exists to remove. The `name`\nrow in here is the rename, said once more where the diff can be read\nfield by field.'),
+  "from": zod.string(),
+  "profile": zod.object({
+  "id": zod.string(),
+  "key": zod.string().nullish().describe('The key it carries, when it carries one. Null on every profile that\npredates the format, which is what makes the name fallback necessary.'),
+  "mayWrite": zod.boolean().describe('Whether the asker may write it. A row they can see and cannot write\nblocks rather than being hidden — they already know it exists.'),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it is filed, for a person to read: `u/kevin/designer_01m3qbzd`.')
+}).describe('An existing profile, as a plan draws it.\n\n**For display, and for one echo.** The id is how a review links to the row\nand the only value a client may send back — as the answer to a candidate,\nwhich is re-resolved and re-authorised on the way in. Nothing downstream\nreads an id out of a plan to decide what to write.'),
+  "to": zod.string()
+}).describe('Same key, different `name`. Stated as a rename rather than left for the\nscreen to infer from a changed `name` row in the diff.').and(zod.object({
+  "kind": zod.enum(['rename'])
+})).describe('Same key, different `name`. Stated as a rename rather than left for the\nscreen to infer from a changed `name` row in the diff.'),zod.object({
+  "adoptsKey": zod.boolean().describe('Whether this match came through the name and would write the key onto a\nrow that has none.\n\nWorth drawing: it is the moment a row stops being matched by its name\nand starts being matched by its key, and it happens once per profile per\ninstallation.'),
+  "answered": zod.boolean().describe('Whether this is an overwrite because somebody answered a candidate.'),
+  "diff": zod.array(zod.object({
+  "after": zod.string().describe('What the file would make it, the same way.'),
+  "before": zod.string().describe('What the profile is now, in the file\'s own vocabulary: names rather than\nids, `here` rather than a column value. An id the asker cannot see\nrenders as what it is — "a machine you cannot see" — and never as a\nname.'),
+  "body": zod.union([zod.null(),zod.object({
+  "added": zod.int().min(planRoleImportResponseEntriesItemOutcomeThreeOneDiffItemBodyTwoAddedMin),
+  "changedLines": zod.int().min(planRoleImportResponseEntriesItemOutcomeThreeOneDiffItemBodyTwoChangedLinesMin).describe('Lines added plus lines removed: the one number a row can carry.'),
+  "removed": zod.int().min(planRoleImportResponseEntriesItemOutcomeThreeOneDiffItemBodyTwoRemovedMin),
+  "unified": zod.string().describe('The unified diff the count expands into. Empty when nothing changed.')
+}).describe('The instructions, when this is `instructions`: a changed-line count that\nexpands into a unified diff.')]).optional(),
+  "change": zod.enum(['unchanged', 'changed', 'reset']).describe('Which kind of change a field is.\n\n**A reset is not an ordinary change and the screen draws it differently.**\nIt is stated here rather than left for a client to re-derive by comparing\nagainst the defaults — that would be the server\'s knowledge of what an\nabsent key means leaking into every client that has to draw it.'),
+  "field": zod.string().describe('The field, spelled the way a `PROFILE.md` spells it.'),
+  "settings": zod.array(zod.object({
+  "after": zod.string(),
+  "before": zod.string().describe('What it is now — **the resulting value**, named, rather than the words\n"the engine\'s default": a profile with an engine pinned resolves one, so\na reset can say what will actually run.'),
+  "change": zod.enum(['unchanged', 'changed', 'reset']).describe('Which kind of change a field is.\n\n**A reset is not an ordinary change and the screen draws it differently.**\nIt is stated here rather than left for a client to re-derive by comparing\nagainst the defaults — that would be the server\'s knowledge of what an\nabsent key means leaking into every client that has to draw it.'),
+  "setting": zod.string().describe('`model`, `effort`, `mode`, `sandbox`.')
+}).describe('One agent setting under `settings`.')).optional().describe('The four agent settings, when this is `settings`. They reset\nindependently, so each carries its own [`FieldChange`].')
+}).describe('One of the sixteen fields, as what it is now against what the file would\nmake it.')).describe('All sixteen fields, with a reset marked as its own kind of change.'),
+  "profile": zod.object({
+  "id": zod.string(),
+  "key": zod.string().nullish().describe('The key it carries, when it carries one. Null on every profile that\npredates the format, which is what makes the name fallback necessary.'),
+  "mayWrite": zod.boolean().describe('Whether the asker may write it. A row they can see and cannot write\nblocks rather than being hidden — they already know it exists.'),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it is filed, for a person to read: `u/kevin/designer_01m3qbzd`.')
+}).describe('An existing profile, as a plan draws it.\n\n**For display, and for one echo.** The id is how a review links to the row\nand the only value a client may send back — as the answer to a candidate,\nwhich is re-resolved and re-authorised on the way in. Nothing downstream\nreads an id out of a plan to decide what to write.')
+}).describe('Same key and same name.').and(zod.object({
+  "kind": zod.enum(['overwrite'])
+})).describe('Same key and same name.'),zod.object({
+  "problems": zod.array(zod.object({
+  "key": zod.string().nullish().describe('The field at fault, written the way the file writes it — `placement`,\n`skills[2]`, `settings.model`. Absent for something about the file as a\nwhole.'),
+  "line": zod.int().min(planRoleImportResponseEntriesItemOutcomeFourOneProblemsItemLineMin).describe('The line in the file, counting from 1.'),
+  "path": zod.string(),
+  "says": zod.string().describe('What is wrong and what to do about it.')
+}).describe('Something wrong, or worth saying, about one place in one file.\n\n**`path` and `line` are not optional**, which is the codec\'s rule\n([`profile_md::Problem`]) and holds for everything this module adds to it:\nan error that cannot say which of twelve files it came from is not\nactionable, and the review draws these beside the line they are about.\n\nA type of its own rather than the codec\'s, so the wire contract is the API\'s\nto keep stable while the codec stays free of serde.')).describe('Every problem in the bundle, not the first — a file with three mistakes\nin it should take one round trip to fix, not three. Sorted by line.')
+}).describe('Something the file names does not resolve, or a permission is missing.\nNothing is ever silently degraded.').and(zod.object({
+  "kind": zod.enum(['blocked'])
+})).describe('Something the file names does not resolve, or a permission is missing.\nNothing is ever silently degraded.'),zod.object({
+  "proposals": zod.array(zod.object({
+  "profile": zod.object({
+  "id": zod.string(),
+  "key": zod.string().nullish().describe('The key it carries, when it carries one. Null on every profile that\npredates the format, which is what makes the name fallback necessary.'),
+  "mayWrite": zod.boolean().describe('Whether the asker may write it. A row they can see and cannot write\nblocks rather than being hidden — they already know it exists.'),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it is filed, for a person to read: `u/kevin/designer_01m3qbzd`.')
+}).describe('An existing profile, as a plan draws it.\n\n**For display, and for one echo.** The id is how a review links to the row\nand the only value a client may send back — as the answer to a candidate,\nwhich is re-resolved and re-authorised on the way in. Nothing downstream\nreads an id out of a plan to decide what to write.'),
+  "says": zod.string().describe('The same thing in a sentence, so a review can draw the reason without a\ntable of its own and a client that has never heard of a new [`ProposalWhy`]\nstill has something to show.'),
+  "why": zod.enum(['name', 'nearName', 'likeName', 'otherKey', 'sameKey']).describe('Why a profile was proposed.')
+}).describe('One existing profile a bundle may be, and why it was proposed.')).describe('What it might be. Usually one.\n\nMore than one is not a hypothetical: names are not unique, so two\nprofiles the asker can see may both answer to the name in this file, and\nan importer that picked the first would be guessing on their behalf.')
+}).describe('It may be an existing profile, and the importer must not decide.\n**Unanswered**, and an unanswered candidate makes the plan unappliable.').and(zod.object({
+  "kind": zod.enum(['candidate'])
+})).describe('It may be an existing profile, and the importer must not decide.\n**Unanswered**, and an unanswered candidate makes the plan unappliable.')]).describe('The five things a bundle can be.'),
+  "path": zod.string().describe('The file, exactly as it was submitted. The entry\'s identity, and what\nevery problem in it points at.'),
+  "warnings": zod.array(zod.object({
+  "key": zod.string().nullish().describe('The field at fault, written the way the file writes it — `placement`,\n`skills[2]`, `settings.model`. Absent for something about the file as a\nwhole.'),
+  "line": zod.int().min(planRoleImportResponseEntriesItemWarningsItemLineMin).describe('The line in the file, counting from 1.'),
+  "path": zod.string(),
+  "says": zod.string().describe('What is wrong and what to do about it.')
+}).describe('Something wrong, or worth saying, about one place in one file.\n\n**`path` and `line` are not optional**, which is the codec\'s rule\n([`profile_md::Problem`]) and holds for everything this module adds to it:\nan error that cannot say which of twelve files it came from is not\nactionable, and the review draws these beside the line they are about.\n\nA type of its own rather than the codec\'s, so the wire contract is the API\'s\nto keep stable while the codec stays free of serde.')).describe('Worth saying and not worth stopping for. A warning never makes a plan\nunappliable.')
+}).describe('One bundle, and what would happen to it.')).describe('One entry per bundle, in path order.'),
+  "ignored": zod.array(zod.string()).describe('Files in the drop that are part of no bundle — a README beside the\nfolders, a `.DS_Store`. Named rather than dropped silently: somebody who\nexpected one of these to be read should be able to see that it was not.'),
+  "limits": zod.object({
+  "depth": zod.int().min(planRoleImportResponseLimitsDepthMin),
+  "fileBytes": zod.int().min(planRoleImportResponseLimitsFileBytesMin),
+  "files": zod.int().min(planRoleImportResponseLimitsFilesMin),
+  "totalBytes": zod.int().min(planRoleImportResponseLimitsTotalBytesMin)
+}).describe('What this endpoint will take, said out loud so a client can refuse before it\nasks rather than after.'),
+  "whyNot": zod.array(zod.string()).describe('Why it could not be, in sentences, when it could not be.')
+}).describe('What a drop would do, bundle by bundle.')
+
 export const UpdateRoleParams = zod.object({
   "id": zod.string().describe('Role id')
 })

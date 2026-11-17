@@ -27,7 +27,9 @@ import type {
 
 import type {
   ApiError,
+  ImportPlan,
   NewRole,
+  ProfileDrop,
   Role,
   RoleDefault
 } from '../model';
@@ -239,6 +241,96 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getCreateRoleMutationOptions(options), queryClient);
+    }
+    export const getPlanRoleImportUrl = () => {
+
+
+
+
+  return `/api/v1/roles/import/plan`
+}
+
+/**
+ * **Read-only, with no exceptions.** It takes the files, says what each one is
+ * against the library, and writes nothing — see `roles::import` for why the
+ * plan it returns cannot be used as a capability by the apply (#356).
+ * @summary What a dropped folder of profile bundles would do.
+ */
+export const planRoleImport = async (profileDrop: ProfileDrop, options?: Parameters<typeof http>[1]): Promise<ImportPlan> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<ImportPlan>(getPlanRoleImportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(profileDrop)
+  }
+);}
+
+
+
+
+
+export const getPlanRoleImportMutationKey = () => ['planRoleImport'] as const;
+
+export const getPlanRoleImportMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planRoleImport>>, TError,PlanRoleImportMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof planRoleImport>>, TError,PlanRoleImportMutationVariables, TContext> => {
+
+const mutationKey = getPlanRoleImportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof planRoleImport>>, PlanRoleImportMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  planRoleImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PlanRoleImportMutationResult = NonNullable<Awaited<ReturnType<typeof planRoleImport>>>
+    export type PlanRoleImportMutationBody = ProfileDrop
+    export type PlanRoleImportMutationError = ApiError
+    export type PlanRoleImportMutationVariables = {data: ProfileDrop}
+
+    /**
+ * @summary What a dropped folder of profile bundles would do.
+ */
+export const usePlanRoleImport = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planRoleImport>>, TError,PlanRoleImportMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof planRoleImport>>,
+        TError,
+        PlanRoleImportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPlanRoleImportMutationOptions(options), queryClient);
     }
     export const getUpdateRoleUrl = (id: string,) => {
 

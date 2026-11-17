@@ -17,6 +17,7 @@ use utoipa::ToSchema;
 
 use crate::access::{filed_where, Level};
 
+pub mod import;
 pub mod profile_md;
 
 /// "May this person move this role" as a SQL predicate: it is in their own
