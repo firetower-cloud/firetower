@@ -152,6 +152,29 @@ pub(super) async fn mine(db: &crate::db::Db, owner: &str, id: &str) -> Result<Ac
     .ok_or_else(|| ApiError::not_found("account"))
 }
 
+/// One account this person may be told exists, by id.
+///
+/// **Viewer, not Writer** — the bar [`list_accounts`] sets rather than the one
+/// [`usable`] sets, and the difference between them is the whole of the
+/// disclosure question #354 asked. A screen saying a colleague has a
+/// subscription is telling you it exists; picking it spends their quota. An
+/// export writes the subscription's *name*, which is the first of those, so it
+/// resolves here.
+pub(crate) async fn nameable(
+    db: &crate::db::Db,
+    person: &str,
+    id: &str,
+) -> Result<Option<Account>, ApiError> {
+    Ok(sqlx::query_as::<_, Account>(&format!(
+        "SELECT {ACCOUNT_COLUMNS} FROM agent_accounts a WHERE a.id=$2 AND {visible}",
+        visible = filed_where("a", 1, Level::Viewer)
+    ))
+    .bind(person)
+    .bind(id)
+    .fetch_optional(db.pool())
+    .await?)
+}
+
 /// One account this person may run on — their own, or one lent to them.
 ///
 /// Writer, not viewer. Picking somebody's subscription spends their quota and

@@ -192,6 +192,7 @@ export * from './probedProvider.ts';
 export * from './probeProvider.ts';
 export * from './probeRequest.ts';
 export * from './probeResponse.ts';
+export * from './profileFile.ts';
 export * from './proposal.ts';
 export * from './provenance.ts';
 export * from './providerChanges.ts';
