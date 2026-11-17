@@ -375,14 +375,12 @@ async fn named_for(
 
     let machine = match role.machine.as_deref() {
         None => None,
+        // `host_named` rather than a scan of `hosts_for`: that list drops the
+        // retired local host, and the migration that retired it left every
+        // profile pinned to it pinned, so asking it would report a machine
+        // somebody can see perfectly well as one they cannot.
         Some(id) => {
-            let found = state
-                .db
-                .hosts_for(me, Level::Viewer)
-                .await?
-                .into_iter()
-                .find(|h| h.id.as_str() == id)
-                .map(|h| h.name);
+            let found = state.db.host_named(me, id).await?.map(|h| h.name);
             if found.is_none() {
                 hidden.push("the machine it runs on".into());
             }
@@ -813,6 +811,45 @@ mod tests {
             .expect("a stale id is not a reason to refuse a file");
         assert!(file.text.contains("- Designer"), "{}", file.text);
         assert!(!file.text.contains("role_deleted"), "{}", file.text);
+    }
+
+    /// **A machine no list offers is still a machine with a name.**
+    ///
+    /// The retired local host is filtered out of every list of machines to run
+    /// on, and `20261106120000_retire_local_host.sql` left every profile
+    /// pinned to it pinned, on the grounds that repinning somebody's profile
+    /// is their decision. So this is a real row an export has to be able to
+    /// name, and reading it off a list of machines-to-run-on reported it as
+    /// one the person could not see.
+    #[tokio::test]
+    async fn a_retired_machine_is_still_named() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let host = state
+            .db
+            .ensure_host("localhost", ft_core::Compute::Local, me.id.as_str())
+            .await
+            .unwrap();
+        // What the migration did, which is what takes it out of the fleet.
+        assert!(
+            !state
+                .db
+                .hosts_for(me.id.as_str(), Level::Viewer)
+                .await
+                .unwrap()
+                .iter()
+                .any(|h| h.id == host.id),
+            "a retired machine is in no list of machines to run on"
+        );
+
+        let mut new = asked_for("Engineering Manager");
+        new.machine = Some(host.id.as_str().to_string());
+        let id = made(&state, &admin, &new).await;
+
+        let Json(file) = export_role(State(state), Extension(admin), Path(id))
+            .await
+            .expect("retired is not the same as hidden");
+        assert!(file.text.contains("machine: localhost"), "{}", file.text);
     }
 
     /// A profile nobody may read is not one they are told exists.
