@@ -64,6 +64,10 @@ db:
     exit 1
 
 # Everything in containers: the database and the development image, with reload.
+#
+# Published on 127.0.0.1, so the stack answers this machine and not the network
+# around it. HOST_BIND in .env.example is how to change that on
+# purpose, and says what it costs.
 up:
     docker compose --profile full up --build
 

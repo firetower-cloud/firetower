@@ -32,9 +32,16 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-firetower}
       POSTGRES_DB: ${POSTGRES_DB:-firetower}
     ports:
+      # Loopback on the host, and with a variable of its own rather than the
+      # control plane's HOST_BIND: this is the database, it comes up with the
+      # development credentials above — the same two words in every checkout —
+      # and widening the stack so a laptop can reach the interface is no
+      # reason to put that on a LAN. Set POSTGRES_BIND only for a database
+      # client somewhere else, knowing what answers it.
+      #
       # 5433 on purpose: 5432 is usually already taken by something local, and
       # a port conflict at start-up is a confusing way to learn that.
-      - "${POSTGRES_PORT:-5433}:5432"
+      - "${POSTGRES_BIND:-127.0.0.1}:${POSTGRES_PORT:-5433}:5432"
     volumes:
       - postgres:/var/lib/postgresql/data
     healthcheck:
@@ -60,18 +67,24 @@ services:
       # sets the same pair for the same reason — see Dockerfile. Firetower
       # refuses to bind an address like this with authentication turned off,
       # which is why the two belong next to each other.
+      #
+      # This is the container's address and not the host's. The ports below
+      # publish on 127.0.0.1 — HOST_BIND, the half that decides *who* can
+      # reach the stack; 0.0.0.0 here only decides whether anyone can.
       FIRETOWER_BIND: 0.0.0.0
       # The interface runs in here. The browser that loads it does not, so the
       # API address it is handed has to be the one published on the host —
-      # this container's own 4400 means nothing to a browser. Overrides
-      # web/.env.development, which is right for the two-processes-on-a-laptop
-      # case it was written for.
-      NEXT_PUBLIC_FIRETOWER_API: http://localhost:${FIRETOWER_PORT:-4400}
+      # this container's own 4400 means nothing to a browser. Host and port
+      # both, which is why HOST_BIND appears here as well as in the mapping
+      # below: whoever moves the stack off loopback moves the address the
+      # browser is sent to with it. Overrides web/.env.development, which is
+      # right for the two-processes-on-a-laptop case it was written for.
+      NEXT_PUBLIC_FIRETOWER_API: http://${HOST_BIND:-127.0.0.1}:${FIRETOWER_PORT:-4400}
       # And the other direction: the address start-up prints to open, which in
       # development is the interface's rather than the control plane's. It
       # guesses 3000 — right until WEB_PORT below moves it, and then it names
       # a port with nothing on it.
-      FIRETOWER_PUBLIC_URL: http://localhost:${WEB_PORT:-3000}
+      FIRETOWER_PUBLIC_URL: http://${HOST_BIND:-127.0.0.1}:${WEB_PORT:-3000}
       # Passed through rather than baked in — see the README.
       FIRETOWER_GITHUB_CLIENT_ID: ${FIRETOWER_GITHUB_CLIENT_ID:-}
       # The key every stored credential is encrypted with. Left unset, one is
@@ -92,11 +105,35 @@ services:
       # Machines are reached over ssh with this key.
       - ./.dev/ssh:/root/.ssh:ro
     ports:
+      # Two addresses, and they are easily taken for one. FIRETOWER_BIND above
+      # is the *container's*, and it is 0.0.0.0 because a process listening on
+      # a container's own loopback publishes a port that answers nothing.
+      # These are the *host's*, and they are 127.0.0.1: reachable from the
+      # machine running the stack, and not from the network it sits on. Both
+      # halves are needed and they point opposite ways — widening the one
+      # below does not require touching the one above.
+      #
+      # A development control plane speaks HTTP, so a password or a bearer
+      # token sent to it from another machine crosses the network in the
+      # clear, and Next's dev server is not an ingress. Neither is something
+      # to offer every LAN and VPN peer by default — and a host firewall is
+      # not the answer either: Docker writes its own DNAT rules and they are
+      # consulted before the host's INPUT chain, so `ufw deny 4400` does not
+      # close a published port. deploy/firetower.yml defaults the same way,
+      # for the same reason, with the same spelling.
+      #
+      # HOST_BIND is the deliberate way out, for a stack on a VM or a spare
+      # box reached from a laptop: set it to the address of the interface it
+      # should answer on. NEXT_PUBLIC_FIRETOWER_API above follows it, so the
+      # browser and the published port agree — which is why an address beats
+      # 0.0.0.0 here. It is named for the side it is on, because
+      # FIRETOWER_BIND is already the other one.
+      #
       # Parameterised like postgres above, and for the same reason: a second
       # checkout cannot also hold 4400, and a port conflict at start-up is a
       # confusing way to learn that.
-      - "${FIRETOWER_PORT:-4400}:4400"
-      - "${WEB_PORT:-3000}:3000"
+      - "${HOST_BIND:-127.0.0.1}:${FIRETOWER_PORT:-4400}:4400"
+      - "${HOST_BIND:-127.0.0.1}:${WEB_PORT:-3000}:3000"
     # The two halves of `just dev`, without the database it starts first —
     # postgres is the service above and `depends_on` has already waited for it
     # to answer queries. `just dev` here ran `docker compose up -d postgres`
