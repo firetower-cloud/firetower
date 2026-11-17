@@ -30,6 +30,7 @@ import type {
   ImportPlan,
   NewRole,
   ProfileDrop,
+  ProfileFile,
   Role,
   RoleDefault
 } from '../model';
@@ -563,3 +564,123 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getSetDefaultRoleMutationOptions(options), queryClient);
     }
+    export const getExportRoleUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/roles/${id}/export`
+}
+
+/**
+ * Read access and nothing more: this writes a file and changes nothing. What
+ * it carries about the things the profile points at is `named_for`'s
+ * business, and the policy is stated there.
+ * @summary A profile as a `PROFILE.md`, so it can be committed and read in a diff.
+ */
+export const exportRole = async (id: string, options?: Parameters<typeof http>[1]): Promise<ProfileFile> => {
+
+  return http<ProfileFile>(getExportRoleUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getExportRoleQueryKey = (id: string,) => {
+    return [
+    `/api/v1/roles/${id}/export`
+    ] as const;
+    }
+
+
+export const getExportRoleQueryOptions = <TData = Awaited<ReturnType<typeof exportRole>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportRole>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getExportRoleQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof exportRole>>> = ({ signal }) => exportRole(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof exportRole>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type ExportRoleQueryResult = NonNullable<Awaited<ReturnType<typeof exportRole>>>
+export type ExportRoleQueryError = ApiError
+
+
+export function useExportRole<TData = Awaited<ReturnType<typeof exportRole>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportRole>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportRole>>,
+          TError,
+          Awaited<ReturnType<typeof exportRole>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportRole<TData = Awaited<ReturnType<typeof exportRole>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportRole>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportRole>>,
+          TError,
+          Awaited<ReturnType<typeof exportRole>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useExportRole<TData = Awaited<ReturnType<typeof exportRole>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportRole>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary A profile as a `PROFILE.md`, so it can be committed and read in a diff.
+ */
+
+export function useExportRole<TData = Awaited<ReturnType<typeof exportRole>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof exportRole>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getExportRoleQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary A profile as a `PROFILE.md`, so it can be committed and read in a diff.
+ */
+export const useSetExportRoleQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof exportRole>> | undefined | ((old: Awaited<ReturnType<typeof exportRole>> | undefined) => Awaited<ReturnType<typeof exportRole>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof exportRole>>>({ exact: $exactMatch, queryKey: getExportRoleQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary A profile as a `PROFILE.md`, so it can be committed and read in a diff.
+ */
+export const useGetExportRoleQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof exportRole>>>(getExportRoleQueryKey(id));
+}
+
+

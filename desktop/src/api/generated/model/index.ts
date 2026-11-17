@@ -211,6 +211,7 @@ export * from './probeProvider.ts';
 export * from './probeRequest.ts';
 export * from './probeResponse.ts';
 export * from './profileDrop.ts';
+export * from './profileFile.ts';
 export * from './proposal.ts';
 export * from './proposalWhy.ts';
 export * from './provenance.ts';

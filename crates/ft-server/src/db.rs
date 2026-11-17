@@ -913,6 +913,34 @@ impl Db {
         .collect())
     }
 
+    /// What one machine is called, for somebody who may be told it exists.
+    ///
+    /// **Viewer, and deliberately not [`in_the_fleet`]** — which is the whole
+    /// reason this is not [`Db::hosts_for`]. The retired local host is filtered
+    /// out of every list of machines to run on, and the migration that retired
+    /// it says in as many words that `roles.host_id` pointing at it "is left
+    /// exactly as it is", because nulling them "would silently repin somebody's
+    /// profile". So a profile really can name a machine no list offers, and
+    /// asking a list of machines-to-run-on what it is called gets "you cannot
+    /// see it" for a machine that is simply retired.
+    ///
+    /// Only `api::roles::export_role` asks, and a name is all it wants: the
+    /// file says what the profile says, and a reimport that cannot resolve the
+    /// machine blocks at plan time with a sentence naming it. That is the right
+    /// place for that conversation, and it is the same reason the migration left
+    /// the pin alone.
+    pub async fn host_named(&self, person: &str, id: &str) -> Result<Option<Host>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {HOST_COLUMNS} FROM hosts h WHERE h.id = $2 AND {visible}",
+            visible = filed_where("h", 1, Level::Viewer),
+        ))
+        .bind(person)
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?
+        .and_then(skip_unreadable_host))
+    }
+
     /// Every host in the fleet, whoever may run on it: skipping the retired
     /// ([`in_the_fleet`]) and any row this build cannot understand
     /// ([`skip_unreadable_host`]).

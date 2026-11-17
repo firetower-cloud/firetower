@@ -1552,6 +1552,189 @@ fn quoted(value: &str) -> String {
     out
 }
 
+// ── a stored profile, as the file that describes it ─────────────────────
+
+/// The name every reference on a profile has, looked up once.
+///
+/// **The queries are not here, and that is the point.** A row holds ids and
+/// the format holds names, so something has to resolve the one into the other
+/// — and that something needs the asking person's own grants, the skills
+/// library and the directory tree. Keeping it in `api::roles` leaves
+/// [`of_role`] a pure function over a row and five answers, which is what
+/// makes "a stored profile round-trips through its own file" a unit test.
+///
+/// Every field is already the final spelling. A `None` is a reference the
+/// profile does not have, never one that could not be resolved: an
+/// unresolvable reference refuses the export rather than reaching here, for
+/// the reason `api::roles::export_role` gives.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Named {
+    pub machine: Option<String>,
+    pub account: Option<String>,
+    pub directory: Option<String>,
+    pub delegates_to: Vec<String>,
+    pub skills: Vec<SkillRef>,
+}
+
+/// A stored profile, as the file that describes it.
+///
+/// **The one normalisation this performs is trimming**, and it is worth being
+/// precise about because an export that silently differs from the profile it
+/// came from is the thing #354 forbids. A stored value with a space on the end
+/// of it comes out of here without one, so re-importing the file would take
+/// that space off the row. The import shows it as a change to the field before
+/// anything is written, so it is not silent — and the alternative, refusing to
+/// export a profile over whitespace nothing renders, helps nobody.
+///
+/// A value this format cannot hold is a refusal rather than a repair. A `does`
+/// with a line break in it is the realistic one: the column takes it, the
+/// format says one line, and writing it anyway would produce a file that this
+/// module's own parser rejects.
+pub fn of_role(role: &super::Role, key: &str, named: Named) -> Result<Profile, super::Refused> {
+    Ok(Profile {
+        key: key.to_string(),
+        name: one_line(&role.name, "name")?,
+        does: one_line(&role.does, "does")?,
+        instructions: role.instructions.trim().to_string(),
+        engine: match role
+            .agent
+            .as_deref()
+            .map(str::trim)
+            .filter(|a| !a.is_empty())
+        {
+            None => None,
+            Some(agent) => Some(ft_core::Agent::from_name(agent).ok_or_else(|| {
+                super::Refused(format!(
+                    "this profile runs on \"{agent}\", which is not an engine this build knows, \
+                     so there is no name to write for it"
+                ))
+            })?),
+        },
+        placement: unreadable(
+            Placement::from_spelling(role.placement.trim()),
+            &role.placement,
+            "placement",
+        )?,
+        machine: named.machine,
+        account: named.account,
+        directory: named.directory,
+        can_delegate: role.can_delegate,
+        delegates_to: named.delegates_to,
+        skills: named.skills,
+        include_always_on: role.include_always_on,
+        include_repo_defaults: role.include_repo_defaults,
+        on_usage_limit: unreadable(
+            OnUsageLimit::from_spelling(role.on_usage_limit.trim()),
+            &role.on_usage_limit,
+            "on_usage_limit",
+        )?,
+        on_child_limit: unreadable(
+            OnChildLimit::from_spelling(role.on_child_limit.trim()),
+            &role.on_child_limit,
+            "on_child_limit",
+        )?,
+        settings: ft_core::controls::Preferred {
+            model: settled(&role.settings.model),
+            effort: settled(&role.settings.effort),
+            mode: settled(&role.settings.mode),
+            sandbox: settled(&role.settings.sandbox),
+        },
+    })
+}
+
+/// The folder a profile is exported into, which is its identity.
+///
+/// **Derived from the name, because no row has a key yet.** The column is
+/// #355's, nullable, and null on every profile that exists — so until it is
+/// there this is the whole answer, and afterwards it is the fallback for a
+/// profile that predates it. One function to change, rather than a decision
+/// spread over the handler.
+///
+/// `slug` cannot serve, and that is the reason the column has to exist: it
+/// carries a generated discriminator so two people's `Designer` can coexist,
+/// which makes it deterministic for the installation and useless as the
+/// author's identity.
+///
+/// A derived key is a guess about identity, and the one place that matters is
+/// the first import of an exported file: `fstack`'s `qa-engineer/` folder
+/// holds a profile called **QA**, so this would call it `qa` and the review
+/// has to offer the match rather than create a second profile. That is #355's
+/// candidate-match rule, and it exists because of exactly this.
+pub fn key_of(role: &super::Role) -> String {
+    let kebab: String = role
+        .name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let mut out = String::with_capacity(kebab.len());
+    for c in kebab.chars() {
+        if c == '-' && out.ends_with('-') {
+            continue;
+        }
+        out.push(c);
+    }
+    let out = out.trim_matches('-').to_string();
+    if out.is_empty() {
+        "profile".to_string()
+    } else {
+        out
+    }
+}
+
+/// Where a bundle for this key belongs in a repository.
+///
+/// Said here rather than in the handler, because the folder name *is* the
+/// identity and the path is the only place that shows it.
+pub fn path_of(key: &str) -> String {
+    format!("profiles/{key}/{FILE}")
+}
+
+/// What a profile bundle's one file is called.
+pub const FILE: &str = "PROFILE.md";
+
+/// A stored value the format can only hold on one line.
+fn one_line(value: &str, what: &str) -> Result<String, super::Refused> {
+    let value = value.trim();
+    if value.contains('\n') || value.chars().any(|c| INVISIBLE_BREAKS.contains(&c)) {
+        return Err(super::Refused(format!(
+            "this profile's `{what}` has a line break in it, and a `{FILE}` holds it on one \
+             line. Edit it to one line, then export."
+        )));
+    }
+    Ok(value.to_string())
+}
+
+/// A stored enum this build does not know.
+///
+/// Only reachable by a write that went round `roles::check` — the column for
+/// two of these three has the same values as a check constraint, and
+/// `placement` has none. Refused rather than defaulted: a file saying `lead`
+/// about a profile that says something else is an export that differs from
+/// what it came from.
+fn unreadable<T>(read: Option<T>, stored: &str, what: &str) -> Result<T, super::Refused> {
+    read.ok_or_else(|| {
+        super::Refused(format!(
+            "this profile's `{what}` is stored as \"{stored}\", which is not a value this build \
+             understands, so there is nothing to write for it"
+        ))
+    })
+}
+
+/// A setting, with a blank reading as nothing chosen.
+fn settled(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+}
+
 // ── tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -2880,5 +3063,208 @@ You own feature delivery.
             dense().delegates_to.len()
         );
         assert_eq!(read.spelled.entries(Field::Skills), dense().skills.len());
+    }
+
+    // ── a stored profile, as a file ─────────────────────────────────────
+
+    /// A row, as the database holds one. The shape `roles::tests` uses, with
+    /// every reference filled in so the names have something to come from.
+    fn stored() -> super::super::Role {
+        super::super::Role {
+            id: "role_x".into(),
+            path: "d/platform/engineering-manager_01hzzzzz".into(),
+            // The key an import would have adopted onto it: this row is the
+            // one the `fstack-repaired` bundle of the same folder describes.
+            key: Some("engineering-manager".into()),
+            name: "Engineering Manager".into(),
+            does: "Orchestrates feature delivery from request to draft PRs.".into(),
+            placement: "new".into(),
+            agent: Some("ClaudeCode".into()),
+            machine: Some("host_1".into()),
+            account: Some("acct_1".into()),
+            settings: ft_core::controls::Preferred {
+                model: Some("opus".into()),
+                effort: Some("high".into()),
+                mode: None,
+                sandbox: None,
+            },
+            instructions: "# Engineering Manager\n\nYou own feature delivery.".into(),
+            on_usage_limit: "engine".into(),
+            on_child_limit: "reroute".into(),
+            can_delegate: true,
+            delegate_scope: vec!["role_a".into(), "role_b".into()],
+            include_always_on: false,
+            include_repo_defaults: true,
+            skill_scope: vec!["skill_a".into()],
+            may_write: true,
+            may_share: true,
+            is_default: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn resolved() -> Named {
+        Named {
+            machine: Some("mac-studio".into()),
+            account: Some("Anthropic Max".into()),
+            directory: Some("Platform".into()),
+            delegates_to: vec!["Designer".into(), "Engineer".into()],
+            skills: vec![SkillRef {
+                directory: Some("Firetower".into()),
+                name: "dataviz".into(),
+            }],
+        }
+    }
+
+    /// **A stored profile round-trips through its own file.**
+    ///
+    /// The governing property of export: write a profile out, read it back,
+    /// and nothing has changed. Pure, because the names are already resolved —
+    /// which is the whole reason the queries are in `api::roles` and this is
+    /// not.
+    #[test]
+    fn a_stored_profile_round_trips_through_its_own_file() {
+        let role = stored();
+        let key = key_of(&role);
+        let want = of_role(&role, &key, resolved()).expect("a row the API would accept");
+        let written = serialize(&want);
+        assert_eq!(accepted(&key, &written), want, "{written}");
+
+        // And every field of the row reached the file.
+        assert_eq!(want.name, role.name);
+        assert_eq!(want.does, role.does);
+        assert_eq!(want.instructions, role.instructions);
+        assert_eq!(want.engine, Some(ft_core::Agent::ClaudeCode));
+        assert_eq!(want.placement, Placement::New);
+        assert_eq!(want.on_usage_limit, OnUsageLimit::Engine);
+        assert_eq!(want.on_child_limit, OnChildLimit::Reroute);
+        assert!(want.can_delegate);
+        assert!(!want.include_always_on);
+        assert!(want.include_repo_defaults);
+        assert_eq!(want.machine.as_deref(), Some("mac-studio"));
+        assert_eq!(want.account.as_deref(), Some("Anthropic Max"));
+        assert_eq!(want.directory.as_deref(), Some("Platform"));
+        assert_eq!(want.delegates_to, ["Designer", "Engineer"]);
+        assert_eq!(want.skills[0].spelling(), "Firetower/dataviz");
+        assert_eq!(want.settings.model.as_deref(), Some("opus"));
+    }
+
+    /// **An exported file has no resets in it.**
+    ///
+    /// Export writes every field, so everything in the file is spelled — and
+    /// re-importing it is an overwrite with nothing to warn about. The rest of
+    /// that assertion is #355's, which diffs a plan; this is the half that can
+    /// be made here, and it is the half that would break if export started
+    /// omitting a field at its default.
+    #[test]
+    fn an_exported_profile_has_nothing_left_to_reset() {
+        let role = stored();
+        let key = key_of(&role);
+        let file = serialize(&of_role(&role, &key, resolved()).unwrap());
+        let read = reading(&key, &file);
+        for field in Field::all() {
+            assert!(
+                read.spelled.wrote(Spot::Field(field)),
+                "`{}` is absent, so re-importing this file would reset it",
+                field.spelling()
+            );
+        }
+        for setting in Setting::all() {
+            assert!(read.spelled.wrote(Spot::Setting(setting)));
+        }
+    }
+
+    /// The folder a profile is exported into, which no row holds yet.
+    #[test]
+    fn a_key_is_derived_from_the_name_until_a_row_carries_one() {
+        let keyed = |name: &str| {
+            let mut role = stored();
+            role.name = name.into();
+            key_of(&role)
+        };
+        assert_eq!(keyed("Engineering Manager"), "engineering-manager");
+        assert_eq!(keyed("Designer"), "designer");
+        assert_eq!(keyed("Security Advisor"), "security-advisor");
+        // The live divergence: `fstack` holds a `qa-engineer/` folder for a
+        // profile called QA, so a derived key is a guess and #355 is what
+        // offers the match rather than creating a second profile.
+        assert_eq!(keyed("QA"), "qa");
+        // Nothing a folder name can be made of.
+        assert_eq!(keyed("…"), "profile");
+        assert_eq!(keyed(""), "profile");
+        // No run of hyphens, and none on either end.
+        assert_eq!(keyed("  A — B  "), "a-b");
+        assert_eq!(path_of("designer"), "profiles/designer/PROFILE.md");
+    }
+
+    /// **A value the format cannot hold refuses the export.**
+    ///
+    /// Repairing it would make the file differ from the profile, and writing it
+    /// anyway would make a file this module's own parser rejects.
+    #[test]
+    fn a_profile_the_format_cannot_hold_refuses() {
+        let line_break = |mut role: super::super::Role| {
+            role.does = "Orchestrates delivery.\nAnd more.".into();
+            of_role(&role, "x", resolved()).map(|_| ()).unwrap_err().0
+        };
+        let said = line_break(stored());
+        assert!(said.contains("`does` has a line break"), "{said}");
+        assert!(said.contains("one line"), "{said}");
+
+        let mut role = stored();
+        role.agent = Some("Grok".into());
+        let said = of_role(&role, "x", resolved()).unwrap_err().0;
+        assert!(said.contains("\"Grok\""), "{said}");
+
+        let mut role = stored();
+        role.placement = "everywhere".into();
+        let said = of_role(&role, "x", resolved()).unwrap_err().0;
+        assert!(
+            said.contains("`placement`") && said.contains("everywhere"),
+            "{said}"
+        );
+
+        let mut role = stored();
+        role.on_usage_limit = "whenever".into();
+        assert!(of_role(&role, "x", resolved()).is_err());
+    }
+
+    /// Trimming is the one thing export changes, and the import review shows
+    /// it. A blank setting is nothing chosen, not a model called "".
+    #[test]
+    fn export_trims_and_nothing_else() {
+        let mut role = stored();
+        role.name = "  Engineering Manager  ".into();
+        role.instructions = "\n\nYou own delivery.\n\n".into();
+        role.settings.mode = Some("   ".into());
+        role.agent = Some("  ClaudeCode  ".into());
+        let out = of_role(&role, "x", resolved()).unwrap();
+        assert_eq!(out.name, "Engineering Manager");
+        assert_eq!(out.instructions, "You own delivery.");
+        assert_eq!(out.settings.mode, None);
+        assert_eq!(out.engine, Some(ft_core::Agent::ClaudeCode));
+    }
+
+    /// A profile that commits to nothing is a file of open marks, and it still
+    /// round-trips.
+    #[test]
+    fn a_profile_that_pins_nothing_exports_as_open() {
+        let mut role = stored();
+        role.agent = None;
+        role.machine = None;
+        role.account = None;
+        role.placement = "lead".into();
+        role.delegate_scope = vec![];
+        role.skill_scope = vec![];
+        role.settings = Default::default();
+        role.path = "u/kevin/engineering-manager_01hzzzzz".into();
+        let key = key_of(&role);
+        let want = of_role(&role, &key, Named::default()).unwrap();
+        let written = serialize(&want);
+        assert!(written.contains("engine: ~"), "{written}");
+        assert!(written.contains("directory: ~"), "{written}");
+        assert!(written.contains("delegates_to: []"), "{written}");
+        assert_eq!(accepted(&key, &written), want);
     }
 }

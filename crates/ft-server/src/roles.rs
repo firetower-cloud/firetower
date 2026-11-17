@@ -547,6 +547,35 @@ impl Roles {
     }
 
     /// One role, if this person may see it.
+    /// Which of these ids are profiles at all, whoever may see them.
+    ///
+    /// `delegate_scope` holds ids with no foreign key behind them, so an entry whose
+    /// profile was deleted stays on the row — and the `profile_scope` migration
+    /// says what that costs: "a stale id simply drops out", because every read
+    /// intersects the list with what is actually visible.
+    ///
+    /// Export is the one caller that has to tell those two cases apart. An id
+    /// it cannot resolve to a name is either something that is gone, which
+    /// every reader already ignores and which the file should not mention, or
+    /// something this person may not see, which is the disclosure question
+    /// #354 settled by refusing. Unscoped deliberately, and it discloses
+    /// nothing: whoever is asking is holding these ids already, off the
+    /// profile's own response.
+    pub async fn which_exist(&self, ids: &[String]) -> Result<std::collections::HashSet<String>> {
+        if ids.is_empty() {
+            return Ok(Default::default());
+        }
+        Ok(
+            sqlx::query_scalar::<_, String>("SELECT id FROM roles WHERE id = ANY($1)")
+                .bind(ids)
+                .fetch_all(&self.pool)
+                .await
+                .context("reading which profiles still exist")?
+                .into_iter()
+                .collect(),
+        )
+    }
+
     pub async fn one(&self, person: &str, id: &str, at_least: Level) -> Result<Option<Role>> {
         let sql = format!(
             "SELECT {FIELDS}, {writable} AS may_write, {shareable} AS may_share, \
