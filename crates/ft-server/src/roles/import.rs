@@ -692,8 +692,8 @@ pub fn plan(drop: &ProfileDrop, here: &Here) -> Result<ImportPlan, Refused> {
 fn check(drop: &ProfileDrop) -> Result<(), Refused> {
     if drop.files.len() > MOST_FILES {
         return Err(Refused(format!(
-            "this drop holds {} files and an import takes at most {MOST_FILES} — drop fewer \
-             folders at once",
+            "this drop holds {} files, and an import takes at most {MOST_FILES}. Drop fewer \
+             folders at once.",
             drop.files.len()
         )));
     }
@@ -721,8 +721,8 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
         }
         if file.path.len() > crate::skills::LONGEST_PATH {
             return Err(Refused(format!(
-                "`{}` is {} bytes long, and a path inside a drop is at most {} — the same cap a \
-                 skill's bundle has",
+                "`{}` is {} bytes long, and a path inside a drop is at most {}. Drop the folder \
+                 that holds the bundles rather than the tree above it.",
                 briefly(&file.path),
                 file.path.len(),
                 crate::skills::LONGEST_PATH
@@ -731,8 +731,8 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
         let depth = file.path.split('/').filter(|s| !s.is_empty()).count();
         if depth > DEEPEST {
             return Err(Refused(format!(
-                "`{}` is {depth} folders deep and an import reads at most {DEEPEST} — drop the \
-                 folder that holds the bundles rather than the repository around it",
+                "`{}` is {depth} folders deep, and an import reads at most {DEEPEST}. Drop the \
+                 folder that holds the bundles rather than the repository around it.",
                 briefly(&file.path)
             )));
         }
@@ -747,7 +747,7 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
         total += file.text.len();
         if total > BIGGEST_DROP {
             return Err(Refused(format!(
-                "this drop is over the {} MB an import takes — drop fewer folders at once",
+                "this drop is over the {} MB an import takes. Drop fewer folders at once.",
                 BIGGEST_DROP / 1024 / 1024
             )));
         }
@@ -1128,7 +1128,7 @@ fn proposal(row: &Role, why: ProposalWhy, wrote: &str) -> PlanProposal {
     let says = match why {
         ProposalWhy::Name => format!(
             "`{name}` is already in your library under this name and carries no key of its own, \
-             and so does another profile — so which of them this folder is, is yours to say."
+             and so does another profile. Which of them this folder is, is yours to say."
         ),
         ProposalWhy::NearName => format!(
             "`{name}` differs from `{wrote}` only in capitals or spacing, which is usually the \
@@ -1139,8 +1139,8 @@ fn proposal(row: &Role, why: ProposalWhy, wrote: &str) -> PlanProposal {
              folder was written for."
         ),
         ProposalWhy::SameKey => format!(
-            "`{name}` carries the key `{wrote}`, and so does another profile you can see — so \
-             which of them this folder is, is yours to say."
+            "`{name}` carries the key `{wrote}`, and so does another profile you can see. Which \
+             of them this folder is, is yours to say."
         ),
     };
     PlanProposal {
@@ -1488,7 +1488,7 @@ fn resolve(
                 line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
                 key,
                 format!(
-                    "{} profiles you can see are called `{wrote}` — {}. A profile delegates to \
+                    "{} profiles you can see are called `{wrote}`: {}. A profile delegates to \
                      one of them, so this has to say which.",
                     many.len(),
                     many.iter()
@@ -1565,7 +1565,7 @@ fn resolve(
                 line,
                 key,
                 format!(
-                    "{} skills you can see are called `{}` — {}. Put the directory in front of \
+                    "{} skills you can see are called `{}`: {}. Put the directory in front of \
                      it to say which.",
                     many.len(),
                     wrote.name,
@@ -1601,7 +1601,7 @@ fn resolve(
             line_of(&said.spelled, Spot::Entry(Field::Skills, first)),
             Some(format!("{}[{first}]", Field::Skills.spelling())),
             format!(
-                "two of the skills named share the name `{}` — {where_each}. A skill's folder on \
+                "two of the skills named share the name `{}`: {where_each}. A skill's folder on \
                  a worker is its name, so neither would be loaded. Drop one, or rename it in the \
                  library.",
                 clashing[0].0.name
@@ -2165,8 +2165,8 @@ fn same_name_warnings(entries: &mut [PlanEntry]) {
             1,
             Some(Field::Name.spelling().into()),
             format!(
-                "{} in this drop is also called `{name}`. Two profiles may share a name — they \
-                 are told apart by their folder — so this is only worth knowing.",
+                "{} in this drop is also called `{name}`. They are told apart by their folders, \
+                 so both can exist; this is only worth knowing.",
                 others.join(" and ")
             ),
         ));
