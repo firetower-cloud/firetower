@@ -18,6 +18,7 @@ import {
   Clock,
   ChevronLeft,
   CircleDashed,
+  Download,
   FolderGit2,
   GitBranch,
   GitBranchPlus,
@@ -54,6 +55,7 @@ import {
   createRole,
   updateRole,
   deleteRole,
+  exportRole,
   setDefaultRole,
 } from "~/api/generated/roles/roles";
 import { useAgentControls } from "~/api/generated/agents/agents";
@@ -490,6 +492,76 @@ function RoleRow({
   );
 }
 
+
+/**
+ * What Export says once it has run.
+ *
+ * Exported as a function because it is the whole of what this feature says to
+ * anybody, and the test for it should not have to mount a button — the same
+ * reason `whatAChildGets` is a function.
+ *
+ * It names the path because that is the next thing to do: a `PROFILE.md` is
+ * only a profile when it is in a folder, and the folder name is the identity.
+ * And it says whose version it copied when the form has edits in it, because
+ * a file that quietly lagged behind the screen would be committed as though it
+ * matched.
+ */
+export function copied(path: string, stale: boolean) {
+  return stale
+    ? `Copied the saved profile, not your unsaved edits. Paste it at ${path}.`
+    : `Copied. Paste it at ${path}.`;
+}
+
+/**
+ * Export: a profile as a file somebody can commit.
+ *
+ * Read access is enough, so this is on the reading of a shared profile as well
+ * as on the form for one of your own. The file goes to the clipboard rather
+ * than through a save dialog: the desktop has no file-writing permission and
+ * giving it one to save thirty lines of YAML is a poor trade, and the place
+ * this text is going is a repository somebody already has open.
+ *
+ * The server refuses an export that would describe a different profile — a
+ * machine or a skill the person cannot see — so a refusal here is a sentence
+ * worth reading, not a shrug.
+ */
+function Export({ id, stale = false }: { id: string; stale?: boolean }) {
+  const [said, setSaid] = useState<{ text: string; bad: boolean } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const run = async () => {
+    setBusy(true);
+    setSaid(null);
+    try {
+      const file = await exportRole(id);
+      if (!navigator.clipboard) {
+        setSaid({ text: "This window has no clipboard to copy to.", bad: true });
+        return;
+      }
+      await navigator.clipboard.writeText(file.text);
+      setSaid({ text: copied(file.path, stale), bad: false });
+    } catch (e) {
+      setSaid({ text: why(e), bad: true });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      {said && (
+        <span className={`text-meta ${said.bad ? "text-brick" : "text-mute"}`} role="status">
+          {said.text}
+        </span>
+      )}
+      <button onClick={() => void run()} disabled={busy} className="btn quiet">
+        <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
+        Export
+      </button>
+    </span>
+  );
+}
+
 /** A small fact about a role, in the list. */
 function Chip({ children }: { children: ReactNode }) {
   return (
@@ -524,9 +596,12 @@ function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
       title={role.name}
       note={role.does}
       action={
-        <button onClick={onClose} className="btn plain">
-          All profiles
-        </button>
+        <span className="inline-flex items-center gap-2">
+          <Export id={role.id} />
+          <button onClick={onClose} className="btn plain">
+            All profiles
+          </button>
+        </span>
       }
     >
       <div className="space-y-5 px-3.5 py-4">
@@ -1539,6 +1614,12 @@ function Editor({
                         ? "Saved when you press it. Running workspaces keep the profile they started with."
                         : "Nothing is created until you press this."}
           </span>
+          {/* Of the saved profile, which is the only thing that has a file:
+              the draft on screen has never been resolved against anything. The
+              sentence says so when the two differ. */}
+          {existing && state.id && (
+            <Export id={state.id} stale={JSON.stringify(draft) !== JSON.stringify(state.draft)} />
+          )}
           {existing && (
             <button onClick={remove} disabled={busy} className="btn danger">
               <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />
