@@ -494,15 +494,6 @@ function RoleRow({
   );
 }
 
-/** A small fact about a role, in the list. */
-function Chip({ children }: { children: ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded bg-raise px-1.5 py-0.5 text-micro text-mute">
-      {children}
-    </span>
-  );
-}
-
 /**
  * A profile you may read and not change.
  *

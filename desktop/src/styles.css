@@ -3489,6 +3489,37 @@ html:not([data-platform="macos"]) {
     font-size: 0.875rem;
     color: var(--color-dim);
   }
+  /* The foot carries one of three severities and only the neutral one existed,
+     so *"Over Codex's limit"* and *"Nothing is created until you press this"*
+     shipped in the same `--color-dim` — the faintest tier, which is the colour
+     of a standing note. The `.bad` and `.warn` rules that were already in this
+     sheet are scoped to other parents (`.first`, `.fld`, `.facts-card .line`)
+     and none of them reaches here, so the class the component emitted resolved
+     to nothing at all. Same symptom as the `--color-amber` drift in
+     `STYLE.md`, different cause: not a token missing from the sheet, but a
+     class the sheet never defined.
+
+     **Brick refuses, amber approaches.** Brick is the signal for something
+     that failed, and `ownOver` is the one state here where Save is disabled —
+     a refusal, not a caution. Amber is the step the other three signals have
+     no word for, *still working but not for much longer*, which is what an
+     empty skill set, a clash and an over-budget checkout all are: allowed, and
+     worth stopping over.
+
+     **Not ember.** Ember answers one question — is an agent waiting on you —
+     and a form you are already looking at is not that question. A footer that
+     took it would put a second loud thing on the screen and cost ember the
+     only thing it is for.
+
+     Both take the text value rather than `-soft`: this is a sentence to read,
+     not a mark to notice, and `--color-amber-soft` is the non-text step (3.92
+     on white, past the 3:1 graphic floor and under the text one). */
+  .formfoot .msg.bad {
+    color: var(--color-brick);
+  }
+  .formfoot .msg.warn {
+    color: var(--color-amber);
+  }
 
   /* ── Which skills a profile loads ─────────────────────────────────
      Drawn in the `profile-skills` prototype, on these primitives rather than
