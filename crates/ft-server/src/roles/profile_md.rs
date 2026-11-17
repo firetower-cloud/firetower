@@ -1644,25 +1644,39 @@ pub fn of_role(role: &super::Role, key: &str, named: Named) -> Result<Profile, s
 
 /// The folder a profile is exported into, which is its identity.
 ///
-/// **Derived from the name, because no row has a key yet.** The column is
-/// #355's, nullable, and null on every profile that exists — so until it is
-/// there this is the whole answer, and afterwards it is the fallback for a
-/// profile that predates it. One function to change, rather than a decision
-/// spread over the handler.
+/// **The stored key wins, and the name is only a fallback.** That is the
+/// folder-as-identity decision, and this had it backwards: it derived from
+/// `name` and ignored the column, so a profile imported from `qa-engineer/`
+/// and renamed — or simply called something else, which the live **QA** is —
+/// exported into a folder named after its label. Re-importing that is not an
+/// overwrite. It is a **second profile**, created silently, which is the exact
+/// failure folder-as-identity exists to prevent, and it breaks the round trip
+/// the whole format rests on.
 ///
-/// `slug` cannot serve, and that is the reason the column has to exist: it
+/// `name` is a display label and may change freely. A key that moved whenever
+/// somebody edited the label would not be an identity at all.
+///
+/// Deriving is for a profile that has never had a key: every row predates the
+/// column, so today that is all of them, and the derived key is a **guess**.
+/// `fstack` is the live case — the folder is `qa-engineer/` and the profile is
+/// called `QA`, so the guess is `qa` and the two do not match. That is what
+/// #355's candidate match is for: it offers the person the match rather than
+/// creating a second profile beside the first.
+///
+/// `slug` cannot serve as the key, and that is why the column has to exist: it
 /// carries a generated discriminator so two people's `Designer` can coexist,
 /// which makes it deterministic for the installation and useless as the
 /// author's identity.
-///
-/// A derived key is a guess about identity, and the one place that matters is
-/// the first import of an exported file: `fstack`'s `qa-engineer/` folder
-/// holds a profile called **QA**, so this would call it `qa` and the review
-/// has to offer the match rather than create a second profile. That is #355's
-/// candidate-match rule, and it exists because of exactly this.
-pub fn key_of(role: &super::Role) -> String {
-    let kebab: String = role
-        .name
+pub fn key_of(stored: Option<&str>, name: &str) -> String {
+    if let Some(key) = stored.map(str::trim).filter(|k| !k.is_empty()) {
+        return key.to_string();
+    }
+    derived_from(name)
+}
+
+/// A key for a profile that has never carried one.
+fn derived_from(name: &str) -> String {
+    let kebab: String = name
         .chars()
         .map(|c| {
             if c.is_ascii_alphanumeric() {
@@ -3126,7 +3140,7 @@ You own feature delivery.
     #[test]
     fn a_stored_profile_round_trips_through_its_own_file() {
         let role = stored();
-        let key = key_of(&role);
+        let key = key_of(None, &role.name);
         let want = of_role(&role, &key, resolved()).expect("a row the API would accept");
         let written = serialize(&want);
         assert_eq!(accepted(&key, &written), want, "{written}");
@@ -3160,7 +3174,7 @@ You own feature delivery.
     #[test]
     fn an_exported_profile_has_nothing_left_to_reset() {
         let role = stored();
-        let key = key_of(&role);
+        let key = key_of(None, &role.name);
         let file = serialize(&of_role(&role, &key, resolved()).unwrap());
         let read = reading(&key, &file);
         for field in Field::all() {
@@ -3175,14 +3189,38 @@ You own feature delivery.
         }
     }
 
-    /// The folder a profile is exported into, which no row holds yet.
+    /// **The stored key wins. The name is a label, and only a fallback.**
+    ///
+    /// This is the folder-as-identity decision, and it had been implemented
+    /// backwards: the key was derived from `name` and the column ignored. The
+    /// live case is the one that breaks, so it is the one pinned here —
+    /// `fstack`'s bundle is `qa-engineer/` and the profile is called `QA`, so
+    /// exporting by name writes `qa/`, and re-importing that is not an
+    /// overwrite of the profile it came from. It is a second profile, created
+    /// silently.
+    #[test]
+    fn a_stored_key_outranks_the_name_it_disagrees_with() {
+        assert_eq!(key_of(Some("qa-engineer"), "QA"), "qa-engineer");
+        assert_eq!(
+            path_of(&key_of(Some("qa-engineer"), "QA")),
+            "profiles/qa-engineer/PROFILE.md"
+        );
+        // A renamed profile keeps its folder, which is what makes a rename a
+        // rename rather than a new profile beside the old one.
+        assert_eq!(
+            key_of(Some("engineering-manager"), "Delivery Lead"),
+            "engineering-manager"
+        );
+        // Blank is not a key. Every row predates the column, and a column
+        // somebody cleared should read the same as one nobody has filled in.
+        assert_eq!(key_of(Some("  "), "QA"), "qa");
+        assert_eq!(key_of(None, "QA"), "qa");
+    }
+
+    /// And a profile that has never carried a key gets a guess from its name.
     #[test]
     fn a_key_is_derived_from_the_name_until_a_row_carries_one() {
-        let keyed = |name: &str| {
-            let mut role = stored();
-            role.name = name.into();
-            key_of(&role)
-        };
+        let keyed = |name: &str| key_of(None, name);
         assert_eq!(keyed("Engineering Manager"), "engineering-manager");
         assert_eq!(keyed("Designer"), "designer");
         assert_eq!(keyed("Security Advisor"), "security-advisor");
@@ -3259,7 +3297,7 @@ You own feature delivery.
         role.skill_scope = vec![];
         role.settings = Default::default();
         role.path = "u/kevin/engineering-manager_01hzzzzz".into();
-        let key = key_of(&role);
+        let key = key_of(None, &role.name);
         let want = of_role(&role, &key, Named::default()).unwrap();
         let written = serialize(&want);
         assert!(written.contains("engine: ~"), "{written}");

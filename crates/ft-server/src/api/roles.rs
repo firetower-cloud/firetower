@@ -511,6 +511,26 @@ async fn named_for(
     })
 }
 
+/// The key this row carries: the folder its author's bundle was in.
+///
+/// **Wired in**, which is what this seam existed for. `author_key` is
+/// `Role::key` (#355), and `key_of` prefers it over deriving one from the name
+/// — so a profile imported from `qa-engineer/` exports back into
+/// `qa-engineer/` rather than into `qa/` because it is called `QA`.
+///
+/// The failure this guards against is silent and was reproduced over HTTP
+/// before the two halves met: with the column present and this function still
+/// answering `None`, every profile whose key and name agree round-trips
+/// perfectly and the one where they differ comes back from the plan as **new**,
+/// which a review would let somebody accept. A second `QA`, through export, is
+/// the duplicate folder-as-identity exists to prevent — so
+/// `the_round_trip_holds_for_the_row_whose_key_and_name_disagree` asserts the
+/// plan's verdict on export's own output rather than this function's answer. A
+/// unit test over `key_of` passes whether or not anything calls it.
+fn stored_key(role: &Role) -> Option<&str> {
+    role.key.as_deref()
+}
+
 /// A profile as a `PROFILE.md`, so it can be committed and read in a diff.
 ///
 /// Read access and nothing more: this writes a file and changes nothing. What
@@ -542,7 +562,7 @@ pub(super) async fn export_role(
         .ok_or_else(|| ApiError::not_found("role"))?;
 
     let named = named_for(&state, me.id.as_str(), me.org_id.as_str(), &role).await?;
-    let key = profile_md::key_of(&role);
+    let key = profile_md::key_of(stored_key(&role), &role.name);
     let profile = profile_md::of_role(&role, &key, named).map_err(refused)?;
 
     Ok(Json(ProfileFile {
@@ -660,7 +680,7 @@ pub(super) async fn plan_role_import(
 mod tests {
     use super::*;
     use crate::access::{NewGrant, SubjectKind};
-    use crate::roles::import::{DroppedFile, PlanOutcome, ProfileDrop};
+    use crate::roles::import::{DroppedFile, FieldChange, FieldDiff, PlanOutcome, ProfileDrop};
     use crate::roles::profile_md;
     use std::sync::Arc;
 
@@ -973,6 +993,182 @@ mod tests {
             .await
             .expect_err("not hers to read");
         assert!(format!("{no:?}").contains("not_found") || format!("{no:?}").contains("NotFound"));
+    }
+
+    // ── export and the plan, as one round trip ──────────────────────────
+
+    /// A profile with the key an import adopted onto it, whatever it is called.
+    async fn keyed(state: &AppState, who: &Principal, name: &str, key: &str) -> String {
+        let id = made(state, who, &asked_for(name)).await;
+        sqlx::query("UPDATE roles SET author_key = $2 WHERE id = $1")
+            .bind(&id)
+            .bind(key)
+            .execute(state.db.pool())
+            .await
+            .unwrap();
+        id
+    }
+
+    /// The file export writes for one profile.
+    async fn exported(state: &AppState, who: &Principal, id: &str) -> ProfileFile {
+        export_role(
+            State(state.clone()),
+            Extension(who.clone()),
+            Path(id.to_string()),
+        )
+        .await
+        .expect("a profile of my own exports")
+        .0
+    }
+
+    /// **Export reads the stored key, not the name.**
+    ///
+    /// The live divergence: `fstack`'s bundle is `qa-engineer/` and the profile
+    /// is called `QA`. Over the endpoint rather than over `key_of`, because the
+    /// defect this pins was not in `key_of` — it was in nothing calling it with
+    /// the column.
+    #[tokio::test]
+    async fn export_writes_the_folder_the_key_names_rather_than_the_name() {
+        let (state, admin) = fixture().await;
+        let id = keyed(&state, &admin, "QA", "qa-engineer").await;
+
+        let file = exported(&state, &admin, &id).await;
+        assert_eq!(file.key, "qa-engineer");
+        assert_eq!(file.path, "profiles/qa-engineer/PROFILE.md");
+        // And the file says so too, so a bundle read away from its folder
+        // still knows what it is.
+        let read = profile_md::parse(std::path::Path::new(&file.path), &file.key, &file.text)
+            .expect("export's own file parses");
+        assert_eq!(read.key, "qa-engineer");
+        assert_eq!(read.name, "QA");
+    }
+
+    /// **The round trip, on the row whose key and name disagree.**
+    ///
+    /// The regression test for the whole class, and the one that matters:
+    /// `a_stored_key_outranks_the_name_it_disagrees_with` proves `key_of`, and
+    /// nothing proved that anything *called* it. A unit test over a function
+    /// passes whether or not it is wired, which is how a silent duplicate
+    /// survived a green suite — so this asserts the **plan's verdict on
+    /// export's own output**: an overwrite of the profile it came from, with
+    /// nothing changing. Before the column was wired in this came back `new`,
+    /// `appliable: true`, which a review would have let somebody accept.
+    #[tokio::test]
+    async fn the_round_trip_holds_for_the_row_whose_key_and_name_disagree() {
+        let (state, admin) = fixture().await;
+        let id = keyed(&state, &admin, "QA", "qa-engineer").await;
+        let file = exported(&state, &admin, &id).await;
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(admin.clone()),
+            Json(plan_for(vec![DroppedFile {
+                path: file.path.clone(),
+                text: file.text.clone(),
+            }])),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        // The outcome first, deliberately: it is the sentence somebody needs
+        // when this breaks. Asserting the folder first fails with `"qa" !=
+        // "qa-engineer"`, which is true and says nothing about what it costs.
+        let entry = &plan.entries[0];
+        let PlanOutcome::Overwrite(over) = &entry.outcome else {
+            panic!(
+                "Firetower's own export of `QA` came back as {:#?} rather than an overwrite of \
+                 the profile it was written from — which is a second QA that a review would let \
+                 somebody accept",
+                entry.outcome
+            )
+        };
+        assert_eq!(entry.key, "qa-engineer");
+        assert_eq!(over.profile.id, id);
+        assert!(!over.adopts_key, "the row already carries the key");
+        assert!(
+            over.diff.iter().all(|f| f.change == FieldChange::Unchanged),
+            "{:#?}",
+            over.diff
+                .iter()
+                .filter(|f| f.change != FieldChange::Unchanged)
+                .collect::<Vec<_>>()
+        );
+        assert!(plan.appliable);
+    }
+
+    /// And all five of `fstack`'s profiles at once: export every one, drop the
+    /// five files back in, and get five overwrites with nothing changing.
+    ///
+    /// The set matters as well as the rows. `qa-engineer`/`QA` is the one that
+    /// diverges, and a drop where four bundles are right and one is a create is
+    /// exactly what a person would accept without reading closely.
+    #[tokio::test]
+    async fn the_five_fstack_profiles_export_and_re_plan_to_five_empty_overwrites() {
+        let (state, admin) = fixture().await;
+        // Their real folders, and the name each live profile actually has —
+        // `qa-engineer` is called `QA`, which is the whole point of the set.
+        let library = [
+            ("designer", "Designer"),
+            ("engineer", "Engineer"),
+            ("engineering-manager", "Engineering Manager"),
+            ("qa-engineer", "QA"),
+            ("security-advisor", "Security Advisor"),
+        ];
+        let mut ids = Vec::new();
+        for (key, name) in library {
+            ids.push((key, keyed(&state, &admin, name, key).await));
+        }
+
+        let mut files = Vec::new();
+        for (key, id) in &ids {
+            let file = exported(&state, &admin, id).await;
+            assert_eq!(&file.key, key, "export put `{key}` in the wrong folder");
+            files.push(DroppedFile {
+                path: file.path,
+                text: file.text,
+            });
+        }
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(admin.clone()),
+            Json(plan_for(files)),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(plan.entries.len(), 5);
+        for entry in &plan.entries {
+            let PlanOutcome::Overwrite(over) = &entry.outcome else {
+                panic!(
+                    "`{}` came back as {:#?} rather than an overwrite",
+                    entry.key, entry.outcome
+                )
+            };
+            let changed: Vec<&FieldDiff> = over
+                .diff
+                .iter()
+                .filter(|f| f.change != FieldChange::Unchanged)
+                .collect();
+            assert!(
+                changed.is_empty(),
+                "`{}` round-tripped with changes: {:#?}",
+                entry.key,
+                changed
+            );
+            assert!(
+                over.diff.iter().all(|f| f
+                    .settings
+                    .iter()
+                    .all(|s| s.change == FieldChange::Unchanged)),
+                "`{}` round-tripped with a setting changing",
+                entry.key
+            );
+            assert!(entry.warnings.is_empty(), "{:#?}", entry.warnings);
+        }
+        assert!(plan.appliable);
     }
 
     // ── the import plan ─────────────────────────────────────────────────

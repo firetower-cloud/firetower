@@ -68,6 +68,37 @@
 //! overwrite diff is otherwise a way to read the fields of a row through a
 //! shared profile.
 //!
+//! ### Three states, not two, and the one pair that must read alike
+//!
+//! The rule above was decided over two states. A machine the fleet **used to
+//! have** is a third, and it is neither of them: it was legitimately named, it
+//! is on the asker's own Compute screen, and it has gone. So a name that does
+//! not resolve is one of three things, and the wording carries them as **two**
+//! sentences:
+//!
+//! | the state | what it says |
+//! |---|---|
+//! | you may not see it | *no machine named `fire_01` is available to you* |
+//! | it never existed | the same sentence, deliberately |
+//! | it left the fleet | *`fire_01` was removed from the fleet, so nothing runs there any more* |
+//!
+//! **The first two have to stay identical** — that pair *is* the enumeration
+//! oracle, and the threat model's Low finding is about exactly it. The third is
+//! distinguished on a judgement that was made deliberately rather than fallen
+//! into: it discloses, to somebody already authenticated inside a single-tenant
+//! installation, that a name they guessed was once real. Taken, because the
+//! harm the other way is concrete and immediate — *"not available to you"*
+//! about a decommissioned machine sends somebody to ask an administrator for
+//! access they will never be given, and nothing in the sentence says why. It is
+//! also the honest answer: the file was right when it was written, and what
+//! changed is the fleet rather than their grants.
+//!
+//! **Where to be careful if this grows a fourth state.** The test to apply is
+//! not "are these different facts" — it is "does telling them apart answer a
+//! question the asker could not already answer". Retirement passes because the
+//! machine is already on their screen. A *hidden* machine never does, which is
+//! why no amount of helpfulness may split the first two.
+//!
 //! ## Identity is the folder name
 //!
 //! `profiles/<key>/PROFILE.md`, and the `<key>` is the profile's identity.
@@ -661,8 +692,8 @@ pub fn plan(drop: &ProfileDrop, here: &Here) -> Result<ImportPlan, Refused> {
 fn check(drop: &ProfileDrop) -> Result<(), Refused> {
     if drop.files.len() > MOST_FILES {
         return Err(Refused(format!(
-            "this drop holds {} files and an import takes at most {MOST_FILES} — drop fewer \
-             folders at once",
+            "this drop holds {} files, and an import takes at most {MOST_FILES}. Drop fewer \
+             folders at once.",
             drop.files.len()
         )));
     }
@@ -690,8 +721,8 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
         }
         if file.path.len() > crate::skills::LONGEST_PATH {
             return Err(Refused(format!(
-                "`{}` is {} bytes long, and a path inside a drop is at most {} — the same cap a \
-                 skill's bundle has",
+                "`{}` is {} bytes long, and a path inside a drop is at most {}. Drop the folder \
+                 that holds the bundles rather than the tree above it.",
                 briefly(&file.path),
                 file.path.len(),
                 crate::skills::LONGEST_PATH
@@ -700,8 +731,8 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
         let depth = file.path.split('/').filter(|s| !s.is_empty()).count();
         if depth > DEEPEST {
             return Err(Refused(format!(
-                "`{}` is {depth} folders deep and an import reads at most {DEEPEST} — drop the \
-                 folder that holds the bundles rather than the repository around it",
+                "`{}` is {depth} folders deep, and an import reads at most {DEEPEST}. Drop the \
+                 folder that holds the bundles rather than the repository around it.",
                 briefly(&file.path)
             )));
         }
@@ -716,7 +747,7 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
         total += file.text.len();
         if total > BIGGEST_DROP {
             return Err(Refused(format!(
-                "this drop is over the {} MB an import takes — drop fewer folders at once",
+                "this drop is over the {} MB an import takes. Drop fewer folders at once.",
                 BIGGEST_DROP / 1024 / 1024
             )));
         }
@@ -1097,7 +1128,7 @@ fn proposal(row: &Role, why: ProposalWhy, wrote: &str) -> PlanProposal {
     let says = match why {
         ProposalWhy::Name => format!(
             "`{name}` is already in your library under this name and carries no key of its own, \
-             and so does another profile — so which of them this folder is, is yours to say."
+             and so does another profile. Which of them this folder is, is yours to say."
         ),
         ProposalWhy::NearName => format!(
             "`{name}` differs from `{wrote}` only in capitals or spacing, which is usually the \
@@ -1108,8 +1139,8 @@ fn proposal(row: &Role, why: ProposalWhy, wrote: &str) -> PlanProposal {
              folder was written for."
         ),
         ProposalWhy::SameKey => format!(
-            "`{name}` carries the key `{wrote}`, and so does another profile you can see — so \
-             which of them this folder is, is yours to say."
+            "`{name}` carries the key `{wrote}`, and so does another profile you can see. Which \
+             of them this folder is, is yours to say."
         ),
     };
     PlanProposal {
@@ -1283,10 +1314,14 @@ fn resolve(
         let key = Some(Field::Machine.spelling().to_string());
         match found.len() {
             1 => {}
-            // Retired is not hidden, and the sentence has to tell them apart:
-            // one is a machine they can see on their own Compute screen that
-            // nothing can run on any more, the other is a name this
-            // installation cannot answer for. Both block.
+            // **The third state**, and the one place the plan tells any two
+            // apart: see the module doc. A retired machine is on the asker's
+            // own Compute screen, so saying it left the fleet answers nothing
+            // they could not already answer — and it stops "not available to
+            // you" sending them to an administrator for access to a
+            // decommissioned machine. The two states above it stay one
+            // sentence, which is the enumeration oracle the threat model is
+            // about. Both block: nothing runs on a machine that is gone.
             0 if !among(wrote, &here.retired, |m| &m.name).is_empty() => out.push(PlanProblem::at(
                 p,
                 line,
@@ -1453,7 +1488,7 @@ fn resolve(
                 line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
                 key,
                 format!(
-                    "{} profiles you can see are called `{wrote}` — {}. A profile delegates to \
+                    "{} profiles you can see are called `{wrote}`: {}. A profile delegates to \
                      one of them, so this has to say which.",
                     many.len(),
                     many.iter()
@@ -1530,7 +1565,7 @@ fn resolve(
                 line,
                 key,
                 format!(
-                    "{} skills you can see are called `{}` — {}. Put the directory in front of \
+                    "{} skills you can see are called `{}`: {}. Put the directory in front of \
                      it to say which.",
                     many.len(),
                     wrote.name,
@@ -1566,7 +1601,7 @@ fn resolve(
             line_of(&said.spelled, Spot::Entry(Field::Skills, first)),
             Some(format!("{}[{first}]", Field::Skills.spelling())),
             format!(
-                "two of the skills named share the name `{}` — {where_each}. A skill's folder on \
+                "two of the skills named share the name `{}`: {where_each}. A skill's folder on \
                  a worker is its name, so neither would be loaded. Drop one, or rename it in the \
                  library.",
                 clashing[0].0.name
@@ -2130,8 +2165,8 @@ fn same_name_warnings(entries: &mut [PlanEntry]) {
             1,
             Some(Field::Name.spelling().into()),
             format!(
-                "{} in this drop is also called `{name}`. Two profiles may share a name — they \
-                 are told apart by their folder — so this is only worth knowing.",
+                "{} in this drop is also called `{name}`. They are told apart by their folders, \
+                 so both can exist; this is only worth knowing.",
                 others.join(" and ")
             ),
         ));
@@ -2853,6 +2888,38 @@ mod tests {
         assert!(
             !says.contains("available to you"),
             "a machine on their own Compute screen is not one they cannot see: {says}"
+        );
+        // It says what to do about it, which is what a blocking message is for.
+        assert!(
+            says.contains("Write a machine that is still in it"),
+            "{says}"
+        );
+
+        // And the pair that has to stay one sentence stays one sentence: a
+        // machine somebody else can see reads exactly as a name this
+        // installation has never held. Three states, two sentences.
+        let hidden = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nmachine: someone-elses\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        let nowhere = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nmachine: never-existed\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert_eq!(
+            said(only(&hidden)).replace("someone-elses", "·"),
+            said(only(&nowhere)).replace("never-existed", "·"),
+            "a hidden machine and one that never existed have to read alike"
         );
 
         // And the stored pin is named rather than hidden, which is only
