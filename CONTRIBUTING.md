@@ -88,8 +88,18 @@ sends the build from this checkout rather than fetching a release.
 
 Workers keep what happened on the machine they run on (for a machine that is
 your own laptop, that is `~/.firetower`). The control plane's cache is
-Postgres. Drop the database and
-it rebuilds from the workers on reconnect; `just reset` wipes both.
+Postgres. Drop the database and it rebuilds from the workers on reconnect, so
+`just reset` is the cheap way back to a clean slate: it drops the database and
+brings it back empty, and touches nothing else.
+
+**Worker state is a separate command, and it is not a cache.** Once this
+laptop is a machine in your own fleet, `~/.firetower/worker` holds the clone
+of every repository and the live worktree of every session running here —
+uncommitted work included, and not only the sessions you started. One laptop
+measured 80GB across 60 worktrees. `just worker-wipe` is the recipe that
+removes it, and it refuses while any worktree is still there rather than
+asking; see #339 for why it has no override. Ending a session takes its
+worktree with it, which is the ordinary way that directory gets smaller.
 
 ## Day to day
 
@@ -215,10 +225,13 @@ follow:
 ## Images, and the worker
 
 ```sh
-just updater-image       # the updater beside the control plane
-docker build -t firetower .   # the control plane, interface and all
-just build-worker        # the worker binary, packed as a release would
+docker build -t firetower .                                # the control plane, interface and all
+docker build -f Dockerfile.updater -t firetower-updater .  # the updater beside it
+just build-worker                                          # the worker binary, packed as a release would
 ```
+
+Neither image has a `just` recipe — `.github/workflows/images.yml` is what
+builds and publishes them, and the two lines above are that by hand.
 
 The two images and the worker binaries are published together on release: the
 control plane compares its version against each worker's on every handshake,

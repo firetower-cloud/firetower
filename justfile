@@ -1,6 +1,26 @@
 # Firetower — every command anyone needs.
 # `just doctor` first if something looks wrong.
 
+# Which Compose project the recipes here act on, passed as `-p` rather than
+# left to compose to work out.
+#
+# Compose resolves a project name from COMPOSE_PROJECT_NAME *first* and the
+# `name:` in compose.yaml only if that is unset — and inside a Firetower
+# session COMPOSE_PROJECT_NAME is set, to `ft-<session id>`
+# (`crates/ft-worker/src/lib.rs`, where the session's environment is built).
+# So a bare `docker compose` in this file acts on whichever stack the shell
+# happens to be in: inside a session, that session's own; outside one,
+# whatever else answers to `firetower-dev`. `just reset` tearing down the
+# session that ran it is the same bug as `just db` adopting its containers.
+#
+# The name is compose.yaml's, for the reasons written there. Override it for a
+# second stack or a test, which is the one thing the environment must not be
+# able to do by accident:
+#
+#   just project=firetower-scratch db
+project := "firetower-dev"
+compose := "docker compose -p " + project
+
 _default:
     @just --list
 
@@ -8,11 +28,22 @@ _default:
 doctor:
     #!/usr/bin/env bash
     missing=0
+    # A tool that is on PATH but cannot say what version it is counts as not
+    # ready, rather than as `ok` with the version column left blank. That
+    # blank is how #348 got past here: `doctor` passed and `setup` failed one
+    # command later. The probe goes through `bash -c` so it can be more than
+    # one word, which pnpm's below needs.
     check() {
-        if command -v "$1" >/dev/null 2>&1; then
-            printf '  ok       %-12s %s\n' "$1" "$(${2:-true} 2>/dev/null | head -1)"
-        else
+        local version
+        if ! command -v "$1" >/dev/null 2>&1; then
             printf '  MISSING  %-12s %s\n' "$1" "$3"; missing=1
+            return
+        fi
+        version=$(bash -c "${2:-true}" 2>/dev/null | head -1)
+        if [ -n "$version" ]; then
+            printf '  ok       %-12s %s\n' "$1" "$version"
+        else
+            printf '  BROKEN   %-12s %s\n' "$1" "$3"; missing=1
         fi
     }
     echo
@@ -20,7 +51,14 @@ doctor:
     check git         "git --version"         "install git"
     check tmux        "tmux -V"               "brew install tmux"
     check node        "node --version"        "brew install node"
-    check pnpm        "pnpm --version"        "brew install pnpm"
+    # pnpm is asked in `web/` rather than here. Its version is pinned in
+    # web/package.json, and a pnpm that came from corepack — which is what
+    # `brew install node` leaves on a machine — resolves that pin from the
+    # working directory. At the repository root, which has no package.json,
+    # it answers with corepack's own newest instead: a version number that is
+    # not the one anything in this file installs with. In `web/` it answers
+    # with the pinned version or it fails, and either is worth knowing.
+    check pnpm        "cd web && pnpm --version" "brew install pnpm"
     check cargo-watch "cargo-watch --version" "cargo install cargo-watch"
     check docker      "docker --version"      "https://docs.docker.com/get-docker"
     echo
@@ -36,8 +74,13 @@ doctor:
 setup:
     #!/usr/bin/env bash
     set -euo pipefail
-    pnpm --dir web install
-    pnpm --dir mobile install
+    # `cd` rather than `--dir`, for the reason written out above `_dev`: a
+    # pnpm that came from corepack reads the pinned version out of the
+    # working directory, and the repository root has no package.json to read
+    # it from — so from here it fetches its own newest pnpm and then refuses
+    # to install `web/` with it.
+    (cd web && pnpm install)
+    (cd mobile && pnpm install)
     cargo fetch
     # Never clobbers an existing one — this is the only place your client id lives.
     if [ ! -f .env ]; then
@@ -49,10 +92,10 @@ setup:
 db:
     #!/usr/bin/env bash
     set -euo pipefail
-    docker compose up -d postgres
+    {{compose}} up -d postgres
     printf '  waiting for postgres'
     for _ in $(seq 1 60); do
-        if docker compose exec -T postgres pg_isready -q 2>/dev/null; then
+        if {{compose}} exec -T postgres pg_isready -q 2>/dev/null; then
             echo " — ready"
             exit 0
         fi
@@ -60,7 +103,7 @@ db:
         sleep 1
     done
     echo
-    echo "  postgres did not come up. Try: docker compose logs postgres"
+    echo "  postgres did not come up. Try: {{compose}} logs postgres"
     exit 1
 
 # Everything in containers: the database and the development image, with reload.
@@ -69,7 +112,7 @@ db:
 # around it. HOST_BIND in .env.example is how to change that on
 # purpose, and says what it costs.
 up:
-    docker compose --profile full up --build
+    {{compose}} --profile full up --build
 
 # Control plane and web application, both with reload. The database first.
 dev: db _dev
@@ -120,7 +163,12 @@ _dev:
 
     # A worker built here is what "Install the worker" sends to a machine of
     # this shape, so a checkout can be tried on a real host without a release.
-    FIRETOWER_WORKER_ARTIFACTS=target/artifacts cargo watch -x 'run -p ft-cli -- serve --dev' & pids+=($!)
+    #
+    # `CARGO_INCREMENTAL=1` because this is the one build that rebuilds in a
+    # loop: `[profile.dev]` turns incremental off for the many throwaway trees
+    # that build once and are deleted, and the environment variable outranks
+    # the profile, so the interactive loop here keeps its fast rebuild.
+    CARGO_INCREMENTAL=1 FIRETOWER_WORKER_ARTIFACTS=target/artifacts cargo watch -x 'run -p ft-cli -- serve --dev' & pids+=($!)
     # The API's address lives in web/.env.development, committed, so that one
     # file answers it wherever the interface runs — and so that an environment
     # variable can override it, which is what the compose stack needs: there
@@ -160,8 +208,10 @@ gen-check: gen
     .github/scripts/unchanged.sh api/ web/src/api/generated desktop/src/api/generated mobile/src/api/generated mobile/src/design
 
 # The release artifact. Web first: the Rust build embeds its output.
+#
+# `cd`, for the same reason `setup` and `_dev` do it.
 build:
-    pnpm --dir web build
+    cd web && pnpm build
     cargo build --release
 
 # The worker, packed the way a release publishes it, for this machine's shape.
@@ -220,10 +270,10 @@ db-clean:
     set -euo pipefail
     # One statement each, not one transaction: a thousand schemas in a single
     # transaction exhausts max_locks_per_transaction and rolls the lot back.
-    docker compose exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -tAc \
+    {{compose}} exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -tAc \
         "SELECT format('DROP SCHEMA %I CASCADE;', schema_name) FROM information_schema.schemata \
           WHERE schema_name LIKE 'test\_%' ESCAPE '\'" \
-      | docker compose exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -q
+      | {{compose}} exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -q
     echo "  swept. Reclaim the disk with: just db-vacuum"
 
 # Prove a session can actually run things. Run this *inside* a session.
@@ -321,13 +371,119 @@ session-check:
 
 # Give the space back to the filesystem. Only worth it after db-clean.
 db-vacuum:
-    docker compose exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -c "VACUUM FULL;"
+    {{compose}} exec -T postgres psql -U "${POSTGRES_USER:-firetower}" -d "${POSTGRES_DB:-firetower}" -c "VACUUM FULL;"
 
-# Start fresh. The control plane's database is a cache — it rebuilds from
-# the workers on reconnect.
-reset:
-    docker compose down -v
-    rm -rf ~/.firetower/worker
+# Start fresh.
+#
+# The database is a cache and nothing else — it rebuilds from the workers on
+# reconnect — so this is the cheap, recoverable way back to a clean slate, and
+# almost always the one you want. It is also the whole of what this recipe
+# does: worker state is `just worker-wipe`, a different kind of operation,
+# which is where the warning lives.
+#
+# The last line of each of these comments is the only one `just --list` shows,
+# so for these two it is the summary and not the tail of the paragraph.
+#
+# Drop the control plane's database and bring it back empty.
+reset: && db
+    {{compose}} down -v
+
+# Wipe this machine's worker state: its clones, every session's worktree, the
+# event log, the installed binary.
+#
+# **Not the other half of `just reset`.** Nothing under the worker root is a
+# cache of anything — a worktree holds the only copy of whatever has not been
+# pushed yet — and on a machine that is also a worker host, which CONTRIBUTING
+# recommends, that is every session running here and not only yours. One
+# laptop measured 47 live worktrees and 54GB when #339 was filed, and 60 and
+# 80GB when this was written a few hours later — it grows while you read it.
+#
+# So it refuses while any worktree is still on disk, and refuses *first*,
+# before anything is removed. There is deliberately no flag that overrides it,
+# and the refusal deliberately prints no destructive command either — not even
+# the one a person would run by hand. An agent is the likeliest caller here,
+# and an agent treats a runnable line in an error as an instruction, so a
+# printed `rm -rf` would be the `--force` flag again through a channel that is
+# easier to act on than argv. It names the directory and says it has to be
+# removed by hand; reconstructing the command is a person's deliberate act.
+#
+# FIRETOWER_WORKER_ROOT picks the root, the same variable and the same default
+# as install/worker.sh, so this wipes the root the worker here actually uses.
+#
+# DESTRUCTIVE — every session's worktree on this machine. Refuses while any is live; `just reset` is the clean slate you want.
+worker-wipe:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    root="${FIRETOWER_WORKER_ROOT:-$HOME/.firetower/worker}"
+
+    if [ ! -d "$root" ]; then
+        echo "  $root does not exist — nothing to wipe."
+        exit 0
+    fi
+
+    # The guard, above every destructive line in this recipe rather than below
+    # one of them. The version this replaced ran `docker compose down -v`
+    # first, so a check added anywhere further down would have fired with the
+    # database already gone — refusing after the irreversible half is not
+    # refusing.
+    live=0
+    if [ -d "$root/worktrees" ]; then
+        live=$(find "$root/worktrees" -mindepth 1 -maxdepth 1 | wc -l | tr -d '[:space:]')
+    fi
+
+    if [ "$live" -ne 0 ]; then
+        # `du` on 80GB of worktrees takes a moment, and it is the number that
+        # makes the refusal land, so it is worth the wait.
+        size=$(du -sh "$root" 2>/dev/null | cut -f1 | tr -d '[:space:]')
+        exec >&2
+        echo
+        echo "  Refusing — $root is a live worker root."
+        echo
+        echo "      $live live session worktree(s) in $root/worktrees"
+        echo "      $size on disk"
+        echo
+        echo "  This machine hosts Firetower sessions, so that directory is not"
+        echo "  scratch. It holds the working tree of every session running here,"
+        echo "  uncommitted work and all. None of it comes back from upstream and"
+        echo "  not all of it is yours to lose."
+        echo
+        # Checked rather than guessed, and the most useful line here when it
+        # fires: #339 was found by an agent that was itself running inside this
+        # directory, which is the case a warning about "live worktrees" is
+        # easiest to read past.
+        case "$PWD/" in
+            "$root"/*)
+                echo "  You are standing in it, so this would delete the working tree"
+                echo "  you are running in, mid-command:"
+                echo
+                echo "      $PWD"
+                echo
+                ;;
+        esac
+        echo "  If you wanted a clean slate, you wanted the database:"
+        echo
+        echo "      just reset"
+        echo
+        echo "  If you really are decommissioning the worker on this machine: end"
+        echo "  those sessions first — their worktrees go with them — and run this"
+        echo "  again. That is the supported route and it leaves nothing behind."
+        echo
+        echo "  Short of that, the directory above has to be removed by hand, by"
+        echo "  somebody who has looked at what is in it."
+        echo
+        echo "  This recipe prints no command for that and takes no flag that"
+        echo "  overrides it. Both on purpose: an argument that can be passed is one"
+        echo "  an agent will pass, and a destructive line printed in an error is one"
+        echo "  an agent will read as an instruction and run. What it would cost is"
+        echo "  every unpushed commit on this machine, most of it somebody else's."
+        echo "  See #339."
+        echo
+        exit 1
+    fi
+
+    rm -rf "$root"
+    echo "  wiped $root"
 
 # The design system, enforced. Sizes and colours belong in web/app/globals.css;
 # written at the point of use they drift a half-pixel apart across twenty files

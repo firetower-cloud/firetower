@@ -22,6 +22,10 @@
 # database is disposable and rebuilt by the next `just db`; changing the name in
 # `deploy/` would orphan the volumes of every installation that already exists,
 # and their database would come back empty.
+#
+# `justfile` passes this same name as `-p` on every compose command, because a
+# name set here is only reached when COMPOSE_PROJECT_NAME is unset — and inside
+# a Firetower session it is not. Change one and change the other.
 name: firetower-dev
 
 services:
