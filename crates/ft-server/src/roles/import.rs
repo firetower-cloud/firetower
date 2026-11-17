@@ -742,22 +742,44 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
             )));
         }
         if file.text.len() > BIGGEST_FILE {
+            let (is, most) = against(file.text.len(), BIGGEST_FILE);
             return Err(Refused(format!(
-                "`{}` is {} KB, and a file in a drop is at most {} KB",
-                briefly(&file.path),
-                file.text.len() / 1024,
-                BIGGEST_FILE / 1024
+                "`{}` is {is}, and a file in a drop is at most {most}. Shorten the instructions \
+                 below the frontmatter.",
+                briefly(&file.path)
             )));
         }
         total += file.text.len();
         if total > BIGGEST_DROP {
+            let (is, most) = against(total, BIGGEST_DROP);
             return Err(Refused(format!(
-                "this drop is over the {} MB an import takes. Drop fewer folders at once.",
-                BIGGEST_DROP / 1024 / 1024
+                "this drop is {is}, and an import takes at most {most}. Drop fewer folders at \
+                 once."
             )));
         }
     }
     Ok(())
+}
+
+/// A size and the cap it broke, in a unit that tells the two apart.
+///
+/// **`len / 1024` truncates**, so a file one byte over read "is 256 KB, and a
+/// file in a drop is at most 256 KB" — a sentence that contradicts itself for
+/// every size in a 1 KB window, and the window is where somebody who has just
+/// trimmed a file lives. So the unit is chosen rather than fixed: the largest
+/// one in which the two figures differ, down to bytes.
+fn against(bytes: usize, cap: usize) -> (String, String) {
+    for (size, unit) in [(1024 * 1024, "MB"), (1024, "KB"), (1, "bytes")] {
+        // Never "0 MB", which is a figure about nothing.
+        if cap < size {
+            continue;
+        }
+        let (over, limit) = (bytes / size, cap / size);
+        if over != limit {
+            return (format!("{over} {unit}"), format!("{limit} {unit}"));
+        }
+    }
+    (format!("{bytes} bytes"), format!("{cap} bytes"))
 }
 
 /// The file a bundle is.
@@ -1508,7 +1530,8 @@ fn resolve(
                 key,
                 format!(
                     "{} profiles you can see are called `{wrote}`: {}. A profile delegates to \
-                     one of them, so this has to say which.",
+                     one of them, and a file has no way to say which: rename one of them in the \
+                     library, or remove the entry.",
                     many.len(),
                     many.iter()
                         .map(|r| format!("`{}`", r.path))
@@ -1535,7 +1558,8 @@ fn resolve(
                     key,
                     format!(
                         "no directory named `{qualifier}` is available to you, so `{}` cannot be \
-                         found in it.",
+                         found in it. Write a directory you can reach, drop the qualifier to \
+                         name the skill on its own, or remove the entry.",
                         wrote.spelling()
                     ),
                 ));
@@ -1555,7 +1579,8 @@ fn resolve(
                     line,
                     key,
                     format!(
-                        "no skill named `{}` in `{}` is available to you.",
+                        "no skill named `{}` in `{}` is available to you. Write one you can use, \
+                         or remove the entry.",
                         wrote.name, dir.name
                     ),
                 )),
@@ -2293,7 +2318,7 @@ fn same_target_blocks(entries: &mut [PlanEntry]) {
                 None,
                 format!(
                     "this bundle and {} both resolve to the profile `{name}`. One of them would \
-                     overwrite the other, so neither is applied — leave one out, or answer the \
+                     overwrite the other, so neither is applied. Leave one out, or answer the \
                      match differently.",
                     others.join(" and ")
                 ),
@@ -2326,6 +2351,15 @@ fn same_name_warnings(entries: &mut [PlanEntry]) {
         }
     }
     for entry in entries.iter_mut() {
+        // **Never beside a block.** Two bundles sharing a *key* share a folder
+        // name, and this says "they are told apart by their folders, so both
+        // can exist" — which is the opposite of the refusal above it, and the
+        // only amber on that screen, pointing at the one false sentence in it.
+        // A warning is for something worth knowing about a bundle that could
+        // be applied.
+        if matches!(entry.outcome, PlanOutcome::Blocked(_)) {
+            continue;
+        }
         let Some(name) = entry.name.clone() else {
             continue;
         };
@@ -2925,6 +2959,96 @@ mod tests {
             );
         }
         assert!(!plan.appliable);
+    }
+
+    /// **A warning never sits beside a block it contradicts.**
+    ///
+    /// Two bundles sharing a key share a folder name, and the same-name
+    /// warning says "they are told apart by their folders, so both can exist"
+    /// — the opposite of the refusal above it. It was also the only amber on
+    /// that screen, so the one colour reserved for "read before you accept"
+    /// was pointing at the one false sentence in the state.
+    #[test]
+    fn a_blocked_bundle_carries_no_warning_that_argues_with_its_block() {
+        let twins = plan(
+            &dropped(vec![
+                at("a/zed/PROFILE.md", &smallest("Zed"), ""),
+                at("b/zed/PROFILE.md", &smallest("Zed"), ""),
+            ]),
+            &here(vec![]),
+        )
+        .unwrap();
+        assert_eq!(twins.entries.len(), 2);
+        for entry in &twins.entries {
+            assert!(
+                said(entry).contains("is also a bundle for `zed`"),
+                "{}",
+                said(entry)
+            );
+            assert!(
+                entry.warnings.is_empty(),
+                "a blocked bundle was also warned about: {:#?}",
+                entry.warnings
+            );
+        }
+
+        // The warning is still there when both bundles could be applied, which
+        // is the case it is for.
+        let two = plan(
+            &dropped(vec![
+                at("zed/PROFILE.md", &smallest("Zed"), ""),
+                at("zed-2/PROFILE.md", &smallest("Zed"), ""),
+            ]),
+            &here(vec![]),
+        )
+        .unwrap();
+        for entry in &two.entries {
+            assert_eq!(entry.warnings.len(), 1, "{:#?}", entry.warnings);
+        }
+        assert!(two.appliable);
+    }
+
+    /// Every block says what to do about it, including the two that used to
+    /// stop at the diagnosis.
+    #[test]
+    fn a_skill_that_cannot_be_found_says_what_to_do_about_it() {
+        let mut library = here(vec![]);
+        library.directories = vec![folder("Firetower", true)];
+        library.skills = vec![skill("sk1", "treg", "d/firetower/treg")];
+
+        // A directory that is there, and no skill of that name in it.
+        let missing = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nskills:\n  - firetower/dataviz\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        let says = said(only(&missing));
+        assert!(
+            says.contains("no skill named `dataviz` in `Firetower` is available to you"),
+            "{says}"
+        );
+        assert!(says.contains("remove the entry"), "{says}");
+
+        // A qualifier that is not a directory they can reach.
+        let nowhere = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nskills:\n  - nowhere/dataviz\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        let says = said(only(&nowhere));
+        assert!(
+            says.contains("no directory named `nowhere` is available to you"),
+            "{says}"
+        );
+        assert!(says.contains("drop the qualifier"), "{says}");
     }
 
     /// Criterion (threat model): two bundles resolving to the same overwrite
@@ -3886,17 +4010,67 @@ mod tests {
             refused.0
         );
 
-        let big = plan(
+        // **One byte over, which is where the sentence has to be exact.** In
+        // kilobytes both figures truncate to 256 and the refusal contradicts
+        // itself, and the 1 KB window is where somebody who has just trimmed a
+        // file lives.
+        let barely = plan(
             &one("designer/PROFILE.md", "x".repeat(BIGGEST_FILE + 1)),
             &here(vec![]),
         )
         .expect_err("too big a file");
+        assert!(
+            barely.0.contains(&format!("is {} bytes", BIGGEST_FILE + 1)),
+            "{}",
+            barely.0
+        );
+        assert!(
+            barely.0.contains(&format!("at most {BIGGEST_FILE} bytes")),
+            "{}",
+            barely.0
+        );
+        assert!(
+            barely.0.contains("Shorten the instructions"),
+            "{}",
+            barely.0
+        );
+
+        // Well over, where kilobytes do tell them apart and are what somebody
+        // reads.
+        let big = plan(
+            &one("designer/PROFILE.md", "x".repeat(BIGGEST_FILE * 2)),
+            &here(vec![]),
+        )
+        .expect_err("much too big a file");
+        assert!(
+            big.0
+                .contains(&format!("is {} KB", BIGGEST_FILE * 2 / 1024)),
+            "{}",
+            big.0
+        );
         assert!(
             big.0
                 .contains(&format!("at most {} KB", BIGGEST_FILE / 1024)),
             "{}",
             big.0
         );
+
+        // And at every size over the cap, the two figures differ: a refusal
+        // that reads as the limit it broke is one nobody can act on.
+        for over in [1, 2, 1023, 1024, 1025, BIGGEST_FILE] {
+            let refused = plan(
+                &one("designer/PROFILE.md", "x".repeat(BIGGEST_FILE + over)),
+                &here(vec![]),
+            )
+            .expect_err("over the cap");
+            let (is, most) = against(BIGGEST_FILE + over, BIGGEST_FILE);
+            assert_ne!(is, most, "{over} over reads as the limit itself");
+            assert!(
+                refused.0.contains(&is) && refused.0.contains(&most),
+                "{}",
+                refused.0
+            );
+        }
 
         let deep = plan(
             &one(
@@ -3936,12 +4110,17 @@ mod tests {
             answers: vec![],
         };
         let over = plan(&total, &here(vec![])).expect_err("too much at once");
-        assert!(
-            over.0
-                .contains(&format!("{} MB", BIGGEST_DROP / 1024 / 1024)),
-            "{}",
-            over.0
-        );
+        // What it is, as well as what it may be: a refusal naming only the cap
+        // leaves somebody guessing how much to cut. The figure is the running
+        // total at the file that crossed, because that is where it stops
+        // reading — and the unit is whichever tells the two apart, which here
+        // is kilobytes.
+        let crossed = (BIGGEST_DROP / BIGGEST_FILE + 1) * BIGGEST_FILE;
+        let (is, most) = against(crossed, BIGGEST_DROP);
+        assert_ne!(is, most);
+        assert!(over.0.contains(&format!("this drop is {is}")), "{}", over.0);
+        assert!(over.0.contains(&format!("at most {most}")), "{}", over.0);
+        assert!(over.0.contains("Drop fewer folders at once."), "{}", over.0);
     }
 
     /// An empty drop is not appliable: there is nothing in it to apply.
