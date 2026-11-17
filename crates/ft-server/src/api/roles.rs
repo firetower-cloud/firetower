@@ -511,6 +511,23 @@ async fn named_for(
     })
 }
 
+/// The key this row carries, which on this branch is always none.
+///
+/// **One function, so #355's column has exactly one place to be wired in.** It
+/// adds a nullable `author_key` and reads it onto `Role::key`; this becomes
+/// `role.key.as_deref()` and nothing else about export changes.
+///
+/// A seam rather than a `None` written at the call site, because the failure it
+/// guards against is silent. `key_of` takes the stored key and falls back to
+/// deriving one from the name — so a merge that brings the column in and
+/// leaves the call site alone would keep deriving, keep exporting `QA` into
+/// `qa/` rather than `qa-engineer/`, and turn every re-import into a duplicate
+/// with nothing failing anywhere. `grep stored_key` finds the one line that
+/// has to change.
+fn stored_key(_role: &Role) -> Option<&str> {
+    None
+}
+
 /// A profile as a `PROFILE.md`, so it can be committed and read in a diff.
 ///
 /// Read access and nothing more: this writes a file and changes nothing. What
@@ -542,7 +559,7 @@ pub(super) async fn export_role(
         .ok_or_else(|| ApiError::not_found("role"))?;
 
     let named = named_for(&state, me.id.as_str(), me.org_id.as_str(), &role).await?;
-    let key = profile_md::key_of(&role);
+    let key = profile_md::key_of(stored_key(&role), &role.name);
     let profile = profile_md::of_role(&role, &key, named).map_err(refused)?;
 
     Ok(Json(ProfileFile {
