@@ -31,6 +31,7 @@ const SAME_NAME = PLANS["same-name"]!;
 const SAME_KEY = PLANS["same-key"]!;
 const BAD_SETTING = PLANS["bad-setting"]!;
 const NOTHING = PLANS["nothing-to-import"]!;
+const AT_THE_ROOT = PLANS["at-the-root"]!;
 
 const nothing = () => {};
 const draw = (plan: ImportPlan, refused: string | null = null) =>
@@ -194,6 +195,25 @@ describe("the field panel", () => {
     const nameless = ALL_BLOCKED.entries.find((e) => e.name == null)!;
     expect(readable(draw(ALL_BLOCKED))).toContain(nameless.key);
   });
+
+  /* Dropped without its folder: no key, no name, and the row had no title. */
+  it("titles a PROFILE.md dropped without its folder", () => {
+    const html = draw(AT_THE_ROOT);
+    const title = html.slice(html.indexOf('class="text-title'), html.indexOf("</span>", html.indexOf('class="text-title')));
+    expect(readable(title)).toContain("PROFILE.md");
+  });
+
+  /* What it is for, where the plan carries it — only an overwrite and a
+     rename do, because `does` lives in the diff and nothing else has one. */
+  it("draws the description on a row whose plan carries one", () => {
+    const said = readable(draw(MIXED));
+    const designer = MIXED.entries.find((e) => e.key === "designer")!;
+    const text = designer.outcome.kind === "overwrite"
+      ? designer.outcome.diff.find((f) => f.field === "does")!.after
+      : "";
+    expect(text.length).toBeGreaterThan(0);
+    expect(said).toContain(readable(text));
+  });
 });
 
 describe("the primary action", () => {
@@ -213,6 +233,14 @@ describe("the primary action", () => {
      reason-less refusal cannot be built — and this asserts the screen draws
      it. The floor underneath, for a plan that somehow arrives without one, is
      asserted in `import-plan.test.ts`. */
+  /* The bounds come off `plan.limits`, so a client cannot drift from them. */
+  it("names every bound when a drop is refused", () => {
+    const html = draw(MIXED, REFUSALS["too-many-files"]!);
+    const said = readable(html);
+    expect(said).toContain(`${MIXED.limits.files} files`);
+    expect(said).toContain(`${Math.round(MIXED.limits.totalBytes / 1024 / 1024)} MB in total`);
+  });
+
   it("never appears dead without a sentence", () => {
     const html = draw(NOTHING);
     expect(html).toMatch(/<button disabled=""[^>]*class="btn primary"/);

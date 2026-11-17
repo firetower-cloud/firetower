@@ -170,6 +170,36 @@
       },
       "whyNot": []
     },
+    "at-the-root": {
+      "appliable": false,
+      "entries": [
+        {
+          "key": "",
+          "outcome": {
+            "kind": "blocked",
+            "problems": [
+              {
+                "line": 1,
+                "path": "PROFILE.md",
+                "says": "this `PROFILE.md` is not inside a folder, and the folder's name is the profile's key. Put it in one named for the profile."
+              }
+            ]
+          },
+          "path": "PROFILE.md",
+          "warnings": []
+        }
+      ],
+      "ignored": [],
+      "limits": {
+        "depth": 8,
+        "fileBytes": 262144,
+        "files": 200,
+        "totalBytes": 8388608
+      },
+      "whyNot": [
+        "One bundle is blocked. Nothing is imported until it is fixed or left out."
+      ]
+    },
     "bad-setting": {
       "appliable": false,
       "entries": [
@@ -2227,7 +2257,13 @@
     }
   },
   "refusals": {
+    "climbs-out": "`../outside/PROFILE.md` is not a path inside the folder that was dropped",
+    "drop-too-big": "this drop is over the 8 MB an import takes. Drop fewer folders at once.",
     "file-too-big": "`profiles/designer/PROFILE.md` is 256 KB, and a file in a drop is at most 256 KB",
+    "no-name": "a file in this drop has no name",
+    "path-too-long": "`profiles/ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp…` is 277 bytes long, and a path inside a drop is at most 256. Drop the folder that holds the bundles rather than the tree above it.",
+    "same-path-twice": "`profiles/designer/PROFILE.md` is in this drop twice, so there is no saying which of the two to read",
+    "too-deep": "`profiles/a/a/a/a/a/a/a/a/a/a//PROFILE.md` is 12 folders deep, and an import reads at most 8. Drop the folder that holds the bundles rather than the repository around it.",
     "too-many-files": "this drop holds 201 files, and an import takes at most 200. Drop fewer folders at once."
   }
 }

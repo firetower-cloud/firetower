@@ -150,8 +150,31 @@ export function tally(plan: ImportPlan, sel: Selection) {
 const firstBlocked = (plan: ImportPlan, sel: Selection): PlanEntry | undefined =>
   plan.entries.find((e) => included(sel, e) && outcomeOf(e, sel) === "blocked");
 
-/** What an entry is called on screen: its `name`, or its folder when it has none. */
-export const labelOf = (entry: PlanEntry): string => entry.name ?? entry.key;
+/**
+ * What an entry is called on screen.
+ *
+ * The `name` the file gives, the folder it came from, and then the path —
+ * because a `PROFILE.md` dropped **without its folder** has neither of the
+ * first two. Its key is the empty string, and a file that never parsed has no
+ * name either, so the obvious two-step fallback drew a row with no title at
+ * all. The path is always there: it is the entry's identity.
+ */
+export const labelOf = (entry: PlanEntry): string => entry.name || entry.key || entry.path;
+
+/**
+ * The bounds an import takes, in the words of the thing being bounded.
+ *
+ * Read off `plan.limits` rather than written here. The figures in a refusal
+ * are the server's — this is the same sentence from the other side, so that
+ * somebody who has hit one bound can see the rest without hitting them too.
+ */
+export function bounds(limits: ImportPlan["limits"]): string {
+  const mb = (n: number) => `${Math.round(n / 1024 / 1024)} MB`;
+  const kb = (n: number) => `${Math.round(n / 1024)} KB`;
+  return `At most ${limits.files} files, ${kb(limits.fileBytes)} a file, ${mb(
+    limits.totalBytes,
+  )} in total, and ${limits.depth} folders deep.`;
+}
 
 /**
  * The diagnosis, for a banner heading that can be acted on in a scan.

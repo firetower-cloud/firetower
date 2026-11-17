@@ -36,8 +36,7 @@ function Harness() {
      are in file order" is checked against the order the plan declares rather
      than against a guess about what that order looks like. The same move
      `shoot-proto.mjs` makes: read the table out of the document. */
-  (window as unknown as { __PLAN__: unknown }).__PLAN__ =
-    PLANS[name as PlanName] ?? PLANS["nothing-to-import"]!;
+  (window as unknown as { __PLAN__: unknown }).__PLAN__ = PLANS[name as PlanName] ?? PLANS.mixed!;
 
   /* Answering a candidate re-plans in the product (#358 posts the answer back
      in `ProfileDrop.answers`). Here the answered plan is a second specimen, so
@@ -79,7 +78,7 @@ function Harness() {
         <div className="scroll-slim flex h-full min-h-0 flex-1 flex-col overflow-y-auto">
       <ImportProfiles
         key={name}
-        plan={PLANS[name as PlanName] ?? PLANS["nothing-to-import"]!}
+        plan={PLANS[name as PlanName] ?? PLANS.mixed!}
         refused={name === "refused" ? REFUSALS["too-many-files"]! : null}
         applying={applying}
         onClose={() => setApplying(false)}

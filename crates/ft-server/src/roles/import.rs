@@ -4534,6 +4534,21 @@ mod tests {
             )
         }
 
+        /// A `PROFILE.md` at the root of the drop, which has no folder above
+        /// it and so **no key** — somebody dropped the file instead of the
+        /// folder that holds it. The row has nothing to call itself from
+        /// either side, which is why it is drawn rather than assumed away.
+        fn at_the_root() -> ImportPlan {
+            made(
+                dropped(vec![at(
+                    "PROFILE.md",
+                    "name: Designer\ndoes: designs and prototypes\n",
+                    "",
+                )]),
+                &bare(),
+            )
+        }
+
         /// A drop with no bundle in it: somebody dropped the wrong folder.
         ///
         /// `appliable` is derived from `why_not`, so a reason-less refusal
@@ -4788,6 +4803,7 @@ mod tests {
             plans.insert("all-blocked", all_blocked());
             plans.insert("more-conditions", more_conditions());
             plans.insert("same-name", same_name());
+            plans.insert("at-the-root", at_the_root());
             plans.insert("bad-setting", bad_setting());
             plans.insert("nothing-to-import", nothing_to_import());
             plans.insert("same-key", same_key());
@@ -4797,25 +4813,94 @@ mod tests {
             plans.insert("near-match-answered", near_match_answered());
             plans.insert("large", large());
 
+            /* **Every refusal the planner can raise**, not the two that were
+            easy to build. Each is a sentence the review draws in place of a
+            list, and the criterion they are held to — *every blocking
+            message says what to do* — is a property of all of them. The
+            first pass covered two, and the assertion standing in for that
+            criterion matched the word "drop" in *"this drop holds 201
+            files"*: the subject of the sentence, never an instruction. */
+            let refuse = |what: &str, files: Vec<DroppedFile>| {
+                plan(&dropped(files), &bare()).expect_err(what).to_string()
+            };
             let mut refusals = BTreeMap::new();
-            let many: Vec<DroppedFile> = (0..=MOST_FILES)
-                .map(|n| file(&format!("p{n}"), "name: P\ndoes: d\n"))
-                .collect();
             refusals.insert(
                 "too-many-files",
-                plan(&dropped(many), &bare())
-                    .expect_err("past the file bound")
-                    .to_string(),
+                refuse(
+                    "past the file bound",
+                    (0..=MOST_FILES)
+                        .map(|n| file(&format!("p{n}"), "name: P\ndoes: d\n"))
+                        .collect(),
+                ),
             );
-            let huge = vec![DroppedFile {
-                path: "profiles/designer/PROFILE.md".into(),
-                text: "x".repeat(BIGGEST_FILE + 1),
-            }];
             refusals.insert(
                 "file-too-big",
-                plan(&dropped(huge), &bare())
-                    .expect_err("past the per-file bound")
-                    .to_string(),
+                refuse(
+                    "past the per-file bound",
+                    vec![DroppedFile {
+                        path: "profiles/designer/PROFILE.md".into(),
+                        text: "x".repeat(BIGGEST_FILE + 1),
+                    }],
+                ),
+            );
+            refusals.insert(
+                "drop-too-big",
+                refuse(
+                    "past the whole-drop bound",
+                    (0..40)
+                        .map(|n| DroppedFile {
+                            path: format!("profiles/p{n}/PROFILE.md"),
+                            text: "x".repeat(BIGGEST_FILE - 1),
+                        })
+                        .collect(),
+                ),
+            );
+            refusals.insert(
+                "too-deep",
+                refuse(
+                    "past the depth bound",
+                    vec![file(&"a/".repeat(DEEPEST + 2), "name: P\ndoes: d\n")],
+                ),
+            );
+            refusals.insert(
+                "path-too-long",
+                refuse(
+                    "past the path bound",
+                    vec![file(
+                        &"p".repeat(crate::skills::LONGEST_PATH + 1),
+                        "name: P\ndoes: d\n",
+                    )],
+                ),
+            );
+            refusals.insert(
+                "same-path-twice",
+                refuse(
+                    "one path, two files",
+                    vec![
+                        file("designer", "name: Designer\ndoes: designs\n"),
+                        file("designer", "name: Designer\ndoes: designs\n"),
+                    ],
+                ),
+            );
+            refusals.insert(
+                "climbs-out",
+                refuse(
+                    "a path that leaves the drop",
+                    vec![DroppedFile {
+                        path: "../outside/PROFILE.md".into(),
+                        text: "---\nname: P\ndoes: d\n---\n".into(),
+                    }],
+                ),
+            );
+            refusals.insert(
+                "no-name",
+                refuse(
+                    "a file with no path at all",
+                    vec![DroppedFile {
+                        path: "   ".into(),
+                        text: "---\nname: P\ndoes: d\n---\n".into(),
+                    }],
+                ),
             );
             (plans, refusals)
         }

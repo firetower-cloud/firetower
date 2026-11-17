@@ -14,6 +14,8 @@ import { describe, expect, it } from "vitest";
 import type { ImportPlan, PlanEntry } from "~/api/generated/model";
 import {
   FIELD_COUNT,
+  bounds,
+  labelOf,
   FIELD_GROUPS,
   UNTOUCHED,
   aboutADuplicateName,
@@ -44,6 +46,7 @@ const NEAR_MATCH = PLANS["near-match"]!;
 const LARGE = PLANS.large!;
 const SAME_NAME = PLANS["same-name"]!;
 const SAME_KEY = PLANS["same-key"]!;
+const AT_THE_ROOT = PLANS["at-the-root"]!;
 
 const sel = (excluded: string[] = [], answers = {}) => ({ excluded: new Set(excluded), answers });
 const entry = (plan: ImportPlan, key: string): PlanEntry => plan.entries.find((e) => e.key === key)!;
@@ -218,6 +221,54 @@ describe("what an entry would do", () => {
   });
 });
 
+describe("what a row calls itself", () => {
+  it("uses the name the file gives", () => {
+    expect(labelOf(entry(MIXED, "designer"))).toBe("Designer");
+  });
+
+  it("falls back to the folder when the file gave no name", () => {
+    const nameless = ALL_BLOCKED.entries.find((e) => e.name == null)!;
+    expect(labelOf(nameless)).toBe(nameless.key);
+  });
+
+  /* A `PROFILE.md` dropped without its folder has no key *and* no name, which
+     drew a row with no title at all. Every entry has a path. */
+  it("falls back to the path when there is neither", () => {
+    const root = AT_THE_ROOT.entries[0]!;
+    expect(root.key).toBe("");
+    expect(root.name ?? null).toBeNull();
+    expect(labelOf(root)).toBe("PROFILE.md");
+  });
+
+  it("never draws a row with no title, in any specimen", () => {
+    for (const [name, plan] of Object.entries(PLANS))
+      for (const e of plan.entries)
+        expect([`${name}/${e.path}`, labelOf(e).trim().length > 0]).toEqual([
+          `${name}/${e.path}`,
+          true,
+        ]);
+  });
+});
+
+describe("the bounds an import takes", () => {
+  /* Read off `plan.limits` rather than written beside the screen — the same
+     lesson the fixtures taught, applied to the one number the client had been
+     about to hard-code. */
+  it("comes from the plan, and says every bound", () => {
+    const said = bounds(MIXED.limits);
+    expect(said).toContain(`${MIXED.limits.files} files`);
+    expect(said).toContain(`${Math.round(MIXED.limits.fileBytes / 1024)} KB`);
+    expect(said).toContain(`${Math.round(MIXED.limits.totalBytes / 1024 / 1024)} MB`);
+    expect(said).toContain(`${MIXED.limits.depth} folders deep`);
+  });
+
+  it("moves when the plan's limits move", () => {
+    const tighter = { ...MIXED.limits, files: 12 };
+    expect(bounds(tighter)).toContain("12 files");
+    expect(bounds(tighter)).not.toContain(`${MIXED.limits.files} files`);
+  });
+});
+
 describe("the diff", () => {
   it("has sixteen fields and six groups", () => {
     expect(FIELD_COUNT).toBe(16);
@@ -367,7 +418,37 @@ describe("a drop past a bound", () => {
     expect(REFUSALS["file-too-big"]).toMatch(/at most 256 KB/);
   });
 
-  it("tells somebody what to do about it", () => {
-    for (const says of Object.values(REFUSALS)) expect(says).toMatch(/Drop|Split|remove|fewer/i);
+  /**
+   * The ticket's criterion: **every blocking message says what to do.**
+   *
+   * The assertion that stood here was `/Drop|Split|remove|fewer/i`, and it
+   * could not fail. Every refusal the planner raises contains the word *drop*
+   * as a **noun** — "this drop holds 201 files", "a file in a drop is at
+   * most", "is in this drop twice" — so a case-insensitive match found the
+   * subject of the sentence and never an instruction. QA proved it by deleting
+   * the remedy from a refusal that had one, regenerating, and watching 1141
+   * tests pass.
+   *
+   * So the remedy is looked for where a remedy actually lives: **after the
+   * first clause**, as a capitalised imperative. A diagnosis cannot satisfy
+   * it, because the word that used to satisfy it is lower-case and in the
+   * subject.
+   */
+  const remedy = (says: string) => {
+    const stop = says.indexOf(". ");
+    return stop === -1 ? "" : says.slice(stop + 2).trim();
+  };
+  const IMPERATIVE = /^(Drop|Split|Remove|Rename|Write|Put|Ask|Fix|Take|Use|Name|Add)\b/;
+
+  it.each(Object.entries(REFUSALS))("%s tells somebody what to do about it", (_which, says) => {
+    expect(remedy(says)).toMatch(IMPERATIVE);
+  });
+
+  /* The guard above is only worth having if it can tell the two apart, so the
+     ones that already carry a remedy are asserted to pass it. */
+  it("recognises the refusals that already carry one", () => {
+    const withRemedy = Object.values(REFUSALS).filter((s) => IMPERATIVE.test(remedy(s)));
+    expect(withRemedy.length).toBeGreaterThan(0);
+    for (const says of withRemedy) expect(remedy(says)).toMatch(/^(Drop|Split|Remove|Write)\b/);
   });
 });

@@ -124,6 +124,7 @@ const STATES = [
   "all-blocked",
   "more-conditions",
   "bad-setting",
+  "at-the-root",
   "nothing-to-import",
   "same-name",
   "same-key",
@@ -165,11 +166,15 @@ for (const theme of ["dark", "light"]) {
           ),
           declared: window.__PLAN__.entries.map((e) => e.path),
         }));
-        ok(
-          `${state} · rows in file order`,
-          JSON.stringify(drawn) === JSON.stringify(declared),
-          `${drawn.slice(0, 3).join(", ")} vs ${declared.slice(0, 3).join(", ")}`,
-        );
+        /* `refused` draws a sentence in place of the list, so there is no
+           order to check — and comparing an empty list against the plan it
+           was handed would fail for the right reason at the wrong state. */
+        if (state !== "refused")
+          ok(
+            `${state} · rows in file order`,
+            JSON.stringify(drawn) === JSON.stringify(declared),
+            `${drawn.slice(0, 3).join(", ")} vs ${declared.slice(0, 3).join(", ")}`,
+          );
       }
       await page.close();
     }
@@ -320,6 +325,31 @@ for (const theme of ["dark", "light"]) {
     ok("refused · and no list is drawn", (await page.locator(".imp").count()) === 0, "rows drawn");
     const rule = await colourOf(page, ".review", "borderLeftColor");
     ok(`refused · brick (${BRICK})`, rule === BRICK, rule);
+    await page.close();
+  }
+
+  /* ── A PROFILE.md dropped without its folder still has a title ─────── */
+  {
+    const page = await open(theme, "at-the-root");
+    const title = (await page.locator(".imp .text-title").first().innerText()).trim();
+    ok("at the root · the row has a title", title.length > 0, `empty (${title.length})`);
+    ok("at the root · which is the path it came from", /PROFILE\.md/.test(title), title);
+    await shot(page, `at-the-root-${theme}`);
+    await page.close();
+  }
+
+  /* ── The bounds are the plan's, not the client's ─────────────────────── */
+  {
+    const page = await open(theme, "refused");
+    const said = await page.locator(".review").innerText();
+    const limits = await page.evaluate(() => window.__PLAN__.limits);
+    ok(
+      "refused · every bound is named, from `plan.limits`",
+      said.includes(`${limits.files} files`) &&
+        said.includes(`${Math.round(limits.totalBytes / 1024 / 1024)} MB in total`) &&
+        said.includes(`${limits.depth} folders deep`),
+      said.replace(/\n/g, " ").slice(-140),
+    );
     await page.close();
   }
 

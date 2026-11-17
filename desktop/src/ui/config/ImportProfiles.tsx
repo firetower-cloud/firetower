@@ -48,6 +48,7 @@ import {
   FILTER_AT,
   aboutADuplicateName,
   appliability,
+  bounds,
   conditionOf,
   bucketOf,
   composition,
@@ -129,6 +130,12 @@ export function ImportProfiles({
         <Block tone="brick" icon={<ShieldAlert className="h-4 w-4" strokeWidth={1.75} />}>
           <h3>Too much was dropped at once</h3>
           <p>{refused}</p>
+          {/* The other bounds, so somebody who has hit one can see the rest
+              without hitting them too. Read off `plan.limits` rather than
+              written here: the figures in the sentence above are the
+              server's, and a second copy of them would be a second place to
+              drift — which is the lesson the fixtures already taught. */}
+          <p className="text-mute">{bounds(plan.limits)}</p>
         </Block>
         <div className="formfoot">
           <span className="msg bad" aria-live="polite">
@@ -272,6 +279,10 @@ export function ImportProfiles({
     </div>
   );
 }
+
+/** What the file says this profile is for, when the plan carries it. */
+const does = (entry: PlanEntry): string | null =>
+  diffOf(entry)?.find((f) => f.field === "does")?.after || null;
 
 const Back = ({ onClose }: { onClose: () => void }) => (
   <button onClick={onClose} className="flex items-center gap-1 text-meta text-mute hover:text-bone">
@@ -486,6 +497,17 @@ function Entry({
             <Pip kind={pipOf(entry, sel)} word={stateWord(entry, sel)} />
             <span className="font-mono text-meta text-mute">{entry.path}</span>
           </span>
+
+          {/* What it is for, which is how somebody recognises the profile
+              without opening it. Only an overwrite and a rename carry it: the
+              plan puts `does` in the diff, and `PlanNew`, `PlanBlocked` and
+              `PlanCandidate` have no field for it at all. Drawn where it
+              exists rather than withheld everywhere for consistency. */}
+          {does(entry) && (
+            <span className="mt-1 line-clamp-2 block max-w-[76ch] text-meta leading-relaxed text-dim">
+              {does(entry)}
+            </span>
+          )}
 
           <Summary entry={entry} sel={sel} />
 
