@@ -2111,11 +2111,65 @@ mod tests {
         assert_eq!(branch.trim(), "agent/fix-retries");
     }
 
+    /// The four variables git reads *ahead of* `user.name` and `user.email`,
+    /// unset for as long as this is held and put back when it is dropped.
+    ///
+    /// A Firetower session exports all four into every process it starts, so
+    /// an agent running this suite has an ambient identity on it — and git's
+    /// environment outranks the `-c user.name=` that `commit` puts on the
+    /// command line. A test that names an author and reads it back is then
+    /// really reading the session owner's name, which is why #345 passed in CI
+    /// and failed for every agent that ran it.
+    ///
+    /// This is process-global and `cargo test` runs the binary's tests in
+    /// parallel, so the window is worth being sure about rather than sorry.
+    /// Nothing else in the crate reads these four, and the suite passes both
+    /// with them set and with them unset — so no test's result turns on them:
+    /// every fixture that commits names an identity in the repository's own
+    /// config, or on the command line. A mutex would serialise nothing worth
+    /// serialising, the tests sharing the window being exactly the ones that
+    /// never touch this guard.
+    struct NoAmbientIdentity([(&'static str, Option<String>); 4]);
+
+    impl NoAmbientIdentity {
+        fn new() -> Self {
+            Self(
+                [
+                    "GIT_AUTHOR_NAME",
+                    "GIT_AUTHOR_EMAIL",
+                    "GIT_COMMITTER_NAME",
+                    "GIT_COMMITTER_EMAIL",
+                ]
+                .map(|name| {
+                    let held = std::env::var(name).ok();
+                    std::env::remove_var(name);
+                    (name, held)
+                }),
+            )
+        }
+    }
+
+    impl Drop for NoAmbientIdentity {
+        fn drop(&mut self) {
+            for (name, held) in &self.0 {
+                match held {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+    }
+
     /// A container has no `user.email` anywhere, and git refuses to commit
     /// rather than guessing one — "Author identity unknown". So the identity
     /// travels with the commit, and this is what proves it arrives.
     #[tokio::test]
     async fn a_commit_is_authored_by_whoever_was_named() {
+        // Nothing ambient may answer for the author. The gitconfig guard below
+        // only covers the files; a session names its owner in the environment,
+        // which git reads first of all.
+        let _identity = NoAmbientIdentity::new();
+
         let dest = tempfile::tempdir().unwrap();
         let git = GitRoot::new(dest.path());
         run(dest.path(), "git", &["init", "-q"]).await.unwrap();
