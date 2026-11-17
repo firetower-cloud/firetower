@@ -1050,8 +1050,19 @@ fn match_one<'a>(
         }
     }
 
-    // One row of exactly this name, with nothing else answering to it: the
-    // fallback is certain, and it adopts the key.
+    // One row of exactly this name, with nothing else answering to it.
+    //
+    // **An exact, unique name match is not a guess — it is the only
+    // candidate.** "Never guess an identity" is the rule this whole function
+    // exists for, and it bites where there are *zero* matches or *several*: a
+    // resemblance, a difference of capitals, two rows answering to one name.
+    // Here there is one answer, the review shows the whole diff before
+    // anything is written, and the alternative costs a compulsory question per
+    // profile on every first import — because export writes the live `name`,
+    // so every bundle of an exported library matches exactly.
+    //
+    // This is where the key is adopted: the one moment a row stops being
+    // matched by its name and starts being matched by its key.
     if exact.len() == 1 && near == 0 {
         return Matched::Hit {
             row: exact[0],
@@ -1205,10 +1216,22 @@ fn resolve(
             )),
             Some(_) => {}
         },
-        // An existing profile is overwritten where it already is: `directory`
-        // is honoured at creation and a move is a sharing operation, so a file
-        // naming a different one is making a claim the import cannot honour.
-        // Said rather than silently ignored, which is the whole rule.
+        // An existing profile is overwritten **where it already is**, and a
+        // file naming a different directory is making a claim the import
+        // cannot honour. Said rather than silently ignored, which is the whole
+        // rule.
+        //
+        // **`directory` is placement, not configuration, so
+        // absent-means-the-default never covered it.** That rule exists so one
+        // file fully describes a profile's *configuration* on any
+        // installation; `directory` says where the resource sits in the
+        // sharing tree, and the write path cannot perform a move at all
+        // (`NewRole::directory` — "only honoured at creation; move it later
+        // with sharing"). So `directory` is creation-only, an absent
+        // `directory:` leaves a row filed where it is, and the `directory` row
+        // of an overwrite's diff is `unchanged`. Reading it as a default would
+        // un-share a shared profile on every import, silently, with nothing in
+        // the diff to show it.
         (Some(wrote), Matched::Hit { row, .. }) => {
             let filed = row.path.rsplit_once('/').map(|(up, _)| up).unwrap_or("");
             let theirs = row
@@ -1346,6 +1369,44 @@ fn resolve(
             Err(_) => false,
         });
         let key = Some(format!("{}[{n}]", Field::DelegatesTo.spelling()));
+
+        // **A profile naming itself is refused. A cycle between profiles is
+        // not.**
+        //
+        // Deliberately two different rules, and not an inconsistency for
+        // somebody to tidy up later: `A → B → A` is a library somebody might
+        // actually mean, and nested delegation is coming, so cycles are
+        // permitted. `A → A` is a copy-paste error almost every time — and
+        // nothing is lost by refusing it, because the same effect becomes
+        // reachable through nesting anyway. If these two ever have to agree,
+        // the direction to move is *permitting* self-delegation, never
+        // blocking cycles.
+        //
+        // Both ways of naming yourself count. The file's own `name` is the
+        // obvious one; the other is a rename — a file that renames `Designer`
+        // to `Product Designer` and still writes `delegates_to: [Designer]`
+        // resolves to the very row it is about to overwrite, and
+        // `delegate_scope` holds ids, so after the write that is a profile
+        // pointing at itself.
+        let itself = folded(wrote) == folded(&profile.name)
+            || matches!(
+                (here_now.as_slice(), matched),
+                ([row], Matched::Hit { row: target, .. }) if row.id == target.id
+            );
+        if itself {
+            out.push(PlanProblem::at(
+                p,
+                line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
+                key,
+                format!(
+                    "`{}` is this profile, so it cannot be one of the teammates it hands work \
+                     to. Remove the entry.",
+                    profile.name
+                ),
+            ));
+            continue;
+        }
+
         if in_drop {
             continue;
         }
@@ -2969,6 +3030,84 @@ mod tests {
         );
         assert_eq!(problems[0].key.as_deref(), Some("delegates_to[1]"));
         assert_eq!(problems[0].line, 6, "the second entry, not the key");
+    }
+
+    /// The thirteenth row of the error table: a profile naming **itself** in
+    /// `delegates_to`, which is blocked and names the profile.
+    ///
+    /// Blocked while a cycle *between* profiles is permitted, which is
+    /// deliberate rather than inconsistent — see the comment in `resolve`. Two
+    /// spellings of the same mistake: the file's own `name`, and a file that
+    /// renames a profile while still naming the row it is about to overwrite.
+    #[test]
+    fn a_profile_that_names_itself_is_blocked_and_told_which_profile() {
+        let plain = plan(
+            &dropped(vec![at(
+                "manager/PROFILE.md",
+                "name: Manager\ndoes: hands work out\ncan_delegate: true\ndelegates_to:\n  - Manager\n",
+                "",
+            )]),
+            &here(vec![]),
+        )
+        .unwrap();
+        let problems = blocked(only(&plain));
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+        assert!(
+            problems[0].says.contains("`Manager` is this profile"),
+            "{}",
+            problems[0].says
+        );
+        assert_eq!(problems[0].key.as_deref(), Some("delegates_to[0]"));
+        assert_eq!(problems[0].line, 6);
+
+        // The same mistake under a rename: the entry resolves to the row this
+        // bundle is about to overwrite, and `delegate_scope` holds ids.
+        let renamed = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Product Designer\ndoes: designs\ndelegates_to:\n  - Designer\n",
+                "",
+            )]),
+            &here(vec![row("r1", "Designer", Some("designer"))]),
+        )
+        .unwrap();
+        assert!(
+            said(only(&renamed)).contains("is this profile"),
+            "{}",
+            said(only(&renamed))
+        );
+    }
+
+    /// And a cycle **between** profiles resolves, because it is a library
+    /// somebody might mean. If these two rules ever have to agree, the
+    /// direction is permitting self-delegation — never blocking cycles.
+    #[test]
+    fn a_cycle_between_two_profiles_is_permitted() {
+        let plan = plan(
+            &dropped(vec![
+                at(
+                    "manager/PROFILE.md",
+                    "name: Manager\ndoes: hands work out\ncan_delegate: true\ndelegates_to:\n  - Designer\n",
+                    "",
+                ),
+                at(
+                    "designer/PROFILE.md",
+                    "name: Designer\ndoes: designs\ncan_delegate: true\ndelegates_to:\n  - Manager\n",
+                    "",
+                ),
+            ]),
+            &here(vec![]),
+        )
+        .unwrap();
+        for entry in &plan.entries {
+            assert!(
+                matches!(entry.outcome, PlanOutcome::New(_)),
+                "{}: {:#?}",
+                entry.path,
+                entry.outcome
+            );
+        }
+        assert!(plan.appliable);
     }
 
     /// A name two visible profiles answer to cannot be resolved for somebody,
