@@ -203,8 +203,10 @@ gen-check: gen
     .github/scripts/unchanged.sh api/ web/src/api/generated desktop/src/api/generated mobile/src/api/generated mobile/src/design
 
 # The release artifact. Web first: the Rust build embeds its output.
+#
+# `cd`, for the same reason `setup` and `_dev` do it.
 build:
-    pnpm --dir web build
+    cd web && pnpm build
     cargo build --release
 
 # The worker, packed the way a release publishes it, for this machine's shape.
