@@ -615,9 +615,11 @@ pub fn parse(at: &Path, key: &str, text: &str) -> Result<Profile, Vec<Problem>> 
     let read: Value = match serde_yaml::from_str(frontmatter) {
         Ok(v) => v,
         Err(e) => {
-            let said_at = e.location().map(|l| l.line()).unwrap_or(1);
+            // The parser counts from the start of the frontmatter, and a
+            // `Problem` counts from the start of the file.
+            let broke_on = e.location().map(|l| l.line()).unwrap_or(1);
             return Err(vec![said(
-                FIRST + said_at.saturating_sub(1),
+                FIRST + broke_on.saturating_sub(1),
                 None,
                 format!(
                     "The frontmatter is not valid YAML. {}.",
@@ -1127,9 +1129,10 @@ fn frame(text: &str) -> Option<(&str, &str)> {
 /// in a flow mapping, written `{name: x}` — the answer is the line the
 /// mapping starts on, which is where somebody would look anyway.
 ///
-/// `indented` is 0 for a top-level key and the line the parent was found on
-/// for a nested one, so `settings.model` is not answered by a `model:` at the
-/// left margin.
+/// `under` is 0 for a key at the left margin, and otherwise the index just
+/// past the line its parent was found on — so `settings.model` is not answered
+/// by a `model:` at the left margin, and a key that cannot be found falls back
+/// to its parent's own line rather than to the top of the file.
 fn line_of(lines: &[&str], first: usize, key: &str, under: usize) -> usize {
     let spellings = [
         format!("{key}:"),
