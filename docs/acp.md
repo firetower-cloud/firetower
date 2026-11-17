@@ -172,8 +172,42 @@ Cursor account and are driven by hand:
 
 - **Desktop**, `desktop/e2e/cursor-live.mjs`. Run it against the Vite
   renderer, server and worker from one checkout, with an isolated Firetower
-  home and database. `FIRETOWER_E2E_PASSWORD` is that server's administrator
-  password. With no other variable it checks installation only.
+  home and database.
+
+  **`FIRETOWER_E2E_SERVER` is the control plane's address, it is required, and
+  it has no default.** This run writes to whatever it is pointed at: it clears
+  the first administrator's forced password change over the API and it names
+  the organisation. The address it would otherwise have guessed —
+  `127.0.0.1:4400`, where `firetower serve --dev` listens — is a developer's
+  own control plane on any machine already running one, so the harness is told
+  its target or it refuses to start, exactly as it already refuses without
+  `FIRETOWER_E2E_PASSWORD`. Being wrong about a server you only read from
+  wastes a run; being wrong about this one replaces a real administrator's
+  password and names somebody's organisation.
+
+  Nor will it take a target it could not have created. `GET /api/v1/bootstrap`
+  is unauthenticated, creates nothing, and carries a `serverId` as soon as an
+  organisation has been named — which is what being set up means — so a server
+  that has one has been set up by somebody and is by definition not the fresh
+  backend this asks for. It is read before anything is sent and the refusal
+  names the organisation it found, which is what makes a mistyped port a
+  stopped run rather than a guess that happened to be wrong. For the same
+  reason a remote address must be `https`, with no fall back to plain http:
+  `probe.ts` tries http for the app because a laptop install has no
+  certificate and a person is reading the next screen, and nobody is reading
+  this one.
+
+  `FIRETOWER_E2E_RENDERER` is the renderer's origin, `http://localhost:5273`
+  unless you say otherwise, which is where `pnpm --dir desktop dev` puts it.
+  That port is flag-only and pnpm will not forward the flag:
+  `desktop/vite.config.ts` hardcodes it with `strictPort`, and `pnpm --dir
+  desktop dev -- --port <n>` runs `vite -- --port <n>` and binds 5273 anyway.
+  A second renderer needs `pnpm --dir desktop exec vite --port <n>
+  --strictPort`, and the variable to match.
+
+  `FIRETOWER_E2E_PASSWORD` is that server's administrator password, and on a
+  fresh database that is the one the first start printed — see below.
+  With no other variable it checks installation only.
   `FIRETOWER_E2E_CONNECT=1` starts the provider sign-in and prints a
   short-lived approval URL to open in a browser signed in to the intended
   account. `FIRETOWER_E2E_RUN=1` with `FIRETOWER_E2E_REPOSITORY` pointing at a
@@ -185,8 +219,83 @@ Cursor account and are driven by hand:
   `-permissions` and `-task` companions, driven by Maestro against a
   development build with `adb reverse` onto an isolated control plane.
 
-Use a fresh backend for a first-user run; both harnesses expect to be the
-first thing that touches the database.
+### A fresh backend, and the two gates it holds a sign-in behind
+
+Use a fresh backend for a first-user run. A database nobody has signed into
+yet stops a sign-in twice before the app is drawn, and the desktop script goes
+through both on the way in: the first administrator's password is temporary,
+so `Connect.tsx` draws **Replace this password** rather than the app, and
+until an organisation is named `Gate.tsx` draws the setup wizard. Neither
+screen carries anything the rest of the script looks for, which is why the
+version of it that signed in and clicked straight for a destination hung
+against the very database this page asks for.
+
+So the only credential it needs is the one the server printed, once, at its
+first start — on **stderr**, and nowhere afterwards:
+
+```sh
+FIRETOWER_E2E_SERVER=127.0.0.1:<your port> \
+FIRETOWER_E2E_PASSWORD=$(sed -n 's/^    password  //p' server.err) \
+  node desktop/e2e/cursor-live.mjs
+```
+
+The address is in there because there is nothing to leave it out of: the
+script refuses to run without it, and it refuses a server whose
+`/api/v1/bootstrap` says somebody has already set it up — so a stale port from
+the last stack stops the run instead of signing into the wrong Firetower and
+replacing its administrator's password.
+
+**Producing that password is still the caller's job; making it usable is
+not.** The script replaces it with itself over `POST /api/v1/auth/password` —
+one of the four calls a locked account may still make — which clears
+`must_change_password` and leaves the caller's own credential the one that
+works. It deliberately does not reach for the database to do it: `firetower
+passwd admin` is the unattended route, and it defaults `DATABASE_URL` to
+`localhost:5433`, which on a machine running more than one Firetower is
+somebody else's administrator. Run it by hand if you want a password of your
+choosing, with the server's own `DATABASE_URL` and `FIRETOWER_HOME`:
+
+```sh
+printf '%s\n' "$FIRETOWER_E2E_PASSWORD" |
+  DATABASE_URL=… FIRETOWER_HOME=… cargo run -p ft-cli -- passwd admin
+```
+
+It clears the forced change in the same statement, and reads a pipe happily —
+the `stty` it attempts is not fatal. `ADMIN_INITIAL_PASSWORD` (`.env.example`)
+is the other way to a known password, and deliberately does *not* skip the
+forced change; the script passes it either way.
+
+### A fresh backend has no machine, and that is a prerequisite
+
+An agent is installed **on a machine**, so with no machine the Cursor row
+reads `0 of 0 machines` and has no Install control at all: the installation
+check cannot pass on a database alone. That is a prerequisite rather than a
+limitation of the harness — "the first thing that touches the database" and
+"install an agent" cannot both be true of one run unless a machine is added
+in between. The script says so in a sentence instead of waiting two minutes
+for a button that cannot appear.
+
+The cheapest machine that is not your own laptop is an **Alpine sshd
+container**: `apk add openssh-server git tmux curl tar ca-certificates`, the
+control plane's own public key from `GET /api/v1/ssh-key` into
+`authorized_keys`, then `POST /hosts/probe`, `POST /hosts` and
+`POST /hosts/{id}/worker`. It reaches `Online` in well under a minute and
+touches nothing on the host. The worked sequence, and the two traps that cost
+that run real time — Alpine's `adduser -D` leaves the account password-locked
+and sshd then refuses it even for key auth, and rebuilding the image
+regenerates host keys until `$FIRETOWER_HOME/ssh/known_hosts` is cleared —
+are recorded on
+[issue #332](https://github.com/firetower-cloud/firetower/issues/332).
+
+One honest caveat about that machine. On macOS `just build-worker` can only
+produce a `darwin-*` asset, so a Linux container machine never matches
+`FIRETOWER_WORKER_ARTIFACTS` and **silently downloads a released worker**
+instead of this checkout's build. Such a run verifies the release, not the
+branch. Cross-build the Linux asset first — #332 again — if what you are
+accepting is a worker change.
+
+The Maestro flows go through neither gate: they expect a Dashboard straight
+after signing in, so give them a control plane that is already past both.
 
 ## Releasing it
 
