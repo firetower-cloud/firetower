@@ -356,9 +356,6 @@ pub enum ProposalWhy {
     /// The words of the two names are the same words, or one name's are a
     /// subset of the other's — `QA` against a `qa-engineer/` folder.
     LikeName,
-    /// The name matches, but that row already carries a key of its own and it
-    /// is not this bundle's.
-    OtherKey,
     /// Two profiles the asker can see carry this bundle's key.
     SameKey,
 }
@@ -514,7 +511,6 @@ impl From<profile_md::Problem> for PlanProblem {
 /// property of the arrangement rather than a rule each lookup has to remember.
 #[derive(Debug, Clone, Default)]
 pub struct Here {
-    pub me: Who,
     /// Every profile they may see, at Viewer or better, carrying `may_write`.
     pub profiles: Vec<Role>,
     /// Every machine they may run on, by name.
@@ -525,14 +521,6 @@ pub struct Here {
     pub directories: Vec<Dir>,
     /// Every skill they may reach, at Viewer or better.
     pub skills: Vec<SkillHere>,
-}
-
-/// Who is asking.
-#[derive(Debug, Clone, Default)]
-pub struct Who {
-    pub id: String,
-    /// Their path slug, which is where a new profile would be filed.
-    pub slug: String,
 }
 
 /// Something with an id and a name, which is all resolution needs.
@@ -616,7 +604,7 @@ fn read(path: &str, key: &str, text: &str) -> Result<Reading, Vec<PlanProblem>> 
 /// (`skills: [a, b]`) has no line of its own, and the honest answer is the key
 /// above it — then the first line of the frontmatter, which is where a key
 /// nobody wrote is missing from.
-fn at(spelled: &Spelled, spot: Spot) -> usize {
+fn line_of(spelled: &Spelled, spot: Spot) -> usize {
     let under = match spot {
         Spot::Field(_) => None,
         Spot::Entry(field, _) => Some(Spot::Field(field)),
@@ -667,9 +655,20 @@ fn check(drop: &ProfileDrop) -> Result<(), Refused> {
         )));
     }
     let mut total = 0usize;
+    let mut seen: BTreeSet<&str> = BTreeSet::new();
     for file in &drop.files {
         if file.path.trim().is_empty() {
             return Err(Refused("a file in this drop has no name".into()));
+        }
+        // One path, one file. Two rows for one path is a malformed request
+        // rather than a bundle with a problem — there is no way to say which of
+        // the two the plan is about, and the entries would differ only by the
+        // order they arrived in.
+        if !seen.insert(file.path.as_str()) {
+            return Err(Refused(format!(
+                "`{}` is in this drop twice, so there is no saying which of the two to read",
+                briefly(&file.path)
+            )));
         }
         if file.path.starts_with('/') || file.path.contains('\\') || file.path.contains("..") {
             return Err(Refused(format!(
@@ -855,11 +854,15 @@ fn classify(
         };
     }
 
+    let mut warnings = Vec::new();
     let outcome = match matched {
-        Matched::Create { answered } => PlanOutcome::New(PlanNew {
-            filed: filed_where(said, here),
-            answered,
-        }),
+        Matched::Create { answered } => {
+            warnings.extend(same_name_as_the_library(bundle, said, here));
+            PlanOutcome::New(PlanNew {
+                filed: filed_where(said, here),
+                answered,
+            })
+        }
         Matched::Propose(proposals) => PlanOutcome::Candidate(PlanCandidate { proposals }),
         Matched::Hit {
             row,
@@ -892,8 +895,42 @@ fn classify(
         key: bundle.key.clone(),
         name: Some(said.profile.name.clone()),
         outcome,
-        warnings: Vec::new(),
+        warnings,
     }
+}
+
+/// A profile already here under this name, which this bundle is about to put a
+/// second one beside.
+///
+/// A warning rather than a question: the key is the identity, so a row that
+/// carries a different one has said what it is and a renamed folder makes a new
+/// profile (#358). Two profiles of one name is legal — they are told apart by
+/// their folder — and rarely what somebody meant, which is exactly the shape of
+/// thing a warning is for.
+///
+/// Only rows the asker can already see, so this adds nothing they could not
+/// read off the Profiles screen.
+fn same_name_as_the_library(bundle: &Bundle, said: &Reading, here: &Here) -> Vec<PlanProblem> {
+    let name = said.profile.name.trim();
+    let theirs: Vec<&Role> = here
+        .profiles
+        .iter()
+        .filter(|r| folded(&r.name) == folded(name) && r.key.is_some())
+        .collect();
+    if theirs.is_empty() {
+        return Vec::new();
+    }
+    vec![PlanProblem::at(
+        &bundle.path,
+        line_of(&said.spelled, Spot::Field(Field::Name)),
+        Some(Field::Name.spelling().to_string()),
+        format!(
+            "`{name}` is already in your library, under the key `{}`. This folder is called \
+             `{}`, so it makes a second profile of that name rather than changing that one.",
+            theirs[0].key.as_deref().unwrap_or_default(),
+            bundle.key
+        ),
+    )]
 }
 
 /// What a bundle turned out to be, before the rest of the file is resolved.
@@ -982,18 +1019,22 @@ fn match_one<'a>(
         }
     }
 
-    // The fallback: the name, against rows that have no key of their own. A row
-    // that already carries a *different* key is not matched by its name — it
-    // has said what it is — but it is still worth proposing, because a renamed
-    // folder is indistinguishable from a new profile and the person is the only
-    // one who knows which it is.
+    // The fallback: the name, against rows that have **no key of their own**.
+    //
+    // A row that already carries a different key is never matched by its name
+    // and never proposed: it has said what it is, and renaming a folder makes a
+    // new profile beside the original rather than editing it (#358). That is
+    // worth *knowing* — two profiles of one name is rarely what somebody meant
+    // — so it is a warning on the entry (`same_name_as_the_library`) rather
+    // than a question that would block the drop.
     let mut exact: Vec<&Role> = Vec::new();
     let mut proposals: Vec<PlanProposal> = Vec::new();
     let mut near = 0usize;
-    let ours = tokens(name)
-        .into_iter()
-        .chain(tokens(&bundle.key))
-        .collect::<BTreeSet<_>>();
+    // A bundle says what it is twice — its `name` and its folder — and either
+    // may be the one that resembles a profile already here. `qa-engineer/`
+    // holding a `name: QA Engineer` is the live case, and both of its spellings
+    // point at the library's `QA`.
+    let ours = [words(name), words(&bundle.key)];
     for row in &here.profiles {
         let theirs = row.name.trim();
         match &row.key {
@@ -1002,19 +1043,27 @@ fn match_one<'a>(
                 near += 1;
                 proposals.push(proposal(row, ProposalWhy::NearName, name));
             }
-            None if resembles(&tokens(theirs), &ours) => {
+            None if ours.iter().any(|ours| resembles(&words(theirs), ours)) => {
                 proposals.push(proposal(row, ProposalWhy::LikeName, name))
-            }
-            Some(key) if key != &bundle.key && folded(theirs) == folded(name) => {
-                proposals.push(proposal(row, ProposalWhy::OtherKey, name))
             }
             _ => {}
         }
     }
 
-    // One row of exactly this name, with nothing else answering to it: the
-    // fallback is certain, and it adopts the key.
-    if exact.len() == 1 && near == 0 && !proposals.iter().any(|p| p.why == ProposalWhy::OtherKey) {
+    // One row of exactly this name, with nothing else answering to it.
+    //
+    // **An exact, unique name match is not a guess — it is the only
+    // candidate.** "Never guess an identity" is the rule this whole function
+    // exists for, and it bites where there are *zero* matches or *several*: a
+    // resemblance, a difference of capitals, two rows answering to one name.
+    // Here there is one answer, the review shows the whole diff before
+    // anything is written, and the alternative costs a compulsory question per
+    // profile on every first import — because export writes the live `name`,
+    // so every bundle of an exported library matches exactly.
+    //
+    // This is where the key is adopted: the one moment a row stops being
+    // matched by its name and starts being matched by its key.
+    if exact.len() == 1 && near == 0 {
         return Matched::Hit {
             row: exact[0],
             adopts_key: true,
@@ -1046,11 +1095,6 @@ fn proposal(row: &Role, why: ProposalWhy, wrote: &str) -> PlanProposal {
             "`{name}` is made of the same words as this bundle, so it may be the profile this \
              folder was written for."
         ),
-        ProposalWhy::OtherKey => format!(
-            "`{name}` has this name already, under the key `{}` — so this folder is either a \
-             rename of it or a second profile.",
-            row.key.as_deref().unwrap_or_default()
-        ),
         ProposalWhy::SameKey => format!(
             "`{name}` carries the key `{wrote}`, and so does another profile you can see — so \
              which of them this folder is, is yours to say."
@@ -1078,8 +1122,13 @@ fn folded(name: &str) -> String {
     name.trim().to_lowercase()
 }
 
-/// The words of a name, lowercased, with punctuation and separators gone.
-fn tokens(name: &str) -> BTreeSet<String> {
+/// The words of a name, lowercased, **in the order they are written**.
+///
+/// Ordered, which matters: the resemblance rule below anchors on the first
+/// word, and a set would anchor on the alphabetically first one instead —
+/// which proposed `Engineer` for a `QA Engineer` bundle and not `QA`, the exact
+/// pair of answers the rule exists to get right.
+fn words(name: &str) -> Vec<String> {
     name.split(|c: char| !c.is_alphanumeric())
         .filter(|w| !w.is_empty())
         .map(|w| w.to_lowercase())
@@ -1093,12 +1142,16 @@ fn tokens(name: &str) -> BTreeSet<String> {
 /// anchor keeps the real case — `QA` against `qa-engineer` — and drops that
 /// one. It only ever proposes, so a false one costs a click and a missed one
 /// costs a duplicate profile.
-fn resembles(theirs: &BTreeSet<String>, ours: &BTreeSet<String>) -> bool {
+fn resembles(theirs: &[String], ours: &[String]) -> bool {
     if theirs.is_empty() || ours.is_empty() || theirs == ours {
         return false;
     }
-    let (first, second) = (theirs.iter().next(), ours.iter().next());
-    first == second && (theirs.is_subset(ours) || ours.is_subset(theirs))
+    if theirs.first() != ours.first() {
+        return false;
+    }
+    let (theirs, ours): (BTreeSet<&String>, BTreeSet<&String>) =
+        (theirs.iter().collect(), ours.iter().collect());
+    theirs.is_subset(&ours) || ours.is_subset(&theirs)
 }
 
 /// Where a new profile would be filed, for a person to read.
@@ -1140,7 +1193,7 @@ fn resolve(
         (Some(wrote), Matched::Create { .. }) => match directory(wrote, here) {
             None => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Directory)),
+                line_of(&said.spelled, Spot::Field(Field::Directory)),
                 Some(Field::Directory.spelling().into()),
                 format!(
                     "no directory named `{wrote}` is available to you. Write one you can file \
@@ -1153,7 +1206,7 @@ fn resolve(
             // that does not apply.
             Some(dir) if !dir.may_write => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Directory)),
+                line_of(&said.spelled, Spot::Field(Field::Directory)),
                 Some(Field::Directory.spelling().into()),
                 format!(
                     "you can look in `{}` but not file anything there. Ask for Editor on it, or \
@@ -1163,10 +1216,22 @@ fn resolve(
             )),
             Some(_) => {}
         },
-        // An existing profile is overwritten where it already is: `directory`
-        // is honoured at creation and a move is a sharing operation, so a file
-        // naming a different one is making a claim the import cannot honour.
-        // Said rather than silently ignored, which is the whole rule.
+        // An existing profile is overwritten **where it already is**, and a
+        // file naming a different directory is making a claim the import
+        // cannot honour. Said rather than silently ignored, which is the whole
+        // rule.
+        //
+        // **`directory` is placement, not configuration, so
+        // absent-means-the-default never covered it.** That rule exists so one
+        // file fully describes a profile's *configuration* on any
+        // installation; `directory` says where the resource sits in the
+        // sharing tree, and the write path cannot perform a move at all
+        // (`NewRole::directory` — "only honoured at creation; move it later
+        // with sharing"). So `directory` is creation-only, an absent
+        // `directory:` leaves a row filed where it is, and the `directory` row
+        // of an overwrite's diff is `unchanged`. Reading it as a default would
+        // un-share a shared profile on every import, silently, with nothing in
+        // the diff to show it.
         (Some(wrote), Matched::Hit { row, .. }) => {
             let filed = row.path.rsplit_once('/').map(|(up, _)| up).unwrap_or("");
             let theirs = row
@@ -1181,7 +1246,7 @@ fn resolve(
             if !agrees {
                 out.push(PlanProblem::at(
                     p,
-                    at(&said.spelled, Spot::Field(Field::Directory)),
+                    line_of(&said.spelled, Spot::Field(Field::Directory)),
                     Some(Field::Directory.spelling().into()),
                     format!(
                         "this bundle is `{}`, which is already filed at `{filed}`. An import \
@@ -1192,43 +1257,82 @@ fn resolve(
                 ));
             }
         }
+        // A candidate has not been answered, so there is no answer to the
+        // question this check asks: "same profile" overwrites a row that is
+        // already filed somewhere, and "a new profile" needs Editor where the
+        // file says. Asked again on the next plan, when the answer is in.
         _ => {}
     }
 
     // The machine its own workspace runs on.
     if let Some(wrote) = profile.machine.as_deref() {
-        if resolve_named(wrote, &here.machines).is_none() {
-            out.push(PlanProblem::at(
+        let found: Vec<&Named> = among(wrote, &here.machines, |m| &m.name);
+        let line = line_of(&said.spelled, Spot::Field(Field::Machine));
+        let key = Some(Field::Machine.spelling().to_string());
+        match found.len() {
+            1 => {}
+            0 => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Machine)),
-                Some(Field::Machine.spelling().into()),
+                line,
+                key,
                 format!(
                     "no machine named `{wrote}` is available to you. Write one of yours, or `~` \
                      to leave the machine to whichever lead delegates to it."
                 ),
-            ));
+            )),
+            // Ambiguity is not absence, and saying "not available to you" about
+            // something there are two of would be a sentence nobody could act
+            // on. Only names the asker can already see are in `found`.
+            n => out.push(PlanProblem::at(
+                p,
+                line,
+                key,
+                format!(
+                    "{n} machines you can see are called `{wrote}`, so this cannot say which one \
+                     to run on. Rename one in Compute."
+                ),
+            )),
         }
     }
 
     // The subscription its agent runs on.
     if let Some(wrote) = profile.account.as_deref() {
-        match (&profile.engine, resolve_account(wrote, &here.accounts)) {
+        let found: Vec<&Subscription> = among(wrote, &here.accounts, |a| &a.name);
+        let one = match found.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        };
+        if found.len() > 1 {
+            out.push(PlanProblem::at(
+                p,
+                line_of(&said.spelled, Spot::Field(Field::Account)),
+                Some(Field::Account.spelling().to_string()),
+                format!(
+                    "{} subscriptions you can see are called `{wrote}`, so this cannot say which \
+                     one to spend. Rename one in Subscriptions.",
+                    found.len()
+                ),
+            ));
+        }
+        match (&profile.engine, one) {
             // A subscription authenticates one engine, and `agent_account_id`
             // is refused without one on the write path too
             // (`api::roles::check_account`). Blocked here so the plan says it
             // rather than the apply.
             (None, _) => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Account)),
+                line_of(&said.spelled, Spot::Field(Field::Account)),
                 Some(Field::Account.spelling().into()),
                 format!(
                     "`{wrote}` is a subscription for one engine, so this profile has to pin one \
                      too. Write `engine:`, or remove the account and the owner's default is used."
                 ),
             )),
-            (Some(_), None) => out.push(PlanProblem::at(
+            // Said only when there is nothing of that name at all: the
+            // ambiguous case has its own sentence above.
+            (Some(_), None) if found.is_empty() => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Field(Field::Account)),
+                line_of(&said.spelled, Spot::Field(Field::Account)),
                 Some(Field::Account.spelling().into()),
                 format!(
                     "no subscription named `{wrote}` is available to you. Write one you can \
@@ -1238,7 +1342,7 @@ fn resolve(
             (Some(engine), Some(account)) if account.engine != format!("{engine:?}") => {
                 out.push(PlanProblem::at(
                     p,
-                    at(&said.spelled, Spot::Field(Field::Account)),
+                    line_of(&said.spelled, Spot::Field(Field::Account)),
                     Some(Field::Account.spelling().into()),
                     format!(
                         "`{wrote}` authenticates {} and this profile runs {engine:?}. Pick a \
@@ -1247,7 +1351,7 @@ fn resolve(
                     ),
                 ))
             }
-            (Some(_), Some(_)) => {}
+            (Some(_), _) => {}
         }
     }
 
@@ -1265,6 +1369,44 @@ fn resolve(
             Err(_) => false,
         });
         let key = Some(format!("{}[{n}]", Field::DelegatesTo.spelling()));
+
+        // **A profile naming itself is refused. A cycle between profiles is
+        // not.**
+        //
+        // Deliberately two different rules, and not an inconsistency for
+        // somebody to tidy up later: `A → B → A` is a library somebody might
+        // actually mean, and nested delegation is coming, so cycles are
+        // permitted. `A → A` is a copy-paste error almost every time — and
+        // nothing is lost by refusing it, because the same effect becomes
+        // reachable through nesting anyway. If these two ever have to agree,
+        // the direction to move is *permitting* self-delegation, never
+        // blocking cycles.
+        //
+        // Both ways of naming yourself count. The file's own `name` is the
+        // obvious one; the other is a rename — a file that renames `Designer`
+        // to `Product Designer` and still writes `delegates_to: [Designer]`
+        // resolves to the very row it is about to overwrite, and
+        // `delegate_scope` holds ids, so after the write that is a profile
+        // pointing at itself.
+        let itself = folded(wrote) == folded(&profile.name)
+            || matches!(
+                (here_now.as_slice(), matched),
+                ([row], Matched::Hit { row: target, .. }) if row.id == target.id
+            );
+        if itself {
+            out.push(PlanProblem::at(
+                p,
+                line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
+                key,
+                format!(
+                    "`{}` is this profile, so it cannot be one of the teammates it hands work \
+                     to. Remove the entry.",
+                    profile.name
+                ),
+            ));
+            continue;
+        }
+
         if in_drop {
             continue;
         }
@@ -1272,7 +1414,7 @@ fn resolve(
             [_] => {}
             [] => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
+                line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
                 key,
                 format!(
                     "no profile named `{wrote}` is available to you, and no bundle in this drop \
@@ -1282,7 +1424,7 @@ fn resolve(
             )),
             many => out.push(PlanProblem::at(
                 p,
-                at(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
+                line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
                 key,
                 format!(
                     "{} profiles you can see are called `{wrote}` — {}. A profile delegates to \
@@ -1304,7 +1446,7 @@ fn resolve(
     let mut resolved: Vec<(&SkillHere, usize)> = Vec::new();
     for (n, wrote) in profile.skills.iter().enumerate() {
         let key = Some(format!("{}[{n}]", Field::Skills.spelling()));
-        let line = at(&said.spelled, Spot::Entry(Field::Skills, n));
+        let line = line_of(&said.spelled, Spot::Entry(Field::Skills, n));
         if let Some(qualifier) = wrote.directory.as_deref() {
             let Some(dir) = directory(qualifier, here) else {
                 out.push(PlanProblem::at(
@@ -1395,7 +1537,7 @@ fn resolve(
         let first = clashing[0].1;
         out.push(PlanProblem::at(
             p,
-            at(&said.spelled, Spot::Entry(Field::Skills, first)),
+            line_of(&said.spelled, Spot::Entry(Field::Skills, first)),
             Some(format!("{}[{first}]", Field::Skills.spelling())),
             format!(
                 "two of the skills named share the name `{}` — {where_each}. A skill's folder on \
@@ -1425,26 +1567,18 @@ fn resolve(
     out
 }
 
-/// A machine or anything else with a name, resolved the way `Roles::by_name`
-/// resolves a profile: case-insensitively, and never ambiguously.
-fn resolve_named<'a>(wrote: &str, among: &'a [Named]) -> Option<&'a Named> {
+/// Everything of this name the asker can see.
+///
+/// Case-insensitively, the way `Roles::by_name` resolves a profile a lead
+/// names. A `Vec` rather than an `Option` because the count is the whole
+/// difference between "there is no such thing" and "there are two, say which",
+/// and a resolver that collapsed them would make one of those two sentences
+/// impossible to write.
+fn among<'a, T>(wrote: &str, here: &'a [T], name: impl Fn(&T) -> &String) -> Vec<&'a T> {
     let wanted = folded(wrote);
-    let mut found = among.iter().filter(|n| folded(&n.name) == wanted);
-    let first = found.next()?;
-    match found.next() {
-        None => Some(first),
-        Some(_) => None,
-    }
-}
-
-fn resolve_account<'a>(wrote: &str, among: &'a [Subscription]) -> Option<&'a Subscription> {
-    let wanted = folded(wrote);
-    let mut found = among.iter().filter(|a| folded(&a.name) == wanted);
-    let first = found.next()?;
-    match found.next() {
-        None => Some(first),
-        Some(_) => None,
-    }
+    here.iter()
+        .filter(|it| folded(name(it)) == wanted)
+        .collect()
 }
 
 // ── the diff ────────────────────────────────────────────────────────────
@@ -1523,7 +1657,10 @@ fn one_field(field: Field, said: &Reading, row: &Role, here: &Here) -> FieldDiff
                 "a machine you cannot see",
                 open,
             ),
-            file.machine.clone().unwrap_or_else(|| open.into()),
+            match file.machine.as_deref() {
+                None => open.to_string(),
+                Some(wrote) => canonical(wrote, &here.machines, |m| &m.name),
+            },
         ),
         Field::Account => (
             match row.account.as_deref() {
@@ -1535,9 +1672,10 @@ fn one_field(field: Field, said: &Reading, row: &Role, here: &Here) -> FieldDiff
                     .map(|a| a.name.clone())
                     .unwrap_or_else(|| "a subscription you cannot see".into()),
             },
-            file.account
-                .clone()
-                .unwrap_or_else(|| "the owner's default for the engine".into()),
+            match file.account.as_deref() {
+                None => "the owner's default for the engine".to_string(),
+                Some(wrote) => canonical(wrote, &here.accounts, |a| &a.name),
+            },
         ),
         Field::CanDelegate => (row.can_delegate.to_string(), file.can_delegate.to_string()),
         Field::DelegatesTo => (
@@ -1554,7 +1692,12 @@ fn one_field(field: Field, said: &Reading, row: &Role, here: &Here) -> FieldDiff
             ),
             match file.delegates_to.is_empty() {
                 true => "any teammate the owner can see".to_string(),
-                false => file.delegates_to.join(", "),
+                false => file
+                    .delegates_to
+                    .iter()
+                    .map(|wrote| canonical(wrote, &here.profiles, |r| &r.name))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             },
         ),
         Field::IncludeAlwaysOn => (
@@ -1582,7 +1725,10 @@ fn one_field(field: Field, said: &Reading, row: &Role, here: &Here) -> FieldDiff
                 false => file
                     .skills
                     .iter()
-                    .map(profile_md::SkillRef::spelling)
+                    .map(|wrote| match skill_here(wrote, here) {
+                        Some(found) => found.qualified(),
+                        None => wrote.spelling(),
+                    })
                     .collect::<Vec<_>>()
                     .join(", "),
             },
@@ -1629,6 +1775,40 @@ fn one_field(field: Field, said: &Reading, row: &Role, here: &Here) -> FieldDiff
         settings: Vec::new(),
         body: None,
     }
+}
+
+/// What a name the file wrote resolves to, spelled the way the library spells
+/// it.
+///
+/// **So that a diff compares things rather than spellings.** Resolution is
+/// case-insensitive, so a file writing `machine: mac-studio` against a machine
+/// called `Mac-Studio` names the same machine — and rendering the file's
+/// spelling on one side and the library's on the other would report a change
+/// where nothing changes, in a diff whose whole job is to be trusted. Anything
+/// that does not resolve has already blocked the bundle, so the fallback is for
+/// a reference this plan cannot see the far end of.
+fn canonical<T>(wrote: &str, here: &[T], name: impl Fn(&T) -> &String) -> String {
+    match among(wrote, here, &name).as_slice() {
+        [one] => name(one).clone(),
+        _ => wrote.to_string(),
+    }
+}
+
+/// The skill a reference names, resolved the way `resolve` resolves it.
+fn skill_here<'a>(wrote: &profile_md::SkillRef, here: &'a Here) -> Option<&'a SkillHere> {
+    let slug = match wrote.directory.as_deref() {
+        None => None,
+        Some(qualifier) => Some(directory(qualifier, here)?.slug.clone()),
+    };
+    let mut found = here.skills.iter().filter(|s| {
+        folded(&s.name) == folded(&wrote.name)
+            && match &slug {
+                None => true,
+                Some(slug) => s.directory() == Some(slug),
+            }
+    });
+    let first = found.next()?;
+    found.next().is_none().then_some(first)
 }
 
 /// An id rendered as its name, or as the fact that it is not visible.
@@ -1973,5 +2153,1465 @@ fn briefly(path: &str) -> String {
     match path.chars().count() > MOST {
         false => path.to_string(),
         true => format!("{}…", path.chars().take(MOST).collect::<String>()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A profile in the library, with every field at what a new one gets.
+    ///
+    /// Named rather than `Default::default()` because `Role` has no default and
+    /// should not: a row with no path is not a thing that can exist, and a
+    /// fixture that invents one would be testing against a shape the database
+    /// cannot hold.
+    fn row(id: &str, name: &str, key: Option<&str>) -> Role {
+        Role {
+            id: id.into(),
+            path: format!("u/kevin/{}_01m3qbzd", name.to_lowercase().replace(' ', "_")),
+            key: key.map(str::to_string),
+            name: name.into(),
+            does: "reads a branch and reports problems".into(),
+            placement: "lead".into(),
+            agent: None,
+            machine: None,
+            account: None,
+            settings: Default::default(),
+            instructions: String::new(),
+            on_usage_limit: "wait".into(),
+            on_child_limit: "ask".into(),
+            can_delegate: false,
+            delegate_scope: vec![],
+            include_always_on: true,
+            include_repo_defaults: true,
+            skill_scope: vec![],
+            may_write: true,
+            may_share: true,
+            is_default: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn here(profiles: Vec<Role>) -> Here {
+        Here {
+            profiles,
+            ..Default::default()
+        }
+    }
+
+    fn machine(id: &str, name: &str) -> Named {
+        Named {
+            id: id.into(),
+            name: name.into(),
+        }
+    }
+
+    fn subscription(id: &str, name: &str, engine: &str) -> Subscription {
+        Subscription {
+            id: id.into(),
+            name: name.into(),
+            engine: engine.into(),
+        }
+    }
+
+    fn folder(name: &str, may_write: bool) -> Dir {
+        Dir {
+            id: format!("dir_{name}"),
+            name: name.into(),
+            slug: name.to_lowercase(),
+            may_write,
+        }
+    }
+
+    fn skill(id: &str, name: &str, path: &str) -> SkillHere {
+        SkillHere {
+            id: id.into(),
+            name: name.into(),
+            path: path.into(),
+        }
+    }
+
+    /// A bundle: the file, and the folder it is in.
+    fn at(path: &str, frontmatter: &str, body: &str) -> DroppedFile {
+        DroppedFile {
+            path: path.into(),
+            text: format!("---\n{frontmatter}---\n{body}"),
+        }
+    }
+
+    /// The smallest file that is a profile: a name and a line about it.
+    fn smallest(name: &str) -> String {
+        format!("name: {name}\ndoes: does the thing\n")
+    }
+
+    fn dropped(files: Vec<DroppedFile>) -> ProfileDrop {
+        ProfileDrop {
+            files,
+            answers: vec![],
+        }
+    }
+
+    fn only(plan: &ImportPlan) -> &PlanEntry {
+        assert_eq!(plan.entries.len(), 1, "{:#?}", plan.entries);
+        &plan.entries[0]
+    }
+
+    fn blocked(entry: &PlanEntry) -> &[PlanProblem] {
+        match &entry.outcome {
+            PlanOutcome::Blocked(b) => &b.problems,
+            other => panic!("expected a block, got {other:#?}"),
+        }
+    }
+
+    fn said(entry: &PlanEntry) -> String {
+        blocked(entry)
+            .iter()
+            .map(|p| p.says.clone())
+            .collect::<Vec<_>>()
+            .join(" / ")
+    }
+
+    fn field<'a>(diff: &'a [FieldDiff], name: &str) -> &'a FieldDiff {
+        diff.iter()
+            .find(|f| f.field == name)
+            .unwrap_or_else(|| panic!("no `{name}` row in the diff"))
+    }
+
+    fn diff_of(entry: &PlanEntry) -> &[FieldDiff] {
+        match &entry.outcome {
+            PlanOutcome::Overwrite(o) => &o.diff,
+            PlanOutcome::Rename(r) => &r.diff,
+            other => panic!("expected a diff, got {other:#?}"),
+        }
+    }
+
+    /// Criterion: the folder's name is the key, and nothing of that key being
+    /// here makes it new.
+    #[test]
+    fn a_bundle_nothing_answers_to_is_new() {
+        let plan = plan(
+            &dropped(vec![at(
+                "profiles/designer/PROFILE.md",
+                &smallest("Designer"),
+                "",
+            )]),
+            &here(vec![row("r1", "Engineer", None)]),
+        )
+        .unwrap();
+        let entry = only(&plan);
+        assert_eq!(entry.key, "designer");
+        assert!(
+            matches!(&entry.outcome, PlanOutcome::New(n) if n.filed == "your own space"),
+            "{:#?}",
+            entry.outcome
+        );
+        assert!(plan.appliable);
+    }
+
+    /// Criterion: same key, different `name`, reported as a rename — old and
+    /// new — rather than as a create.
+    #[test]
+    fn the_same_key_under_a_new_name_is_a_rename() {
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                &smallest("Product Designer"),
+                "",
+            )]),
+            &here(vec![row("r1", "Designer", Some("designer"))]),
+        )
+        .unwrap();
+        let entry = only(&plan);
+        let PlanOutcome::Rename(renamed) = &entry.outcome else {
+            panic!("expected a rename, got {:#?}", entry.outcome)
+        };
+        assert_eq!(renamed.from, "Designer");
+        assert_eq!(renamed.to, "Product Designer");
+        assert!(!renamed.adopts_key);
+        // The rename is also in the diff, because the write behind it is the
+        // same whole-object update and the other fifteen fields have to be
+        // readable.
+        assert_eq!(field(&renamed.diff, "name").change, FieldChange::Changed);
+        assert_eq!(renamed.diff.len(), 16);
+    }
+
+    /// Criteria: same key and name is an overwrite, and the diff carries all
+    /// sixteen fields.
+    #[test]
+    fn the_same_key_and_name_is_an_overwrite_of_all_sixteen_fields() {
+        let plan = plan(
+            &dropped(vec![at("designer/PROFILE.md", &smallest("Designer"), "")]),
+            &here(vec![row("r1", "Designer", Some("designer"))]),
+        )
+        .unwrap();
+        let entry = only(&plan);
+        assert!(
+            matches!(&entry.outcome, PlanOutcome::Overwrite(o) if !o.adopts_key),
+            "{:#?}",
+            entry.outcome
+        );
+        let diff = diff_of(entry);
+        assert_eq!(diff.len(), 16, "{:#?}", diff);
+        let fields: Vec<&str> = diff.iter().map(|f| f.field.as_str()).collect();
+        assert!(
+            !fields.contains(&"key"),
+            "the key is the identity: {fields:?}"
+        );
+        assert!(fields.contains(&"instructions"), "{fields:?}");
+        assert!(fields.contains(&"settings"), "{fields:?}");
+    }
+
+    /// Criterion: a key absent from the file is a **reset** and marked as its
+    /// own kind of change — and a key that spells its own default is an
+    /// ordinary value, because somebody who writes the default has said
+    /// something.
+    #[test]
+    fn a_deleted_line_is_a_reset_and_a_spelled_default_is_not() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.can_delegate = true;
+        stored.include_always_on = false;
+
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                // `can_delegate` is gone, which returns it to false. The
+                // inheritance switch is written at the value it already
+                // defaults to, which is not an event.
+                "name: Designer\ndoes: does the thing\ninclude_always_on: true\n",
+                "",
+            )]),
+            &here(vec![stored]),
+        )
+        .unwrap();
+        let diff = diff_of(only(&plan));
+        assert_eq!(field(diff, "can_delegate").change, FieldChange::Reset);
+        assert_eq!(field(diff, "can_delegate").before, "true");
+        assert_eq!(field(diff, "can_delegate").after, "false");
+        assert_eq!(
+            field(diff, "include_always_on").change,
+            FieldChange::Changed,
+            "a line somebody wrote is a change, whatever it says"
+        );
+        assert_eq!(field(diff, "name").change, FieldChange::Unchanged);
+    }
+
+    /// Criterion: a reset under `settings` names the **resulting value**, not
+    /// the words "the engine's default".
+    #[test]
+    fn a_reset_setting_names_what_will_actually_run() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.agent = Some("ClaudeCode".into());
+        stored.settings.model = Some("haiku".into());
+
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nengine: ClaudeCode\n",
+                "",
+            )]),
+            &here(vec![stored]),
+        )
+        .unwrap();
+        let diff = diff_of(only(&plan));
+        let settings = &field(diff, "settings").settings;
+        let model = settings
+            .iter()
+            .find(|s| s.setting == "model")
+            .expect("a model row");
+        assert_eq!(model.change, FieldChange::Reset);
+        assert!(model.before.contains("haiku"), "{}", model.before);
+        // The value an unset model takes for Claude Code, named — and said as
+        // a label rather than as a bare alias.
+        let will = ft_core::controls::default_value(
+            ft_core::Agent::ClaudeCode,
+            ft_core::controls::ControlKind::Model,
+        )
+        .expect("Claude Code has a default model");
+        assert!(model.after.contains(will), "{}", model.after);
+        assert!(
+            !model.after.contains("engine's default"),
+            "a reset names the value, not the words: {}",
+            model.after
+        );
+        // The four reset independently, so the row above is not the whole of
+        // what `settings` says.
+        assert_eq!(settings.len(), 4);
+    }
+
+    /// Criterion: the instructions diff as a changed-line count plus a unified
+    /// diff.
+    #[test]
+    fn the_instructions_diff_as_a_count_and_a_unified_diff() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.instructions = "One.\nTwo.\nThree.\n".into();
+
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                &smallest("Designer"),
+                "One.\nTwo changed.\nThree.\n",
+            )]),
+            &here(vec![stored]),
+        )
+        .unwrap();
+        let diff = diff_of(only(&plan));
+        let body = field(diff, "instructions").body.as_ref().expect("a body");
+        assert_eq!(body.added, 1);
+        assert_eq!(body.removed, 1);
+        assert_eq!(body.changed_lines, 2);
+        assert!(body.unified.contains("-Two."), "{}", body.unified);
+        assert!(body.unified.contains("+Two changed."), "{}", body.unified);
+        assert_eq!(field(diff, "instructions").change, FieldChange::Changed);
+    }
+
+    /// Deleting the markdown under the frontmatter is a reset: an absent body
+    /// is the documented default, which is the empty one.
+    #[test]
+    fn deleting_the_instructions_is_a_reset() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.instructions = "One.\n".into();
+        let plan = plan(
+            &dropped(vec![at("designer/PROFILE.md", &smallest("Designer"), "")]),
+            &here(vec![stored]),
+        )
+        .unwrap();
+        assert_eq!(
+            field(diff_of(only(&plan)), "instructions").change,
+            FieldChange::Reset
+        );
+    }
+
+    /// The live case, from `fixtures/profiles/fstack-repaired/qa-engineer`: the
+    /// folder is `qa-engineer/` and the library profile is called `QA`.
+    ///
+    /// **Never a create.** A second profile beside the first is what a naive
+    /// importer does here and is the failure this plan exists to prevent. The
+    /// exported file carries the live name, so the name is an exact match on a
+    /// row with no key of its own — which is the one case the fallback is
+    /// certain about, and it adopts the key rather than asking. See the pull
+    /// request: the specification's two readings of this disagree, and this is
+    /// the one that does not make every first import of a library a dozen
+    /// questions whose answer is obviously yes.
+    #[test]
+    fn qa_engineer_against_a_library_profile_called_qa_is_never_a_create() {
+        let text = std::fs::read_to_string(
+            "../../fixtures/profiles/fstack-repaired/qa-engineer/PROFILE.md",
+        )
+        .expect("the repaired fixture");
+        let plan = plan(
+            &dropped(vec![DroppedFile {
+                path: "profiles/qa-engineer/PROFILE.md".into(),
+                text,
+            }]),
+            &here(vec![row("r1", "QA", None)]),
+        )
+        .unwrap();
+        let entry = only(&plan);
+        let PlanOutcome::Overwrite(over) = &entry.outcome else {
+            panic!("expected an overwrite of QA, got {:#?}", entry.outcome)
+        };
+        assert_eq!(over.profile.name, "QA");
+        assert!(
+            over.adopts_key,
+            "the row has no key, so this is where it gets one"
+        );
+        assert!(plan.appliable);
+    }
+
+    /// Criteria: a bundle matching neither key nor name, but resembling an
+    /// existing profile, is a **candidate** — carrying the proposed row's name,
+    /// its key and why it was proposed — and an unanswered candidate makes the
+    /// plan unappliable.
+    #[test]
+    fn a_folder_that_resembles_a_profile_is_one_unanswered_candidate() {
+        let plan = plan(
+            &dropped(vec![at(
+                "profiles/qa-engineer/PROFILE.md",
+                &smallest("QA Engineer"),
+                "",
+            )]),
+            &here(vec![row("r1", "QA", None), row("r2", "Engineer", None)]),
+        )
+        .unwrap();
+        let entry = only(&plan);
+        let PlanOutcome::Candidate(candidate) = &entry.outcome else {
+            panic!("expected a candidate, got {:#?}", entry.outcome)
+        };
+        assert_eq!(candidate.proposals.len(), 1, "{:#?}", candidate.proposals);
+        let proposed = &candidate.proposals[0];
+        assert_eq!(proposed.profile.name, "QA");
+        assert_eq!(proposed.profile.key, None);
+        assert_eq!(proposed.why, ProposalWhy::LikeName);
+        assert!(!proposed.says.is_empty());
+        assert!(!plan.appliable);
+        assert!(
+            plan.why_not.iter().any(|w| w.contains("only you can say")),
+            "{:#?}",
+            plan.why_not
+        );
+    }
+
+    /// A name differing only by case or surrounding whitespace is a candidate
+    /// too, with its own reason — it is usually the same profile and is not
+    /// always.
+    #[test]
+    fn a_name_differing_only_by_case_is_a_candidate() {
+        let plan = plan(
+            &dropped(vec![at("designer/PROFILE.md", &smallest("designer"), "")]),
+            &here(vec![row("r1", "Designer", None)]),
+        )
+        .unwrap();
+        let PlanOutcome::Candidate(candidate) = &only(&plan).outcome else {
+            panic!("expected a candidate")
+        };
+        assert_eq!(candidate.proposals[0].why, ProposalWhy::NearName);
+    }
+
+    /// An answer decides, both ways, and a candidate that has been answered is
+    /// drawn as the instruction being carried out rather than as a finding.
+    #[test]
+    fn answering_a_candidate_resolves_it_either_way() {
+        let drop = |answer: Option<CandidateDecision>| ProfileDrop {
+            files: vec![at("qa-engineer/PROFILE.md", &smallest("QA Engineer"), "")],
+            answers: answer
+                .map(|answer| {
+                    vec![CandidateAnswer {
+                        key: "qa-engineer".into(),
+                        answer,
+                    }]
+                })
+                .unwrap_or_default(),
+        };
+        let library = here(vec![row("r1", "QA", None)]);
+
+        let same = plan(
+            &drop(Some(CandidateDecision::SameProfile {
+                profile: "r1".into(),
+            })),
+            &library,
+        )
+        .unwrap();
+        let PlanOutcome::Rename(renamed) = &only(&same).outcome else {
+            panic!("expected a rename, got {:#?}", only(&same).outcome)
+        };
+        assert!(renamed.answered && renamed.adopts_key);
+        assert_eq!(renamed.from, "QA");
+        assert!(same.appliable);
+
+        let fresh = plan(&drop(Some(CandidateDecision::NewProfile)), &library).unwrap();
+        assert!(
+            matches!(&only(&fresh).outcome, PlanOutcome::New(n) if n.answered),
+            "{:#?}",
+            only(&fresh).outcome
+        );
+        assert!(fresh.appliable);
+    }
+
+    /// An answer is data from a client, so it is re-resolved rather than
+    /// trusted: a profile the asker cannot see is not one they can be told
+    /// about, and not one this plan will write.
+    #[test]
+    fn an_answer_naming_a_profile_the_asker_cannot_see_blocks() {
+        let plan = plan(
+            &ProfileDrop {
+                files: vec![at("designer/PROFILE.md", &smallest("Designer"), "")],
+                answers: vec![CandidateAnswer {
+                    key: "designer".into(),
+                    answer: CandidateDecision::SameProfile {
+                        profile: "r_somebody_elses".into(),
+                    },
+                }],
+            },
+            &here(vec![row("r1", "Engineer", None)]),
+        )
+        .unwrap();
+        assert!(
+            said(only(&plan)).contains("not one available to you"),
+            "{}",
+            said(only(&plan))
+        );
+        assert!(!plan.appliable);
+    }
+
+    /// Criterion (corrected by the threat model): two bundles in one drop with
+    /// the same key are blocked **explicitly**. A filesystem folder cannot hold
+    /// two folders of one name; an archive and a direct API call both can.
+    #[test]
+    fn two_bundles_sharing_a_key_are_blocked() {
+        let plan = plan(
+            &dropped(vec![
+                at("one/designer/PROFILE.md", &smallest("Designer"), ""),
+                at("two/designer/PROFILE.md", &smallest("Also Designer"), ""),
+            ]),
+            &here(vec![]),
+        )
+        .unwrap();
+        assert_eq!(plan.entries.len(), 2);
+        for entry in &plan.entries {
+            assert!(
+                said(entry).contains("is also a bundle for `designer`"),
+                "{}",
+                said(entry)
+            );
+        }
+        assert!(!plan.appliable);
+    }
+
+    /// Criterion (threat model): two bundles resolving to the same overwrite
+    /// target are blocked — the last write would otherwise silently win.
+    #[test]
+    fn two_bundles_resolving_to_one_profile_are_blocked() {
+        let plan = plan(
+            &ProfileDrop {
+                files: vec![
+                    at("designer/PROFILE.md", &smallest("Designer"), ""),
+                    at("design/PROFILE.md", &smallest("Design"), ""),
+                ],
+                // Two different keys, one answered onto the row the other
+                // matches by name.
+                answers: vec![CandidateAnswer {
+                    key: "design".into(),
+                    answer: CandidateDecision::SameProfile {
+                        profile: "r1".into(),
+                    },
+                }],
+            },
+            &here(vec![row("r1", "Designer", None)]),
+        )
+        .unwrap();
+        for entry in &plan.entries {
+            assert!(
+                said(entry).contains("both resolve to the profile `Designer`"),
+                "{}",
+                said(entry)
+            );
+        }
+        assert!(!plan.appliable);
+    }
+
+    /// Criterion: two bundles sharing a `name` warn rather than block. With the
+    /// key as the identity they are simply two profiles.
+    #[test]
+    fn two_bundles_sharing_a_name_warn_rather_than_block() {
+        let plan = plan(
+            &dropped(vec![
+                at("designer/PROFILE.md", &smallest("Designer"), ""),
+                at("designer-2/PROFILE.md", &smallest("Designer"), ""),
+            ]),
+            &here(vec![]),
+        )
+        .unwrap();
+        for entry in &plan.entries {
+            assert!(
+                matches!(entry.outcome, PlanOutcome::New(_)),
+                "{:#?}",
+                entry.outcome
+            );
+            assert_eq!(entry.warnings.len(), 1, "{:#?}", entry.warnings);
+            assert!(entry.warnings[0].says.contains("also called `Designer`"));
+        }
+        assert!(plan.appliable, "a warning never makes a plan unappliable");
+    }
+
+    // ── resolution, and what it is allowed to know ──────────────────────
+
+    /// Criterion: an unresolved name blocks, and says what it says.
+    ///
+    /// *"available to you"*, never *"no such machine"* — the wording follows
+    /// from resolving inside what the asker can see rather than filtering
+    /// afterwards.
+    #[test]
+    fn an_unresolved_machine_blocks_and_never_says_it_does_not_exist() {
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nmachine: mac-studio\n",
+                "",
+            )]),
+            &here(vec![]),
+        )
+        .unwrap();
+        let problems = blocked(only(&plan));
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+        assert!(
+            problems[0]
+                .says
+                .contains("no machine named `mac-studio` is available to you"),
+            "{}",
+            problems[0].says
+        );
+        // Every error carries `{path, line}`, pointing at the line that named
+        // the thing rather than at the file.
+        assert_eq!(problems[0].path, "designer/PROFILE.md");
+        assert_eq!(problems[0].line, 4);
+        assert_eq!(problems[0].key.as_deref(), Some("machine"));
+    }
+
+    /// A machine that resolves raises nothing — and two of one name is said as
+    /// what it is, because "not available to you" about something there are two
+    /// of is a sentence nobody can act on.
+    #[test]
+    fn a_machine_resolves_by_name_and_two_of_one_name_is_said_as_that() {
+        let file = at(
+            "designer/PROFILE.md",
+            "name: Designer\ndoes: does the thing\nmachine: mac-studio\n",
+            "",
+        );
+        let mut library = here(vec![]);
+        library.machines = vec![machine("h1", "Mac-Studio")];
+        let one = plan(&dropped(vec![file.clone()]), &library).unwrap();
+        assert!(
+            matches!(only(&one).outcome, PlanOutcome::New(_)),
+            "a name resolves whatever its capitals: {:#?}",
+            only(&one).outcome
+        );
+
+        library.machines.push(machine("h2", "mac-studio"));
+        let two = plan(&dropped(vec![file]), &library).unwrap();
+        assert!(
+            said(only(&two)).contains("2 machines you can see are called `mac-studio`"),
+            "{}",
+            said(only(&two))
+        );
+    }
+
+    /// The enumeration oracle, closed: a machine that exists and is somebody
+    /// else's reads **exactly** as one that does not exist at all.
+    #[test]
+    fn a_machine_the_asker_cannot_see_reads_as_one_that_is_not_there() {
+        let file = at(
+            "designer/PROFILE.md",
+            "name: Designer\ndoes: does the thing\nmachine: mac-studio\n",
+            "",
+        );
+        let nowhere = plan(&dropped(vec![file.clone()]), &here(vec![])).unwrap();
+        // The same installation, with the machine in it — and the asker holding
+        // no grant on it, so it is not in what they can see.
+        let theirs = plan(&dropped(vec![file]), &here(vec![])).unwrap();
+        assert_eq!(said(only(&nowhere)), said(only(&theirs)));
+    }
+
+    /// Criterion: a `directory` you may read but not write blocks **at plan
+    /// time**, not during apply — an accepted plan has to be one that applies.
+    /// Saying so about a directory they can already see is deliberate and safe.
+    #[test]
+    fn a_directory_you_may_read_but_not_write_blocks_at_plan_time() {
+        let mut library = here(vec![]);
+        library.directories = vec![folder("Fstack", false)];
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\ndirectory: Fstack\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert!(
+            said(only(&plan)).contains("you can look in `Fstack` but not file anything there"),
+            "{}",
+            said(only(&plan))
+        );
+    }
+
+    /// And a directory nobody has shown them is the same answer as one that is
+    /// not there.
+    #[test]
+    fn a_directory_that_does_not_resolve_blocks() {
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\ndirectory: Fstack\n",
+                "",
+            )]),
+            &here(vec![]),
+        )
+        .unwrap();
+        assert!(
+            said(only(&plan)).contains("no directory named `Fstack` is available to you"),
+            "{}",
+            said(only(&plan))
+        );
+    }
+
+    /// A directory they may write is where the new profile would be filed, and
+    /// the slug in a path answers as well as the name on the screen.
+    #[test]
+    fn a_directory_resolves_by_its_name_or_its_slug() {
+        let mut library = here(vec![]);
+        library.directories = vec![folder("Fstack", true)];
+        for wrote in ["Fstack", "fstack"] {
+            let plan = plan(
+                &dropped(vec![at(
+                    "designer/PROFILE.md",
+                    &format!("name: Designer\ndoes: does the thing\ndirectory: {wrote}\n"),
+                    "",
+                )]),
+                &library,
+            )
+            .unwrap();
+            assert!(
+                matches!(&only(&plan).outcome, PlanOutcome::New(n) if n.filed == "Fstack"),
+                "{wrote}: {:#?}",
+                only(&plan).outcome
+            );
+        }
+    }
+
+    /// Criterion: a skill the importer cannot reach **blocks** rather than
+    /// being silently stripped. A skill is executable, and a profile that
+    /// quietly loads less than its file says is one nobody can review.
+    #[test]
+    fn a_skill_the_importer_cannot_reach_blocks() {
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nskills:\n  - dataviz\n",
+                "",
+            )]),
+            &here(vec![]),
+        )
+        .unwrap();
+        let problems = blocked(only(&plan));
+        assert!(
+            problems[0]
+                .says
+                .contains("no skill named `dataviz` is available to you"),
+            "{}",
+            problems[0].says
+        );
+        // The entry, not the key: `Spot::Entry` is what makes this possible.
+        assert_eq!(problems[0].key.as_deref(), Some("skills[0]"));
+        assert_eq!(problems[0].line, 5);
+    }
+
+    /// Criterion: a colliding skill name blocks, naming both skills and where
+    /// each lives. Two bare names that resolve to two skills of one name is the
+    /// set the delivery side already refuses, because a skill's folder on a
+    /// worker **is** its name.
+    #[test]
+    fn a_colliding_skill_name_blocks_naming_both_and_where_each_lives() {
+        let mut library = here(vec![]);
+        library.directories = vec![folder("Firetower", true), folder("House", true)];
+        library.skills = vec![
+            skill("sk1", "dataviz", "d/firetower/dataviz"),
+            skill("sk2", "dataviz", "d/house/dataviz"),
+        ];
+
+        // Written bare, it is ambiguous: two skills the asker can see answer to
+        // the name, and the qualifier exists for exactly this.
+        let bare = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nskills:\n  - dataviz\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        let says = said(only(&bare));
+        assert!(
+            says.contains("2 skills you can see are called `dataviz`"),
+            "{says}"
+        );
+        assert!(
+            says.contains("`firetower/dataviz`") && says.contains("`house/dataviz`"),
+            "{says}"
+        );
+
+        // Written as both, each resolves — and the pair still cannot be
+        // delivered, so it blocks, naming both and where each lives.
+        let both = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nskills:\n  - firetower/dataviz\n  - house/dataviz\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        let says = said(only(&both));
+        assert!(says.contains("share the name `dataviz`"), "{says}");
+        assert!(
+            says.contains("`firetower/dataviz`") && says.contains("`house/dataviz`"),
+            "{says}"
+        );
+        assert!(says.contains("folder on a worker is its name"), "{says}");
+    }
+
+    /// A qualifier the asker cannot see is the same answer every unresolved
+    /// name gets, and a skill that resolves raises nothing at all.
+    #[test]
+    fn a_qualified_skill_resolves_and_an_unknown_qualifier_blocks() {
+        let mut library = here(vec![]);
+        library.directories = vec![folder("Firetower", true)];
+        library.skills = vec![skill("sk1", "dataviz", "d/firetower/dataviz")];
+
+        let good = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nskills:\n  - firetower/dataviz\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert!(
+            matches!(only(&good).outcome, PlanOutcome::New(_)),
+            "{:#?}",
+            only(&good).outcome
+        );
+
+        let bad = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nskills:\n  - house/dataviz\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert!(
+            said(only(&bad)).contains("no directory named `house` is available to you"),
+            "{}",
+            said(only(&bad))
+        );
+    }
+
+    /// Criterion: intra-bundle references resolve — a teammate present only
+    /// elsewhere in the drop does not block, whether or not it exists here yet.
+    #[test]
+    fn a_teammate_present_only_elsewhere_in_the_drop_does_not_block() {
+        let plan = plan(
+            &dropped(vec![
+                at(
+                    "manager/PROFILE.md",
+                    "name: Manager\ndoes: hands work out\ncan_delegate: true\ndelegates_to:\n  - Designer\n",
+                    "",
+                ),
+                at("designer/PROFILE.md", &smallest("Designer"), ""),
+            ]),
+            &here(vec![]),
+        )
+        .unwrap();
+        for entry in &plan.entries {
+            assert!(
+                matches!(entry.outcome, PlanOutcome::New(_)),
+                "{}: {:#?}",
+                entry.path,
+                entry.outcome
+            );
+        }
+        assert!(plan.appliable);
+    }
+
+    /// And one that is in neither blocks, saying both halves of where it looked.
+    #[test]
+    fn an_unresolved_teammate_blocks() {
+        let plan = plan(
+            &dropped(vec![at(
+                "manager/PROFILE.md",
+                "name: Manager\ndoes: hands work out\ndelegates_to:\n  - Designer\n  - QA\n",
+                "",
+            )]),
+            &here(vec![row("r1", "Designer", None)]),
+        )
+        .unwrap();
+        let problems = blocked(only(&plan));
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+        assert!(
+            problems[0]
+                .says
+                .contains("no profile named `QA` is available to you"),
+            "{}",
+            problems[0].says
+        );
+        assert_eq!(problems[0].key.as_deref(), Some("delegates_to[1]"));
+        assert_eq!(problems[0].line, 6, "the second entry, not the key");
+    }
+
+    /// The thirteenth row of the error table: a profile naming **itself** in
+    /// `delegates_to`, which is blocked and names the profile.
+    ///
+    /// Blocked while a cycle *between* profiles is permitted, which is
+    /// deliberate rather than inconsistent — see the comment in `resolve`. Two
+    /// spellings of the same mistake: the file's own `name`, and a file that
+    /// renames a profile while still naming the row it is about to overwrite.
+    #[test]
+    fn a_profile_that_names_itself_is_blocked_and_told_which_profile() {
+        let plain = plan(
+            &dropped(vec![at(
+                "manager/PROFILE.md",
+                "name: Manager\ndoes: hands work out\ncan_delegate: true\ndelegates_to:\n  - Manager\n",
+                "",
+            )]),
+            &here(vec![]),
+        )
+        .unwrap();
+        let problems = blocked(only(&plain));
+        assert_eq!(problems.len(), 1, "{problems:#?}");
+        assert!(
+            problems[0].says.contains("`Manager` is this profile"),
+            "{}",
+            problems[0].says
+        );
+        assert_eq!(problems[0].key.as_deref(), Some("delegates_to[0]"));
+        assert_eq!(problems[0].line, 6);
+
+        // The same mistake under a rename: the entry resolves to the row this
+        // bundle is about to overwrite, and `delegate_scope` holds ids.
+        let renamed = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Product Designer\ndoes: designs\ndelegates_to:\n  - Designer\n",
+                "",
+            )]),
+            &here(vec![row("r1", "Designer", Some("designer"))]),
+        )
+        .unwrap();
+        assert!(
+            said(only(&renamed)).contains("is this profile"),
+            "{}",
+            said(only(&renamed))
+        );
+    }
+
+    /// And a cycle **between** profiles resolves, because it is a library
+    /// somebody might mean. If these two rules ever have to agree, the
+    /// direction is permitting self-delegation — never blocking cycles.
+    #[test]
+    fn a_cycle_between_two_profiles_is_permitted() {
+        let plan = plan(
+            &dropped(vec![
+                at(
+                    "manager/PROFILE.md",
+                    "name: Manager\ndoes: hands work out\ncan_delegate: true\ndelegates_to:\n  - Designer\n",
+                    "",
+                ),
+                at(
+                    "designer/PROFILE.md",
+                    "name: Designer\ndoes: designs\ncan_delegate: true\ndelegates_to:\n  - Manager\n",
+                    "",
+                ),
+            ]),
+            &here(vec![]),
+        )
+        .unwrap();
+        for entry in &plan.entries {
+            assert!(
+                matches!(entry.outcome, PlanOutcome::New(_)),
+                "{}: {:#?}",
+                entry.path,
+                entry.outcome
+            );
+        }
+        assert!(plan.appliable);
+    }
+
+    /// A name two visible profiles answer to cannot be resolved for somebody,
+    /// and the refusal names only what they can already see.
+    #[test]
+    fn an_ambiguous_teammate_blocks_naming_only_what_the_asker_can_see() {
+        let plan = plan(
+            &dropped(vec![at(
+                "manager/PROFILE.md",
+                "name: Manager\ndoes: hands work out\ndelegates_to:\n  - Designer\n",
+                "",
+            )]),
+            &here(vec![
+                row("r1", "Designer", None),
+                row("r2", "Designer", Some("designer-2")),
+            ]),
+        )
+        .unwrap();
+        let says = said(only(&plan));
+        assert!(
+            says.contains("2 profiles you can see are called `Designer`"),
+            "{says}"
+        );
+        assert!(says.contains("u/kevin/designer_01m3qbzd"), "{says}");
+    }
+
+    /// A subscription pins an engine on the write path, so a file that names
+    /// one without an engine is blocked at plan time rather than at apply —
+    /// and one for another engine is named rather than quietly accepted.
+    #[test]
+    fn a_subscription_needs_an_engine_and_has_to_be_for_it() {
+        let mut library = here(vec![]);
+        library.accounts = vec![subscription("aa1", "Personal", "Codex")];
+
+        let no_engine = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\naccount: Personal\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert!(
+            said(only(&no_engine)).contains("has to pin one too"),
+            "{}",
+            said(only(&no_engine))
+        );
+
+        let wrong_engine = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nengine: ClaudeCode\naccount: Personal\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert!(
+            said(only(&wrong_engine)).contains("authenticates Codex"),
+            "{}",
+            said(only(&wrong_engine))
+        );
+
+        let unknown = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\nengine: ClaudeCode\naccount: Startup\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert!(
+            said(only(&unknown)).contains("no subscription named `Startup` is available to you"),
+            "{}",
+            said(only(&unknown))
+        );
+    }
+
+    /// A diff compares the things a file names, not the way it spells them.
+    ///
+    /// Resolution is case-insensitive, so `machine: mac-studio` against a
+    /// machine called `Mac-Studio` is the same machine — and a diff that
+    /// reported a change there would be one nobody could trust the next time.
+    #[test]
+    fn a_reference_diffs_as_what_it_resolves_to_rather_than_how_it_is_spelled() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.machine = Some("h1".into());
+        stored.skill_scope = vec!["sk1".into()];
+        let mut library = here(vec![stored]);
+        library.machines = vec![machine("h1", "Mac-Studio")];
+        library.directories = vec![folder("Firetower", true)];
+        library.skills = vec![skill("sk1", "dataviz", "d/firetower/dataviz")];
+
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                // The machine in other capitals, and the skill written bare
+                // where the library has it in a directory.
+                "name: Designer\ndoes: does the thing\nmachine: mac-studio\nskills:\n  - dataviz\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        let diff = diff_of(only(&plan));
+        assert_eq!(field(diff, "machine").change, FieldChange::Unchanged);
+        assert_eq!(field(diff, "machine").after, "Mac-Studio");
+        assert_eq!(field(diff, "skills").change, FieldChange::Unchanged);
+        assert_eq!(field(diff, "skills").after, "firetower/dataviz");
+    }
+
+    /// A folder renamed is a **new profile** beside the original, said as one
+    /// rather than offered as a match: the key is the identity, and a row that
+    /// carries one has said what it is. Two profiles of one name is rarely what
+    /// somebody meant, so it is a warning — not a question that would stop the
+    /// drop.
+    #[test]
+    fn renaming_a_folder_is_a_new_profile_with_a_warning_rather_than_a_candidate() {
+        let plan = plan(
+            &dropped(vec![at("designer-2/PROFILE.md", &smallest("Designer"), "")]),
+            &here(vec![row("r1", "Designer", Some("designer"))]),
+        )
+        .unwrap();
+        let entry = only(&plan);
+        assert!(
+            matches!(entry.outcome, PlanOutcome::New(_)),
+            "{:#?}",
+            entry.outcome
+        );
+        assert_eq!(entry.warnings.len(), 1, "{:#?}", entry.warnings);
+        assert!(
+            entry.warnings[0].says.contains("already in your library"),
+            "{}",
+            entry.warnings[0].says
+        );
+        assert!(plan.appliable);
+    }
+
+    /// Criterion: an overwrite diff does not reveal old values from something
+    /// the asker cannot read. A profile shared into a directory can pin a
+    /// machine, a subscription and teammates in its author's own space.
+    #[test]
+    fn an_overwrite_diff_never_names_what_the_asker_cannot_see() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.machine = Some("h_theirs".into());
+        stored.account = Some("aa_theirs".into());
+        stored.delegate_scope = vec!["r_theirs".into()];
+        stored.skill_scope = vec!["sk_theirs".into()];
+
+        let plan = plan(
+            &dropped(vec![at("designer/PROFILE.md", &smallest("Designer"), "")]),
+            &here(vec![stored]),
+        )
+        .unwrap();
+        let diff = diff_of(only(&plan));
+        assert_eq!(field(diff, "machine").before, "a machine you cannot see");
+        assert_eq!(
+            field(diff, "account").before,
+            "a subscription you cannot see"
+        );
+        assert_eq!(
+            field(diff, "delegates_to").before,
+            "a profile you cannot see"
+        );
+        assert_eq!(field(diff, "skills").before, "a skill you cannot see");
+        for row in diff {
+            assert!(
+                !row.before.contains("theirs"),
+                "`{}` leaked an id: {}",
+                row.field,
+                row.before
+            );
+        }
+    }
+
+    /// A row they can see and cannot write is said out loud — they already
+    /// know it exists, so the only new fact is the grant they would need.
+    #[test]
+    fn a_profile_you_may_read_but_not_write_blocks() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.may_write = false;
+        stored.path = "d/fstack/designer_01m3qbzd".into();
+        let plan = plan(
+            &dropped(vec![at("designer/PROFILE.md", &smallest("Designer"), "")]),
+            &here(vec![stored]),
+        )
+        .unwrap();
+        assert!(
+            said(only(&plan)).contains("without being able to change it"),
+            "{}",
+            said(only(&plan))
+        );
+    }
+
+    /// An import cannot move a profile — `directory` is honoured when one is
+    /// created, and moving one is a sharing operation. A file that says
+    /// otherwise is told so rather than having the line quietly ignored.
+    #[test]
+    fn a_file_that_would_move_an_existing_profile_blocks() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.path = "u/kevin/designer_01m3qbzd".into();
+        let mut library = here(vec![stored]);
+        library.directories = vec![folder("Fstack", true)];
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\ndirectory: Fstack\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert!(
+            said(only(&plan)).contains("An import cannot move a profile"),
+            "{}",
+            said(only(&plan))
+        );
+    }
+
+    /// ...and one that names the directory the row is already in is content.
+    #[test]
+    fn a_file_naming_the_directory_a_profile_is_already_in_is_fine() {
+        let mut stored = row("r1", "Designer", Some("designer"));
+        stored.path = "d/fstack/designer_01m3qbzd".into();
+        let mut library = here(vec![stored]);
+        library.directories = vec![folder("Fstack", true)];
+        let plan = plan(
+            &dropped(vec![at(
+                "designer/PROFILE.md",
+                "name: Designer\ndoes: does the thing\ndirectory: Fstack\n",
+                "",
+            )]),
+            &library,
+        )
+        .unwrap();
+        assert!(
+            matches!(only(&plan).outcome, PlanOutcome::Overwrite(_)),
+            "{:#?}",
+            only(&plan).outcome
+        );
+        assert_eq!(
+            field(diff_of(only(&plan)), "directory").change,
+            FieldChange::Unchanged
+        );
+    }
+
+    // ── the drop itself ─────────────────────────────────────────────────
+
+    /// A file that fails to parse reports its error and **no field values**. It
+    /// has none to report, and expanding one into a diff would mean inventing
+    /// them.
+    #[test]
+    fn a_file_that_does_not_parse_reports_its_error_and_no_values() {
+        let plan = plan(
+            &dropped(vec![DroppedFile {
+                path: "designer/PROFILE.md".into(),
+                text: "# Designer\n\nProse, and no frontmatter.\n".into(),
+            }]),
+            &here(vec![row("r1", "Designer", Some("designer"))]),
+        )
+        .unwrap();
+        let entry = only(&plan);
+        assert_eq!(entry.name, None, "there is no name to report");
+        assert!(said(entry).contains("no frontmatter"), "{}", said(entry));
+    }
+
+    /// The five bundles `fstack` actually holds today. All five refuse, which
+    /// is the right answer — they are prose that was never connected to a live
+    /// profile — and the plan says so per file rather than failing the drop.
+    #[test]
+    fn the_five_fstack_bundles_are_each_blocked_with_their_own_sentence() {
+        let drop = fixtures("fstack");
+        assert_eq!(drop.files.len(), 5);
+        let plan = plan(&drop, &here(vec![])).unwrap();
+        assert_eq!(plan.entries.len(), 5);
+        for entry in &plan.entries {
+            assert!(
+                matches!(entry.outcome, PlanOutcome::Blocked(_)),
+                "{} should refuse: {:#?}",
+                entry.path,
+                entry.outcome
+            );
+            for problem in blocked(entry) {
+                assert_eq!(problem.path, entry.path);
+                assert!(problem.line >= 1);
+            }
+        }
+        assert!(!plan.appliable);
+        // The two that carry `description`, and the three with no frontmatter
+        // at all, get different sentences — which is the distinction a person
+        // dropping these first meets.
+        let designer = plan
+            .entries
+            .iter()
+            .find(|e| e.key == "designer")
+            .expect("the designer bundle");
+        assert!(said(designer).contains("`does`"), "{}", said(designer));
+        let engineer = plan
+            .entries
+            .iter()
+            .find(|e| e.key == "engineer")
+            .expect("the engineer bundle");
+        assert!(
+            said(engineer).contains("no frontmatter"),
+            "{}",
+            said(engineer)
+        );
+    }
+
+    /// The same five, repaired: against an empty library every one is new, and
+    /// the plan applies.
+    #[test]
+    fn the_repaired_fstack_bundles_are_five_new_profiles() {
+        let plan = plan(&fixtures("fstack-repaired"), &here(vec![])).unwrap();
+        assert_eq!(plan.entries.len(), 5);
+        for entry in &plan.entries {
+            assert!(
+                matches!(entry.outcome, PlanOutcome::New(_)),
+                "{}: {:#?}",
+                entry.path,
+                entry.outcome
+            );
+        }
+        assert!(plan.appliable);
+    }
+
+    /// Every bundle in one of the vendored sets, as a drop.
+    fn fixtures(set: &str) -> ProfileDrop {
+        let root = std::path::Path::new("../../fixtures/profiles").join(set);
+        let mut files = Vec::new();
+        for folder in std::fs::read_dir(&root).expect("the fixtures") {
+            let folder = folder.unwrap().path();
+            let file = folder.join("PROFILE.md");
+            if !file.is_file() {
+                continue;
+            }
+            files.push(DroppedFile {
+                path: format!(
+                    "profiles/{}/PROFILE.md",
+                    folder.file_name().unwrap().to_string_lossy()
+                ),
+                text: std::fs::read_to_string(&file).unwrap(),
+            });
+        }
+        dropped(files)
+    }
+
+    /// A bundle is a folder with a `PROFILE.md` in it. Everything else in the
+    /// drop is named as ignored rather than dropped silently, and a file whose
+    /// name only folds onto that spelling is a bundle that would otherwise
+    /// vanish without a word.
+    #[test]
+    fn what_is_a_bundle_and_what_is_not() {
+        let plan = plan(
+            &dropped(vec![
+                at("profiles/designer/PROFILE.md", &smallest("Designer"), ""),
+                DroppedFile {
+                    path: "profiles/README.md".into(),
+                    text: "Our profiles.".into(),
+                },
+                DroppedFile {
+                    path: "profiles/.DS_Store".into(),
+                    text: String::new(),
+                },
+                at("profiles/qa/profile.md", &smallest("QA"), ""),
+                at("PROFILE.md", &smallest("Loose"), ""),
+            ]),
+            &here(vec![]),
+        )
+        .unwrap();
+        assert_eq!(
+            plan.ignored,
+            vec![
+                "profiles/.DS_Store".to_string(),
+                "profiles/README.md".into()
+            ]
+        );
+        let lower = plan
+            .entries
+            .iter()
+            .find(|e| e.path.ends_with("profile.md"))
+            .expect("a bundle, not an ignored file");
+        assert!(
+            said(lower).contains("spelled `PROFILE.md`, in capitals"),
+            "{}",
+            said(lower)
+        );
+        let loose = plan
+            .entries
+            .iter()
+            .find(|e| e.path == "PROFILE.md")
+            .expect("the loose file");
+        assert!(
+            said(loose).contains("not inside a folder"),
+            "{}",
+            said(loose)
+        );
+    }
+
+    /// The bounds are the endpoint's, and every refusal names the limit it is —
+    /// a refusal that does not leaves somebody guessing which half of their
+    /// drop to cut.
+    #[test]
+    fn the_bounds_refuse_the_whole_drop_and_name_the_limit() {
+        let one = |path: &str, text: String| ProfileDrop {
+            files: vec![DroppedFile {
+                path: path.into(),
+                text,
+            }],
+            answers: vec![],
+        };
+
+        let many = ProfileDrop {
+            files: (0..MOST_FILES + 1)
+                .map(|n| DroppedFile {
+                    path: format!("p{n}/PROFILE.md"),
+                    text: String::new(),
+                })
+                .collect(),
+            answers: vec![],
+        };
+        let refused = plan(&many, &here(vec![])).expect_err("too many files");
+        assert!(
+            refused.0.contains(&format!("at most {MOST_FILES}")),
+            "{}",
+            refused.0
+        );
+
+        let big = plan(
+            &one("designer/PROFILE.md", "x".repeat(BIGGEST_FILE + 1)),
+            &here(vec![]),
+        )
+        .expect_err("too big a file");
+        assert!(
+            big.0
+                .contains(&format!("at most {} KB", BIGGEST_FILE / 1024)),
+            "{}",
+            big.0
+        );
+
+        let deep = plan(
+            &one(
+                &format!("{}/designer/PROFILE.md", "a/".repeat(DEEPEST)),
+                String::new(),
+            ),
+            &here(vec![]),
+        )
+        .expect_err("too deep");
+        assert!(deep.0.contains(&format!("at most {DEEPEST}")), "{}", deep.0);
+
+        let out = plan(&one("../../etc/PROFILE.md", String::new()), &here(vec![]))
+            .expect_err("climbing out");
+        assert!(
+            out.0.contains("inside the folder that was dropped"),
+            "{}",
+            out.0
+        );
+
+        let twice = plan(
+            &dropped(vec![
+                at("designer/PROFILE.md", &smallest("Designer"), ""),
+                at("designer/PROFILE.md", &smallest("Designer"), ""),
+            ]),
+            &here(vec![]),
+        )
+        .expect_err("the same path twice");
+        assert!(twice.0.contains("is in this drop twice"), "{}", twice.0);
+
+        let total = ProfileDrop {
+            files: (0..40)
+                .map(|n| DroppedFile {
+                    path: format!("p{n}/PROFILE.md"),
+                    text: "x".repeat(BIGGEST_FILE),
+                })
+                .collect(),
+            answers: vec![],
+        };
+        let over = plan(&total, &here(vec![])).expect_err("too much at once");
+        assert!(
+            over.0
+                .contains(&format!("{} MB", BIGGEST_DROP / 1024 / 1024)),
+            "{}",
+            over.0
+        );
+    }
+
+    /// An empty drop is not appliable: there is nothing in it to apply.
+    #[test]
+    fn a_drop_with_no_bundles_in_it_applies_nothing() {
+        let plan = plan(&dropped(vec![]), &here(vec![])).unwrap();
+        assert!(plan.entries.is_empty());
+        assert!(!plan.appliable);
+    }
+
+    /// The limits travel with the plan, so a client can refuse before it asks
+    /// rather than after.
+    #[test]
+    fn the_plan_says_what_the_endpoint_will_take() {
+        let plan = plan(&dropped(vec![]), &here(vec![])).unwrap();
+        assert_eq!(plan.limits.files, MOST_FILES);
+        assert_eq!(plan.limits.file_bytes, BIGGEST_FILE);
+        assert_eq!(plan.limits.total_bytes, BIGGEST_DROP);
+        assert_eq!(plan.limits.depth, DEEPEST);
     }
 }

@@ -234,7 +234,7 @@ export const PlanRoleImportResponse = zod.object({
   "path": zod.string().describe('Where it is filed, for a person to read: `u/kevin/designer_01m3qbzd`.')
 }).describe('An existing profile, as a plan draws it.\n\n**For display, and for one echo.** The id is how a review links to the row\nand the only value a client may send back — as the answer to a candidate,\nwhich is re-resolved and re-authorised on the way in. Nothing downstream\nreads an id out of a plan to decide what to write.'),
   "says": zod.string().describe('The same thing in a sentence, so a review can draw the reason without a\ntable of its own and a client that has never heard of a new [`ProposalWhy`]\nstill has something to show.'),
-  "why": zod.enum(['name', 'nearName', 'likeName', 'otherKey', 'sameKey']).describe('Why a profile was proposed.')
+  "why": zod.enum(['name', 'nearName', 'likeName', 'sameKey']).describe('Why a profile was proposed.')
 }).describe('One existing profile a bundle may be, and why it was proposed.')).describe('What it might be. Usually one.\n\nMore than one is not a hypothetical: names are not unique, so two\nprofiles the asker can see may both answer to the name in this file, and\nan importer that picked the first would be guessing on their behalf.')
 }).describe('It may be an existing profile, and the importer must not decide.\n**Unanswered**, and an unanswered candidate makes the plan unappliable.').and(zod.object({
   "kind": zod.enum(['candidate'])
