@@ -113,6 +113,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest as _, Sha256};
 use utoipa::ToSchema;
 
 use super::profile_md::{self, Field, Reading, Setting, Spelled, Spot};
@@ -180,6 +181,144 @@ pub enum CandidateDecision {
     NewProfile,
 }
 
+// ── what an accept takes, and what it says it did ──────────────────────
+
+/// A drop somebody has reviewed and accepted.
+///
+/// **The drop, plus the fingerprint of what they were shown.** The resolution
+/// inputs are the plan endpoint's own and nothing more: the same files, the
+/// same answers, read and resolved again by the same function. The one thing
+/// added is [`ImportPlan::digest`], which cannot widen anything — a caller who
+/// tampers with it gets a refusal, and a caller who sends the right one still
+/// has every write re-derived and re-authorised against what they can see at
+/// that moment.
+///
+/// There is deliberately no way to send a plan: no outbound type derives
+/// `Deserialize`, so an endpoint that accepted one could not be written
+/// without somebody adding the derive and reading the module doc above.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptedDrop {
+    /// The files and the answers, exactly as [`plan`] takes them.
+    pub drop: ProfileDrop,
+    /// The `digest` of every entry being imported.
+    ///
+    /// The whole of what the plan derived from these files, which is what
+    /// makes leaving a row out work: its file is not sent, so it is not in the
+    /// plan derived here either, and the rows that remain still fingerprint to
+    /// what was on screen.
+    pub reviewed: Vec<String>,
+}
+
+/// What an apply wrote, profile by profile.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportDone {
+    /// One per bundle, in the plan's order.
+    pub wrote: Vec<WroteProfile>,
+}
+
+/// One profile, after the write.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct WroteProfile {
+    /// The file it came from.
+    pub path: String,
+    /// The folder's name, which the row now carries as its key.
+    pub key: String,
+    /// The profile's id, whether it was made now or already here.
+    pub profile: String,
+    pub name: String,
+    /// Whether this made a profile. False is an overwrite in place, which
+    /// includes a rename.
+    pub created: bool,
+}
+
+// ── what an apply does, derived from the files and nowhere else ─────────
+
+/// A plan, and the writes behind it.
+///
+/// **Neither half is `Serialize` or `Deserialize`.** `writes` never leaves the
+/// process: a list of operations with their targets resolved is exactly the
+/// shape whose obvious use is to accept it from a client, which is the first
+/// finding of this feature's threat model. It is derived twice from the files
+/// instead, once to show and once to write.
+pub struct Decided {
+    pub plan: ImportPlan,
+    /// One per bundle that would be written, in the plan's order. **Empty
+    /// whenever the plan is not appliable**, because the set applies as one.
+    pub writes: Vec<Write>,
+}
+
+/// One profile an apply would write.
+pub struct Write {
+    /// The file it came from: the plan entry's identity, and what a refusal
+    /// about this profile points at.
+    pub path: String,
+    /// The folder's name. The key the row carries after the write.
+    pub key: String,
+    /// Whether this makes a profile or replaces one, and which one.
+    pub onto: Onto,
+    /// Every column but the team, with every name resolved to an id.
+    pub asked: crate::roles::NewRole,
+    /// The directory a new profile is filed in, as the asker can see it.
+    /// `None` is their own space. Never read for an overwrite: an import
+    /// cannot move a profile.
+    pub filed: Option<Dir>,
+    /// The teammates the file names, as resolution found them.
+    pub team: Vec<Teammate>,
+}
+
+/// What a bundle is being written onto.
+pub enum Onto {
+    /// Nothing here is this profile.
+    Create,
+    /// This row, as it stood when the plan was derived.
+    Replace {
+        profile: String,
+        /// What to check the row against before overwriting it. Compared
+        /// inside the transaction, so a profile that moved, or that somebody
+        /// else edited, refuses rather than being overwritten blind.
+        was: crate::roles::Standing,
+        /// Whether the row has no key of its own and gains this one.
+        adopts_key: bool,
+    },
+}
+
+/// One teammate a profile delegates to.
+///
+/// Two cases because of the two passes: a name may belong to a profile that is
+/// already here, or to another bundle in the same drop whose id only exists
+/// once the first pass has written it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Teammate {
+    /// A profile already here, by id.
+    Here(String),
+    /// Another bundle in this drop, by the path of its file.
+    InDrop(String),
+}
+
+/// What one file's names came to, once resolved against what the asker sees.
+///
+/// Filled by [`resolve`] as it checks each one, which is what keeps the ids an
+/// apply writes and the refusals a review draws from being two readings of the
+/// same question. A name that does not resolve puts a problem in the plan, and
+/// a bundle with a problem is blocked and has no write at all — so a resolved
+/// set shorter than what the file wrote is not something a caller can reach.
+#[derive(Debug, Clone, Default)]
+struct Resolved {
+    /// The machine it runs on, by host id.
+    machine: Option<String>,
+    /// The subscription it spends, by account id.
+    account: Option<String>,
+    /// The skills it loads, by id, in the order the file names them.
+    skills: Vec<String>,
+    /// Where a new profile is filed.
+    directory: Option<Dir>,
+    /// Its team, in the order the file names it.
+    team: Vec<Teammate>,
+}
+
 // ── the limits, which are the endpoint's and not the client's ───────────
 
 /// The most files one drop may hold.
@@ -215,7 +354,9 @@ pub struct PlanLimits {
 }
 
 impl PlanLimits {
-    fn ours() -> Self {
+    /// This endpoint's own bounds. `pub` because a client is told them before
+    /// it drops anything — `api::roles::role_import_limits`.
+    pub fn ours() -> Self {
         Self {
             files: MOST_FILES,
             file_bytes: BIGGEST_FILE,
@@ -269,6 +410,27 @@ pub struct PlanEntry {
     /// Worth saying and not worth stopping for. A warning never makes a plan
     /// unappliable.
     pub warnings: Vec<PlanProblem>,
+    /// A fingerprint of this entry, which an accept hands back for every row
+    /// it is importing.
+    ///
+    /// **Not a plan and not a capability.** It conveys no authority: the apply
+    /// reads the files again, resolves them again and re-authorises every
+    /// write, and only then checks that what it derived is what was reviewed.
+    /// The one thing a fingerprint can do is make an apply *refuse*.
+    ///
+    /// Per entry rather than per plan because excluding a row is a thing a
+    /// person does: the rows that are left are unchanged by it, so they still
+    /// match — and a row whose meaning *did* change, because the bundle it
+    /// named a teammate in is the one that was left out, does not, and is
+    /// refused rather than written unreviewed.
+    ///
+    /// It is also why conflict detection does not rest on `updated_at`. Filing
+    /// a profile moves its path without touching that timestamp, and deleting
+    /// a machine clears a pin through a foreign key without touching it
+    /// either. Both change an entry — its target's path, a `before` column in
+    /// a diff — so both change this, and nobody has to remember to add a field
+    /// to a staleness check.
+    pub digest: String,
 }
 
 /// The five things a bundle can be.
@@ -667,12 +829,27 @@ fn line_of(spelled: &Spelled, spot: Spot) -> usize {
 /// bound, named — and is the one answer that is not a plan: there is nothing to
 /// classify when the input is larger than the endpoint takes.
 pub fn plan(drop: &ProfileDrop, here: &Here) -> Result<ImportPlan, Refused> {
+    Ok(decide(drop, here)?.plan)
+}
+
+/// The same reading of the same drop, with the writes it comes to.
+///
+/// **One function, two callers, no second reader.** The plan a person reviews
+/// and the writes an apply performs are the same classification: the apply
+/// calls this over the files it was handed and uses `writes`, and the plan
+/// endpoint calls it and throws them away. A second derivation of "which row
+/// is this bundle" is how a review comes to show one thing and an apply to do
+/// another.
+pub fn decide(drop: &ProfileDrop, here: &Here) -> Result<Decided, Refused> {
     check(drop)?;
 
     let (bundles, ignored) = bundles_in(drop);
     let mut entries: Vec<PlanEntry> = Vec::new();
+    let mut writes: Vec<Write> = Vec::new();
     for bundle in &bundles {
-        entries.push(classify(bundle, &bundles, drop, here));
+        let (entry, write) = classify(bundle, &bundles, drop, here);
+        entries.push(entry);
+        writes.extend(write);
     }
     same_target_blocks(&mut entries);
     same_name_warnings(&mut entries);
@@ -683,13 +860,43 @@ pub fn plan(drop: &ProfileDrop, here: &Here) -> Result<ImportPlan, Refused> {
     // empty drop came back unappliable and silent, and a screen given no
     // sentence draws a dead button with nothing beside it.
     let why_not = why_not(&entries, &ignored);
-    Ok(ImportPlan {
-        appliable: why_not.is_empty(),
-        why_not,
-        entries,
-        ignored,
-        limits: PlanLimits::ours(),
+
+    // **The set applies as one, so a reason not to takes every write with
+    // it.** `same_target_blocks` runs after classification and can turn an
+    // entry down once the drop is seen whole, so the writes are discarded
+    // here, where the reasons are counted, rather than filtered one by one
+    // somewhere that would have to remember to.
+    if !why_not.is_empty() {
+        writes.clear();
+    }
+
+    // **Last, after every pass that can still change an entry.** Two of them
+    // run over the whole drop once each bundle is classified, and a
+    // fingerprint taken before they do would be of a row nobody was shown.
+    for entry in &mut entries {
+        entry.digest = fingerprint(entry);
+    }
+
+    Ok(Decided {
+        plan: ImportPlan {
+            appliable: why_not.is_empty(),
+            why_not,
+            entries,
+            ignored,
+            limits: PlanLimits::ours(),
+        },
+        writes,
     })
+}
+
+/// What one entry comes to, as a string a client can hand back.
+///
+/// Over the entry's own JSON with its `digest` still empty, which is how both
+/// sides agree without either holding a second list of what counts: everything
+/// the review drew of this row is in it, and nothing else is.
+fn fingerprint(entry: &PlanEntry) -> String {
+    let drawn = serde_json::to_vec(entry).expect("an entry serialises");
+    format!("{:x}", Sha256::digest(&drawn))
 }
 
 /// The bounds.
@@ -876,27 +1083,36 @@ fn bundles_in(drop: &ProfileDrop) -> (Vec<Bundle>, Vec<String>) {
     (bundles, ignored)
 }
 
-/// One bundle, classified.
+/// One bundle, classified — and the write behind it, when it has one.
+///
+/// The write is `None` for anything an apply must not perform: a blocked
+/// bundle, and a candidate nobody has answered. So "what the review shows" and
+/// "what the apply writes" cannot come apart: they are the two halves of one
+/// return value.
 fn classify(
     bundle: &Bundle,
     drop_bundles: &[Bundle],
     drop: &ProfileDrop,
     here: &Here,
-) -> PlanEntry {
+) -> (PlanEntry, Option<Write>) {
     let said = match &bundle.said {
         // A file that does not parse reports its error and **no field values**.
         // It has none to report, and expanding one into a diff would mean
         // inventing them.
         Err(problems) => {
-            return PlanEntry {
-                path: bundle.path.clone(),
-                key: bundle.key.clone(),
-                name: None,
-                outcome: PlanOutcome::Blocked(PlanBlocked {
-                    problems: sorted(problems.clone()),
-                }),
-                warnings: Vec::new(),
-            }
+            return (
+                PlanEntry {
+                    path: bundle.path.clone(),
+                    key: bundle.key.clone(),
+                    name: None,
+                    outcome: PlanOutcome::Blocked(PlanBlocked {
+                        problems: sorted(problems.clone()),
+                    }),
+                    warnings: Vec::new(),
+                    digest: String::new(),
+                },
+                None,
+            )
         }
         Ok(said) => said,
     };
@@ -925,24 +1141,38 @@ fn classify(
     }
 
     let matched = match_one(bundle, said, drop, here, &mut problems);
-    problems.extend(resolve(bundle, said, drop_bundles, here, &matched));
+    let mut resolved = Resolved::default();
+    problems.extend(resolve(
+        bundle,
+        said,
+        drop_bundles,
+        here,
+        &matched,
+        &mut resolved,
+    ));
 
     if !problems.is_empty() {
-        return PlanEntry {
-            path: bundle.path.clone(),
-            key: bundle.key.clone(),
-            name: Some(said.profile.name.clone()),
-            outcome: PlanOutcome::Blocked(PlanBlocked {
-                problems: sorted(problems),
-            }),
-            warnings: Vec::new(),
-        };
+        return (
+            PlanEntry {
+                path: bundle.path.clone(),
+                key: bundle.key.clone(),
+                name: Some(said.profile.name.clone()),
+                outcome: PlanOutcome::Blocked(PlanBlocked {
+                    problems: sorted(problems),
+                }),
+                warnings: Vec::new(),
+                digest: String::new(),
+            },
+            None,
+        );
     }
 
     let mut warnings = said_about_settings(bundle, said);
+    let mut write = None;
     let outcome = match matched {
         Matched::Create { answered } => {
             warnings.extend(same_name_as_the_library(bundle, said, here));
+            write = Some(written_as(bundle, said, Onto::Create, &mut resolved));
             PlanOutcome::New(PlanNew {
                 filed: filed_where(said, here),
                 answered,
@@ -955,6 +1185,16 @@ fn classify(
             answered,
         } => {
             let diff = diff(said, row, here);
+            write = Some(written_as(
+                bundle,
+                said,
+                Onto::Replace {
+                    profile: row.id.clone(),
+                    was: standing_of(row),
+                    adopts_key,
+                },
+                &mut resolved,
+            ));
             if row.name.trim() == said.profile.name {
                 PlanOutcome::Overwrite(PlanOverwrite {
                     profile: target(row),
@@ -975,12 +1215,78 @@ fn classify(
         }
     };
 
-    PlanEntry {
+    (
+        PlanEntry {
+            path: bundle.path.clone(),
+            key: bundle.key.clone(),
+            name: Some(said.profile.name.clone()),
+            outcome,
+            warnings,
+            digest: String::new(),
+        },
+        write,
+    )
+}
+
+/// The write one classified bundle comes to.
+///
+/// Every column the file describes, with the resolutions resolution already
+/// performed. The team is left off `asked` and carried beside it: it is the
+/// second pass, because a profile's team may name a profile from this same
+/// drop.
+fn written_as(bundle: &Bundle, said: &Reading, onto: Onto, resolved: &mut Resolved) -> Write {
+    Write {
         path: bundle.path.clone(),
         key: bundle.key.clone(),
-        name: Some(said.profile.name.clone()),
-        outcome,
-        warnings,
+        onto,
+        asked: asked_for(said, resolved),
+        filed: resolved.directory.take(),
+        team: std::mem::take(&mut resolved.team),
+    }
+}
+
+/// A file as the columns of a profile.
+///
+/// **Every field is spelled out, including the ones the file left absent.** The
+/// codec has already resolved an absent key to its documented default, and the
+/// four `Option` fields on [`crate::roles::NewRole`] mean "leave this as it is"
+/// on the write path — so passing them through as `None` would make a deleted
+/// line change nothing, when a deleted line is exactly what a reset is. The
+/// review draws it as a reset and this is the half that performs one.
+fn asked_for(said: &Reading, resolved: &Resolved) -> crate::roles::NewRole {
+    let profile = &said.profile;
+    crate::roles::NewRole {
+        name: profile.name.clone(),
+        does: profile.does.clone(),
+        placement: profile.placement.spelling().to_string(),
+        agent: profile.engine.map(|engine| format!("{engine:?}")),
+        machine: resolved.machine.clone(),
+        account: resolved.account.clone(),
+        settings: profile.settings.clone(),
+        instructions: profile.instructions.clone(),
+        on_usage_limit: Some(profile.on_usage_limit.spelling().to_string()),
+        on_child_limit: Some(profile.on_child_limit.spelling().to_string()),
+        can_delegate: profile.can_delegate,
+        // The second pass writes it. Empty here is not "no teammates" —
+        // `delegate_scope = []` means any profile the owner can see — which is
+        // why these two passes are one transaction and never two calls.
+        delegate_scope: Vec::new(),
+        include_always_on: Some(profile.include_always_on),
+        include_repo_defaults: Some(profile.include_repo_defaults),
+        skill_scope: resolved.skills.clone(),
+        // Filing is the apply's, from `Write::filed`, and it is a slug there
+        // rather than the id this field takes. An import cannot move a
+        // profile, so this would be the wrong field to say it with.
+        directory: None,
+    }
+}
+
+/// A row as the plan found it, for the apply to check against before it writes.
+fn standing_of(row: &Role) -> crate::roles::Standing {
+    crate::roles::Standing {
+        path: row.path.clone(),
+        key: row.key.clone(),
+        updated_at: row.updated_at,
     }
 }
 
@@ -1268,6 +1574,11 @@ fn resolve(
     drop_bundles: &[Bundle],
     here: &Here,
     matched: &Matched,
+    // **What it resolved to, recorded where it is checked.** An apply writes
+    // ids and a review draws refusals, and both are this one walk: a second
+    // function that resolved the same names again is how the two come to
+    // disagree about which machine a file meant.
+    came_to: &mut Resolved,
 ) -> Vec<PlanProblem> {
     let p = &bundle.path;
     let mut out: Vec<PlanProblem> = Vec::new();
@@ -1299,7 +1610,7 @@ fn resolve(
                     dir.name
                 ),
             )),
-            Some(_) => {}
+            Some(dir) => came_to.directory = Some(dir.clone()),
         },
         // An existing profile is overwritten **where it already is**, and a
         // file naming a different directory is making a claim the import
@@ -1377,8 +1688,8 @@ fn resolve(
         let found: Vec<&Named> = among(wrote, &here.machines, |m| &m.name);
         let line = line_of(&said.spelled, Spot::Field(Field::Machine));
         let key = Some(Field::Machine.spelling().to_string());
-        match found.len() {
-            1 => {}
+        match found.as_slice() {
+            [one] => came_to.machine = Some(one.id.clone()),
             // **The third state**, and the one place the plan tells any two
             // apart: see the module doc. A retired machine is on the asker's
             // own Compute screen, so saying it left the fleet answers nothing
@@ -1387,17 +1698,19 @@ fn resolve(
             // decommissioned machine. The two states above it stay one
             // sentence, which is the enumeration oracle the threat model is
             // about. Both block: nothing runs on a machine that is gone.
-            0 if !among(wrote, &here.retired, |m| &m.name).is_empty() => out.push(PlanProblem::at(
-                p,
-                line,
-                key,
-                format!(
-                    "`{wrote}` was removed from the fleet, so nothing runs there any more. \
+            [] if !among(wrote, &here.retired, |m| &m.name).is_empty() => {
+                out.push(PlanProblem::at(
+                    p,
+                    line,
+                    key,
+                    format!(
+                        "`{wrote}` was removed from the fleet, so nothing runs there any more. \
                          Write a machine that is still in it, or `~` to leave the choice to \
                          whichever lead delegates to it."
-                ),
-            )),
-            0 => out.push(PlanProblem::at(
+                    ),
+                ))
+            }
+            [] => out.push(PlanProblem::at(
                 p,
                 line,
                 key,
@@ -1409,13 +1722,14 @@ fn resolve(
             // Ambiguity is not absence, and saying "not available to you" about
             // something there are two of would be a sentence nobody could act
             // on. Only names the asker can already see are in `found`.
-            n => out.push(PlanProblem::at(
+            many => out.push(PlanProblem::at(
                 p,
                 line,
                 key,
                 format!(
-                    "{n} machines you can see are called `{wrote}`, so this cannot say which one \
-                     to run on. Rename one in Compute."
+                    "{} machines you can see are called `{wrote}`, so this cannot say which one \
+                     to run on. Rename one in Compute.",
+                    many.len()
                 ),
             )),
         }
@@ -1461,8 +1775,12 @@ fn resolve(
             )),
             _ => None,
         };
-        if let Some(says) = says {
-            out.push(PlanProblem::at(p, line, key, says));
+        match (says, found.as_slice()) {
+            (Some(says), _) => out.push(PlanProblem::at(p, line, key, says)),
+            (None, [one]) => came_to.account = Some(one.id.clone()),
+            // Nothing wrong and nothing found is not reachable: every arm
+            // above that leaves `says` empty has matched exactly one.
+            (None, _) => {}
         }
     }
 
@@ -1475,10 +1793,13 @@ fn resolve(
             .iter()
             .filter(|r| folded(&r.name) == folded(wrote))
             .collect();
-        let in_drop = drop_bundles.iter().any(|b| match &b.said {
-            Ok(other) => folded(&other.profile.name) == folded(wrote),
-            Err(_) => false,
-        });
+        let in_drop: Vec<&Bundle> = drop_bundles
+            .iter()
+            .filter(|b| match &b.said {
+                Ok(other) => folded(&other.profile.name) == folded(wrote),
+                Err(_) => false,
+            })
+            .collect();
         let key = Some(format!("{}[{n}]", Field::DelegatesTo.spelling()));
 
         // **A profile naming itself is refused. A cycle between profiles is
@@ -1528,11 +1849,41 @@ fn resolve(
             continue;
         }
 
-        if in_drop {
-            continue;
+        // **The drop answers first, and two bundles of one name is a
+        // question.** A folder being imported is the library the file was
+        // written against, so a teammate in it is that bundle rather than a
+        // namesake already here — which is also why a second profile of that
+        // name only warns (`same_name_as_the_library`). What the drop cannot
+        // do is answer twice: two bundles called `Designer` are two profiles,
+        // and picking the one that sorted first would be this resolver
+        // guessing an identity, which is the one thing it exists not to do.
+        match in_drop.as_slice() {
+            [] => {}
+            [one] => {
+                came_to.team.push(Teammate::InDrop(one.path.clone()));
+                continue;
+            }
+            many => {
+                out.push(PlanProblem::at(
+                    p,
+                    line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
+                    key,
+                    format!(
+                        "{} bundles in this drop are called `{wrote}`: {}. A profile delegates \
+                         to one of them, and a file has no way to say which. Rename one of the \
+                         folders, or remove the entry.",
+                        many.len(),
+                        many.iter()
+                            .map(|b| format!("`{}`", briefly(&b.path)))
+                            .collect::<Vec<_>>()
+                            .join(" and ")
+                    ),
+                ));
+                continue;
+            }
         }
         match here_now.as_slice() {
-            [_] => {}
+            [one] => came_to.team.push(Teammate::Here(one.id.clone())),
             [] => out.push(PlanProblem::at(
                 p,
                 line_of(&said.spelled, Spot::Entry(Field::DelegatesTo, n)),
@@ -1640,6 +1991,8 @@ fn resolve(
             )),
         }
     }
+
+    came_to.skills = resolved.iter().map(|(s, _)| s.id.clone()).collect();
 
     // Two skills of one name, however they were written. A skill's folder on a
     // worker **is** its name, so only one of the two could be written and

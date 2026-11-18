@@ -19,7 +19,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronLeft, FolderDown, Loader2, Plus, Puzzle, Search, ShieldAlert, Sparkles, Trash2, TriangleAlert, UserPlus } from "lucide-react";
-import { Blank, Note, Rows, Section, Typed } from "~/ui/config/bits";
+import { Blank, Dropping, Note, Rows, Section, Typed } from "~/ui/config/bits";
 import { ShareMany, WhoCanAccess } from "~/ui/Sharing";
 import { AddSkill } from "~/ui/AddSkill";
 import { CreateMenu } from "~/ui/config/CreateMenu";
@@ -260,7 +260,9 @@ export function Skills({ open: asked = null }: { open?: string | null }) {
        pane brings its own `.pcol`, and two centred columns inside each other
        is a 770px page inside a 1120px one. */
     <div {...surface} data-wide className="pcol relative">
-      {over && <Dropping />}
+      {over && (
+        <Dropping says="One skill, a folder of them, or a .zip of either. Nothing is written until you have looked at what was found." />
+      )}
 
       <div className="phead2">
         <div className="min-w-0">
@@ -453,23 +455,6 @@ function Group({
 }
 
 /** The whole page as a drop target, said while something is over it. */
-function Dropping() {
-  return (
-    <div className="drop">
-      <div>
-        <span className="mx-auto grid h-14 w-14 place-items-center text-dim">
-          <FolderDown className="h-7 w-7" strokeWidth={1.5} />
-        </span>
-        <b className="mt-2 block text-lede font-mid text-bone">Drop the folder</b>
-        <p className="mt-1 max-w-[46ch] text-ui text-dim">
-          One skill, a folder of them, or a .zip of either. Nothing is written until you have looked
-          at what was found.
-        </p>
-      </div>
-    </div>
-  );
-}
-
 /**
  * Two letters from the name: identity by shape, never a hue.
  *

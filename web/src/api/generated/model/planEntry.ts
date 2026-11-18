@@ -12,6 +12,29 @@ import type { PlanProblem } from './planProblem';
  * One bundle, and what would happen to it.
  */
 export interface PlanEntry {
+  /**
+     * A fingerprint of this entry, which an accept hands back for every row
+     * it is importing.
+     *
+     * **Not a plan and not a capability.** It conveys no authority: the apply
+     * reads the files again, resolves them again and re-authorises every
+     * write, and only then checks that what it derived is what was reviewed.
+     * The one thing a fingerprint can do is make an apply *refuse*.
+     *
+     * Per entry rather than per plan because excluding a row is a thing a
+     * person does: the rows that are left are unchanged by it, so they still
+     * match — and a row whose meaning *did* change, because the bundle it
+     * named a teammate in is the one that was left out, does not, and is
+     * refused rather than written unreviewed.
+     *
+     * It is also why conflict detection does not rest on `updated_at`. Filing
+     * a profile moves its path without touching that timestamp, and deleting
+     * a machine clears a pin through a foreign key without touching it
+     * either. Both change an entry — its target's path, a `before` column in
+     * a diff — so both change this, and nobody has to remember to add a field
+     * to a staleness check.
+     */
+  digest: string;
   /** The folder's name: this bundle's key, and the profile's identity. */
   key: string;
   /**

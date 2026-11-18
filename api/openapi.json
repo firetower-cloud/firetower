@@ -3542,6 +3542,90 @@
         }
       }
     },
+    "/api/v1/roles/import/apply": {
+      "post": {
+        "tags": [
+          "roles"
+        ],
+        "summary": "Apply a drop somebody has reviewed.",
+        "description": "**The plan is a presentation, and this is where that pays for itself.** The\ninput is the plan endpoint's input plus the fingerprint of what was shown:\nno resolved ids, no overwrite targets, no permission flags. Every write\nbelow is derived here, by `import::decide` over those same files and a\nsnapshot of what this person can see *now*, and then authorised again\nagainst the row it would overwrite inside the transaction that overwrites\nit.\n\nThree gates, in this order, and each one answers a different question:\n\n1. **Is this drop appliable at all**, as read at this moment? A bundle that\n   has become blocked since the review stops the set.\n2. **Is it still what was reviewed?** The fingerprint of every entry\n   derived here against the ones handed back. A profile that was filed\n   elsewhere, or whose pinned machine was deleted, changes an entry without\n   changing `updated_at` — see [`import::PlanEntry::digest`].\n3. **May this person still perform each write?** Writer on every row\n   overwritten and Editor on the directory anything new is filed in, read\n   inside the transaction, plus `check_account` and `check_skills` — the\n   same two the editor's own save goes through, so an import cannot be a\n   way around either.\n\nThen one transaction, two passes: every profile written, then every team\nwired, because a team may name a profile from the same drop. The set\napplies whole or not at all.",
+        "operationId": "apply_role_import",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptedDrop"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportDone"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/roles/import/limits": {
+      "get": {
+        "tags": [
+          "roles"
+        ],
+        "summary": "What an import will take, before anything is dropped.",
+        "description": "**So a client can refuse before it asks rather than after**, which is what\n[`import::PlanLimits`] has always said it was for and what nothing could\nread until there was an endpoint for it. The desktop needs the figures\n*before* it expands an archive: a zip that unpacks into more than this is a\ndrop that is refused, and inflating it first to find that out is the denial\nof service the threat model's fifth finding is about.\n\nThe same figures the plan carries, from the same constants. Nothing about\nthis installation is in them, so it needs no authorisation beyond being\nsigned in.",
+        "operationId": "role_import_limits",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlanLimits"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/roles/import/plan": {
       "post": {
         "tags": [
@@ -9244,6 +9328,27 @@
   },
   "components": {
     "schemas": {
+      "AcceptedDrop": {
+        "type": "object",
+        "description": "A drop somebody has reviewed and accepted.\n\n**The drop, plus the fingerprint of what they were shown.** The resolution\ninputs are the plan endpoint's own and nothing more: the same files, the\nsame answers, read and resolved again by the same function. The one thing\nadded is [`ImportPlan::digest`], which cannot widen anything — a caller who\ntampers with it gets a refusal, and a caller who sends the right one still\nhas every write re-derived and re-authorised against what they can see at\nthat moment.\n\nThere is deliberately no way to send a plan: no outbound type derives\n`Deserialize`, so an endpoint that accepted one could not be written\nwithout somebody adding the derive and reading the module doc above.",
+        "required": [
+          "drop",
+          "reviewed"
+        ],
+        "properties": {
+          "drop": {
+            "$ref": "#/components/schemas/ProfileDrop",
+            "description": "The files and the answers, exactly as [`plan`] takes them."
+          },
+          "reviewed": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The `digest` of every entry being imported.\n\nThe whole of what the plan derived from these files, which is what\nmakes leaving a row out work: its file is not sent, so it is not in the\nplan derived here either, and the rows that remain still fingerprint to\nwhat was on screen."
+          }
+        }
+      },
       "AccessEntry": {
         "type": "object",
         "description": "One line of the access log.",
@@ -12573,6 +12678,22 @@
         ],
         "description": "How somebody came by the access they have to a directory.\n\nNot `Route`, which is taken: the sharing sheet already has one, meaning\n*owner, directory or exception*. Two schemas of the same name do not\ncollide loudly — one silently replaces the other in every generated client,\nand the first sign is a field typed as something unrelated.\n\nFlattened, `directory_access` answers *what* they may do and loses *why* —\nwhich is the only thing that matters when the question is how to take it\naway. Revoking a grant that was never theirs to begin with changes nothing;\nthe team is what has to be left."
       },
+      "ImportDone": {
+        "type": "object",
+        "description": "What an apply wrote, profile by profile.",
+        "required": [
+          "wrote"
+        ],
+        "properties": {
+          "wrote": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WroteProfile"
+            },
+            "description": "One per bundle, in the plan's order."
+          }
+        }
+      },
       "ImportPlan": {
         "type": "object",
         "description": "What a drop would do, bundle by bundle.",
@@ -14078,9 +14199,14 @@
           "path",
           "key",
           "outcome",
-          "warnings"
+          "warnings",
+          "digest"
         ],
         "properties": {
+          "digest": {
+            "type": "string",
+            "description": "A fingerprint of this entry, which an accept hands back for every row\nit is importing.\n\n**Not a plan and not a capability.** It conveys no authority: the apply\nreads the files again, resolves them again and re-authorises every\nwrite, and only then checks that what it derived is what was reviewed.\nThe one thing a fingerprint can do is make an apply *refuse*.\n\nPer entry rather than per plan because excluding a row is a thing a\nperson does: the rows that are left are unchanged by it, so they still\nmatch — and a row whose meaning *did* change, because the bundle it\nnamed a teammate in is the one that was left out, does not, and is\nrefused rather than written unreviewed.\n\nIt is also why conflict detection does not rest on `updated_at`. Filing\na profile moves its path without touching that timestamp, and deleting\na machine clears a pin through a foreign key without touching it\neither. Both change an entry — its target's path, a `before` column in\na diff — so both change this, and nobody has to remember to add a field\nto a staleness check."
+          },
           "key": {
             "type": "string",
             "description": "The folder's name: this bundle's key, and the profile's identity."
@@ -19099,6 +19225,38 @@
             "format": "int64",
             "description": "How many times something in this workspace was killed for going over.\n\nCarried so a session can say so. Without it, a build that vanishes is a\nmystery that reads as a crash in whatever was running.",
             "minimum": 0
+          }
+        }
+      },
+      "WroteProfile": {
+        "type": "object",
+        "description": "One profile, after the write.",
+        "required": [
+          "path",
+          "key",
+          "profile",
+          "name",
+          "created"
+        ],
+        "properties": {
+          "created": {
+            "type": "boolean",
+            "description": "Whether this made a profile. False is an overwrite in place, which\nincludes a rename."
+          },
+          "key": {
+            "type": "string",
+            "description": "The folder's name, which the row now carries as its key."
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "The file it came from."
+          },
+          "profile": {
+            "type": "string",
+            "description": "The profile's id, whether it was made now or already here."
           }
         }
       }

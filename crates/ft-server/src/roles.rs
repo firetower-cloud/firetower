@@ -700,51 +700,7 @@ impl Roles {
         person_slug: &str,
         new: &NewRole,
     ) -> Result<ft_core::RoleId> {
-        let id = ft_core::RoleId::new();
-        let slug = slug_of(&new.name, id.as_str());
-        let path = format!("u.{person_slug}.{slug}");
-        sqlx::query(
-            "INSERT INTO roles \
-               (id, org_id, path, created_by, name, slug, does, \
-                placement, agent, host_id, agent_account_id, instructions, can_delegate, \
-                delegate_scope, skill_scope, include_always_on, include_repo_defaults, \
-                on_usage_limit, on_child_limit, \
-                pref_model, pref_effort, pref_mode, pref_sandbox) \
-             VALUES ($1, $2, $3::ltree, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
-                     $16, $17, $18, $19, $20, $21, $22, $23)",
-        )
-        .bind(id.as_str())
-        .bind(org)
-        .bind(&path)
-        .bind(person)
-        .bind(new.name.trim())
-        .bind(&slug)
-        .bind(new.does.trim())
-        .bind(&new.placement)
-        .bind(&new.agent)
-        .bind(new.machine.as_deref().filter(|m| !m.is_empty()))
-        .bind(new.account.as_deref().filter(|a| !a.is_empty()))
-        .bind(&new.instructions)
-        .bind(new.can_delegate)
-        .bind(&new.delegate_scope)
-        .bind(&new.skill_scope)
-        // Nothing to leave alone on a row that does not exist yet, so an
-        // absent switch resolves to the column's default.
-        .bind(new.include_always_on.unwrap_or(INHERITS))
-        .bind(new.include_repo_defaults.unwrap_or(INHERITS))
-        // Nothing to leave alone on a row that does not exist yet, so an
-        // absent grant resolves to the column's default — which is the whole
-        // of the migration and the whole of the compatibility story.
-        .bind(new.on_usage_limit.as_deref().unwrap_or(WAITS_FOR_A_PERSON))
-        .bind(new.on_child_limit.as_deref().unwrap_or(ASKS_THE_PERSON))
-        .bind(nonblank(&new.settings.model))
-        .bind(nonblank(&new.settings.effort))
-        .bind(nonblank(&new.settings.mode))
-        .bind(nonblank(&new.settings.sandbox))
-        .execute(&self.pool)
-        .await
-        .map_err(|e| written(e, new, "writing a role"))?;
-        Ok(id)
+        create_in(&self.pool, org, person, person_slug, Filing::default(), new).await
     }
 
     /// Change a role's fields. The person must be able to work in where it is filed.
@@ -758,46 +714,10 @@ impl Roles {
     pub async fn update(&self, person: &str, id: &str, new: &NewRole) -> Result<bool> {
         // Writer decides it, through the one predicate — the same gate the
         // interface drew `may_write` from.
-        let may = self.one(person, id, Level::Writer).await?.is_some();
-        if !may {
+        if !may_write_in(&self.pool, person, id).await? {
             return Ok(false);
         }
-        sqlx::query(
-            "UPDATE roles SET name=$2, does=$3, \
-               placement=$4, agent=$5, host_id=$6, agent_account_id=$7, instructions=$8, \
-               can_delegate=$9, delegate_scope=$10, skill_scope=$11, \
-               include_always_on=COALESCE($12, include_always_on), \
-               include_repo_defaults=COALESCE($13, include_repo_defaults), \
-               on_usage_limit=COALESCE($14, on_usage_limit), \
-               on_child_limit=COALESCE($15, on_child_limit), \
-               pref_model=$16, pref_effort=$17, pref_mode=$18, pref_sandbox=$19, \
-               updated_at=now() WHERE id=$1",
-        )
-        .bind(id)
-        .bind(new.name.trim())
-        .bind(new.does.trim())
-        .bind(&new.placement)
-        .bind(&new.agent)
-        .bind(new.machine.as_deref().filter(|m| !m.is_empty()))
-        .bind(new.account.as_deref().filter(|a| !a.is_empty()))
-        .bind(&new.instructions)
-        .bind(new.can_delegate)
-        .bind(&new.delegate_scope)
-        .bind(&new.skill_scope)
-        .bind(new.include_always_on)
-        .bind(new.include_repo_defaults)
-        // `COALESCE`d for the reason the two switches above are: this is a
-        // whole-object write, and an absent grant has to mean "leave it" —
-        // otherwise every save by a client that predates the field revokes it.
-        .bind(&new.on_usage_limit)
-        .bind(&new.on_child_limit)
-        .bind(nonblank(&new.settings.model))
-        .bind(nonblank(&new.settings.effort))
-        .bind(nonblank(&new.settings.mode))
-        .bind(nonblank(&new.settings.sandbox))
-        .execute(&self.pool)
-        .await
-        .map_err(|e| written(e, new, "updating a role"))?;
+        replace_in(&self.pool, id, None, new).await?;
         Ok(true)
     }
 
@@ -814,6 +734,299 @@ impl Roles {
         Ok(true)
     }
 }
+
+// ── the writes, against a pool or a transaction ─────────────────────────
+//
+// **Free-standing and executor-generic, which is what makes an import
+// atomic.** `Roles` holds a pool, so every method on it takes a connection of
+// its own per query: a `create` called between somebody else's `BEGIN` and
+// `COMMIT` runs on a second connection, outside that transaction, and commits
+// on its own. `profiles-as-code`'s threat model names that trap, and this is
+// the answer it asked for — the helpers learn to take an executor rather than
+// the import growing a second copy of the column list, which is the thing most
+// likely to drift the day a field is added.
+//
+// The pair above (`Roles::create`, `Roles::update`) is now these three with
+// the pool handed in, so there is exactly one spelling of what a profile's
+// columns are.
+
+/// What an import knows about a profile that neither write path does: where it
+/// is filed at creation, and the key its author gave it.
+///
+/// `directory` is a **slug**, not an id, and a create files the row at its
+/// destination in one insert. `api::roles::create_role` creates and then moves
+/// because filing is a separate, later act there; inside an import the move
+/// would be a second write to roll back, and `access::transfer` for a role is
+/// an `UPDATE` of the path and nothing else.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Filing<'a> {
+    /// The directory to file it in, by slug. `None` is the person's own space.
+    pub directory: Option<&'a str>,
+    /// The folder name its `PROFILE.md` sat in. `None` for a profile nobody
+    /// imported, which is every one made in the interface.
+    pub key: Option<&'a str>,
+}
+
+/// Insert one role.
+pub async fn create_in<'e, E>(
+    x: E,
+    org: &str,
+    person: &str,
+    person_slug: &str,
+    filing: Filing<'_>,
+    new: &NewRole,
+) -> Result<ft_core::RoleId>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let id = ft_core::RoleId::new();
+    let slug = slug_of(&new.name, id.as_str());
+    let path = match filing.directory {
+        Some(directory) => ft_core::ResourcePath::in_directory(directory, &slug),
+        None => ft_core::ResourcePath::personal(person_slug, &slug),
+    };
+    sqlx::query(
+        "INSERT INTO roles \
+           (id, org_id, path, created_by, name, slug, does, \
+            placement, agent, host_id, agent_account_id, instructions, can_delegate, \
+            delegate_scope, skill_scope, include_always_on, include_repo_defaults, \
+            on_usage_limit, on_child_limit, \
+            pref_model, pref_effort, pref_mode, pref_sandbox, author_key) \
+         VALUES ($1, $2, $3::ltree, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, \
+                 $16, $17, $18, $19, $20, $21, $22, $23, $24)",
+    )
+    .bind(id.as_str())
+    .bind(org)
+    .bind(path.to_ltree())
+    .bind(person)
+    .bind(new.name.trim())
+    .bind(&slug)
+    .bind(new.does.trim())
+    .bind(&new.placement)
+    .bind(&new.agent)
+    .bind(new.machine.as_deref().filter(|m| !m.is_empty()))
+    .bind(new.account.as_deref().filter(|a| !a.is_empty()))
+    .bind(&new.instructions)
+    .bind(new.can_delegate)
+    .bind(&new.delegate_scope)
+    .bind(&new.skill_scope)
+    // Nothing to leave alone on a row that does not exist yet, so an absent
+    // switch resolves to the column's default.
+    .bind(new.include_always_on.unwrap_or(INHERITS))
+    .bind(new.include_repo_defaults.unwrap_or(INHERITS))
+    // Nothing to leave alone on a row that does not exist yet, so an absent
+    // grant resolves to the column's default — which is the whole of the
+    // migration and the whole of the compatibility story.
+    .bind(new.on_usage_limit.as_deref().unwrap_or(WAITS_FOR_A_PERSON))
+    .bind(new.on_child_limit.as_deref().unwrap_or(ASKS_THE_PERSON))
+    .bind(nonblank(&new.settings.model))
+    .bind(nonblank(&new.settings.effort))
+    .bind(nonblank(&new.settings.mode))
+    .bind(nonblank(&new.settings.sandbox))
+    .bind(filing.key)
+    .execute(x)
+    .await
+    .map_err(|e| written(e, new, "writing a role"))?;
+    Ok(id)
+}
+
+/// Whether this person may change this role: Writer where it is filed, through
+/// the one predicate the interface's `may_write` is drawn from.
+pub async fn may_write_in<'e, E>(x: E, person: &str, id: &str) -> Result<bool>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let sql = format!(
+        "SELECT EXISTS (SELECT 1 FROM roles r WHERE r.id = $2 AND {visible})",
+        visible = filed_where("r", 1, Level::Writer),
+    );
+    sqlx::query_scalar::<_, bool>(&sql)
+        .bind(person)
+        .bind(id)
+        .fetch_one(x)
+        .await
+        .context("reading whether somebody may change a role")
+}
+
+/// Replace every column of a role with what was sent.
+///
+/// **No authorisation.** The two callers do it themselves, one line above:
+/// `Roles::update` through `may_write_in`, and the import inside its own
+/// transaction so the answer cannot change between the check and the write.
+///
+/// `key` is an author's key to adopt, and `None` leaves whatever the row
+/// carries. A profile matched by its *name* gains its key the first time an
+/// import recognises it, which happens once per profile per installation;
+/// nothing else writes one, and nothing clears one.
+pub async fn replace_in<'e, E>(x: E, id: &str, key: Option<&str>, new: &NewRole) -> Result<()>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query(
+        "UPDATE roles SET name=$2, does=$3, \
+           placement=$4, agent=$5, host_id=$6, agent_account_id=$7, instructions=$8, \
+           can_delegate=$9, delegate_scope=$10, skill_scope=$11, \
+           include_always_on=COALESCE($12, include_always_on), \
+           include_repo_defaults=COALESCE($13, include_repo_defaults), \
+           on_usage_limit=COALESCE($14, on_usage_limit), \
+           on_child_limit=COALESCE($15, on_child_limit), \
+           pref_model=$16, pref_effort=$17, pref_mode=$18, pref_sandbox=$19, \
+           author_key=COALESCE($20, author_key), \
+           updated_at=now() WHERE id=$1",
+    )
+    .bind(id)
+    .bind(new.name.trim())
+    .bind(new.does.trim())
+    .bind(&new.placement)
+    .bind(&new.agent)
+    .bind(new.machine.as_deref().filter(|m| !m.is_empty()))
+    .bind(new.account.as_deref().filter(|a| !a.is_empty()))
+    .bind(&new.instructions)
+    .bind(new.can_delegate)
+    .bind(&new.delegate_scope)
+    .bind(&new.skill_scope)
+    .bind(new.include_always_on)
+    .bind(new.include_repo_defaults)
+    // `COALESCE`d for the reason the two switches above are: this is a
+    // whole-object write, and an absent grant has to mean "leave it" —
+    // otherwise every save by a client that predates the field revokes it.
+    .bind(&new.on_usage_limit)
+    .bind(&new.on_child_limit)
+    .bind(nonblank(&new.settings.model))
+    .bind(nonblank(&new.settings.effort))
+    .bind(nonblank(&new.settings.mode))
+    .bind(nonblank(&new.settings.sandbox))
+    .bind(key)
+    .execute(x)
+    .await
+    .map_err(|e| written(e, new, "updating a role"))?;
+    Ok(())
+}
+
+/// Write a Manager's team, once every profile it names exists.
+///
+/// The second pass of an import: a profile's team may name a profile from the
+/// same drop, so the ids are only all known after every row is written. One
+/// transaction, so the two passes are never observable apart.
+pub async fn set_team_in<'e, E>(x: E, id: &str, team: &[String]) -> Result<()>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query("UPDATE roles SET delegate_scope = $2 WHERE id = $1")
+        .bind(id)
+        .bind(team)
+        .execute(x)
+        .await
+        .context("wiring a profile's team")?;
+    Ok(())
+}
+
+/// What a role is right now, held for the rest of the transaction.
+///
+/// `FOR UPDATE`: an import compares these against what it planned over and
+/// then writes, and a concurrent edit between the two would be the overwrite
+/// nobody reviewed. The three columns are the ones a timestamp cannot stand in
+/// for — **filing moves `path` without touching `updated_at`**, and a key is
+/// adopted once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Standing {
+    pub path: String,
+    pub key: Option<String>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn standing_in<'e, E>(x: E, id: &str) -> Result<Option<Standing>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let row = sqlx::query(
+        "SELECT path::text AS path, author_key, updated_at FROM roles WHERE id = $1 FOR UPDATE",
+    )
+    .bind(id)
+    .fetch_optional(x)
+    .await
+    .context("reading a profile before overwriting it")?;
+    Ok(row.map(|r| Standing {
+        // Slashes, the way a `Role` carries one, so the two can be compared
+        // at all: the column is an `ltree` and reads back with dots.
+        path: ft_core::ResourcePath::from_stored(r.get::<String, _>("path")).to_string(),
+        key: r.get("author_key"),
+        updated_at: r.get("updated_at"),
+    }))
+}
+
+/// Whichever profile already carries this key where one is being filed.
+///
+/// **One spelling of the question, asked by both writers of keys**: the import
+/// (`api::roles::apply_role_import`) and a move (`access::transfer_in`).
+/// `roles_author_key` is unique within the parent path, and the index answers
+/// a clash with a constraint name once the transaction is already aborted — so
+/// nothing can be looked up to explain it. Asked first instead, while the
+/// profile in the way can still be named.
+///
+/// `parent` is everything but the leaf, as an `ltree`: `u.kevin`, `d.fstack`.
+/// [`filed_beside`] is that.
+pub async fn keyed_already<'e, E>(
+    x: E,
+    parent: &str,
+    key: &str,
+    except: Option<&str>,
+) -> Result<Option<String>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query_scalar::<_, String>(
+        "SELECT name FROM roles \
+          WHERE subpath(path, 0, nlevel(path) - 1) = $1::ltree AND author_key = $2 \
+            AND ($3::text IS NULL OR id <> $3) \
+          LIMIT 1",
+    )
+    .bind(parent)
+    .bind(key)
+    .bind(except)
+    .fetch_optional(x)
+    .await
+    .context("reading which profile already carries a key")
+}
+
+/// The key one profile carries, if it carries one.
+pub async fn key_of_role<'e, E>(x: E, id: &str) -> Result<Option<String>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    Ok(
+        sqlx::query_scalar::<_, Option<String>>("SELECT author_key FROM roles WHERE id = $1")
+            .bind(id)
+            .fetch_optional(x)
+            .await
+            .context("reading a profile's key")?
+            .flatten(),
+    )
+}
+
+/// Everything but the leaf of a path, as an `ltree`: the scope a key is unique
+/// in.
+pub fn filed_beside(path: &ft_core::ResourcePath) -> String {
+    let labels: Vec<&str> = path.as_str().split('/').collect();
+    labels[..labels.len().saturating_sub(1)].join(".")
+}
+
+/// Whether a write was refused because that key is already filed there.
+///
+/// `roles_author_key` is unique within the parent path — see
+/// `migrations/server/20261117120000_profile_key.sql`. Asked rather than
+/// guessed, and the sentence is the caller's: this layer knows the constraint
+/// and the caller knows which profile and which directory a person is looking
+/// at.
+pub fn key_already_filed_there(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<sqlx::Error>().is_some_and(|e| {
+        e.as_database_error()
+            .is_some_and(|db| db.is_unique_violation() && db.constraint() == Some(KEY_IS_UNIQUE))
+    })
+}
+
+/// The index that makes a key one profile within one directory.
+pub const KEY_IS_UNIQUE: &str = "roles_author_key";
 
 #[cfg(test)]
 mod tests {
@@ -877,6 +1090,33 @@ mod tests {
 
     fn reachable(names: &[&str]) -> std::collections::HashSet<String> {
         names.iter().map(|n| n.to_string()).collect()
+    }
+
+    /// **A standing reads a path the way a profile carries one.**
+    ///
+    /// Dots in the database, slashes everywhere else. The import compares the
+    /// two, so a standing in the column's own spelling makes every overwrite
+    /// refuse as a profile that has moved — which is what it did, until this.
+    #[tokio::test]
+    async fn a_standing_reads_the_path_a_profile_carries() {
+        let (db, admin) = Db::open_for_test_owned().await.unwrap();
+        let roles = Roles::new(db.pool().clone());
+        let org = db.org().await.unwrap();
+        let id = roles
+            .create(&org, &admin, "admin", &new("Designer"))
+            .await
+            .unwrap();
+
+        let row = roles
+            .one(&admin, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        let standing = standing_in(db.pool(), id.as_str()).await.unwrap().unwrap();
+        assert_eq!(standing.path, row.path);
+        assert_eq!(standing.key, row.key);
+        assert_eq!(standing.updated_at, row.updated_at);
+        assert!(standing.path.contains('/'), "{}", standing.path);
     }
 
     /// Criterion 11: an existing profile is unchanged by the migration.
