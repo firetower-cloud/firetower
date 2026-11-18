@@ -49,7 +49,8 @@ const REMOTE_SCRIPT: &str = "$HOME/.firetower/worker/install.sh";
 /// **It pins this control plane's own version**, which is what makes a fresh
 /// machine arrive with the matching binary first time. The script downloads
 /// from `worker-latest` by default, and that rolling release serves general
-/// access — so on a control plane running a beta, an unpinned install would
+/// access — moved by a promotion and by nothing else, which is what #459
+/// fixed — so on a control plane running a beta, an unpinned install would
 /// land an older worker that the first connection then immediately replaces.
 /// Pinning removes that install-then-reinstall, and it is this build's own
 /// version rather than the channel's newest for a stronger reason: a worker
