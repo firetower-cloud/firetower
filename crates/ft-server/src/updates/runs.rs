@@ -96,6 +96,22 @@ pub fn steps_for(
     steps
 }
 
+/// Whether this run needs an updater that can be told which image to fetch.
+///
+/// A channel switch does: it rewrites the image line in the same run, so the
+/// image to pull is the one the file is being moved to and not the one the
+/// container came from.
+///
+/// **An ordinary upgrade does not, even when it carries a tag.** The release
+/// that introduces channels moves the image line too, and every installation
+/// taking it is carrying it out with the updater it already has — which is
+/// one release older, and cannot be told anything. Keying this off the tag
+/// rather than off the switch would refuse the one upgrade everybody has to
+/// take.
+fn needs_a_tagged_fetch(targets: &super::store::Targets) -> bool {
+    targets.channel.is_some()
+}
+
 /// Drive a run on a task of its own. Idempotent: a run already being driven
 /// by this process is left to it.
 pub async fn spawn(state: AppState, run_id: String) {
@@ -315,7 +331,14 @@ async fn preflight(state: &AppState, run: &Run, log: &Log) -> Result<String> {
         // into again after a restart, and an updater that cannot be told
         // which image to fetch would pull the tag it is already on — which
         // for a switch is the channel being left.
-        if run.plan.tag.is_some() && status.api_version < 2 {
+        //
+        // **A switch, and not any run carrying a tag.** Every installation
+        // taking the release that introduces channels has an API-1 updater at
+        // the moment its run starts — the updater step is what replaces it —
+        // and that run carries a tag, because the release moves the image
+        // line. Refusing on the tag alone would refuse the one upgrade
+        // everybody has to take.
+        if needs_a_tagged_fetch(&run.targets) && status.api_version < 2 {
             anyhow::bail!(
                 "the updater beside this control plane is {} (contract version {}) and cannot be \
                  told which image to fetch, so the image line cannot be moved. Upgrade this \
@@ -1048,6 +1071,28 @@ mod tests {
         let targets: Vec<&str> = steps.iter().map(|(t, _)| t.as_str()).collect();
         assert_eq!(targets, vec![PREFLIGHT, BACKUP, CONTROL_PLANE, UPDATER]);
         assert_eq!(steps[2].1, "Move the control plane onto beta");
+    }
+
+    /// The trap this guard was first written into: the run that introduces
+    /// channels carries a tag and is carried out by the updater it is
+    /// replacing, so the question is whether a *channel is changing*, not
+    /// whether a tag is present.
+    #[test]
+    fn only_a_switch_needs_an_updater_that_can_be_told_a_tag() {
+        let moving_the_line = super::super::store::Targets {
+            control_plane: true,
+            host_ids: vec![],
+            channel: None,
+        };
+        assert!(
+            !needs_a_tagged_fetch(&moving_the_line),
+            "an ordinary upgrade must not be refused by the updater it is about to replace"
+        );
+        assert!(needs_a_tagged_fetch(&super::super::store::Targets {
+            control_plane: true,
+            host_ids: vec![],
+            channel: Some(super::super::channel::Channel::Beta),
+        }));
     }
 
     #[test]

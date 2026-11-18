@@ -860,7 +860,17 @@ pub async fn offered(updates: &Updates, channel: Channel) -> Result<String> {
         .channel_manifest
         .or_read(&updates.http, &updates.channel_source)
         .await;
-    match seen.outcome {
+    offered_in(&seen, channel)
+}
+
+/// The same, on what a read actually said.
+///
+/// Only [`Read::Found`] names a version. **Not the held document** — a copy
+/// of what was published an hour ago is not what is published now, and the
+/// act this answers is irreversible. Every other outcome is a refusal that
+/// says which one it was.
+pub fn offered_in(seen: &Seen, channel: Channel) -> Result<String> {
+    match &seen.outcome {
         Some(Read::Found(manifest)) => manifest
             .pin(Package::ControlPlane, channel)
             .map(str::to_string)
@@ -1067,8 +1077,16 @@ impl<'a> ImageValue<'a> {
 /// The compose file is the intent and the container is the fact, and they
 /// differ at exactly two moments: a switch, which rewrites the line in the
 /// same run, and the release that first moves an installation off the general
-/// floating tag. Both want the file's answer. `None` when they agree, which
-/// leaves every ordinary upgrade fetching what it always fetched.
+/// floating tag. Both want the file's answer.
+///
+/// Answered whenever the line can be read at all, rather than only when it
+/// differs from the container — the two containers are not always on the same
+/// tag as each other. An installation that switched channel while both
+/// channels held one version has an updater still created from the tag it was
+/// left on, and a comparison against the *control plane's* container would
+/// say "no tag needed" and send that updater to fetch the channel it is no
+/// longer on. `None` only when there is no line to read, which leaves the
+/// updater fetching what it always fetched.
 pub async fn fetch_tag(state: &AppState, writes: &[FileWrite]) -> Option<String> {
     let updates = &state.updates;
     let running = running(updates, None).await;
@@ -1090,8 +1108,7 @@ pub async fn fetch_tag(state: &AppState, writes: &[FileWrite]) -> Option<String>
         Some(write) => write.content.clone(),
         None => on_disk.await?,
     };
-    let named = image_tag(&compose, repository)?;
-    (Some(&named) != running.tag.as_ref()).then_some(named)
+    image_tag(&compose, repository)
 }
 
 /// The tag a compose file's `image:` line gives a repository.
@@ -1107,6 +1124,89 @@ fn image_tag(compose: &str, repository: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A host that answers one canned response and goes away.
+    ///
+    /// On a socket rather than against a mocked client: what separates a 404
+    /// from a 429 from a connection that is refused is the network, and the
+    /// three have to stay apart all the way out to the API.
+    async fn host(answer: &'static str) -> (Source, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let serving = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut scratch = [0u8; 1024];
+                let _ = socket.read(&mut scratch).await;
+                let _ = socket.write_all(answer.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (
+            Source {
+                url: format!("http://127.0.0.1:{port}/channels.json"),
+            },
+            serving,
+        )
+    }
+
+    fn body(status: &str, body: &str) -> String {
+        format!(
+            "HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    /// Every way the host can answer, and the outcome each has to produce.
+    /// Without this, a 429 collapsing into "there is no document yet" would
+    /// pass every other test in this file.
+    #[tokio::test]
+    async fn what_the_host_answers_decides_which_outcome_it_is() {
+        let http = reqwest::Client::new();
+
+        let absent = body("404 Not Found", "Not Found");
+        let (source, serving) = host(Box::leak(absent.into_boxed_str())).await;
+        assert_eq!(
+            fetch(&http, &source).await,
+            Read::Absent,
+            "a 404 is the bootstrap case and nothing else is"
+        );
+        serving.abort();
+
+        let limited = body("429 Too Many Requests", "rate limited");
+        let (source, serving) = host(Box::leak(limited.into_boxed_str())).await;
+        match fetch(&http, &source).await {
+            Read::Unreadable(why) => assert!(why.contains("429"), "{why}"),
+            other => panic!("a rate limit is not {other:?}"),
+        }
+        serving.abort();
+
+        let junk = body("200 OK", "<html>maintenance</html>");
+        let (source, serving) = host(Box::leak(junk.into_boxed_str())).await;
+        assert!(matches!(fetch(&http, &source).await, Read::Malformed(_)));
+        serving.abort();
+
+        let good = body(
+            "200 OK",
+            r#"{"schema_version":1,"control_plane":{"beta":"0.56.0","general":"0.54.1"}}"#,
+        );
+        let (source, serving) = host(Box::leak(good.into_boxed_str())).await;
+        let Read::Found(manifest) = fetch(&http, &source).await else {
+            panic!("a document that reads is the answer");
+        };
+        assert_eq!(
+            manifest.pin(Package::ControlPlane, Channel::General),
+            Some("0.54.1")
+        );
+        serving.abort();
+
+        // Nothing listening at all: a failure to reach it is not an absence
+        // of anything.
+        let nowhere = Source {
+            url: "http://127.0.0.1:1/channels.json".into(),
+        };
+        assert!(matches!(fetch(&http, &nowhere).await, Read::Unreadable(_)));
+    }
 
     fn document() -> String {
         serde_json::json!({
@@ -1485,6 +1585,49 @@ mod tests {
         let beta = row(&offers, Channel::Beta);
         assert_eq!(beta.version, Some(ahead()), "what it last held");
         assert!(beta.action.is_none(), "and nothing may be taken on it");
+    }
+
+    /// What a switch would move to. A read that went wrong must not answer
+    /// this from the copy it kept — the version it would name is the one it
+    /// would then install, and that act cannot be undone.
+    #[test]
+    fn only_a_document_that_read_names_a_version_to_move_to() {
+        let manifest = held();
+        let ahead = ahead();
+
+        let good = Seen {
+            outcome: Some(Read::Found(manifest.clone())),
+            held: Some(manifest.clone()),
+            read_at: None,
+        };
+        assert_eq!(offered_in(&good, Channel::Beta).unwrap(), ahead);
+
+        for bad in [
+            Read::Absent,
+            Read::Unreadable("rate limited".into()),
+            Read::Malformed("not this document".into()),
+            Read::Incomplete("no version in it".into()),
+        ] {
+            // The held copy is still there, which is the trap: answering
+            // from it would look exactly like a successful read.
+            let seen = Seen {
+                outcome: Some(bad.clone()),
+                held: Some(manifest.clone()),
+                read_at: None,
+            };
+            let refused = offered_in(&seen, Channel::Beta)
+                .expect_err(&format!("{bad:?} must not name a version"))
+                .to_string();
+            assert!(!refused.contains(&ahead), "{bad:?}: {refused}");
+        }
+
+        // And a cache nobody has filled is not an empty document either.
+        let never = Seen {
+            outcome: None,
+            held: None,
+            read_at: None,
+        };
+        assert!(offered_in(&never, Channel::Beta).is_err());
     }
 
     #[test]

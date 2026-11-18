@@ -39,60 +39,22 @@ pub async fn check(state: &AppState) -> Result<Checked> {
         .refresh(&updates.http, &updates.channel_source)
         .await;
 
-    let found = match &manifest {
-        // A read that went wrong moves nothing. `record_check` keeps the
-        // version the last good check found, so the screen holds still and
-        // says why rather than reporting a version nobody published.
-        bad if !bad.is_usable() && !matches!(bad, channel::Read::Absent) => Checked {
-            checked_at: chrono::Utc::now(),
-            latest_version: None,
-            published_at: None,
-            notes_url: None,
-            notes: None,
-            cli_minimum: None,
-            error: bad
-                .problem()
-                .map(|why| format!("{why}. Nothing is being moved.")),
-        },
-        channel::Read::Found(document) => {
-            match document
-                .pin(channel::Package::ControlPlane, on)
-                .and_then(version::parse)
-            {
-                Some(pinned) => offered(updates, &pinned).await,
-                None => Checked {
-                    checked_at: chrono::Utc::now(),
-                    latest_version: None,
-                    published_at: None,
-                    notes_url: None,
-                    notes: None,
-                    cli_minimum: None,
-                    error: Some(format!(
-                        "the channel manifest names no control plane version for {}. Nothing is \
-                         being moved.",
-                        on.name()
-                    )),
-                },
-            }
-        }
+    let found = match what_to_offer(&manifest, on) {
+        Offered::Pinned(version) => described(updates, &version).await,
         // Absence is the bootstrap: nothing has been published yet, so this
         // installation follows the newest release exactly as it did before
         // channels existed.
-        _ => match check::latest(&updates.http, &updates.feed).await {
-            Ok(latest) => offered(updates, &latest.version).await,
+        Offered::TheNewestRelease => match check::latest(&updates.http, &updates.feed).await {
+            Ok(latest) => described(updates, &latest.version).await,
             Err(e) => {
                 tracing::warn!("checking for a release: {e:#}");
-                Checked {
-                    checked_at: chrono::Utc::now(),
-                    latest_version: None,
-                    published_at: None,
-                    notes_url: None,
-                    notes: None,
-                    cli_minimum: None,
-                    error: Some(format!("{e:#}")),
-                }
+                nothing_new(format!("{e:#}"))
             }
         },
+        // A read that went wrong moves nothing. `record_check` keeps the
+        // version the last good check found, so the screen holds still and
+        // says why rather than reporting a version nobody published.
+        Offered::Stop(why) => nothing_new(why),
     };
     updates.store.record_check(&found).await?;
 
@@ -104,6 +66,61 @@ pub async fn check(state: &AppState) -> Result<Checked> {
     Ok(found)
 }
 
+/// What a check offers, once the channel manifest has been read.
+#[derive(Debug, PartialEq, Eq)]
+enum Offered {
+    /// The version this installation's channel holds.
+    Pinned(Version),
+    /// Nothing is published yet, so follow the newest release as this
+    /// installation did before channels existed. **Only absence.**
+    TheNewestRelease,
+    /// Change nothing, and say why.
+    Stop(String),
+}
+
+/// Which of the three a read means.
+///
+/// The whole of the rule in one place, so it can be interrogated: only
+/// [`channel::Read::Absent`] is the bootstrap, and every other way a read can
+/// go wrong stops. A rate limit falling through to the newest release would
+/// offer a general-access installation whatever beta is on.
+fn what_to_offer(manifest: &channel::Read, on: channel::Channel) -> Offered {
+    match manifest {
+        channel::Read::Absent => Offered::TheNewestRelease,
+        channel::Read::Found(document) => match document
+            .pin(channel::Package::ControlPlane, on)
+            .and_then(version::parse)
+        {
+            Some(pinned) => Offered::Pinned(pinned),
+            None => Offered::Stop(format!(
+                "the channel manifest names no control plane version for {}. Nothing is being \
+                 moved.",
+                on.name()
+            )),
+        },
+        failed => Offered::Stop(format!(
+            "{}. Nothing is being moved.",
+            failed
+                .problem()
+                .unwrap_or("the channel manifest did not read")
+        )),
+    }
+}
+
+/// A check that found nothing to move to, and the reason. The version the
+/// last good check found is kept — see `Store::record_check`.
+fn nothing_new(why: String) -> Checked {
+    Checked {
+        checked_at: chrono::Utc::now(),
+        latest_version: None,
+        published_at: None,
+        notes_url: None,
+        notes: None,
+        cli_minimum: None,
+        error: Some(why),
+    }
+}
+
 /// One version, with whatever the feed can say about it.
 ///
 /// The version is the answer; its notes are a nicety. A release that has
@@ -111,7 +128,7 @@ pub async fn check(state: &AppState) -> Result<Checked> {
 /// versions — is still the release being offered, so a feed that cannot
 /// supply the notes is a warning beside the version rather than a check that
 /// found nothing.
-async fn offered(updates: &Updates, version: &semver::Version) -> Checked {
+async fn described(updates: &Updates, version: &Version) -> Checked {
     let found = match check::releases(&updates.http, &updates.feed).await {
         Ok(body) => Ok(check::pick_version(&body, version)),
         Err(e) => Err(e),
@@ -425,4 +442,89 @@ pub async fn files_from_plan(
         });
     }
     Ok(writes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn document(general: &str, beta: &str) -> channel::Manifest {
+        let channel::Read::Found(manifest) = channel::read(&format!(
+            r#"{{"schema_version":1,"control_plane":{{"beta":"{beta}","general":"{general}"}}}}"#
+        )) else {
+            panic!("a document")
+        };
+        manifest
+    }
+
+    /// Which release an installation is offered is its channel's, and a read
+    /// that went wrong changes nothing. Four of these five would be caught by
+    /// nothing else: falling through to the newest release is exactly what
+    /// the old behaviour was, so it looks right until a general-access
+    /// installation is offered a beta.
+    #[test]
+    fn only_absence_falls_back_to_the_newest_release() {
+        let manifest = channel::Read::Found(document("0.54.1", "0.56.0"));
+        assert_eq!(
+            what_to_offer(&manifest, channel::Channel::General),
+            Offered::Pinned(Version::new(0, 54, 1))
+        );
+        assert_eq!(
+            what_to_offer(&manifest, channel::Channel::Beta),
+            Offered::Pinned(Version::new(0, 56, 0)),
+            "the same document, a different channel, a different release"
+        );
+
+        assert_eq!(
+            what_to_offer(&channel::Read::Absent, channel::Channel::General),
+            Offered::TheNewestRelease,
+            "the bootstrap case, and the only one"
+        );
+
+        for failed in [
+            channel::Read::Unreadable("rate limited".into()),
+            channel::Read::Malformed("not this document".into()),
+            channel::Read::Incomplete("no version in it".into()),
+        ] {
+            match what_to_offer(&failed, channel::Channel::General) {
+                Offered::Stop(why) => {
+                    assert!(why.contains("Nothing is being moved"), "{why}");
+                    assert!(
+                        why.contains(failed.problem().unwrap()),
+                        "it says which one it was: {why}"
+                    );
+                }
+                other => panic!("{failed:?} must stop, not {other:?}"),
+            }
+        }
+    }
+
+    /// A document that reads but names nothing for this package is not a
+    /// reason to go back to the feed either.
+    #[test]
+    fn a_document_naming_no_version_stops() {
+        let only_desktop = channel::read(
+            r#"{"schema_version":1,"control_plane":{"beta":"0.1.0","general":"0.1.0"}}"#,
+        );
+        assert!(matches!(
+            what_to_offer(&only_desktop, channel::Channel::General),
+            Offered::Pinned(_)
+        ));
+        assert!(matches!(
+            what_to_offer(
+                &channel::Read::Incomplete("names no control_plane.general version".into()),
+                channel::Channel::General
+            ),
+            Offered::Stop(_)
+        ));
+    }
+
+    /// Nothing found is nothing found, and the version the last check knew
+    /// stays — `record_check` coalesces it.
+    #[test]
+    fn a_check_that_found_nothing_names_no_version() {
+        let said = nothing_new("the channel manifest could not be fetched".into());
+        assert!(said.latest_version.is_none(), "never a zero, never a guess");
+        assert!(said.error.is_some());
+    }
 }
