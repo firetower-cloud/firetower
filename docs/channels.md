@@ -116,8 +116,10 @@ into step.
 
 ## The channel manifest
 
-One document says which version each channel points at. Everything reads it, and
-promotion writes it **last**, which is what makes it the commit point.
+One document says which version each channel points at. For the control plane it
+is what every reader consults, and promotion writes it last — which is what
+makes it that package's point of no return. For the desktop it is written first,
+because the app reads its own addresses rather than this; see Promoting.
 
 It lives on a rolling release of its own — tag `channels`, asset
 `channels.json` — because it is mutable by design and cannot live at an
@@ -150,6 +152,22 @@ failure, a document with no version in it — stops and changes nothing.** A rea
 that goes wrong must never be allowed to look like "general access is at version
 zero".
 
+Nor must a *write* that went wrong. Uploading an asset deletes the old one
+before it writes the new, so a failed upload can leave the release with no
+manifest at all — which would otherwise be indistinguishable from a repository
+that has never promoted, and would then accept a version older than the pin it
+had just lost. The writer therefore always leaves `channels.previous.json` on
+the release first, and a release carrying that but no `channels.json` is read as
+a destroyed manifest and stops everything. To recover: check
+`channels.previous.json`, confirm it is what you expect, and re-upload it as
+`channels.json`.
+
+Two writers can also overlap — a release moving a `beta` pin while a promotion
+moves a `general` one. Both read and replace the whole document, so the writer
+reads back what landed and, if another writer got in between, re-reads their
+document and re-applies its own pins on top. The pins commute and never move
+backwards, so this converges and both survive.
+
 ---
 
 ## Promoting
@@ -162,16 +180,38 @@ backwards is refused by design, so the irreversible accident is promoting a
 *newer* version than intended — and the other refusals are all silent on exactly
 that. A mis-click or a stale browser tab is what the retyped version addresses.
 
-The order is fixed:
+**The order is per package, and so is the point of no return.** There is no
+single commit point across both, and the rule is the same one in each case: the
+last write is the one that package's own readers consult.
 
-1. Re-tag the control plane and updater images onto `stable`, together.
-2. Rewrite the desktop manifest at the general-access address, from the bundles
-   already on the release.
-3. **Write the channel manifest.** Until this lands, nothing has been promoted.
+| Package | Order | Why |
+| --- | --- | --- |
+| Control plane | re-tag the images onto `stable` → **write the channel manifest** | Nothing acts on a moved tag until something tells it to want that version, and the updater refuses an image whose stamped version is not the one it was asked for. An installation that pulls in the window is frozen, not moved. |
+| Desktop | **write the channel manifest** → rewrite `desktop-stable` and `desktop-latest` | Those addresses are what copies actually fetch, and the app installs whatever is there if the version is greater. There is no second opinion. |
 
-A failure before step 3 leaves an inconsistent registry but a consistent world:
-tags have moved, but nothing has been told to want them, and the run is simply
-re-run. Every step is idempotent.
+The desktop order is that way round because the other way was a real defect: an
+interruption between the addresses and the document left every general-access
+copy upgrading on its next check while the document said they had not been
+promoted — and **re-running completed the promotion but could not repair it**,
+because the installs had already happened. Written this way, an interruption
+leaves the document ahead of the addresses, copies stay exactly where they are
+because nothing is offering them anything new, and the re-run finishes the job.
+
+Either way a half-finished run leaves every reader where it was, and every step
+is idempotent, so re-running is always the answer.
+
+`promote.yml` is the only route to general access. Dispatching the desktop
+release workflow with a general-access channel is refused — it would publish to
+both general-access addresses with no confirmation, no check that the version is
+on beta, and no update to this document.
+
+Images are re-tagged to a staging tag first, checked there for an unchanged
+index digest and for both `linux/amd64` and `linux/arm64` by name, and only then
+written to `stable` **by digest**. `stable` is therefore only ever written from
+an index that has already passed every check. The staging tag,
+`promote-<run>-<attempt>`, is left behind: it is not a channel, nothing reads
+it, and GHCR has no delete-a-tag call — deleting the "version" would delete the
+index `stable` now points at.
 
 It refuses, and moves nothing, on:
 
