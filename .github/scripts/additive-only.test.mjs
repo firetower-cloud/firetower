@@ -73,23 +73,32 @@ describe("what is no longer promised", () => {
     assert.deepEqual(breaches(was, now), []);
   });
 
-  it("catches a narrowed type", () => {
+  it("catches a response that can now produce something it could not", () => {
     const was = doc({ get: object({ count: str }) });
     const now = doc({ get: object({ count: num }) });
     const found = breaches(was, now);
     assert.equal(found.length, 1);
     assert.match(found[0].what, /was string and is now integer/);
+
+    // The same shape in this contract's own spelling: `Option<T>` is a type
+    // array, so a response gaining `null` is a reader meeting one it never
+    // had to handle.
+    const gainsNull = doc({ get: object({ count: { type: ["string", "null"] } }) });
+    assert.equal(breaches(was, gainsNull).length, 1);
   });
 
-  it("catches a dropped enum variant, and allows an added one", () => {
+  it("catches a request that no longer accepts what it used to", () => {
+    const was = doc({ post: object({ state: { type: "string", enum: ["queued", "running", "held"] } }) });
     // The narrowing most likely to happen by accident: somebody tidies a Rust
-    // enum and a client holding the old value can no longer send it back.
-    const was = doc({ get: object({ state: { type: "string", enum: ["queued", "running", "held"] } }) });
-    const narrower = doc({ get: object({ state: { type: "string", enum: ["queued", "running"] } }) });
-    const wider = doc({ get: object({ state: { type: "string", enum: ["queued", "running", "held", "paused"] } }) });
+    // enum and a caller holding the old value can no longer send it back.
+    const narrower = doc({ post: object({ state: { type: "string", enum: ["queued", "running"] } }) });
     assert.equal(breaches(was, narrower).length, 1);
     assert.match(breaches(was, narrower)[0].what, /held/);
-    assert.deepEqual(breaches(was, wider), []);
+
+    // And a request type array losing a member.
+    const wasNullable = doc({ post: object({ name: { type: ["string", "null"] } }) });
+    const nowStrict = doc({ post: object({ name: str }) });
+    assert.equal(breaches(wasNullable, nowStrict).length, 1);
   });
 
   it("catches a request field that became required", () => {
@@ -160,6 +169,40 @@ describe("what is still allowed, because the whole point is to add", () => {
   it("passes a new optional request field", () => {
     const was = doc({ post: object({ name: str }, ["name"]) });
     const now = doc({ post: object({ name: str, channel: str }, ["name"]) });
+    assert.deepEqual(breaches(was, now), []);
+  });
+
+  /**
+   * The over-firing QA found, in this contract's own spelling.
+   *
+   * `nullable` appears zero times in `api/openapi.json` and type arrays appear
+   * 237 times, because `Option<T>` generates OpenAPI 3.1's
+   * `{"type": ["string", "null"]}`. Comparing the joined string made
+   * `null|string` and `string` unequal in *either* direction, so two safe and
+   * routine changes were reported as breaches — and `Option<String>` → `String`
+   * on a real handler failed the build.
+   */
+  it("passes a response field that stops being null", () => {
+    // Strictly more guarantee to every reader: one that coped with
+    // `string|null` copes with `string`.
+    const was = doc({ get: object({ ownerName: { type: ["string", "null"] } }) });
+    const now = doc({ get: object({ ownerName: str }, ["ownerName"]) });
+    assert.deepEqual(breaches(was, now), []);
+  });
+
+  it("passes a request field that starts accepting null", () => {
+    // Strictly more accepted: a caller sending a string is still fine.
+    const was = doc({ post: object({ name: str }, ["name"]) });
+    const now = doc({ post: object({ name: { type: ["string", "null"] } }, []) });
+    assert.deepEqual(breaches(was, now), []);
+  });
+
+  it("passes a new variant on a response enum", () => {
+    // Deliberate. Adding one is routine, clients are expected to tolerate
+    // values they do not know, and flagging it would be the next wolf — which
+    // is the failure mode this whole check has to avoid to stay believed.
+    const was = doc({ get: object({ state: { type: "string", enum: ["queued", "running"] } }) });
+    const now = doc({ get: object({ state: { type: "string", enum: ["queued", "running", "paused"] } }) });
     assert.deepEqual(breaches(was, now), []);
   });
 

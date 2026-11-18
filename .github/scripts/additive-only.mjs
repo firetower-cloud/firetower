@@ -91,35 +91,59 @@ export function fields(doc, schema, prefix = "", seen = new Set(), out = new Map
 }
 
 /**
- * A type as this check compares them.
+ * A type as this check compares them: the set of primitive types it may be,
+ * the set of enum values if it has one, and a label for the message.
  *
- * `enum` is carried along because dropping a variant narrows a type just as a
- * `string` becoming an `integer` does, and it is the narrowing most likely to
- * happen by accident — somebody tidies a Rust enum and a client that stored
- * the old value can no longer send it back.
+ * **The type is a set, not a string, because this contract writes it as one.**
+ * `Option<T>` generates OpenAPI 3.1's `{"type": ["string", "null"]}` — the
+ * `nullable` keyword appears zero times in `api/openapi.json` and type arrays
+ * appear 237 times — so comparing the joined string made `null|string` and
+ * `string` simply unequal, in either direction.
  */
 function typeOf(schema) {
-  if (!schema || typeof schema !== "object") return "unknown";
-  const base = Array.isArray(schema.type) ? [...schema.type].sort().join("|") : (schema.type ?? "unknown");
-  return schema.enum ? `${base}<${[...schema.enum].map(String).sort().join(",")}>` : base;
+  if (!schema || typeof schema !== "object") return { types: null, values: null, label: "unknown" };
+  const types = Array.isArray(schema.type) ? [...schema.type] : schema.type ? [schema.type] : null;
+  const values = Array.isArray(schema.enum) ? schema.enum.map(String) : null;
+  const base = types ? [...types].sort().join("|") : "unknown";
+  return {
+    types: types ? new Set(types) : null,
+    values: values ? new Set(values) : null,
+    label: values ? `${base}<${[...values].sort().join(",")}>` : base,
+  };
 }
 
-/** Is `now` at least as wide as `was`? Equal counts; anything else is narrowing. */
-function widened(was, now) {
-  if (was === now) return true;
-  // `string<a,b>` → `string<a,b,c>` adds a variant, which is additive. The
-  // other direction is exactly the removal this is here for.
-  const variants = (t) => t.match(/^(\w+)<(.*)>$/);
-  const a = variants(was);
-  const b = variants(now);
-  if (a && b && a[1] === b[1]) return a[2].split(",").every((v) => b[2].split(",").includes(v));
-  // An enum becoming the bare type it was drawn from accepts everything it
-  // used to and more.
-  if (a && !b && a[1] === now) return true;
-  // `unknown` on either side is a shape this check does not model. Passing is
-  // deliberate: a check that fires on changes nobody can act on gets turned off.
-  return was === "unknown" || now === "unknown";
-}
+/** Is every member of `a` in `b`? A missing set means "not modelled". */
+const within = (a, b) => !a || !b || [...a].every((v) => b.has(v));
+
+/**
+ * **Whether narrowing is a breach depends on which side of the call it is on,
+ * and that is the whole of this.**
+ *
+ * The old version applied one `widened()` in both loops, so direction was
+ * never considered and two perfectly safe changes were reported as breaches:
+ * a response field going `string|null` → `string`, and a request field going
+ * `string` → `string|null`. Both were real — `Option<String>` → `String` on a
+ * handler fails the build — and a check that cries wolf is a check people
+ * learn to override, which is worse than the case it catches given this one
+ * is the guard rail under the whole additive-only promise.
+ *
+ * * **A response** may produce *fewer* kinds of thing than it used to and
+ *   nothing breaks: a reader that coped with `string|null` copes with
+ *   `string`. What breaks a reader is a response producing something it could
+ *   not before. So: breach if the new set is not contained in the old.
+ * * **A request** may accept *more* than it used to and nothing breaks: a
+ *   caller sending `string` is still fine against `string|null`. What breaks a
+ *   caller is the server accepting less. So: breach if the old set is not
+ *   contained in the new.
+ *
+ * Enum values are compared on the request side only. Dropping a variant the
+ * server used to accept breaks a caller that stored it — that is the narrowing
+ * most likely to happen by accident. On the response side a new variant is
+ * left alone deliberately: adding one is routine, clients are expected to
+ * tolerate values they do not know, and flagging it would be the next wolf.
+ */
+const responseKept = (was, now) => within(now.types, was.types);
+const requestKept = (was, now) => within(was.types, now.types) && within(was.values, now.values);
 
 /** Every operation in a document, as `METHOD /path` → the operation object. */
 function operations(doc) {
@@ -168,8 +192,10 @@ export function breaches(was, now) {
           found.push(breach(`${name} → ${field}`, "the response field is gone. A client reading it gets undefined."));
           continue;
         }
-        if (!widened(had.type, has.type)) {
-          found.push(breach(`${name} → ${field}`, `the response field was ${had.type} and is now ${has.type}.`));
+        if (!responseKept(had.type, has.type)) {
+          found.push(
+            breach(`${name} → ${field}`, `the response field was ${had.type.label} and is now ${has.type.label}, which a reader of the old one may not expect.`),
+          );
         }
       }
     }
@@ -202,8 +228,10 @@ export function breaches(was, now) {
       }
       for (const [field, had] of old) {
         const has = fresh.get(field);
-        if (has && !widened(had.type, has.type)) {
-          found.push(breach(`${name} ← ${field}`, `the request field was ${had.type} and is now ${has.type}.`));
+        if (has && !requestKept(had.type, has.type)) {
+          found.push(
+            breach(`${name} ← ${field}`, `the request field was ${had.type.label} and is now ${has.type.label}, which no longer accepts everything it used to.`),
+          );
         }
       }
     }
