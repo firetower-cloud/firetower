@@ -17,6 +17,7 @@
     "shoot:app": "node scripts/shoot-app.mjs",
     "shoot:profile-skills": "node scripts/shoot-profile-skills.mjs",
     "shoot:formfoot": "node scripts/shoot-formfoot.mjs",
+    "shoot:import-review": "node scripts/shoot-import-review.mjs",
     "reconcile": "node scripts/reconcile.mjs",
     "orval": "orval",
     "test": "vitest run",

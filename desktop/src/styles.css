@@ -3521,6 +3521,380 @@ html:not([data-platform="macos"]) {
     color: var(--color-amber);
   }
 
+  /* ── The profile import review ────────────────────────────────────
+     Drawn in the `profiles-import-review` prototype (v13) and built on
+     geometry the app already has rather than on a new idea: `.sk`'s row,
+     `.review`'s 2px rule, `.risk`'s amber marks, `AddSkill`'s recessed pair
+     and the Inspector's unified diff. **No new token, no new hue, no new
+     radius** — a state here is a pip, a weight and a position.
+
+     **No ember anywhere.** Nothing on this screen is waiting on you from
+     across the room; you are standing in front of it. Brick refuses. Amber
+     means *read this before you accept* and is spent on exactly two things
+     with one meaning: a field going back to its default, and a name that may
+     be a duplicate. Sage and slate are 6px pips, not badges. */
+
+  /* `.review`'s tone, which the sheet had no way to say.
+     `SkillSources.tsx` has been emitting `.review.slate` since it shipped and
+     nothing defined it, so its reassurance drew the amber rule meant for "an
+     agent wrote this and it runs code" — the same drift as `.msg.bad`, one
+     screen over. Both spellings resolve here so neither call site is wrong. */
+  .review[data-tone="brick"] {
+    border-left-color: var(--color-brick);
+  }
+  .review[data-tone="slate"],
+  .review.slate {
+    border-left-color: var(--color-slate-deep);
+  }
+  .review[data-tone="sage"] {
+    border-left-color: var(--color-sage-deep);
+  }
+  .review[data-tone="amber"] {
+    border-left-color: var(--color-amber-soft);
+  }
+  /* The mark takes the rule's hue, so the block reads as one thing. */
+  .review > div > span:first-child {
+    color: var(--color-amber-soft);
+  }
+  .review[data-tone="brick"] > div > span:first-child {
+    color: var(--color-brick);
+  }
+  .review[data-tone="slate"] > div > span:first-child {
+    color: var(--color-slate);
+  }
+  .review[data-tone="sage"] > div > span:first-child {
+    color: var(--color-sage);
+  }
+  .review .acts {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* One profile in the drop. The hairline between entries is `AddSkill`'s. */
+  .imp {
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .imp:first-child {
+    border-top: 1px solid var(--color-line-soft);
+  }
+  .imp-top {
+    display: flex;
+    align-items: flex-start;
+    gap: 13px;
+    padding: 13px 0;
+  }
+  /* Excluded: still in place, still in order, and plainly out. Moving it would
+     make the list a different object from the folder it came from. */
+  .imp[data-off="true"] {
+    opacity: 0.45;
+  }
+
+  /* What would happen to it: a pip and a word. The word is always there, so
+     nothing on this screen is keyed by colour alone.
+     `.st` was taken — a 7px dot with four other meanings — so this is its own
+     class rather than a fifth value on somebody else's. */
+  .outcome {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .outcome i,
+  .pip {
+    display: block;
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 99px;
+    background: var(--color-mute);
+  }
+  .outcome[data-s="new"] i,
+  .pip[data-s="new"] {
+    background: var(--color-sage);
+  }
+  .outcome[data-s="overwrite"] i,
+  .pip[data-s="overwrite"] {
+    background: var(--color-slate);
+  }
+  .outcome[data-s="blocked"] i,
+  .pip[data-s="blocked"] {
+    background: var(--color-brick);
+  }
+  .outcome[data-s="blocked"] {
+    color: var(--color-brick);
+  }
+  /* Nothing to do, and an answer not yet given, are both hollow rings — and
+     they are told apart by their word, which is the mitigation the file kinds
+     already use. **An unanswered candidate wears no hue**: it is a control,
+     not a finding, and amber is spent elsewhere. */
+  .outcome[data-s="nochange"] i,
+  .pip[data-s="nochange"] {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--color-mute);
+  }
+  .outcome[data-s="asking"] i,
+  .pip[data-s="asking"] {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--color-dim);
+  }
+
+  /* The field-by-field diff. A term column and two value columns, so `now` and
+     `would be` line up down the whole table and the eye reads one column. */
+  .dsheet {
+    margin: 11px 0 16px;
+    padding: 4px 16px;
+    border-radius: 14px;
+    background: var(--color-raise);
+  }
+  .dsheet .grp {
+    padding: 13px 0 5px;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .dsheet > div:first-of-type .grp {
+    padding-top: 11px;
+  }
+  .dr {
+    display: grid;
+    grid-template-columns: 168px minmax(0, 1fr) 18px minmax(0, 1fr);
+    align-items: baseline;
+    gap: 0 14px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .dr:last-child {
+    border-bottom: 0;
+  }
+  .dr.colhd {
+    padding: 11px 0 7px;
+    border-bottom: 0;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .dr .k {
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    letter-spacing: -0.01em;
+    color: var(--color-dim);
+  }
+  .dr .k.sub {
+    padding-left: 14px;
+  }
+  .dr .was,
+  .dr .now {
+    min-width: 0;
+    font-size: var(--text-ui);
+    line-height: 1.55;
+    color: var(--color-dim);
+    overflow-wrap: anywhere;
+  }
+  .dr .arrow {
+    justify-self: center;
+    color: var(--color-mute);
+  }
+
+  /* Unchanged: said once, in the `now` column, with nothing in the other.
+     Still on screen — all sixteen are always drawn — but it costs one line and
+     no colour, which is what makes the one that moved visible. Hiding the
+     other fifteen behind a disclosure would make the disclosure load-bearing
+     on the one screen whose job is that nothing is lost unseen. */
+  .dr[data-c="unchanged"] .arrow,
+  .dr[data-c="unchanged"] .now {
+    visibility: hidden;
+  }
+  .dr[data-c="changed"] .k {
+    color: var(--color-text);
+  }
+  .dr[data-c="changed"] .now {
+    color: var(--color-bone);
+    font-weight: 500;
+  }
+  .dr[data-c="changed"] .arrow {
+    color: var(--color-dim);
+  }
+
+  /* A reset to the documented default: the one genuinely surprising thing the
+     feature does, so it is the one thing in the table wearing a colour. A drop
+     with no reset in it has no colour in its diff at all. */
+  .dr[data-c="reset"] {
+    margin-inline: -10px;
+    padding-inline: 10px;
+    border-radius: 7px;
+    border-bottom-color: transparent;
+    background: color-mix(in srgb, var(--color-amber-tint) 70%, transparent);
+  }
+  .dr[data-c="reset"] .k,
+  .dr[data-c="reset"] .now {
+    color: var(--color-amber);
+  }
+  .dr[data-c="reset"] .now {
+    font-weight: 500;
+  }
+  .dr[data-c="reset"] .arrow {
+    color: var(--color-amber-soft);
+  }
+  .dr .tagr {
+    margin-left: 7px;
+    font-size: var(--text-micro);
+    color: var(--color-amber-soft);
+    white-space: nowrap;
+  }
+
+  /* A list value as its items, with what moved marked. Mono, because these are
+     names a file wrote and a resolver matched. A team of four gaining a fifth
+     is the commonest overwrite in the feature and it should take one glance,
+     not a word-by-word comparison of two joined strings. */
+  .items {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .items span {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    letter-spacing: -0.01em;
+    color: inherit;
+  }
+  .items span em {
+    flex: none;
+    width: 9px;
+    font-style: normal;
+    color: var(--color-mute);
+  }
+  .items span[data-i="add"],
+  .items span[data-i="add"] em {
+    color: var(--color-sage);
+  }
+  .items span[data-i="del"],
+  .items span[data-i="del"] em {
+    color: var(--color-brick);
+  }
+
+  /* The instructions, as the unified diff the Inspector already draws. Its
+     colours come from the component, which is where the Inspector keeps them.
+     Code scrolls; it never wraps. */
+  .prose-diff {
+    grid-column: 1 / -1;
+    margin-top: 6px;
+    border-radius: 9px;
+    overflow: hidden;
+    background: var(--color-panel);
+  }
+  .prose-diff .ln {
+    display: flex;
+    gap: 10px;
+    padding: 1px 10px;
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    line-height: 1.6;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  /* A quiet link inside a line of text, for a disclosure that is not a button
+     anybody is meant to notice first. */
+  .linkish {
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+    text-decoration: underline;
+    text-decoration-color: var(--color-line);
+    text-underline-offset: 2px;
+  }
+  .linkish:hover {
+    color: var(--color-bone);
+  }
+
+  /* The candidate's two answers: `AddSkill`'s recessed pair, in the same place
+     under the row, for the same reason — a per-row decision that changes what
+     the primary will do. Neither is pressed until somebody presses it. */
+  .pickpair {
+    display: inline-flex;
+    gap: 2px;
+    margin: 10px 0 2px;
+    padding: 2px;
+    border-radius: 10px;
+    background: var(--color-ground);
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.35);
+  }
+  [data-theme="light"] .pickpair {
+    background: var(--color-overlay);
+    box-shadow: none;
+  }
+  .pickpair button {
+    padding: 5px 11px;
+    border-radius: 8px;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .pickpair button:hover {
+    color: var(--color-text);
+  }
+  .pickpair button[aria-checked="true"] {
+    background: var(--color-raise);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+  [data-theme="light"] .pickpair button[aria-checked="true"] {
+    background: var(--color-panel);
+  }
+
+  /* ── The narrow desk ──────────────────────────────────────────────
+     At the window's own 900px `minWidth` the diff stops being a grid and reads
+     in reading order: the term, the old value with a trailing arrow, then the
+     new one. The column headers go, because a two-column header over one
+     column is a lie.
+
+     **It does not drop a field to earn width.** Sixteen fields in one column
+     is a long column, and a long column is the correct answer here: the screen
+     exists so that nothing is lost unseen, and hiding a field to fit is the
+     one thing it may not do. The foot does not move either — `.formfoot` is
+     sticky at every width, because the refusal and the excluded count have to
+     be on screen while you scroll a list of twenty-three. */
+  @media (max-width: 900px) {
+    .dr {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 2px;
+    }
+    .dr.colhd {
+      display: none;
+    }
+    .dr .arrow {
+      display: none;
+    }
+    .dr .k.sub {
+      padding-left: 12px;
+    }
+    .dr[data-c="unchanged"] .was {
+      display: none;
+    }
+    .dr[data-c="unchanged"] .now {
+      visibility: visible;
+    }
+    .dr[data-c="changed"] .was,
+    .dr[data-c="reset"] .was {
+      color: var(--color-mute);
+    }
+    .dr[data-c="changed"] .was::after,
+    .dr[data-c="reset"] .was::after {
+      content: " \2193";
+      color: var(--color-mute);
+    }
+    .dsheet {
+      padding-inline: 12px;
+    }
+  }
+
   /* ── Which skills a profile loads ─────────────────────────────────
      Drawn in the `profile-skills` prototype, on these primitives rather than
      on new ones: `.fld` and `.pk` above, `.sk`'s row geometry, `.risk`'s amber
