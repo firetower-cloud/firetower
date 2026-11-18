@@ -9,7 +9,7 @@ use super::access::whoever;
 use super::{ApiError, ApiResult, ErrorCode};
 use crate::access::Level;
 use crate::auth::Principal;
-use crate::roles::{NewRole, Role};
+use crate::roles::{import, NewRole, Role};
 use crate::AppState;
 use axum::{
     extract::{Path, State},
@@ -511,21 +511,24 @@ async fn named_for(
     })
 }
 
-/// The key this row carries, which on this branch is always none.
+/// The key this row carries: the folder its author's bundle was in.
 ///
-/// **One function, so #355's column has exactly one place to be wired in.** It
-/// adds a nullable `author_key` and reads it onto `Role::key`; this becomes
-/// `role.key.as_deref()` and nothing else about export changes.
+/// **Wired in**, which is what this seam existed for. `author_key` is
+/// `Role::key` (#355), and `key_of` prefers it over deriving one from the name
+/// — so a profile imported from `qa-engineer/` exports back into
+/// `qa-engineer/` rather than into `qa/` because it is called `QA`.
 ///
-/// A seam rather than a `None` written at the call site, because the failure it
-/// guards against is silent. `key_of` takes the stored key and falls back to
-/// deriving one from the name — so a merge that brings the column in and
-/// leaves the call site alone would keep deriving, keep exporting `QA` into
-/// `qa/` rather than `qa-engineer/`, and turn every re-import into a duplicate
-/// with nothing failing anywhere. `grep stored_key` finds the one line that
-/// has to change.
-fn stored_key(_role: &Role) -> Option<&str> {
-    None
+/// The failure this guards against is silent and was reproduced over HTTP
+/// before the two halves met: with the column present and this function still
+/// answering `None`, every profile whose key and name agree round-trips
+/// perfectly and the one where they differ comes back from the plan as **new**,
+/// which a review would let somebody accept. A second `QA`, through export, is
+/// the duplicate folder-as-identity exists to prevent — so
+/// `the_round_trip_holds_for_the_row_whose_key_and_name_disagree` asserts the
+/// plan's verdict on export's own output rather than this function's answer. A
+/// unit test over `key_of` passes whether or not anything calls it.
+fn stored_key(role: &Role) -> Option<&str> {
+    role.key.as_deref()
 }
 
 /// A profile as a `PROFILE.md`, so it can be committed and read in a diff.
@@ -569,10 +572,115 @@ pub(super) async fn export_role(
     }))
 }
 
+// ── importing a folder of bundles ───────────────────────────────────────
+
+/// What this person can see, as the plan's resolution is allowed to know it.
+///
+/// **Six reads, every one of them already filtered**, which is the whole of the
+/// arrangement: `roles::visible`, `db::hosts_for`, `accounts::spendable`,
+/// `access::directories_for` and `skills::visible` each paste
+/// `access::filed_where` through their own query, so nothing reaches
+/// `import::plan` that the asker could not already list through an endpoint
+/// they have. Resolution therefore cannot distinguish "that does not exist"
+/// from "you may not have that" — it never learns the difference.
+///
+/// Subscriptions are read at **Editor** (`spendable`), not Viewer, and that is
+/// deliberate: a profile naming one spends somebody's quota, which is the bar
+/// `usable` and `check_account` already set on the write path. A plan that
+/// resolved a subscription the apply would then refuse has offered a choice
+/// that was never there.
+async fn visible_to(state: &AppState, me: &crate::accounts::User) -> ApiResult<import::Here> {
+    let who = me.id.as_str();
+    Ok(import::Here {
+        profiles: state.roles.visible(who, Level::Viewer).await?,
+        machines: state
+            .db
+            .hosts_for(who, Level::Viewer)
+            .await?
+            .into_iter()
+            .map(named)
+            .collect(),
+        // Read separately rather than folded in, because a file may name one
+        // and it still blocks: see `import::Here::retired`.
+        retired: state
+            .db
+            .retired_hosts(who, Level::Viewer)
+            .await?
+            .into_iter()
+            .map(named)
+            .collect(),
+        accounts: super::accounts::spendable(state, who)
+            .await?
+            .into_iter()
+            .map(|a| import::Subscription {
+                id: a.id,
+                name: a.name,
+                engine: a.kind,
+            })
+            .collect(),
+        directories: state
+            .access
+            .directories_for(who)
+            .await?
+            .into_iter()
+            .map(|d| import::Dir {
+                may_write: matches!(d.level, Some(level) if level >= Level::Writer),
+                id: d.id.as_str().to_string(),
+                name: d.name,
+                slug: d.slug,
+            })
+            .collect(),
+        skills: state
+            .skills
+            .visible(who, Level::Viewer)
+            .await?
+            .into_iter()
+            .map(|s| import::SkillHere {
+                id: s.id.as_str().to_string(),
+                name: s.name,
+                path: s.path,
+            })
+            .collect(),
+    })
+}
+
+/// A machine, as resolution needs it: an id and the name a file would write.
+fn named(host: ft_core::Host) -> import::Named {
+    import::Named {
+        id: host.id.as_str().to_string(),
+        name: host.name,
+    }
+}
+
+/// What a dropped folder of profile bundles would do.
+///
+/// **Read-only, with no exceptions.** It takes the files, says what each one is
+/// against the library, and writes nothing — see `roles::import` for why the
+/// plan it returns cannot be used as a capability by the apply (#356).
+#[utoipa::path(
+    post, path = "/api/v1/roles/import/plan", tag = "roles",
+    request_body = import::ProfileDrop,
+    responses(
+        (status = 200, body = import::ImportPlan),
+        (status = 400, body = ApiError),
+        (status = 401, body = ApiError),
+    ),
+)]
+pub(super) async fn plan_role_import(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(dropped): Json<import::ProfileDrop>,
+) -> ApiResult<Json<import::ImportPlan>> {
+    let me = whoever(&principal)?;
+    let here = visible_to(&state, me).await?;
+    import::plan(&dropped, &here).map(Json).map_err(refused)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::access::{NewGrant, SubjectKind};
+    use crate::roles::import::{DroppedFile, FieldChange, FieldDiff, PlanOutcome, ProfileDrop};
     use crate::roles::profile_md;
     use std::sync::Arc;
 
@@ -885,5 +993,423 @@ mod tests {
             .await
             .expect_err("not hers to read");
         assert!(format!("{no:?}").contains("not_found") || format!("{no:?}").contains("NotFound"));
+    }
+
+    // ── export and the plan, as one round trip ──────────────────────────
+
+    /// A profile with the key an import adopted onto it, whatever it is called.
+    async fn keyed(state: &AppState, who: &Principal, name: &str, key: &str) -> String {
+        let id = made(state, who, &asked_for(name)).await;
+        sqlx::query("UPDATE roles SET author_key = $2 WHERE id = $1")
+            .bind(&id)
+            .bind(key)
+            .execute(state.db.pool())
+            .await
+            .unwrap();
+        id
+    }
+
+    /// The file export writes for one profile.
+    async fn exported(state: &AppState, who: &Principal, id: &str) -> ProfileFile {
+        export_role(
+            State(state.clone()),
+            Extension(who.clone()),
+            Path(id.to_string()),
+        )
+        .await
+        .expect("a profile of my own exports")
+        .0
+    }
+
+    /// **Export reads the stored key, not the name.**
+    ///
+    /// The live divergence: `fstack`'s bundle is `qa-engineer/` and the profile
+    /// is called `QA`. Over the endpoint rather than over `key_of`, because the
+    /// defect this pins was not in `key_of` — it was in nothing calling it with
+    /// the column.
+    #[tokio::test]
+    async fn export_writes_the_folder_the_key_names_rather_than_the_name() {
+        let (state, admin) = fixture().await;
+        let id = keyed(&state, &admin, "QA", "qa-engineer").await;
+
+        let file = exported(&state, &admin, &id).await;
+        assert_eq!(file.key, "qa-engineer");
+        assert_eq!(file.path, "profiles/qa-engineer/PROFILE.md");
+        // And the file says so too, so a bundle read away from its folder
+        // still knows what it is.
+        let read = profile_md::parse(std::path::Path::new(&file.path), &file.key, &file.text)
+            .expect("export's own file parses");
+        assert_eq!(read.key, "qa-engineer");
+        assert_eq!(read.name, "QA");
+    }
+
+    /// **The round trip, on the row whose key and name disagree.**
+    ///
+    /// The regression test for the whole class, and the one that matters:
+    /// `a_stored_key_outranks_the_name_it_disagrees_with` proves `key_of`, and
+    /// nothing proved that anything *called* it. A unit test over a function
+    /// passes whether or not it is wired, which is how a silent duplicate
+    /// survived a green suite — so this asserts the **plan's verdict on
+    /// export's own output**: an overwrite of the profile it came from, with
+    /// nothing changing. Before the column was wired in this came back `new`,
+    /// `appliable: true`, which a review would have let somebody accept.
+    #[tokio::test]
+    async fn the_round_trip_holds_for_the_row_whose_key_and_name_disagree() {
+        let (state, admin) = fixture().await;
+        let id = keyed(&state, &admin, "QA", "qa-engineer").await;
+        let file = exported(&state, &admin, &id).await;
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(admin.clone()),
+            Json(plan_for(vec![DroppedFile {
+                path: file.path.clone(),
+                text: file.text.clone(),
+            }])),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        // The outcome first, deliberately: it is the sentence somebody needs
+        // when this breaks. Asserting the folder first fails with `"qa" !=
+        // "qa-engineer"`, which is true and says nothing about what it costs.
+        let entry = &plan.entries[0];
+        let PlanOutcome::Overwrite(over) = &entry.outcome else {
+            panic!(
+                "Firetower's own export of `QA` came back as {:#?} rather than an overwrite of \
+                 the profile it was written from — which is a second QA that a review would let \
+                 somebody accept",
+                entry.outcome
+            )
+        };
+        assert_eq!(entry.key, "qa-engineer");
+        assert_eq!(over.profile.id, id);
+        assert!(!over.adopts_key, "the row already carries the key");
+        assert!(
+            over.diff.iter().all(|f| f.change == FieldChange::Unchanged),
+            "{:#?}",
+            over.diff
+                .iter()
+                .filter(|f| f.change != FieldChange::Unchanged)
+                .collect::<Vec<_>>()
+        );
+        assert!(plan.appliable);
+    }
+
+    /// And all five of `fstack`'s profiles at once: export every one, drop the
+    /// five files back in, and get five overwrites with nothing changing.
+    ///
+    /// The set matters as well as the rows. `qa-engineer`/`QA` is the one that
+    /// diverges, and a drop where four bundles are right and one is a create is
+    /// exactly what a person would accept without reading closely.
+    #[tokio::test]
+    async fn the_five_fstack_profiles_export_and_re_plan_to_five_empty_overwrites() {
+        let (state, admin) = fixture().await;
+        // Their real folders, and the name each live profile actually has —
+        // `qa-engineer` is called `QA`, which is the whole point of the set.
+        let library = [
+            ("designer", "Designer"),
+            ("engineer", "Engineer"),
+            ("engineering-manager", "Engineering Manager"),
+            ("qa-engineer", "QA"),
+            ("security-advisor", "Security Advisor"),
+        ];
+        let mut ids = Vec::new();
+        for (key, name) in library {
+            ids.push((key, keyed(&state, &admin, name, key).await));
+        }
+
+        let mut files = Vec::new();
+        for (key, id) in &ids {
+            let file = exported(&state, &admin, id).await;
+            assert_eq!(&file.key, key, "export put `{key}` in the wrong folder");
+            files.push(DroppedFile {
+                path: file.path,
+                text: file.text,
+            });
+        }
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(admin.clone()),
+            Json(plan_for(files)),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(plan.entries.len(), 5);
+        for entry in &plan.entries {
+            let PlanOutcome::Overwrite(over) = &entry.outcome else {
+                panic!(
+                    "`{}` came back as {:#?} rather than an overwrite",
+                    entry.key, entry.outcome
+                )
+            };
+            let changed: Vec<&FieldDiff> = over
+                .diff
+                .iter()
+                .filter(|f| f.change != FieldChange::Unchanged)
+                .collect();
+            assert!(
+                changed.is_empty(),
+                "`{}` round-tripped with changes: {:#?}",
+                entry.key,
+                changed
+            );
+            assert!(
+                over.diff.iter().all(|f| f
+                    .settings
+                    .iter()
+                    .all(|s| s.change == FieldChange::Unchanged)),
+                "`{}` round-tripped with a setting changing",
+                entry.key
+            );
+            assert!(entry.warnings.is_empty(), "{:#?}", entry.warnings);
+        }
+        assert!(plan.appliable);
+    }
+
+    // ── the import plan ─────────────────────────────────────────────────
+
+    fn bundle(key: &str, name: &str) -> DroppedFile {
+        DroppedFile {
+            path: format!("profiles/{key}/PROFILE.md"),
+            text: format!("---\nname: {name}\ndoes: does the thing\n---\n\nInstructions.\n"),
+        }
+    }
+
+    fn plan_for(files: Vec<DroppedFile>) -> ProfileDrop {
+        ProfileDrop {
+            files,
+            answers: vec![],
+        }
+    }
+
+    /// Every row of `roles`, as a fingerprint — so "writes nothing" can be
+    /// asserted against the table rather than against the absence of a call.
+    async fn every_row(state: &AppState) -> Vec<(String, String, Option<String>, String)> {
+        sqlx::query_as("SELECT id, name, author_key, updated_at::text FROM roles ORDER BY id")
+            .fetch_all(state.db.pool())
+            .await
+            .unwrap()
+    }
+
+    /// **The property with no exceptions.** A plan that would create one
+    /// profile and overwrite another leaves the table exactly as it was.
+    #[tokio::test]
+    async fn the_plan_endpoint_writes_nothing() {
+        let (state, principal) = fixture().await;
+        let made = create_role(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Json(NewRole {
+                name: "Designer".into(),
+                does: "designs".into(),
+                placement: "lead".into(),
+                agent: None,
+                machine: None,
+                account: None,
+                settings: Default::default(),
+                instructions: String::new(),
+                on_usage_limit: None,
+                on_child_limit: None,
+                can_delegate: false,
+                delegate_scope: vec![],
+                include_always_on: None,
+                include_repo_defaults: None,
+                skill_scope: vec![],
+                directory: None,
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(made.0, StatusCode::CREATED);
+
+        let before = every_row(&state).await;
+        assert_eq!(before.len(), 1);
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Json(plan_for(vec![
+                bundle("designer", "Designer"),
+                bundle("engineer", "Engineer"),
+            ])),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        // It said it would overwrite the one that is here and create the one
+        // that is not...
+        let kinds: Vec<(&str, &str)> = plan
+            .entries
+            .iter()
+            .map(|e| {
+                (
+                    e.key.as_str(),
+                    match e.outcome {
+                        PlanOutcome::New(_) => "new",
+                        PlanOutcome::Overwrite(_) => "overwrite",
+                        PlanOutcome::Rename(_) => "rename",
+                        PlanOutcome::Blocked(_) => "blocked",
+                        PlanOutcome::Candidate(_) => "candidate",
+                    },
+                )
+            })
+            .collect();
+        assert_eq!(
+            kinds,
+            [("designer", "overwrite"), ("engineer", "new")],
+            "{:#?}",
+            plan.entries
+        );
+        assert!(plan.appliable);
+
+        // ...and did neither.
+        assert_eq!(every_row(&state).await, before);
+    }
+
+    /// The column, against the index that holds it: unique within the parent
+    /// path, and every existing row's null colliding with nothing.
+    #[tokio::test]
+    async fn a_key_is_unique_within_its_parent_and_nulls_never_collide() {
+        let (state, principal) = fixture().await;
+        let who = whoever(&principal).unwrap().id.as_str().to_string();
+        let org = state.db.org().await.unwrap();
+        async fn mine(
+            state: &AppState,
+            org: &str,
+            who: &str,
+            path: &str,
+            key: Option<&str>,
+        ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
+            sqlx::query(
+                "INSERT INTO roles (id, org_id, path, created_by, name, slug, does, author_key) \
+                 VALUES ($1, $2, $3::ltree, $4, 'Designer', $1, 'designs', $5)",
+            )
+            .bind(ft_core::RoleId::new().as_str())
+            .bind(org)
+            .bind(path)
+            .bind(who)
+            .bind(key)
+            .execute(state.db.pool())
+            .await
+        }
+        let mine = |path: &'static str, key: Option<&'static str>| {
+            let (state, org, who) = (&state, org.as_str(), who.as_str());
+            async move { mine(state, org, who, path, key).await }
+        };
+
+        mine("u.kevin.designer_1", Some("designer")).await.unwrap();
+        // The same key, in somebody else's space: the ordinary case, and the
+        // whole reason the index is per parent rather than per installation.
+        mine("u.ana.designer_2", Some("designer")).await.unwrap();
+        // ...and in the same space, refused.
+        let again = mine("u.kevin.designer_3", Some("designer")).await;
+        assert!(
+            again.is_err_and(|e| e
+                .as_database_error()
+                .is_some_and(|db| db.is_unique_violation())),
+            "a second `designer` in one space has to be refused"
+        );
+        // Every row that predates the format is null, and nulls are distinct.
+        mine("u.kevin.a_1", None).await.unwrap();
+        mine("u.kevin.b_1", None).await.unwrap();
+    }
+
+    /// A key written onto a row is read back as the identity: the plan matches
+    /// by it, and does not ask about the name.
+    #[tokio::test]
+    async fn a_row_that_carries_a_key_is_matched_by_it_and_not_by_its_name() {
+        let (state, principal) = fixture().await;
+        let who = whoever(&principal).unwrap().id.as_str().to_string();
+        let org = state.db.org().await.unwrap();
+        let id = ft_core::RoleId::new();
+        sqlx::query(
+            "INSERT INTO roles (id, org_id, path, created_by, name, slug, does, author_key) \
+             VALUES ($1, $2, ('u.' || (SELECT slug FROM principals WHERE id = $3) || \
+             '.designer_x')::ltree, $3, 'Something Else', $1, 'designs', 'designer')",
+        )
+        .bind(id.as_str())
+        .bind(&org)
+        .bind(&who)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(principal),
+            Json(plan_for(vec![bundle("designer", "Designer")])),
+        )
+        .await
+        .unwrap()
+        .0;
+        let PlanOutcome::Rename(renamed) = &plan.entries[0].outcome else {
+            panic!("expected a rename, got {:#?}", plan.entries[0].outcome)
+        };
+        assert_eq!(renamed.from, "Something Else");
+        assert_eq!(renamed.to, "Designer");
+        assert_eq!(renamed.profile.key.as_deref(), Some("designer"));
+        assert!(!renamed.adopts_key, "it already had one");
+    }
+
+    /// **Visibility filters before resolution.** A colleague's profile of the
+    /// same name is not matched, not proposed, and not mentioned — the plan
+    /// cannot tell the asker that it exists, because it never saw it.
+    #[tokio::test]
+    async fn a_colleagues_profile_of_the_same_name_is_neither_matched_nor_named() {
+        let (state, principal) = fixture().await;
+        let org = state.db.org().await.unwrap();
+        let them = whoever(&colleague(&state, "them").await).unwrap().clone();
+        let theirs = state
+            .roles
+            .create(
+                &org,
+                them.id.as_str(),
+                &them.slug,
+                &NewRole {
+                    name: "Designer".into(),
+                    does: "designs".into(),
+                    placement: "lead".into(),
+                    agent: None,
+                    machine: None,
+                    account: None,
+                    settings: Default::default(),
+                    instructions: String::new(),
+                    on_usage_limit: None,
+                    on_child_limit: None,
+                    can_delegate: false,
+                    delegate_scope: vec![],
+                    include_always_on: None,
+                    include_repo_defaults: None,
+                    skill_scope: vec![],
+                    directory: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let plan = plan_role_import(
+            State(state.clone()),
+            Extension(principal),
+            Json(plan_for(vec![bundle("designer", "Designer")])),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert!(
+            matches!(plan.entries[0].outcome, PlanOutcome::New(_)),
+            "{:#?}",
+            plan.entries[0].outcome
+        );
+        let drawn = serde_json::to_string(&plan).unwrap();
+        assert!(
+            !drawn.contains(theirs.as_str()),
+            "the plan named a profile the asker cannot see"
+        );
     }
 }

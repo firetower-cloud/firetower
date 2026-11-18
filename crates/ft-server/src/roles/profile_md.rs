@@ -3087,6 +3087,9 @@ You own feature delivery.
         super::super::Role {
             id: "role_x".into(),
             path: "d/platform/engineering-manager_01hzzzzz".into(),
+            // The key an import would have adopted onto it: this row is the
+            // one the `fstack-repaired` bundle of the same folder describes.
+            key: Some("engineering-manager".into()),
             name: "Engineering Manager".into(),
             does: "Orchestrates feature delivery from request to draft PRs.".into(),
             placement: "new".into(),
