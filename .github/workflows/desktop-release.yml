@@ -56,12 +56,25 @@ on:
         description: "An existing desktop-v* tag to rebuild"
         required: true
         type: string
+      # **Beta only, and general access deliberately absent.**
+      #
+      # Dispatching this with `channel: general` published `desktop-stable` and
+      # `desktop-latest` — the two addresses every desktop copy on general
+      # access reads — with no typed confirmation, no check that the version is
+      # on beta, and no channel-manifest write. It was an unguarded second
+      # route to the thing `promote.yml` exists to guard, and it was
+      # reproduced: it published 0.60.0 to both addresses while the manifest
+      # still said beta 0.59.0, general 0.58.0.
+      #
+      # General access now reaches this job only through `workflow_call`, which
+      # means only through `promote.yml`. The step guarding it is below; this
+      # list is the half somebody sees before they press anything.
       channel:
-        description: "Which channel's address to write: beta or general"
+        description: "Which channel's address to write (general access is promotion's, not this)"
         required: false
         type: choice
         default: beta
-        options: [beta, general]
+        options: [beta]
       publish_only:
         description: "Rewrite the manifest only — build and sign nothing"
         required: false
@@ -389,6 +402,35 @@ jobs:
         with:
           node-version: 22
 
+      # The list of dispatch options above is a courtesy; this is the rule.
+      # `workflow_dispatch` and `workflow_call` share one `inputs` context, so
+      # the only thing that distinguishes "a person pressed Run workflow" from
+      # "promotion called it" is the event name.
+      - name: general access comes from promotion and from nowhere else
+        env:
+          CHANNEL: ${{ inputs.channel || 'beta' }}
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANNEL" != beta ] && [ "$CHANNEL" != general ]; then
+            echo "::error::channel must be beta or general, not '$CHANNEL'."; exit 1
+          fi
+          if [ "$CHANNEL" = general ] && [ "${{ github.event_name }}" != workflow_call ]; then
+            echo "::error::Writing the general-access address is promotion's job." \
+                 "Run the 'promote' workflow, which requires a typed confirmation, checks the" \
+                 "version is on beta and is not a downgrade, and writes the channel manifest." \
+                 "Nothing has been published."
+            exit 1
+          fi
+          # Signing and general access are never the same run. A promotion
+          # moves what is already built; anything that builds is a release.
+          if [ "$CHANNEL" = general ] && [ "$PUBLISH_ONLY" != true ]; then
+            echo "::error::channel=general requires publish_only=true." \
+                 "General access is reached by moving what was already built and signed," \
+                 "never by building again. Nothing has been published."
+            exit 1
+          fi
+
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
@@ -495,51 +537,92 @@ jobs:
           # always the safe answer — it is the single address every installed
           # copy reads, `$TAG` already has its own copy of this manifest a few
           # lines up, and this job can be re-run once whatever failed is over.
-          held=""
-          rolling=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$ROLLING" \
-            --jq '[.assets[] | select(.name == "latest.json")] | length' \
-            2>"$RUNNER_TEMP/rolling.err") || rolling=""
-          if [ -z "$rolling" ]; then
-            if ! grep -q '(HTTP 404)' "$RUNNER_TEMP/rolling.err"; then
-              cat "$RUNNER_TEMP/rolling.err" >&2
-              echo "Could not read what $ROLLING holds, so it is not being moved." >&2
-              echo "$TAG keeps its own copy of this manifest; re-run this job." >&2
-              exit 1
-            fi
-            echo "No $ROLLING release yet — this one creates it."
-            gh release create "$ROLLING" -R "$GITHUB_REPOSITORY" --prerelease \
-              --title "desktop: $CHANNEL" \
-              --notes "The desktop app's $CHANNEL address. Its \`latest.json\` is what an installed copy on this channel reads; the versioned releases hold the same manifest." \
-              >/dev/null
-            rolling=0
-          fi
-          if [ "$rolling" != 0 ]; then
-            if ! gh release download "$ROLLING" -R "$GITHUB_REPOSITORY" \
-                -p latest.json -D "$RUNNER_TEMP/held" --clobber; then
-              echo "$ROLLING holds a manifest that would not download, so it is" >&2
-              echo "not being moved. $TAG keeps its own copy; re-run this job." >&2
-              exit 1
-            fi
-            held=$(jq -r '.version // empty' "$RUNNER_TEMP/held/latest.json" || true)
-            if [ -z "$held" ]; then
-              echo "$ROLLING holds a manifest with no version in it, so there is" >&2
-              echo "nothing to compare $VERSION against and it is not being moved." >&2
-              exit 1
-            fi
-          fi
+          # **Every address is guarded, not just the first one.**
+          #
+          # This used to read what `$ROLLING` held, compare that, and then
+          # upload to `$ROLLING` *and* `$ALIASES` in a loop. `desktop-latest`
+          # was therefore clobbered having been compared against nothing — and
+          # it is the address every copy predating channels reads, forever.
+          # The loop had a second hole: a failure between its two iterations
+          # left `desktop-stable` moved and `desktop-latest` not, two
+          # general-access addresses disagreeing with nothing to notice.
+          #
+          # So each address answers for itself: read what it holds, refuse to
+          # move it backwards, write it. An address that is already ahead is
+          # skipped and said out loud rather than silently overwritten, and if
+          # a later address fails the earlier ones have already landed — which
+          # is the same "re-run it" position as before, now with the state
+          # printed.
+          #
           # **Per channel, and it has to be.** Beta is legitimately and
           # permanently ahead of general access, so a guard spanning both
           # channels would read every promotion as a downgrade and refuse
-          # forever. Within one channel the rule is unchanged: that address is
-          # the single thing every copy on the channel reads, and moving it
-          # back is a silent downgrade of all of them.
-          if [ -n "$held" ] && [ "$held" != "$VERSION" ] &&
-            [ "$(printf '%s\n%s\n' "$held" "$VERSION" | sort -V | tail -1)" = "$held" ]; then
-            echo "$ROLLING holds $held, which is newer than $VERSION."
-            echo "Leaving it alone: $TAG keeps its own copy of this manifest."
-            exit 0
-          fi
+          # forever. Within one address the rule is unchanged: it is the single
+          # thing every copy reading it reads, and moving it back is a silent
+          # downgrade of all of them.
+          moved=""
+          skipped=""
           for address in $ROLLING $ALIASES; do
+            held=""
+            rolling=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$address" \
+              --jq '[.assets[] | select(.name == "latest.json")] | length' \
+              2>"$RUNNER_TEMP/rolling.err") || rolling=""
+            if [ -z "$rolling" ]; then
+              if ! grep -q '(HTTP 404)' "$RUNNER_TEMP/rolling.err"; then
+                cat "$RUNNER_TEMP/rolling.err" >&2
+                echo "Could not read what $address holds, so it is not being moved." >&2
+                echo "$TAG keeps its own copy of this manifest; re-run this job." >&2
+                exit 1
+              fi
+              echo "No $address release yet — this one creates it."
+              gh release create "$address" -R "$GITHUB_REPOSITORY" --prerelease \
+                --title "desktop: $CHANNEL" \
+                --notes "The desktop app's $CHANNEL address. Its \`latest.json\` is what an installed copy reading this address gets; the versioned releases hold the same manifest." \
+                >/dev/null
+              rolling=0
+            fi
+            if [ "$rolling" != 0 ]; then
+              rm -rf "$RUNNER_TEMP/held"
+              if ! gh release download "$address" -R "$GITHUB_REPOSITORY" \
+                  -p latest.json -D "$RUNNER_TEMP/held" --clobber; then
+                echo "$address holds a manifest that would not download, so it is" >&2
+                echo "not being moved. $TAG keeps its own copy; re-run this job." >&2
+                exit 1
+              fi
+              held=$(jq -r '.version // empty' "$RUNNER_TEMP/held/latest.json" || true)
+              if [ -z "$held" ]; then
+                echo "$address holds a manifest with no version in it, so there is" >&2
+                echo "nothing to compare $VERSION against and it is not being moved." >&2
+                exit 1
+              fi
+            fi
+
+            # Captured on its own line and checked, never inside the `if`: a
+            # command substitution *in* a condition is exempt from `set -e`, so
+            # a `sort` that failed used to read as "not newer" and let the
+            # write through. Third instance of that shape found in this effort.
+            newest=""
+            if [ -n "$held" ]; then
+              newest=$(printf '%s\n%s\n' "$held" "$VERSION" | sort -V | tail -1)
+              if [ -z "$newest" ]; then
+                echo "Could not compare $held against $VERSION, so $address is not" >&2
+                echo "being moved. $TAG keeps its own copy; re-run this job." >&2
+                exit 1
+              fi
+            fi
+            if [ -n "$held" ] && [ "$held" != "$VERSION" ] && [ "$newest" = "$held" ]; then
+              echo "$address holds $held, which is newer than $VERSION. Leaving it alone."
+              skipped="$skipped $address($held)"
+              continue
+            fi
+
             gh release upload "$address" "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber
             echo "published $VERSION to $address"
+            moved="$moved $address"
           done
+          echo "moved:${moved:- nothing}${skipped:+ · left alone:$skipped}"
+          if [ -n "$skipped" ] && [ -n "$moved" ]; then
+            echo "::warning::$CHANNEL's addresses do not all hold the same version:" \
+                 "moved$moved, left alone$skipped. That is the no-backwards rule doing its job," \
+                 "but two general-access addresses disagreeing is worth knowing about."
+          fi
