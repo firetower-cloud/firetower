@@ -961,8 +961,9 @@ fn decide(
                             None,
                             Some(format!(
                                 "this Firetower is running {current}, which is newer than the \
-                                 {holds} {} holds. Nothing is ever moved backwards.",
-                                channel.name()
+                                 {holds} {name} holds. Nothing is ever moved backwards — this \
+                                 becomes an ordinary switch once {name} reaches {current}.",
+                                name = channel.name()
                             )),
                         ),
                         (true, true, _) => (
@@ -2073,11 +2074,13 @@ mod tests {
         assert!(reason.is_none(), "the installation itself is fine");
         let beta = row(&offers, Channel::Beta);
         assert!(beta.action.is_none());
+        let why = beta.reason.unwrap();
+        assert!(why.contains("Nothing is ever moved backwards"), "{why}");
+        // And when it stops being refused. A refusal with no end to it reads
+        // as a permanent membership, which is the thing this is not.
         assert!(
-            beta.reason
-                .unwrap()
-                .contains("Nothing is ever moved backwards"),
-            "and it says why"
+            why.contains("once beta reaches") && why.contains(&version::current().to_string()),
+            "it has to say what lifts it: {why}"
         );
     }
 
