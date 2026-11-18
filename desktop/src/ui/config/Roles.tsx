@@ -461,7 +461,11 @@ export function Roles() {
         className="hidden"
         onChange={(e) => {
           const bounds = limits.data;
-          const chosen = e.target.files;
+          /* **Copied out before the input is cleared.** `value = ""` empties
+             the `FileList` this handler is holding, not a stale copy of it,
+             so reading after the reset reads nothing at all. The reset is
+             what lets the same folder be picked twice running. */
+          const chosen = Array.from(e.target.files ?? []);
           e.target.value = "";
           if (!bounds) {
             void unbounded();

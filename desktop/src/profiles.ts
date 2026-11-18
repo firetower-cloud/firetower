@@ -132,8 +132,18 @@ export function readProfileDrop(dt: DataTransfer | null, limits: PlanLimits): Pr
   return read(roots, limits);
 }
 
-/** The same, from a file input — which gives `webkitRelativePath` instead. */
-export function readProfileFiles(chosen: FileList | null, limits: PlanLimits): Promise<Dropped> {
+/**
+ * The same, from a file input — which gives `webkitRelativePath` instead.
+ *
+ * Takes a list **or an array**, because the caller has to copy the files out
+ * of the input before it clears it: `input.value = ""` empties the very
+ * `FileList` object a handler is holding, so a reader handed one after the
+ * reset reads nothing and the screen does nothing.
+ */
+export function readProfileFiles(
+  chosen: FileList | readonly File[] | null,
+  limits: PlanLimits,
+): Promise<Dropped> {
   return read(Array.from(chosen ?? []), limits);
 }
 
