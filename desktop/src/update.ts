@@ -1,11 +1,24 @@
 /**
- * Which build this is, and whether a newer one is out.
+ * Which build this is, which channel it is on, and whether a newer one is out.
  *
- * The app asks the GitHub release's `latest.json`, checks the file's signature
- * against the public key it was built with, and keeps the answer. It asks
- * again every ten minutes, because a window that stays open for a fortnight
- * used to find out about a release by being restarted — which is the one
- * moment nobody is thinking about updates.
+ * The app asks its channel's `latest.json`, checks the file's signature against
+ * the public key it was built with, and keeps the answer. It asks again every
+ * ten minutes, because a window that stays open for a fortnight used to find
+ * out about a release by being restarted — which is the one moment nobody is
+ * thinking about updates.
+ *
+ * **The asking moved into the shell** (`src-tauri/src/updater.rs`, reached
+ * through `~/update-shell`). A copy's channel is an address, and choosing one
+ * at runtime is available only from the shell language — so the whole
+ * check / download / install sequence had to go with it, an update being a
+ * resource whose handle that side owns. This file is otherwise what it was:
+ * the watch, the shared check, and what a failure means.
+ *
+ * The address is read per check from the local preference, so switching a copy
+ * between channels takes effect at the next check and needs no restart. There
+ * is no downgrade allowance anywhere in the path: the plugin's "only if newer"
+ * rule is what makes leaving beta mean *stop receiving new betas* rather than
+ * *put the general-access build back*.
  *
  * A find is said in two places and interrupts in neither: the rail's Updates
  * row reads "Update available" in slate, and the Updates screen offers it.
@@ -20,20 +33,35 @@
  * version is never known, nothing is ever found, and both surfaces stay quiet.
  */
 import { useSyncExternalStore } from "react";
-import type { Update } from "@tauri-apps/plugin-updater";
 import { bridge } from "~/bridge";
+import type { AppChannel } from "~/channel";
+import { appChannel, endpointFor, rememberInstalledFrom } from "~/channel";
+import type { Progress } from "~/update-shell";
+import { check, install, version as askVersion } from "~/update-shell";
 
 export type Build = {
   /** What this window runs. Null until the shell answers, and in a browser tab. */
   version: string | null;
   /** The build that is out, if a check found a newer one. */
   newer: string | null;
+  /** The channel the last check asked. */
+  channel: AppChannel;
+  /**
+   * The channel the manifest that answered said it was, when it said so.
+   *
+   * Read from the manifest and **never acted on** — the updater has no channel
+   * concept and ignores the field. It is here so a copy can say where a build
+   * it is being offered came from.
+   */
+  from: string | null;
+  /** How far a download has got, while one is running. */
+  taking: Progress | null;
 };
 
 /** How often a window asks again. Releases are monthly; windows live for days. */
 const EVERY = 10 * 60_000;
 
-const NOTHING: Build = { version: null, newer: null };
+const NOTHING: Build = { version: null, newer: null, channel: "general", from: null, taking: null };
 
 /* The same object until something actually changes — `useSyncExternalStore`
    compares what the snapshot returns against what it returned last time, and a
@@ -42,22 +70,21 @@ let build: Build = NOTHING;
 const watching = new Set<() => void>();
 let timer: ReturnType<typeof setInterval> | null = null;
 
-/**
- * What the last check found, held for the install rather than fetched twice.
- *
- * It is a handle on a resource the Rust side owns, so the one being replaced
- * is closed: a window open for a day asks a hundred and forty-four times, and
- * a hundred and forty-four of these left open is a leak nobody sees until the
- * shell runs out of them.
- */
-let held: Update | null = null;
-/** An install in flight. Nothing is re-checked or closed under one. */
+/** An install in flight. Nothing is re-checked under one. */
 let taking = false;
 /** The check in flight, so two callers wait on one request. */
 let looking: Promise<void> | null = null;
 
 function settle(next: Build) {
-  if (next.version === build.version && next.newer === build.newer) return;
+  if (
+    next.version === build.version &&
+    next.newer === build.newer &&
+    next.channel === build.channel &&
+    next.from === build.from &&
+    next.taking === build.taking
+  ) {
+    return;
+  }
   build = next;
   for (const tell of watching) tell();
 }
@@ -77,30 +104,34 @@ async function ask(): Promise<void> {
      it is does not also cost us the check. */
   if (!build.version) {
     try {
-      const { getVersion } = await import("@tauri-apps/api/app");
-      settle({ ...build, version: await getVersion() });
+      settle({ ...build, version: await askVersion() });
     } catch {
       /* The row leaves the version out. */
     }
   }
 
-  try {
-    const { check } = await import("@tauri-apps/plugin-updater");
-    const found = await check();
-    // An install started while we were asking: it is holding `held`.
-    if (taking) {
-      await found?.close().catch(() => {});
-      return;
+  /* **Twice at most, and only when the preference moved under the check.**
+     Somebody presses Beta and the screen asks straight away; if a ten-minute
+     check was already in flight against the old address, `look()` hands them
+     that one — and an answer for the channel they just left is the thing they
+     would notice. So the channel is read before and after, and a check that
+     was overtaken is made again. Bounded, because a preference being flipped
+     faster than the network answers must not become a loop. */
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const on = appChannel();
+    try {
+      const found = await check(endpointFor(on));
+      // An install started while we were asking: it owns the held update now.
+      if (taking) return;
+      settle({ ...build, newer: found?.version ?? null, channel: on, from: found?.channel ?? null });
+    } catch {
+      // No network, a release with no updater assets, a signature that does not
+      // check: all of them mean "not now", none of them is the person's. What a
+      // previous check found stands — a dropped connection is not a release
+      // being withdrawn. The channel still moves, because the preference did.
+      settle({ ...build, channel: on });
     }
-    const was = held;
-    held = found;
-    if (was && was !== found) void was.close().catch(() => {});
-    settle({ ...build, newer: found?.version ?? null });
-  } catch {
-    // No network, a release with no updater assets, a signature that does not
-    // check: all of them mean "not now", none of them is the person's. What a
-    // previous check found stands — a dropped connection is not a release
-    // being withdrawn.
+    if (appChannel() === on) return;
   }
 }
 
@@ -137,16 +168,24 @@ function watch(onChange: () => void): () => void {
  * is the version that arrives. It throws rather than swallowing, because a
  * download that fails after somebody pressed the button has to be readable on
  * the screen they pressed it from.
+ *
+ * Where the build came from is written down **before** the install, because
+ * the install relaunches the window and anything not in storage by then is
+ * lost. It is stored with its version and only believed when the two agree, so
+ * an install that failed leaves no claim behind.
  */
 export async function takeUpdate(): Promise<void> {
-  if (!held) throw new Error("There is nothing to install — check again.");
+  if (!build.newer) throw new Error("There is nothing to install — check again.");
+  rememberInstalledFrom(build.newer, build.channel);
   taking = true;
+  settle({ ...build, taking: { downloaded: 0, total: null } });
   try {
-    await held.downloadAndInstall();
+    await install((p) => settle({ ...build, taking: p }));
     const { relaunch } = await import("@tauri-apps/plugin-process");
     await relaunch();
   } finally {
     taking = false;
+    settle({ ...build, taking: null });
   }
 }
 
@@ -199,7 +238,11 @@ const CANNOT_WRITE =
  * to the one person it has already happened to.
  */
 export function whyUpdateFailed(e: unknown): string {
-  const said = (e as { message?: string })?.message?.trim() ?? "";
+  /* A Tauri command rejects with a bare string, so a failure arrives here
+     sometimes as an `Error` and sometimes as the sentence itself. Both are
+     read, because the one that matters most — the platform's own words about
+     a file it would not overwrite — is the half this would otherwise drop. */
+  const said = (typeof e === "string" ? e : (e as { message?: string })?.message)?.trim() ?? "";
   if (CANNOT_WRITE.test(said)) {
     return `Firetower could not replace its own files: either it is installed somewhere this account cannot write to, or a copy of it is still running. Move it somewhere you can write to, or close the other copy, and take the update again — waiting on its own will not help. (${said})`;
   }
