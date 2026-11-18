@@ -320,9 +320,32 @@ function poster(look) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400"><rect width="640" height="400" fill="#fff"/>${body}</svg>`;
 }
 
+/**
+ * The subscriptions a session can be started on.
+ *
+ * **`connected`, and nothing else will do.** Both of these said `"ready"`,
+ * which is a word no part of this product uses: `agent_accounts.state` is
+ * `pending` while a credential is being taken and `connected` once it is
+ * (`crates/ft-server/src/api/accounts.rs`), and `usable()` — byte-identical
+ * in `mobile/src/api/accounts.ts` and `desktop/src/api/accounts.ts` — is
+ * `enabled && state === "connected" && credentialSet`. So every account the
+ * mock served was unusable, and the composer correctly refused to start
+ * anything: on the phone, on the desk, and in the old New workspace dialog
+ * at once. The desk's own fixture in `account-switch.test.tsx` has said
+ * `connected` all along, which is how the two drifted apart unseen.
+ *
+ * `mode` is `Subscription`, capitalised, because the column holds the
+ * variant name — `format!("{:?}", req.mode)` — and `AccountSwitcher` asks
+ * `a.mode === "Subscription"` before it recommends one. Lower-cased, the
+ * recommendation never fired and the sheet offered nothing in bold.
+ *
+ * `path` is required by the contract and was absent, which is the quieter
+ * half of the same row: `mayMove` splits a path to decide whether to offer
+ * *Move* at all, so every account read as something nobody may file.
+ */
 const ACCOUNTS = [
-  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
-  { id: "a_2", kind: "Codex", name: "Acme · Plus", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
+  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "Subscription", isDefault: true, enabled: true, state: "connected", revision: 1, credentialSet: true, identity: "kevin@acme.com", path: "u/kevin", limits: [] },
+  { id: "a_2", kind: "Codex", name: "Acme · Plus", mode: "Subscription", isDefault: true, enabled: true, state: "connected", revision: 1, credentialSet: true, identity: "kevin@acme.com", path: "u/kevin", limits: [] },
 ];
 
 const say = (item, text) => [
