@@ -282,7 +282,7 @@ export function Roles() {
   const unbounded = async () => {
     const again = await confirm({
       title: "Nothing was read",
-      body: "Firetower has not said what an import takes, so this drop could not be checked against it. Try again, or reopen this screen.",
+      body: "Firetower has not said what an import takes, so nothing was read. Try again, or reopen this screen.",
       action: "Try again",
       cancel: "Close",
     });
