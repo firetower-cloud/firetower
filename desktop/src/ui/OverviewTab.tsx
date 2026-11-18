@@ -48,8 +48,13 @@ function agentName(name: string | undefined): string {
      something else — one version out, a proxy, a mock's catch-all — made
      `lastIndexOf` throw and the whole Overview became the error boundary.
      That is the third crash from exactly this, after the skill review and
-     the account sheet, so it is a habit rather than an incident. */
-  if (!name) return "Untitled";
+     the account sheet, so it is a habit rather than an incident.
+
+     **The type, not the truthiness.** `!name` only catches `undefined`,
+     `null` and `""` — a number walked straight through it into the very
+     `lastIndexOf` call this exists to protect, which is the shape that
+     actually arrived. Mobile's `agentName` guards it this way too. */
+  if (typeof name !== "string" || !name) return "Untitled";
   const at = name.lastIndexOf(" / ");
   return at >= 0 ? name.slice(at + 3) : name;
 }
