@@ -211,10 +211,15 @@ describe("latest.json", () => {
     const rolling = publish.slice(publish.indexOf("held="));
     const upload = rolling.indexOf('release upload "$address"');
     expect(upload).toBeGreaterThan(0);
-    // Every path that failed to read stops before the upload...
-    const stops = [...rolling.matchAll(/exit 1/g)].map((m) => m.index);
+    // Every path that failed to read stops before the upload.
+    //
+    // Scoped to the region *before* the upload rather than to the whole gate:
+    // there is now also an `exit 1` after it, reporting that an upload failed
+    // and the addresses disagree. That one is a report, not a guard, and
+    // asserting on the maximum index would read the two as the same thing —
+    // which is how a true property gets encoded as a false one.
+    const stops = [...rolling.slice(0, upload).matchAll(/exit 1/g)];
     expect(stops.length).toBeGreaterThan(1);
-    expect(Math.max(...stops)).toBeLessThan(upload);
     // ...and absence is told apart from failure, so a repository with no
     // rolling release yet can still make one.
     expect(rolling).toMatch(/\(HTTP 404\)/);
@@ -295,6 +300,10 @@ case "$*" in
     if [ -n "\${DOWNLOAD_FAILS:-}" ]; then echo "HTTP 500" >&2; exit 1; fi
     mkdir -p "$RUNNER_TEMP/held"
     printf '%s' "\${HELD_JSON:-}" > "$RUNNER_TEMP/held/latest.json" ;;
+  *"release upload"*)
+    case "$*" in
+      *"\${UPLOAD_FAILS:-__none__}"*) echo "injected upload failure" >&2; exit 1 ;;
+    esac ;;
 esac
 exit 0
 `;
@@ -454,6 +463,31 @@ exit 0
     expect(r.output).toMatch(/desktop-latest holds 0\.30\.0/);
     // And it is not silent about the two now disagreeing.
     expect(r.output).toMatch(/do not all hold the same version/);
+  });
+
+  it("reports the two addresses disagreeing when an upload fails, rather than dying mid-loop", () => {
+    // Under `set -e` the step used to end inside the loop, so neither the
+    // summary nor the warning ran: `desktop-stable` had moved, `desktop-latest`
+    // had not, and the log said so only by which `published` lines were
+    // present. The skipped case was already announced; this is the case where
+    // nobody is looking.
+    const r = run({ CHANNEL: "general", HELD_JSON: '{"version":"0.29.0"}', UPLOAD_FAILS: "desktop-latest" });
+    expect(r.status).not.toBe(0);
+    expect(r.moved).toBe(true); // desktop-stable landed
+    expect(r.output).toMatch(/addresses now disagree/);
+    expect(r.output).toMatch(/moved desktop-stable/);
+    expect(r.output).toMatch(/failed desktop-latest/);
+    // And it says which way to recover, because the laggard is behind.
+    expect(r.output).toMatch(/re-running this job moves them forward/);
+  });
+
+  it("still attempts every address after one upload fails", () => {
+    // Stopping after the first failure would guarantee the split that
+    // carrying on only risks.
+    const r = run({ CHANNEL: "general", HELD_JSON: '{"version":"0.29.0"}', UPLOAD_FAILS: "desktop-stable" });
+    expect(r.status).not.toBe(0);
+    expect(r.alias).toBe(true); // desktop-latest was still tried, and landed
+    expect(r.output).toMatch(/failed desktop-stable/);
   });
 
   it("refuses a channel it does not recognise, before reading anything", () => {
