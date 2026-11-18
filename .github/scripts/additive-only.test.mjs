@@ -153,24 +153,62 @@ describe("what is still allowed, because the whole point is to add", () => {
     assert.deepEqual(breaches(updater, updater), []);
   });
 
+  /**
+   * The first operation whose 2xx response is a plain `$ref` to an object with
+   * more than one property, as `[operation, schema name]`.
+   *
+   * Chosen by **reachability from a response**, not by taking the first schema
+   * in `components`. An earlier version did the latter and passed here while
+   * failing in CI, where a different merge commit put an unreferenced schema
+   * first: removing a field from something nothing returns is correctly not a
+   * breach, so the test was asserting on whichever schema happened to sort
+   * first rather than on anything about the check.
+   */
+  function aReturnedSchema(contract) {
+    for (const [path, item] of Object.entries(contract.paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        const ok = Object.entries(operation.responses ?? {}).find(([code]) => code.startsWith("2"));
+        const ref = ok?.[1]?.content?.["application/json"]?.schema?.$ref;
+        if (!ref) continue;
+        const name = ref.replace("#/components/schemas/", "");
+        const schema = contract.components?.schemas?.[name];
+        if (schema?.type === "object" && Object.keys(schema.properties ?? {}).length > 1) {
+          return { where: `${method.toUpperCase()} ${path}`, name };
+        }
+      }
+    }
+    throw new Error("no operation returns an object with more than one field — this test is reading a contract it does not recognise");
+  }
+
   it("survives the real contract having a field taken out of it", () => {
-    // Not a synthetic document: the committed contract with one response field
-    // removed, which is the change this exists to stop. Proves the check works
-    // at the size and shape of the thing it will actually read, including its
-    // `$ref` chains and its cycles.
+    // Not a synthetic document: the committed contract with one field removed
+    // from something an endpoint actually returns, which is the change this
+    // exists to stop. Proves the check works at the size and shape of the thing
+    // it will really read, including its `$ref` chains and its cycles.
     const contract = JSON.parse(readFileSync(join(ROOT, "api/openapi.json"), "utf8"));
+    const { where, name } = aReturnedSchema(contract);
     const after = JSON.parse(JSON.stringify(contract));
-    const [name, schema] = Object.entries(after.components.schemas).find(
-      ([, s]) => s.type === "object" && Object.keys(s.properties ?? {}).length > 1,
-    );
-    const dropped = Object.keys(schema.properties)[0];
-    delete schema.properties[dropped];
+    const dropped = Object.keys(after.components.schemas[name].properties)[0];
+    delete after.components.schemas[name].properties[dropped];
 
     const found = breaches(contract, after);
-    assert.ok(found.length > 0, `removing ${name}.${dropped} was not noticed`);
+    assert.ok(found.length > 0, `removing ${name}.${dropped}, returned by ${where}, was not noticed`);
     assert.ok(
       found.some((f) => f.where.endsWith(dropped) || f.where.includes(`.${dropped}`)),
       `${dropped} is not named in: ${found.map((f) => f.where).join(", ")}`,
+    );
+  });
+
+  it("survives the real contract losing a path", () => {
+    const contract = JSON.parse(readFileSync(join(ROOT, "api/openapi.json"), "utf8"));
+    const after = JSON.parse(JSON.stringify(contract));
+    const [gone] = Object.keys(after.paths);
+    delete after.paths[gone];
+
+    const found = breaches(contract, after);
+    assert.ok(
+      found.some((f) => f.where.includes(gone) && /path is gone/.test(f.what)),
+      `${gone} is not named in: ${found.map((f) => f.where).join(", ")}`,
     );
   });
 });
