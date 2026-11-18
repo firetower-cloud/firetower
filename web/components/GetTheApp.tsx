@@ -234,11 +234,12 @@ export function GetTheApp() {
  * access to itself, so nothing diverges on the day this lands (#415). The
  * first release deliberately left unpromoted is where they part, and from then
  * on the tiles and this line want the channel manifest's `desktop.general`
- * pin, which #448 publishes. That is one lookup in one place, and it is named
- * here so nobody has to go hunting for it. It is deliberately *not* derived
- * from the releases feed: general access can lag beta by more than a page of
- * releases, and reading a pin by enumerating releases is the failure the
- * manifest exists to prevent.
+ * pin, which #448 publishes. **That is #454, and it has a deadline rather
+ * than a backlog slot: it has to land before the first unpromoted release**,
+ * because nothing else in the code will say so. It is deliberately *not*
+ * derived from the releases feed: general access can lag beta by more than a
+ * page of releases, and reading a pin by enumerating releases is the failure
+ * the manifest exists to prevent.
  */
 export function downloadNote(version?: string): string {
   return version ? `General access: ${version}` : "The general-access release";
