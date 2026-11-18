@@ -10643,7 +10643,7 @@
           },
           "irreversible": {
             "type": "boolean",
-            "description": "Whether this cannot be undone. True for beta, always."
+            "description": "Whether this cannot be undone at the moment it is taken. True for\nbeta, always — see [`Channel::irreversible`]."
           },
           "lines": {
             "type": "array",
@@ -14318,7 +14318,7 @@
           },
           "irreversible": {
             "type": "boolean",
-            "description": "Whether taking it cannot be undone."
+            "description": "Whether taking it cannot be undone at the moment it is taken. See\n[`Channel::irreversible`] — it is the version that cannot be walked\nback, not the membership."
           },
           "offers": {
             "type": "string",
@@ -18021,7 +18021,7 @@
         "properties": {
           "acknowledgeOneWay": {
             "type": "boolean",
-            "description": "Taken as read: moving to beta cannot be undone. Required for beta,\nwhere `irreversible` on the plan is the sentence a client has to put\nin front of somebody first; ignored for general access, which can."
+            "description": "Taken as read: the version this moves onto cannot be walked back.\nRequired for beta, where `irreversible` on the plan is the sentence a\nclient has to put in front of somebody first; ignored for general\naccess, which never moves an installation backwards anyway."
           },
           "channel": {
             "$ref": "#/components/schemas/Channel"

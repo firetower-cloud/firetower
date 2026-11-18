@@ -40,7 +40,7 @@ export const GetUpdatesResponse = zod.object({
   "offers": zod.array(zod.object({
   "action": zod.union([zod.null(),zod.enum(['switch', 'pin']).describe('What can be done about this row, if anything.')]).optional(),
   "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
-  "irreversible": zod.boolean().describe('Whether taking it cannot be undone.'),
+  "irreversible": zod.boolean().describe('Whether taking it cannot be undone at the moment it is taken. See\n[`Channel::irreversible`] — it is the version that cannot be walked\nback, not the membership.'),
   "offers": zod.string().describe('What being on it means, in one line.'),
   "on": zod.boolean().describe('Whether this is the channel in force.'),
   "reason": zod.string().nullish().describe('Why there is nothing to do here, in words.'),
@@ -135,7 +135,7 @@ export const GetChannelResponse = zod.object({
   "offers": zod.array(zod.object({
   "action": zod.union([zod.null(),zod.enum(['switch', 'pin']).describe('What can be done about this row, if anything.')]).optional(),
   "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
-  "irreversible": zod.boolean().describe('Whether taking it cannot be undone.'),
+  "irreversible": zod.boolean().describe('Whether taking it cannot be undone at the moment it is taken. See\n[`Channel::irreversible`] — it is the version that cannot be walked\nback, not the membership.'),
   "offers": zod.string().describe('What being on it means, in one line.'),
   "on": zod.boolean().describe('Whether this is the channel in force.'),
   "reason": zod.string().nullish().describe('Why there is nothing to do here, in words.'),
@@ -166,7 +166,7 @@ export const GetChannelResponse = zod.object({
 version, as one run.
  */
 export const SwitchChannelBody = zod.object({
-  "acknowledgeOneWay": zod.boolean().optional().describe('Taken as read: moving to beta cannot be undone. Required for beta,\nwhere `irreversible` on the plan is the sentence a client has to put\nin front of somebody first; ignored for general access, which can.'),
+  "acknowledgeOneWay": zod.boolean().optional().describe('Taken as read: the version this moves onto cannot be walked back.\nRequired for beta, where `irreversible` on the plan is the sentence a\nclient has to put in front of somebody first; ignored for general\naccess, which never moves an installation backwards anyway.'),
   "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -223,7 +223,7 @@ export const PlanChannelResponse = zod.object({
   "diff": zod.string().describe('The same, as a unified diff — the way every other change to this file\nis shown.'),
   "file": zod.string().describe('The deployment file being rewritten.'),
   "from": zod.enum(['general', 'beta']).describe('The channel it is leaving. The same as `channel` when the act is a\npin rather than a move.'),
-  "irreversible": zod.boolean().describe('Whether this cannot be undone. True for beta, always.'),
+  "irreversible": zod.boolean().describe('Whether this cannot be undone at the moment it is taken. True for\nbeta, always — see [`Channel::irreversible`].'),
   "lines": zod.array(zod.object({
   "from": zod.string(),
   "to": zod.string()
@@ -273,7 +273,7 @@ export const CheckUpdatesResponse = zod.object({
   "offers": zod.array(zod.object({
   "action": zod.union([zod.null(),zod.enum(['switch', 'pin']).describe('What can be done about this row, if anything.')]).optional(),
   "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
-  "irreversible": zod.boolean().describe('Whether taking it cannot be undone.'),
+  "irreversible": zod.boolean().describe('Whether taking it cannot be undone at the moment it is taken. See\n[`Channel::irreversible`] — it is the version that cannot be walked\nback, not the membership.'),
   "offers": zod.string().describe('What being on it means, in one line.'),
   "on": zod.boolean().describe('Whether this is the channel in force.'),
   "reason": zod.string().nullish().describe('Why there is nothing to do here, in words.'),
@@ -342,7 +342,7 @@ export const PlanUpdateResponse = zod.object({
   "diff": zod.string().describe('The same, as a unified diff — the way every other change to this file\nis shown.'),
   "file": zod.string().describe('The deployment file being rewritten.'),
   "from": zod.enum(['general', 'beta']).describe('The channel it is leaving. The same as `channel` when the act is a\npin rather than a move.'),
-  "irreversible": zod.boolean().describe('Whether this cannot be undone. True for beta, always.'),
+  "irreversible": zod.boolean().describe('Whether this cannot be undone at the moment it is taken. True for\nbeta, always — see [`Channel::irreversible`].'),
   "lines": zod.array(zod.object({
   "from": zod.string(),
   "to": zod.string()

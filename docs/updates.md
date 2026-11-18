@@ -67,10 +67,19 @@ shown as a deployment-file diff before it is applied, like every other change
 to that file, and the previous copy is kept as `firetower.yml.backup`. If the
 new control plane does not answer, the file and the image go back together.
 
-**Moving to beta cannot be undone.** Beta installs every release as it is cut
-and its migrations run on your database; migrations do not run backwards, so
-coming back to general access means restoring a dump and losing what has
-happened since. Take a backup first — **Back up now** is on the same screen.
+**The version beta moves you onto cannot be walked back.** Beta installs every
+release as it is cut, and the migrations of versions general access has not
+reached yet run on your database. Migrations do not run backwards, so until
+general access reaches the version you end up on, the only way back is
+restoring a dump and losing what has happened since. Take a backup first —
+**Back up now** is on the same screen.
+
+What this is *not* is a permanent membership. Once general access catches up to
+the build an installation is holding, leaving beta costs nothing: the database
+is already on that schema, and the switch is offered again by itself. What is
+refused in the meantime is the downgrade, and it is refused with the two
+versions named — the same never-move-backwards rule everything else here
+follows, rather than a separate rule about channels.
 
 Four situations the screen names rather than guesses at:
 

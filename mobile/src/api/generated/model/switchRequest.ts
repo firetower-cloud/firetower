@@ -10,9 +10,10 @@ import type { FileChoice } from './fileChoice';
 
 export interface SwitchRequest {
   /**
-     * Taken as read: moving to beta cannot be undone. Required for beta,
-     * where `irreversible` on the plan is the sentence a client has to put
-     * in front of somebody first; ignored for general access, which can.
+     * Taken as read: the version this moves onto cannot be walked back.
+     * Required for beta, where `irreversible` on the plan is the sentence a
+     * client has to put in front of somebody first; ignored for general
+     * access, which never moves an installation backwards anyway.
      */
   acknowledgeOneWay?: boolean;
   channel: Channel;

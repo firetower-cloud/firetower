@@ -265,9 +265,10 @@ pub(super) async fn plan_channel(
 #[serde(rename_all = "camelCase")]
 pub struct SwitchRequest {
     pub channel: channel::Channel,
-    /// Taken as read: moving to beta cannot be undone. Required for beta,
-    /// where `irreversible` on the plan is the sentence a client has to put
-    /// in front of somebody first; ignored for general access, which can.
+    /// Taken as read: the version this moves onto cannot be walked back.
+    /// Required for beta, where `irreversible` on the plan is the sentence a
+    /// client has to put in front of somebody first; ignored for general
+    /// access, which never moves an installation backwards anyway.
     #[serde(default)]
     pub acknowledge_one_way: bool,
     #[serde(default)]
@@ -327,10 +328,11 @@ pub(super) async fn switch_channel(
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
             format!(
-                "moving to {} cannot be undone: it installs every release as it is cut, and its \
-                 migrations run on this database. Migrations do not run backwards, so coming back \
-                 to general access means restoring a dump and losing everything written since. \
-                 Say that first, take a backup, and send acknowledgeOneWay.",
+                "{} installs every release as it is cut, and the migrations of versions general \
+                 access has not reached yet run on this database. Migrations do not run \
+                 backwards, so until general access reaches the version this installation ends \
+                 up on, the only way back is restoring a dump and losing everything written \
+                 since. Say that first, take a backup, and send acknowledgeOneWay.",
                 req.channel.name()
             ),
         ));

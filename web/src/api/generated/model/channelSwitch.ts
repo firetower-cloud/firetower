@@ -27,7 +27,10 @@ export interface ChannelSwitch {
      * pin rather than a move.
      */
   from: Channel;
-  /** Whether this cannot be undone. True for beta, always. */
+  /**
+     * Whether this cannot be undone at the moment it is taken. True for
+     * beta, always — see [`Channel::irreversible`].
+     */
   irreversible: boolean;
   /** The image lines, as they are and as they would be. */
   lines: ImageLine[];

@@ -101,10 +101,15 @@ impl Channel {
         }
     }
 
-    /// Whether moving here can be undone.
+    /// Whether taking this channel can be undone *at the moment it is taken*.
     ///
-    /// Beta cannot: migrations are forward-only, so the image can be put back
-    /// and the database cannot. The only route back is restoring a dump.
+    /// Beta cannot: it installs versions general access does not hold yet,
+    /// and their migrations run forward on the database. What this is not is
+    /// a permanent membership — leaving beta costs nothing once general
+    /// access reaches the version the installation is holding, because the
+    /// database is already on that schema. That is why nothing here hides
+    /// the row: the refusal is [`Offer::reason`] on a move that would be a
+    /// downgrade, and it lifts by itself.
     pub const fn irreversible(self) -> bool {
         matches!(self, Channel::Beta)
     }
@@ -159,7 +164,12 @@ pub struct Source {
 
 impl Source {
     pub const ENV: &'static str = "FIRETOWER_CHANNEL_MANIFEST";
-    pub const DEFAULT: &'static str = "https://github.com/firetower-cloud/firetower/releases/download/channels-latest/channels.json";
+    /// The release the promotion workflow uploads to, and the one asset on
+    /// it. Named `channels` rather than `channels-latest`: the rolling
+    /// releases beside it point at the newest of a *series*, and there is
+    /// only ever one channel manifest.
+    pub const DEFAULT: &'static str =
+        "https://github.com/firetower-cloud/firetower/releases/download/channels/channels.json";
 
     pub fn from_env() -> Self {
         Self {
@@ -627,7 +637,9 @@ pub struct Offer {
     pub on: bool,
     /// What can be done about this row, if anything.
     pub action: Option<Act>,
-    /// Whether taking it cannot be undone.
+    /// Whether taking it cannot be undone at the moment it is taken. See
+    /// [`Channel::irreversible`] — it is the version that cannot be walked
+    /// back, not the membership.
     pub irreversible: bool,
     /// Why there is nothing to do here, in words.
     pub reason: Option<String>,
@@ -658,7 +670,8 @@ pub struct ChannelSwitch {
     pub tag: String,
     /// The version this installation would be moved onto, in the same act.
     pub version: String,
-    /// Whether this cannot be undone. True for beta, always.
+    /// Whether this cannot be undone at the moment it is taken. True for
+    /// beta, always — see [`Channel::irreversible`].
     pub irreversible: bool,
     /// The deployment file being rewritten.
     pub file: String,

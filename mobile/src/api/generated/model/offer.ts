@@ -14,7 +14,11 @@ import type { Channel } from './channel';
 export interface Offer {
   action?: null | Act;
   channel: Channel;
-  /** Whether taking it cannot be undone. */
+  /**
+     * Whether taking it cannot be undone at the moment it is taken. See
+     * [`Channel::irreversible`] — it is the version that cannot be walked
+     * back, not the membership.
+     */
   irreversible: boolean;
   /** What being on it means, in one line. */
   offers: string;
