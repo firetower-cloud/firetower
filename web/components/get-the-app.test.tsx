@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { BetaRoute, downloadNote, showsOnLinux, tileLine } from "./GetTheApp";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { BetaRoute, GetTheApp, betaOffer, downloadNote, showsOnLinux, tileLine } from "./GetTheApp";
+
+/** Where the page sends anybody it cannot hand a release page to. */
+const RELEASES_INDEX = "https://github.com/firetower-cloud/firetower/releases";
 
 /** The rendered block as somebody reads it: text, with the markup taken out. */
 function words(node: React.ReactNode): string {
@@ -111,6 +115,53 @@ describe("the version line under Download", () => {
   });
 });
 
+/** A lookup that found a beta build with bundles on it. */
+const FOUND = {
+  version: "0.56.0",
+  betaRelease: "https://example.invalid/desktop-v0.56.0",
+  mac: "https://example.invalid/Firetower_0.56.0_macos.dmg",
+  windows: "https://example.invalid/Firetower_0.56.0_x64-setup.exe",
+  linux: "https://example.invalid/Firetower_0.56.0_amd64.AppImage",
+};
+
+/**
+ * What the route can honestly offer, which is not always a build.
+ *
+ * Two states hand the reader the releases index instead of a release page,
+ * and they are different sentences — so they are different values here rather
+ * than one boolean, and neither of them keeps the version.
+ */
+describe("what the beta route can offer", () => {
+  it("names the build and links at its own page when there is one", () => {
+    expect(betaOffer(FOUND)).toEqual({
+      version: "0.56.0",
+      href: "https://example.invalid/desktop-v0.56.0",
+    });
+  });
+
+  it("falls back to the index when nothing resolved, and says which case that is", () => {
+    // Still looking, GitHub refused, or no desktop release in the feed. The
+    // refusal is the common one: sixty unauthenticated calls an hour, per
+    // address, shared by everyone behind an admin console.
+    expect(betaOffer({})).toEqual({ href: RELEASES_INDEX, insteadOf: "unknown" });
+    expect(betaOffer({ version: "0.56.0" })).toEqual({ href: RELEASES_INDEX, insteadOf: "unknown" });
+  });
+
+  it("will not name a build whose bundles never uploaded", () => {
+    // The three tiles above already say "Not in this release". A confident
+    // version here, linking at an empty page, would be the only part of the
+    // card still claiming there is something to download.
+    expect(betaOffer({ version: "0.56.0", betaRelease: "https://example.invalid/r" })).toEqual({
+      href: RELEASES_INDEX,
+      insteadOf: "empty",
+    });
+  });
+
+  it("names a build on the strength of any one platform", () => {
+    expect(betaOffer({ ...FOUND, mac: undefined, windows: undefined }).version).toBe("0.56.0");
+  });
+});
+
 /**
  * The route onto beta for a copy that cannot reach it any other way.
  *
@@ -120,21 +171,29 @@ describe("the version line under Download", () => {
  * one leaves a correct-looking page that misleads.
  */
 describe("the beta route", () => {
-  const drawn = words(<BetaRoute version="0.56.0" release="https://example.invalid/desktop-v0.56.0" />);
+  const drawn = words(<BetaRoute found={FOUND} />);
 
   it("says why a manual install is necessary, and not only that one is", () => {
     // The compiled-in updater address is the fact the whole route rests on:
     // a copy can only read a different address by updating, and it can only
     // update through the address it has. Without this the hand-install reads
     // as an arbitrary inconvenience somebody should have automated.
-    expect(drawn).toContain("Every copy carries its update address inside the bundle");
-    expect(drawn).toContain("installing by hand once is the only way to reach a different one");
+    expect(drawn).toContain("its update address is compiled into the bundle");
+    expect(drawn).toContain("the only way to a different address is to install from it once");
+  });
+
+  it("scopes that reason to the copies it is true of", () => {
+    // It is true of a copy that predates the channel release. A copy that
+    // carries it chooses its endpoint per check — which is what the next
+    // sentence means by a switch in the app under Updates — so stating the
+    // requirement of every copy made the two contradict each other one line
+    // apart. The page said exactly that, and must not again.
+    expect(drawn).toContain("A copy that predates all of this cannot be switched from inside itself");
+    expect(drawn).not.toContain("Every copy carries its update address inside the bundle");
   });
 
   it("offers the beta bundle, at the release page it is actually on", () => {
-    const markup = renderToStaticMarkup(
-      <BetaRoute version="0.56.0" release="https://example.invalid/desktop-v0.56.0" />,
-    );
+    const markup = renderToStaticMarkup(<BetaRoute found={FOUND} />);
     expect(markup).toContain('href="https://example.invalid/desktop-v0.56.0"');
     expect(drawn).toContain("Beta builds on GitHub");
   });
@@ -185,24 +244,122 @@ describe("the beta route", () => {
     }
   });
 
+  it("says a bundle installed by hand is not checked the way an update is", () => {
+    // This route goes around the updater's signature check, which is the one
+    // thing on the automatic path nobody has to remember to do. The page that
+    // sends somebody down it owes them the alternative.
+    expect(drawn).toContain("An automatic update is verified against a signing key inside the app");
+    expect(drawn).toContain("A bundle you install by hand is not");
+  });
+
+  it("names what each platform does on its own, because the three differ", () => {
+    expect(drawn).toContain("macOS is notarised");
+    expect(drawn).toContain("The Windows installer is not signed");
+    expect(drawn).toContain("nothing checks an AppImage you run");
+  });
+
+  it("points at the signature rather than a checksum", () => {
+    // A digest published on the same release as the bundle it describes
+    // proves only that the two agree. The separate signing key is the
+    // guarantee, so that is what the page sends somebody to check.
+    expect(drawn).toContain("a detached signature is published beside the bundle");
+    expect(drawn.toLowerCase()).not.toContain("checksum");
+    expect(drawn.toLowerCase()).not.toContain("sha256");
+    expect(renderToStaticMarkup(<BetaRoute found={FOUND} />)).toContain("verifying-a-download.md");
+  });
+
+  it("says so when the link is the index rather than the release page", () => {
+    // The reader has just been told to use *the release page* and is being
+    // handed thirty releases across three packages. Two links with two labels
+    // and one destination, with no sign which is the fallback, is the state
+    // this is here to prevent.
+    const missed = words(<BetaRoute found={{}} />);
+    expect(missed).toContain("All releases on GitHub");
+    expect(missed).toContain("could not be looked up just now");
+    expect(missed).toContain("the newest one tagged desktop-v");
+    expect(missed).not.toContain("Beta builds on GitHub");
+  });
+
+  it("says something different when the release is there and its bundles are not", () => {
+    const empty = words(<BetaRoute found={{ version: "0.56.0", betaRelease: "https://e.invalid/r" }} />);
+    expect(empty).toContain("the newest release has no bundles on it yet");
+    // And no confident version against a download nobody can get.
+    expect(empty).not.toContain("0.56.0");
+  });
+
   it("still has somewhere to send a reader when the lookup failed", () => {
     // Every sentence here is true whatever the release holds, so the block is
-    // drawn in that state too — and then the link is the releases index. The
-    // same argument `showsOnLinux` makes for the block above it.
-    const markup = renderToStaticMarkup(<BetaRoute />);
-    expect(markup).toContain('href="https://github.com/firetower-cloud/firetower/releases"');
-    expect(words(<BetaRoute />)).toContain("Beta builds");
+    // drawn in that state too. The same argument `showsOnLinux` makes for the
+    // block above it.
+    const markup = renderToStaticMarkup(<BetaRoute found={{}} />);
+    expect(markup).toContain(`href="${RELEASES_INDEX}"`);
+    expect(words(<BetaRoute found={{}} />)).toContain("Beta builds");
   });
 
   it("answers no question ember answers, and adds no tone", () => {
     // `desktop/STYLE.md`: ember means one thing — something is waiting on you
     // — and nothing else may use it. A new section is told apart by position
     // and weight, never by a new hue.
-    const markup = renderToStaticMarkup(
-      <BetaRoute version="0.56.0" release="https://example.invalid/desktop-v0.56.0" />,
-    );
+    const markup = renderToStaticMarkup(<BetaRoute found={FOUND} />);
     for (const tone of ["ember", "sage", "brick", "slate"]) {
       expect(markup).not.toContain(tone);
     }
+  });
+
+  it("draws its sentences above the faintest tier", () => {
+    // `--color-dim` is recorded in the sheet at 2.94:1 on `--color-panel`,
+    // under the floor for normal text and spent on counts, timestamps and
+    // paths. These sentences decide whether somebody hand-installs a build,
+    // so they are `--color-text`.
+    const markup = renderToStaticMarkup(<BetaRoute found={FOUND} />);
+    for (const sentence of [
+      "The downloads above are general access",
+      "A copy that predates all of this",
+      "Switching back in the app stops new betas",
+    ]) {
+      // The paragraph's own class, not a window before it — a window picks
+      // up the version badge, which is `--color-dim` and correctly so.
+      const tag = markup.match(new RegExp(`<p class="([^"]+)">${sentence}`));
+      expect(tag?.[1]).toBeDefined();
+      expect(tag?.[1]).toContain("text-text");
+      expect(tag?.[1]).not.toContain("text-dim");
+    }
+  });
+});
+
+/**
+ * That the page actually carries the route.
+ *
+ * Every test above renders `BetaRoute` directly, so all of them pass with the
+ * block deleted from the card — which is the regression this ticket is most
+ * exposed to: the block dropped, moved into another card, or put behind a
+ * condition that is false in production. This renders the page itself.
+ *
+ * Server rendering, so no effect runs and the release lookup never answers.
+ * That is the state the assertions want anyway: the sentences are the same in
+ * every state of the lookup, and this proves they reach the page in the one
+ * state a reader is guaranteed to see first.
+ */
+describe("the Get the app page", () => {
+  const page = words(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <GetTheApp />
+    </QueryClientProvider>,
+  );
+
+  it("carries the beta route, in the Download card", () => {
+    expect(page).toContain("Beta builds");
+    expect(page).toContain("Download");
+  });
+
+  it("carries all four of the sentences the route exists to say", () => {
+    expect(page).toContain("A copy that predates all of this cannot be switched from inside itself");
+    expect(page).toContain("From the next release on, that copy updates on beta by itself");
+    expect(page).toContain("Switching back in the app stops new betas");
+    expect(page).toContain("The same download is how a copy that stopped updating is brought back");
+  });
+
+  it("carries the version line as a channel", () => {
+    expect(page).toContain("The general-access release");
   });
 });
