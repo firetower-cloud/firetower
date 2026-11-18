@@ -247,8 +247,13 @@ tokens:
     cd mobile && pnpm tokens
 
 # The database tests need Postgres; `just db` is enough to satisfy them.
+#
+# The release pipeline's scripts are in here too, mirrored by the `pipeline`
+# workflow so a local verdict and a CI verdict agree. They have no package of
+# their own — Node's own runner, over four files with no dependencies.
 test: db
     cargo test --workspace
+    node --test .github/scripts/*.test.mjs
     cd web && pnpm tsc --noEmit
     cd desktop && pnpm tsc --noEmit && pnpm test
     cd mobile && pnpm tsc --noEmit && pnpm test

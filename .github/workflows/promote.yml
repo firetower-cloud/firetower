@@ -1,0 +1,386 @@
+# Promote a version to general access, by moving pointers at a build that is
+# already on beta.
+#
+# **Nothing here builds anything.** The promoted build is the tested build,
+# byte for byte: images are re-tagged rather than rebuilt, and the desktop
+# manifest is rewritten from the bundles already on the release rather than
+# regenerated from new ones. There is no "general access build" in which a new
+# bug could appear, which is the property the whole channel design rests on.
+#
+# Dispatched by hand, by somebody with write access. A button inside Firetower
+# was rejected because it would put a repository-write credential in the
+# control plane's vault purely so it could publish its own releases, widening
+# what a compromised control plane can do in exchange for a convenience used a
+# few times a month. A label on a release was rejected because it would be a
+# second marker able to disagree with the manifest. This needs no new
+# credential anywhere, and is audited in the Actions log for free.
+#
+# ## Why a typed confirmation, and not an approval
+#
+# Promotion cannot be undone. Moving a pin backwards is refused by design, so
+# the irreversible accident is promoting a *newer* version than intended — and
+# every other refusal below is silent on exactly that: an older version and an
+# unpublished version are both already safe, while promoting one version too
+# far passes every check and can only be "fixed" by going forward again.
+#
+# So the confirmation field has to be retyped and has to match. It addresses
+# the real failure — a mis-click, or a stale browser tab offering a version
+# that has since been superseded — while keeping promotion a one-person act,
+# which matters at this size. An environment approval was considered and
+# rejected on that last point: it needs a second person, or self-approval
+# turned on, which is friction without much benefit.
+#
+# ## The order, and why only the last step matters
+#
+#   1. re-tag the control plane and updater images onto `stable`, together
+#   2. rewrite the desktop manifest at the general-access address
+#   3. **write the channel manifest** — the commit point
+#
+# Until (3) lands nothing has been promoted, because the manifest is what every
+# reader consults. A failure before it leaves an inconsistent registry but a
+# consistent world: tags have moved, but nothing has been told to want them,
+# and the run can simply be repeated. This is `desktop-release.yml`'s own
+# conclusion applied one level up — leaving a rolling pointer where it is is
+# always the safe answer.
+name: promote
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Which package to promote.
+        required: true
+        type: choice
+        options: [control_plane, desktop]
+      version:
+        description: The version to move general access to, without a leading v.
+        required: true
+        type: string
+      confirm:
+        description: Type the same version again. Promotion cannot be undone.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One promotion at a time, and queued rather than cancelled: a promotion
+# abandoned halfway through has moved tags that nothing has been told to want,
+# which is safe but untidy, and finishing it is better than starting another.
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+env:
+  OWNER: ${{ github.repository_owner }}
+
+jobs:
+  # Everything that can refuse, before anything has moved. Each refusal here
+  # leaves every pointer exactly where it was, which is the half of the
+  # requirement that is easy to lose: a run that fails after moving two of
+  # three pointers has still refused, and has still changed the world.
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tag: ${{ steps.refuse.outputs.tag }}
+      held: ${{ steps.refuse.outputs.held }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - id: refuse
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+
+          # The confirmation, first and on its own. A mis-click is the failure
+          # this exists for, so it is answered before any network call — if the
+          # two fields disagree, nothing should even be looked up.
+          if [ "$CONFIRM" != "$VERSION" ]; then
+            echo "::error::The confirmation says '$CONFIRM' and the version says '$VERSION'." \
+                 "Nothing has been promoted. Promotion cannot be undone, so the two have to match."
+            exit 1
+          fi
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::'$VERSION' is not a three-part version. Nothing has been promoted."; exit 1 ;;
+          esac
+
+          case "$PACKAGE" in
+            control_plane) tag="firetower-v$VERSION" ;;
+            desktop) tag="desktop-v$VERSION" ;;
+            *) echo "::error::'$PACKAGE' is not a package with channels."; exit 1 ;;
+          esac
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          # Published at all. Promotion can only promote something that exists,
+          # and the release is what carries the bundles the desktop leg rewrites
+          # its manifest from.
+          if ! gh release view "$tag" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::There is no $tag release, so $VERSION is not published." \
+                 "Nothing has been promoted."
+            exit 1
+          fi
+
+          # And on beta. Beta is continuous — every released version goes to it
+          # — so the manifest's beta pin is the newest release, and a version
+          # above it is one beta has never had.
+          #
+          # The read is the inherited rule: absence is the bootstrap case, a
+          # document that reads is the answer, and anything else stops and moves
+          # nothing. Absence is allowed here only because the very first
+          # promotion of a repository that has never released has nothing to
+          # compare against — and it still cannot get past the release check
+          # above, so it is not a hole.
+          state=$(.github/scripts/read-channel-manifest.sh "$RUNNER_TEMP/held.json")
+          if [ "$state" = absent ]; then
+            echo "::warning::No channel manifest is published yet, so this promotion creates it."
+            echo "held=" >> "$GITHUB_OUTPUT"
+          else
+            beta=$(jq -r --arg p "$PACKAGE" '.[$p].beta // empty' "$RUNNER_TEMP/held.json")
+            held=$(jq -r --arg p "$PACKAGE" '.[$p].general // empty' "$RUNNER_TEMP/held.json")
+            echo "held=$held" >> "$GITHUB_OUTPUT"
+            echo "$PACKAGE is on ${held:-nothing} on general access, ${beta:-nothing} on beta."
+
+            if [ -n "$beta" ] && [ "$beta" != "$VERSION" ] &&
+              [ "$(printf '%s\n%s\n' "$beta" "$VERSION" | sort -V | tail -1)" = "$VERSION" ]; then
+              echo "::error::$PACKAGE is on $beta on beta, so $VERSION is not a version beta has." \
+                   "General access is never moved ahead of beta. Nothing has been promoted."
+              exit 1
+            fi
+
+            # Never backwards. Per channel, and it has to be: beta is
+            # legitimately and permanently ahead of general access, so a guard
+            # spanning both would read every promotion as a downgrade. Within
+            # general access the rule is absolute — that pin is the one address
+            # every installation on the channel reads, and moving it back is a
+            # silent downgrade of all of them with no way to notice.
+            if [ -n "$held" ] && [ "$held" != "$VERSION" ] &&
+              [ "$(printf '%s\n%s\n' "$held" "$VERSION" | sort -V | tail -1)" = "$held" ]; then
+              echo "::error::$PACKAGE is on $held on general access, which is newer than $VERSION." \
+                   "A channel pin is never moved backwards. Nothing has been promoted."
+              exit 1
+            fi
+            if [ "$held" = "$VERSION" ]; then
+              echo "::notice::$PACKAGE is already on $VERSION on general access." \
+                   "Running anyway, which is how a promotion interrupted before the manifest write is finished."
+            fi
+          fi
+
+      # Who actually ran it, at the moment of deciding.
+      #
+      # The signal is the daily telemetry digest as it already exists: a beta
+      # version is by definition one general access does not have yet, so
+      # counting installations reporting that version is counting beta
+      # installations. No new field is sent and the privacy posture is
+      # untouched.
+      #
+      # Its limits, so nobody over-reads the number: an installation with
+      # telemetry off is invisible and is a beta tester you cannot count; the
+      # desktop reports one version per installation even when its copies
+      # differ; and a count of zero is expected rather than alarming, because
+      # beta is one-way for a control plane and few will volunteer.
+      #
+      # The collector is a separate service. `TELEMETRY_COUNTS_URL` is a
+      # repository *variable* holding where to ask — not a secret and not a
+      # credential, because that endpoint is unauthenticated by necessity, the
+      # same reason `FIRETOWER_TELEMETRY_ENDPOINT` is. Unset, this says so
+      # rather than printing a zero: a count nobody can tell apart from "we did
+      # not ask" is worse than no count at all.
+      - name: how many installations reported running it
+        env:
+          COUNTS: ${{ vars.TELEMETRY_COUNTS_URL }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -uo pipefail
+          say() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          echo "### who is running $VERSION" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "${COUNTS:-}" ]; then
+            say "Not known: no telemetry collector is configured for this repository."
+            say ""
+            say "Set the \`TELEMETRY_COUNTS_URL\` repository variable to an endpoint answering"
+            say "\`?package=<p>&version=<v>\` with \`{\"installations\": <n>}\` and this line becomes a count."
+            say "Promotion is not blocked by it — the signal informs the decision, it does not gate it."
+            exit 0
+          fi
+          body=$(curl -fsS --max-time 20 "$COUNTS?package=$PACKAGE&version=$VERSION" 2>&1) || {
+            say "Not known: the telemetry collector could not be reached ($body)."
+            say "Promotion is not blocked by it."
+            exit 0
+          }
+          count=$(printf '%s' "$body" | jq -r '.installations // empty' 2>/dev/null)
+          if [ -z "$count" ]; then
+            say "Not known: the telemetry collector answered something with no \`installations\` in it."
+            exit 0
+          fi
+          say "**$count** installation(s) reported running $PACKAGE $VERSION."
+          if [ "$count" = 0 ]; then
+            say ""
+            say "Zero is expected rather than alarming: beta is one-way for a control plane,"
+            say "few will volunteer, and an installation with telemetry off is invisible."
+          fi
+
+  # Step 1, for the control plane: the image pair onto `stable`.
+  images:
+    needs: check
+    if: inputs.package == 'control_plane'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      # Together, always — and `fail-fast: false` so that if one of the two
+      # does fail, the log says which rather than saying that something did.
+      # They are published together by `images.yml` and the control plane
+      # checks its API version against the updater's on every call, so they
+      # cannot be left on different channels. A run where only one moved is
+      # finished by re-running this, which is safe because a re-tag is
+      # idempotent.
+      fail-fast: false
+      matrix:
+        name: [firetower, firetower-updater]
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # **`imagetools create`, and never `docker pull` / `tag` / `push`.**
+      #
+      # These images are multi-architecture: one OCI index naming a linux/amd64
+      # manifest, a linux/arm64 one, and the provenance attestations
+      # `build-push-action` attaches. `imagetools create` writes a *tag* at the
+      # existing index — the index is not rewritten, and comes out at the same
+      # digest it went in at.
+      #
+      # The obvious alternative is a trap, and it is a silent one. `docker pull`
+      # fetches only the platform the runner happens to be — amd64 here — and
+      # the `docker push` that follows publishes that single manifest in place
+      # of the index. **It exits 0** and reports the loss as an informational
+      # line (`Not all multiplatform-content is present and only the available
+      # single-platform image was pushed`). Nothing goes red. The tag moves, the
+      # channel manifest is written, every check passes, and the failure does
+      # not appear until somebody on arm64 pulls `stable` and is told there is
+      # no matching manifest. Verified on a real registry while building this;
+      # the evidence is on #448.
+      #
+      # So the step below is followed by an assertion rather than trusted,
+      # because a comment cannot stop the next edit and this is the one check
+      # that would catch it.
+      - name: move ${{ matrix.name }}:stable to ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          before=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}')
+          echo "$IMAGE:$VERSION is $before"
+
+          docker buildx imagetools create -t "$IMAGE:stable" "$IMAGE:$VERSION"
+
+          # Same bytes, provably. The index digest is a hash of the index, so
+          # an unchanged digest *is* the statement that every platform entry
+          # and every attestation survived — there is no way to lose one and
+          # keep the digest. It is also the evidence that promotion moves the
+          # tested build rather than an equivalent one: `stable` and the
+          # version tag are now the same object, not two objects that agree.
+          after=$(docker buildx imagetools inspect "$IMAGE:stable" --format '{{.Manifest.Digest}}')
+          if [ "$after" != "$before" ]; then
+            echo "::error::$IMAGE:stable came out as $after, and $VERSION is $before." \
+                 "A re-tag must leave the index untouched; something rewrote it." \
+                 "Do not move the channel manifest."
+            exit 1
+          fi
+
+          # And the platform list, read back and named in the log. Redundant
+          # while the digests match — and worth printing anyway, because it is
+          # what a person reading this log is actually trying to find out.
+          platforms=$(docker buildx imagetools inspect "$IMAGE:stable" --raw |
+            jq -r '[.manifests[] | select(.platform.architecture != "unknown")
+                    | "\(.platform.os)/\(.platform.architecture)"] | sort | join(", ")')
+          echo "$IMAGE:stable is $after — $platforms"
+          if [ "$(printf '%s' "$platforms" | tr -cd , | wc -c)" -lt 1 ]; then
+            echo "::error::$IMAGE:stable names only '$platforms'. A multi-architecture index was expected." \
+                 "Do not move the channel manifest."
+            exit 1
+          fi
+          echo "- \`$IMAGE:stable\` → $VERSION ($platforms, $after)" >> "$GITHUB_STEP_SUMMARY"
+
+  # Step 2, for the desktop: the same publish job that a release runs, in
+  # general-access mode, against a tag whose bundles are already built and
+  # already signed.
+  #
+  # **Re-run rather than copied across.** Copying the beta manifest onto the
+  # general-access address would create a second writer, which is precisely
+  # what that job was rewritten to eliminate after per-leg writes raced and a
+  # platform silently vanished with nothing going red. Re-running also keeps
+  # the job's best property: it builds the manifest from what is actually on
+  # the release and refuses to write one it cannot fill, verifying each
+  # signature against the bytes of the asset its entry points at.
+  #
+  # `publish_only` is what keeps the promise that nothing is rebuilt: the
+  # build and sign legs do not run at all.
+  desktop:
+    needs: check
+    if: inputs.package == 'desktop'
+    uses: ./.github/workflows/desktop-release.yml
+    permissions:
+      contents: write
+    secrets: inherit
+    with:
+      tag: ${{ needs.check.outputs.tag }}
+      version: ${{ inputs.version }}
+      ref: ${{ github.sha }}
+      channel: general
+      publish_only: true
+
+  # Step 3. **The commit point.** Nothing above has promoted anything: the
+  # tags have moved, but the manifest is what every reader consults, so until
+  # this job's upload lands every installation is still on the previous
+  # general-access version. A run that got this far and then failed is re-run,
+  # and a re-run is idempotent all the way down — a re-tag writes the same
+  # digest, the desktop manifest is rebuilt from the same assets, and a pin
+  # already at this version is left where it is, timestamp included.
+  #
+  # `!cancelled()` with an explicit success check on each leg rather than
+  # `needs:` alone, because exactly one of the two legs above runs and the
+  # other is skipped — and a skipped `needs` would otherwise skip this too.
+  manifest:
+    needs: [check, images, desktop]
+    if: >-
+      ${{ !cancelled() && needs.check.result == 'success'
+          && (inputs.package != 'control_plane' || needs.images.result == 'success')
+          && (inputs.package != 'desktop' || needs.desktop.result == 'success') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+        run: .github/scripts/publish-channel-pin.sh "$PACKAGE:general=$VERSION"
+
+      - env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          HELD: ${{ needs.check.outputs.held }}
+        run: |
+          {
+            echo "### promoted"
+            echo "\`$PACKAGE\` general access: ${HELD:-nothing} → **$VERSION**."
+            echo ""
+            echo "Installations on general access will be offered $VERSION from their next check."
+          } >> "$GITHUB_STEP_SUMMARY"
