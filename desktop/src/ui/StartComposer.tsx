@@ -29,7 +29,6 @@ import {
   ArrowUp,
   ChevronDown,
   CircleAlert,
-  Diamond,
   ExternalLink,
   FolderGit2,
   GitBranch,
@@ -48,7 +47,7 @@ import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { Pop } from "~/ui/Pop";
-import { Head, Menu, Opt, Sift, looselyMatches } from "~/ui/menus";
+import { Menu, Opt, Sift, looselyMatches } from "~/ui/menus";
 import { Readout, isReady } from "~/components/HostReadiness";
 import { useHostReadiness } from "~/api/generated/hosts/hosts";
 import { useListRoles } from "~/api/generated/roles/roles";
@@ -357,8 +356,11 @@ export function StartComposer({
         .map((s) => s.id),
     [allSkills, checkouts],
   );
-  const [skillIds, setSkillIds] = useState<string[] | null>(null);
-  const selectedSkills = skillIds ?? defaultSkillIds;
+  /* What the start payload carries. There is no picker here and the comment
+     beside the composer's controls says why — so this is the resolution and
+     nothing overrides it. It used to be `skillIds ?? defaultSkillIds` behind
+     a `useState` whose only setter lived in a popover nothing could open. */
+  const selectedSkills = defaultSkillIds;
 
   const profile = profiles.find((p) => p.id === profileId);
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
@@ -906,34 +908,6 @@ export function StartComposer({
               />
             </div>
           )}
-        </Pop>
-      )}
-
-      {open?.which === "skills" && (
-        <Pop anchor={open.at} onClose={close} width={340}>
-          <Menu>
-            <Head>Skills this agent reads</Head>
-            {allSkills.map((s) => {
-              const on = selectedSkills.includes(s.id);
-              return (
-                <Opt
-                  key={s.id}
-                  on={on}
-                  keepOpen
-                  onPick={() =>
-                    setSkillIds(
-                      on
-                        ? selectedSkills.filter((x) => x !== s.id)
-                        : [...selectedSkills, s.id],
-                    )
-                  }
-                  icon={<Diamond className="h-4 w-4" strokeWidth={1.75} />}
-                  title={s.name}
-                  sub={s.alwaysOn ? "always on" : (s.description || undefined)}
-                />
-              );
-            })}
-          </Menu>
         </Pop>
       )}
 
