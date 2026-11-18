@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type {
   ChannelStatus,
   FilePlan,
+  Offer,
   HostTarget,
   UpdateRun,
   UpdateStatus,
@@ -9,12 +10,21 @@ import type {
 } from "./generated/model";
 import {
   canStart,
+  channelBlock,
   countEnded,
   diffLines,
   duration,
   everythingUpgradable,
   hostNote,
+  manifestTrouble,
+  mismatch,
   needsChoice,
+  pinOffer,
+  pinsFor,
+  rowOffers,
+  rowVerdict,
+  servesChannels,
+  switchOffer,
   nothingChosen,
   runSummary,
   isActive,
@@ -281,5 +291,272 @@ describe("a step that did not do what it was for", () => {
     expect(warned).not.toBe(stepGlyph("done"));
     expect(warned).not.toBe(stepGlyph("failed"));
     expect(warned).not.toBe(stepGlyph("pending"));
+  });
+});
+
+/* ── Channels ───────────────────────────────────────────────────────────
+   **One screen, two things wearing the word.** Everything here is the
+   installation's channel; the copy's is `~/channel` and is tested there. The
+   server publishes an action or the reason there is none, so what is asserted
+   below is what a *row* says — never what may be done, which is not this
+   client's to decide. */
+
+const offer = (over: Partial<Offer> = {}): Offer => ({
+  channel: "general",
+  tag: "stable",
+  offers: "Releases a maintainer has promoted.",
+  version: "0.54.1",
+  since: null,
+  on: true,
+  action: null,
+  irreversible: false,
+  reason: null,
+  ...over,
+});
+
+const bothOffers = (over: { general?: Partial<Offer>; beta?: Partial<Offer> } = {}): Offer[] => [
+  offer(over.general),
+  offer({
+    channel: "beta",
+    tag: "beta",
+    offers: "Every release, as soon as it is cut.",
+    version: "0.56.0",
+    on: false,
+    irreversible: true,
+    action: "switch",
+    ...over.beta,
+  }),
+];
+
+describe("whether this control plane can speak about channels at all", () => {
+  it("reads the answer rather than a version", () => {
+    expect(servesChannels(status())).toBe(true);
+  });
+
+  /* A control plane that predates channels. The screen must present no
+     control it cannot serve — a switch here would be a path that 404s. */
+  it("says no when the server did not carry a channel", () => {
+    const old = status();
+    delete (old as Partial<UpdateStatus>).channel;
+    expect(servesChannels(old)).toBe(false);
+    expect(servesChannels(undefined)).toBe(false);
+  });
+
+  it("explains a real mismatch in terms naming both versions", () => {
+    const said = mismatch("0.30.1", "0.44.0");
+    expect(said).toContain("0.30.1");
+    expect(said).toContain("0.44.0");
+    /* "Your client is too new" is an error with nothing behind it: a copy is
+       never downgraded, so the sentence has to name what would fix it. */
+    expect(said).toMatch(/upgraded/);
+  });
+});
+
+describe("the one thing in the way of an installation's channel", () => {
+  it("is nothing at all when the tag names a channel", () => {
+    expect(channelBlock(channel())).toBeNull();
+  });
+
+  /* The pre-channel floating tag: it follows the newest build published,
+     which under a continuous beta is beta's, so an upgrade fetches a version
+     it was not told to fetch and stops. The only unrecognised tag that is
+     actively handing this installation the wrong build. */
+  it("is amber for the tag that freezes an installation", () => {
+    expect(channelBlock(channel({ tag: "latest", recognised: false }))).toEqual({
+      kind: "frozen",
+      tone: "amber",
+    });
+  });
+
+  it("is amber for an exact version, which nothing can move", () => {
+    expect(channelBlock(channel({ tag: "0.55.0", recognised: false, pinned: true }))).toEqual({
+      kind: "pinned",
+      tone: "amber",
+    });
+  });
+
+  /* `edge`, a two-part tag, a local build. Treated as general access, said
+     rather than assumed — and nothing is in the way until an upgrade is
+     attempted, so it states a fact rather than asking to be read first. */
+  it("is slate for a tag that merely names no channel", () => {
+    for (const tag of ["edge", "0.54", "dev-kp"]) {
+      expect(channelBlock(channel({ tag, recognised: false }))).toEqual({
+        kind: "unrecognised",
+        tone: "slate",
+      });
+    }
+  });
+
+  it("is the updater's absence when there is nothing to ask", () => {
+    expect(channelBlock(channel({ tag: null, recognised: false }))).toEqual({
+      kind: "noUpdater",
+      tone: "slate",
+    });
+  });
+});
+
+describe("what one channel row says", () => {
+  const ch = channel({ offers: bothOffers() });
+
+  it("marks the channel in force", () => {
+    expect(rowVerdict(ch.offers[0], ch, true, false)).toEqual({ kind: "on" });
+  });
+
+  it("offers the switch the server offered, and says it cannot be undone", () => {
+    expect(rowVerdict(ch.offers[1], ch, true, false)).toEqual({
+      kind: "act",
+      act: "switch",
+      irreversible: true,
+    });
+  });
+
+  /**
+   * **A member sees a fact, not a disabled control.** Reading is not
+   * upgrading, and a greyed-out button is how an interface says you are being
+   * withheld from. "Why does my colleague have this" is the question a channel
+   * creates and this screen is where it gets answered — so the row is drawn
+   * and the control is not.
+   */
+  it("gives a non-administrator the fact and no control", () => {
+    expect(rowVerdict(ch.offers[1], ch, false, false)).toEqual({
+      kind: "said",
+      said: "You do not administer this Firetower",
+    });
+    /* And still sees which channel is in force — the fact is the whole
+       reason the row is drawn for them at all. */
+    expect(rowVerdict(ch.offers[0], ch, false, false)).toEqual({ kind: "on" });
+  });
+
+  it("offers nothing while a run is going", () => {
+    expect(rowVerdict(ch.offers[1], ch, true, true)).toEqual({
+      kind: "said",
+      said: "An upgrade is running",
+    });
+  });
+
+  /* A pin is offered in the block above the rows, where its consequence and
+     its diff are. The row says what it is: an assumption. */
+  it("calls an assumed channel assumed, rather than putting the pin in the row", () => {
+    const assumed = channel({
+      tag: "edge",
+      recognised: false,
+      offers: bothOffers({ general: { action: "pin" } }),
+    });
+    expect(rowVerdict(assumed.offers[0], assumed, true, false)).toEqual({
+      kind: "said",
+      said: "Assumed",
+    });
+    expect(pinOffer(assumed)?.channel).toBe("general");
+    expect(switchOffer(assumed)?.channel).toBe("beta");
+  });
+
+  it("says why there is nothing to do when the server would not act", () => {
+    const stuck = channel({
+      switchable: false,
+      reason: "an upgrade is in progress",
+      offers: bothOffers({ beta: { action: null, reason: "an upgrade is in progress" } }),
+    });
+    expect(rowVerdict(stuck.offers[1], stuck, true, false)).toEqual({
+      kind: "said",
+      said: "Not available yet",
+    });
+  });
+});
+
+describe("what a channel row holds", () => {
+  it("names the version and when general access reached it", () => {
+    const since = new Date(Date.now() - 5 * 86_400_000).toISOString();
+    expect(rowOffers(offer({ since }))).toBe(
+      "Releases a maintainer has promoted. 0.54.1, promoted 5 days ago.",
+    );
+  });
+
+  /**
+   * **Never a zero, and never the newest release.** A manifest that could not
+   * be read leaves the figure unknown; writing `0.0.0` or falling back to the
+   * feed is precisely the failure the manifest exists to prevent.
+   */
+  it("says there is no version rather than inventing one", () => {
+    expect(rowOffers(offer({ version: null, since: null }))).toContain("No version yet");
+    expect(rowOffers(offer({ version: null, since: null }))).not.toMatch(/\d+\.\d+\.\d+/);
+  });
+
+  it("leaves the date off when the manifest records none — beta has none by design", () => {
+    expect(rowOffers(offer({ channel: "beta", version: "0.56.0", since: null }))).toBe(
+      "Releases a maintainer has promoted. 0.56.0.",
+    );
+  });
+});
+
+describe("what a channel holds for one package", () => {
+  it("is read out of the installation's own manifest", () => {
+    const ch = channel({
+      manifest: {
+        outcome: "found",
+        problem: null,
+        schemaVersion: 1,
+        readAt: null,
+        url: "https://example.test/channels.json",
+        packages: [
+          { package: "controlPlane", beta: "0.56.0", general: "0.54.1", generalPromotedAt: null },
+          { package: "desktop", beta: "0.30.0", general: "0.29.1", generalPromotedAt: null },
+        ],
+      },
+    });
+    expect(pinsFor(ch, "desktop")?.general).toBe("0.29.1");
+    expect(pinsFor(ch, "controlPlane")?.beta).toBe("0.56.0");
+    expect(pinsFor(undefined, "desktop")).toBeUndefined();
+  });
+});
+
+/**
+ * **A destroyed document and a failed read are not the same state.**
+ *
+ * They behave identically — both refuse and move nothing — which is exactly
+ * why the interface has to tell them apart: the only difference a person ever
+ * sees is the words, and the next action differs completely. One clears by
+ * itself. The other gets worse until somebody republishes the document.
+ */
+describe("what is wrong with the channel manifest", () => {
+  const view = (outcome: string, problem: string | null = "something") =>
+    ({
+      outcome,
+      problem,
+      schemaVersion: 1,
+      packages: [],
+      readAt: null,
+      url: "https://example.test/channels.json",
+    }) as unknown as Parameters<typeof manifestTrouble>[0];
+
+  it("is nothing when it read", () => {
+    expect(manifestTrouble(view("found", null))).toBeNull();
+  });
+
+  /* Absence is the bootstrap case and the only one that is not a problem: the
+     installation follows the newest release, as it did before channels. */
+  it("is nothing when none has ever been published", () => {
+    expect(manifestTrouble(view("absent", null))).toBeNull();
+  });
+
+  it("is the destroyed one when a document that read before has gone", () => {
+    expect(manifestTrouble(view("vanished", "it has gone"))).toEqual({
+      kind: "destroyed",
+      problem: "it has gone",
+    });
+  });
+
+  it("is the transient one for a read that merely failed", () => {
+    for (const outcome of ["unreadable", "malformed", "incomplete"]) {
+      expect(manifestTrouble(view(outcome))?.kind).toBe("unreadable");
+    }
+  });
+
+  /* The whole point of the distinction. If these ever collapse into one, the
+     screen says "try again later" about a document somebody has to go and
+     put back. */
+  it("never reports a destroyed document as a read that might work next time", () => {
+    expect(manifestTrouble(view("vanished"))?.kind).not.toBe(
+      manifestTrouble(view("unreadable"))?.kind,
+    );
   });
 });

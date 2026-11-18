@@ -1,12 +1,19 @@
 import type {
+  Act,
+  ChannelStatus,
   FilePlan,
   HostTarget,
+  Offer,
+  Package,
+  ManifestView,
+  Pins,
   RunState,
   StepState,
   UpdateRun,
   UpdateStatus,
   UpgradePlan,
 } from "./generated/model";
+import { Channel, ManifestOutcome } from "./generated/model";
 
 /**
  * What the Updates screen works out for itself.
@@ -220,4 +227,219 @@ export function diffLines(diff: string): { kind: "add" | "del" | "hunk" | "meta"
       if (text.startsWith("-")) return { kind: "del" as const, text };
       return { kind: "same" as const, text };
     });
+}
+
+/* ── Channels ───────────────────────────────────────────────────────────
+   **Two things on this screen wear the word, and they are not two of the
+   same thing.** Everything below is about the *installation's* channel: the
+   tag on the image it is running, an administrator's, and the same for
+   everybody connected to it. The channel of *this copy of the app* is a
+   local preference and lives in `~/channel`.
+
+   The server publishes a control or the reason there is none, per channel
+   row, so nothing here decides what may be done — it decides what a row
+   *says*, which is the half the API deliberately leaves to a screen. */
+
+/**
+ * Whether this control plane can answer about channels at all.
+ *
+ * **The client is newer than the server it is pointed at more often than the
+ * reverse**, because a copy's channel is its own and most people running the
+ * app are not the person who upgrades the server. So the screen reads the
+ * answer rather than the version: a control plane that predates channels
+ * returns an `UpdateStatus` with no `channel` on it, and a screen that then
+ * drew a switch would be offering a path that 404s.
+ *
+ * Not a version comparison. The API is additive-only, so the presence of the
+ * field *is* the capability, and a window stated in version numbers would
+ * have to be widened every time beta ran ahead — which is routine rather than
+ * exceptional.
+ */
+export function servesChannels(status: UpdateStatus | undefined): boolean {
+  return !!status?.channel;
+}
+
+/**
+ * How to say a mismatch, when there is a real one.
+ *
+ * Both versions, named. "Your client is too new" is an error with no action
+ * behind it — a copy is never downgraded — so this says what the server is,
+ * what this copy is, and which of the two moving would fix it.
+ */
+export function mismatch(serverVersion: string, appVersion: string | null): string {
+  return `This Firetower is ${serverVersion} and does not report release channels. This app is ${appVersion ?? "a newer build"}, which can read them. Nothing is wrong with either; the installation's channel appears here once it has been upgraded. Your own copy's channel, below, is unaffected.`;
+}
+
+/** The block a channel's state wants drawn above the rows, if any. */
+export type ChannelBlock = {
+  kind: "pinned" | "frozen" | "unrecognised" | "noUpdater";
+  tone: "amber" | "slate";
+};
+
+/**
+ * The one thing about this installation's channel that needs attention.
+ *
+ * At most one, in the order an operator would have to fix them. The tone is
+ * the design's rule rather than a severity dial: **amber means read this
+ * before you act and the installation cannot move until you do**; slate
+ * states a fact that is not in the way.
+ *
+ *   * `pinned` — the image line names an exact version. No upgrade can move
+ *     this installation at all until it changes. Amber.
+ *   * `frozen` — the pre-channel floating tag. It follows the newest build
+ *     published, which is beta's, so the updater fetches a version it was not
+ *     told to fetch and refuses. It is unrecognised like the others and it is
+ *     the only unrecognised tag that is *actively* handing this installation
+ *     the wrong build, which is why it is the one that goes amber.
+ *   * `unrecognised` — `edge`, a two-part tag, a local build. Treated as
+ *     general access, which is the safe answer, and said rather than assumed.
+ *     Slate: nothing is broken until an upgrade is attempted.
+ *   * `noUpdater` — nothing to ask what image is running. Slate.
+ */
+export function channelBlock(channel: ChannelStatus): ChannelBlock | null {
+  if (!channel.tag) return { kind: "noUpdater", tone: "slate" };
+  if (channel.pinned) return { kind: "pinned", tone: "amber" };
+  if (!channel.recognised) {
+    return channel.tag === FLOATING
+      ? { kind: "frozen", tone: "amber" }
+      : { kind: "unrecognised", tone: "slate" };
+  }
+  return null;
+}
+
+/**
+ * The tag that existed before channels and kept its conventional meaning:
+ * the newest build published, which under a continuous beta is beta's.
+ *
+ * Named here rather than inferred, because it is the one tag the
+ * specification calls out by name — "not a channel, and not what an operator
+ * should pin" — and it is also the one somebody will pin by mistake.
+ */
+export const FLOATING = "latest";
+
+/** The offer that would make an unrecognised tag name the channel it is treated as. */
+export function pinOffer(channel: ChannelStatus): Offer | undefined {
+  return channel.offers.find((o) => o.action === "pin");
+}
+
+/** The offer that would move this installation to the other channel. */
+export function switchOffer(channel: ChannelStatus): Offer | undefined {
+  return channel.offers.find((o) => o.action === "switch");
+}
+
+/** What one channel row's right-hand cell carries. */
+export type RowVerdict =
+  | { kind: "on" }
+  | { kind: "act"; act: Act; irreversible: boolean }
+  | { kind: "said"; said: string };
+
+/**
+ * One channel row, decided.
+ *
+ * **No control the server would refuse, and none this reader may not take.**
+ * The action comes from the server; `mayChange` narrows it to an
+ * administrator. A member is not shown a greyed-out button — that is how an
+ * interface says you are being withheld from — they are shown the fact and
+ * whose it is.
+ *
+ * The sentence in the `said` case is kept short on purpose: the server's full
+ * reason is a paragraph and goes under the rows, where a paragraph fits. A
+ * row that grew to hold one pushed the version and the verdict off the end.
+ */
+export function rowVerdict(
+  offer: Offer,
+  channel: ChannelStatus,
+  mayChange: boolean,
+  blocked: boolean,
+): RowVerdict {
+  if (offer.on && channel.recognised) return { kind: "on" };
+  if (!mayChange) {
+    return { kind: "said", said: offer.on ? "On this installation" : "You do not administer this Firetower" };
+  }
+  if (blocked) return { kind: "said", said: "An upgrade is running" };
+  /* A pin is offered in the block above the rows, where its consequence and
+     its diff are — so the row it belongs to says what the row is for. */
+  if (offer.action === "pin") return { kind: "said", said: "Assumed" };
+  if (offer.action) return { kind: "act", act: offer.action, irreversible: offer.irreversible };
+  if (!channel.tag) return { kind: "said", said: "Needs the updater" };
+  return { kind: "said", said: offer.on ? "On this installation" : "Not available yet" };
+}
+
+/**
+ * What a channel row's second line says: what it offers, and what it holds.
+ *
+ * The version is the manifest's, never the newest release — a manifest that
+ * could not be read says so rather than putting a zero here.
+ */
+export function rowOffers(offer: Offer): string {
+  const holds = offer.version
+    ? offer.since
+      ? `${offer.version}, promoted ${ago(offer.since)}.`
+      : `${offer.version}.`
+    : "No version yet.";
+  return `${offer.offers} ${holds}`;
+}
+
+/** "5 days ago", in the drawing's words rather than a date. */
+export function ago(at: string): string {
+  const days = Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 30) return `${days} days ago`;
+  const months = Math.round(days / 30);
+  return months === 1 ? "a month ago" : `${months} months ago`;
+}
+
+/** What one package's channels hold, from the installation's last manifest read. */
+export function pinsFor(channel: ChannelStatus | undefined, pkg: Package): Pins | undefined {
+  return channel?.manifest.packages.find((p) => p.package === pkg);
+}
+
+/**
+ * What the installation's channel row says on its second line.
+ *
+ * The row already carried one line of explanation; this replaces it with the
+ * one fact that now matters. An assumption says so — a channel that could not
+ * be read is never asserted.
+ */
+export function saysChannel(channel: ChannelStatus | null): string {
+  if (!channel) return "The control plane and everything it serves";
+  if (!channel.tag || !channel.recognised) {
+    return "The control plane and everything it serves. Treated as general access.";
+  }
+  return channel.channel === Channel.beta
+    ? "On beta. Every release reaches this installation."
+    : "On general access. Releases a maintainer has promoted.";
+}
+
+/** What is wrong with the channel manifest, if anything. */
+export type ManifestTrouble = {
+  /** `destroyed` is the one that gets worse while nobody acts on it. */
+  kind: "destroyed" | "unreadable";
+  /** The server's own sentence for this outcome. */
+  problem: string | null;
+};
+
+/**
+ * Whether the document that says what every installation upgrades to is in
+ * trouble, and which kind.
+ *
+ * **Two states a person ever sees, and they must not look alike.** A read
+ * that failed is transient — a rate limit, a network blip — and the right
+ * answer is to wait. A document that *was* read before and has gone has been
+ * **destroyed**, and waiting makes it worse: until somebody republishes it,
+ * every installation reading it is told the same thing. If the copy for the
+ * two reads the same, the distinction has bought nothing.
+ *
+ * `absent` is neither: nothing has been published yet, which is the bootstrap
+ * case and the only one that is not a problem — the installation follows the
+ * newest release, as it did before channels existed.
+ */
+export function manifestTrouble(manifest: ManifestView): ManifestTrouble | null {
+  const { outcome } = manifest;
+  if (outcome === ManifestOutcome.found || outcome === ManifestOutcome.absent) return null;
+  return {
+    kind: outcome === ManifestOutcome.vanished ? "destroyed" : "unreadable",
+    problem: manifest.problem ?? null,
+  };
 }
