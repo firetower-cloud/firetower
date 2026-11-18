@@ -117,7 +117,7 @@ function ChannelRow({
           </button>
         </span>
       ) : (
-        <span className="st">{verdict.kind === "on" ? "On this installation" : verdict.said}</span>
+        <span className="verdict">{verdict.kind === "on" ? "On this installation" : verdict.said}</span>
       )}
     </div>
   );

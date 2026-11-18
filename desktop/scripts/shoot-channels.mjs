@@ -120,6 +120,55 @@ const spilling = (page) =>
     return out.slice(0, 5);
   });
 
+/**
+ * Text painted outside the box that is supposed to hold it.
+ *
+ * **`spilling()` could not see this and that is the point.** It measures
+ * boxes, so a 7x7px cell with 212px of text painted out of it has a box
+ * entirely inside the column and passes — which is exactly what happened:
+ * `.chan .st` inherited an unscoped 7px status dot's width and height, and
+ * every verdict on every channel row was broken at every width a window can
+ * be, in all 166 screenshots, under a green assertion. An assertion only ever
+ * checks the thing you thought to measure.
+ *
+ * So this measures the other thing: a Range over the element's own text nodes
+ * gives the rectangle the glyphs actually occupy, and that is compared with
+ * the element's border box. Anything that scrolls or clips on purpose is
+ * excluded — a diff line, a truncated path — because those overflow by
+ * design; what is caught is text with nowhere to go.
+ */
+const painting = (page) =>
+  page.evaluate(() => {
+    const out = [];
+    const SLACK = 2; // sub-pixel rounding, and a descender or two
+    for (const el of document.querySelectorAll(".pg *")) {
+      const text = [...el.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim());
+      if (text.length === 0) continue;
+      const style = getComputedStyle(el);
+      if (style.overflow !== "visible" || style.textOverflow === "ellipsis") continue;
+      if (el.closest(".prose-diff")) continue;
+      const box = el.getBoundingClientRect();
+      if (box.width === 0 && box.height === 0) continue;
+      const range = document.createRange();
+      let widest = 0;
+      let tallest = 0;
+      for (const node of text) {
+        range.selectNodeContents(node);
+        const ink = range.getBoundingClientRect();
+        widest = Math.max(widest, ink.right - box.right, box.left - ink.left);
+        tallest = Math.max(tallest, ink.bottom - box.bottom, box.top - ink.top);
+      }
+      range.detach?.();
+      if (widest > SLACK || tallest > SLACK) {
+        out.push(
+          `${el.className || el.tagName} "${el.textContent.trim().slice(0, 30)}" ` +
+            `${Math.round(Math.max(widest, tallest))}px outside a ${Math.round(box.width)}x${Math.round(box.height)} box`,
+        );
+      }
+    }
+    return out.slice(0, 5);
+  });
+
 const STATES = [
   "general",
   "beta",
@@ -163,6 +212,12 @@ for (const theme of ["dark", "light"]) {
       const over = await spilling(page);
       ok(`${state} · ${width} · nothing spills sideways`, over.length === 0, over.join(" · "));
 
+      /* ── And nothing paints outside the box meant to hold it ──────────
+         The one `spilling` structurally cannot see. Run at every width,
+         because the collision it exists for was broken at all of them. */
+      const outside = await painting(page);
+      ok(`${state} · ${width} · no text painted outside its box`, outside.length === 0, outside.join(" · "));
+
       await page.close();
     }
   }
@@ -200,6 +255,23 @@ for (const theme of ["dark", "light"]) {
     ok("member · with no control on it", (await install.locator("button").count()) === 0, `${await install.locator("button").count()} buttons`);
     ok("member · and the mark is still on the one in force", (await install.locator('.chan[data-on="true"]').count()) === 1, "no mark");
     const said = await install.innerText();
+    /* **The longest verdict in the set, measured on purpose.** "You do not
+       administer this Firetower" is 212px of text and was being painted out
+       of a 7px box; it is the string any future collision on this cell breaks
+       first, so it is asserted by name rather than only by the sweep above. */
+    const verdict = install.locator(".verdict").filter({ hasText: "do not administer" });
+    const fits = await verdict.evaluate((n) => {
+      const box = n.getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(n);
+      const ink = range.getBoundingClientRect();
+      return { box: Math.round(box.width), ink: Math.round(ink.width) };
+    });
+    ok(
+      `member · the longest verdict has a box to sit in (${fits.ink}px of text, ${fits.box}px box)`,
+      fits.box >= fits.ink - 2,
+      `${fits.ink}px in ${fits.box}px`,
+    );
     ok("member · says whose it is", /changing it is an administrator's/.test(said), said.slice(-120));
     ok("member · and points at their own copy's channel", /Your own copy of the app has its own channel/.test(said), said.slice(-120));
     /* Theirs is still theirs. */

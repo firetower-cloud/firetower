@@ -1565,6 +1565,15 @@
     font-size: var(--text-ui);
     line-height: 1.6;
     color: var(--color-text);
+    /* **A sentence from the server can carry an address.** The channel
+       blocks draw the control plane's own words, and those name the manifest
+       URL and whole image references — unbreakable runs that painted eighty
+       pixels outside this paragraph at the narrow end. `break-word` only
+       acts on a word that would otherwise overflow, so nothing that already
+       fits moves. Found by the painted-text assertion in
+       `shoot-channels.mjs`, which is the check the box-geometry one could
+       not be. */
+    overflow-wrap: break-word;
   }
 
   /* Dropping a folder on the page. */
@@ -2568,6 +2577,8 @@ html:not([data-platform="macos"]) {
     font-size: var(--text-ui);
     line-height: 1.45;
     color: var(--color-dim);
+    /* As `.review p`: these carry the server's sentences too. */
+    overflow-wrap: break-word;
   }
   .note2 .btn.quiet {
     height: 28px;
@@ -5315,7 +5326,14 @@ html:not([data-platform="macos"]) {
     font-size: var(--text-body);
     color: var(--color-dim);
   }
-  .chan .st {
+  /* **`.verdict`, because `.st` was taken.** `.st` is an unscoped 7x7 dot with
+     four meanings, a few thousand lines up, and `.chan .st` inherited its
+     width and height without ever resetting them — so every verdict on a
+     channel row was a seven-pixel box with its sentence painted outside it,
+     at every width a window can be. `.outcome` renamed around the same class
+     for the same reason rather than overriding it; overriding leaves the
+     collision there for the next person. */
+  .chan .verdict {
     flex: none;
     font-size: var(--text-ui);
     color: var(--color-dim);
@@ -5479,7 +5497,7 @@ html:not([data-platform="macos"]) {
       flex-wrap: wrap;
     }
     .chan .acts,
-    .chan .st {
+    .chan .verdict {
       width: 100%;
       margin-top: 4px;
       padding-left: 30px;
