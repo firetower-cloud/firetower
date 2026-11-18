@@ -515,6 +515,16 @@ async fn credential_on(
         crate::updates::deploy::FileVerdict,
         crate::updates::deploy::FilePlan,
         crate::updates::store::Targets,
+        crate::updates::channel::Channel,
+        crate::updates::channel::Package,
+        crate::updates::channel::ManifestOutcome,
+        crate::updates::channel::Act,
+        crate::updates::channel::Pins,
+        crate::updates::channel::ManifestView,
+        crate::updates::channel::Offer,
+        crate::updates::channel::ChannelSwitch,
+        crate::updates::channel::ImageLine,
+        crate::updates::channel::ChannelStatus,
         ft_core::schedule::Schedule,
         ft_core::schedule::ScheduleRun,
         ft_core::schedule::Trigger,
@@ -723,6 +733,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(updates::get_updates))
         .routes(routes!(updates::check_updates))
         .routes(routes!(updates::plan_update))
+        .routes(routes!(updates::get_channel, updates::switch_channel))
+        .routes(routes!(updates::plan_channel))
         .routes(routes!(updates::list_runs, updates::create_run))
         .routes(routes!(updates::get_run))
         .routes(routes!(updates::cancel_run))

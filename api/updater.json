@@ -10,7 +10,7 @@
       "name": "AGPL-3.0-only",
       "identifier": "AGPL-3.0-only"
     },
-    "version": "1"
+    "version": "2"
   },
   "paths": {
     "/v1/deploy": {
@@ -193,6 +193,14 @@
           }
         }
       },
+      "ImageRole": {
+        "type": "string",
+        "description": "Which of the two this is. They are published together and upgraded\ntogether, so they can never be on different channels.",
+        "enum": [
+          "controlPlane",
+          "updater"
+        ]
+      },
       "Job": {
         "type": "object",
         "required": [
@@ -298,6 +306,13 @@
                   "upgradeUpdater"
                 ]
               },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Which tag to fetch the version from. See\n[`JobKind::UpgradeControlPlane`]; the same rule, for the container\nbeside it."
+              },
               "version": {
                 "type": "string"
               }
@@ -322,6 +337,13 @@
                 "enum": [
                   "upgradeControlPlane"
                 ]
+              },
+              "tag": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Which tag to fetch the version from, when it is not the tag the\ncontainer is already on.\n\nThe compose file is the intent and the container is the fact, and\na channel switch is the moment they differ: the file is being\nrewritten to `:beta` in this same job, so the image to pull is\n`:beta` and the one the container came from is not. `None` keeps\nthe old behaviour — fetch the tag the container is on — which is\nwhat every ordinary upgrade still wants.\n\nWhatever is fetched is still checked against `version` before\nanything is recreated, and a rollback still goes back to the tag\nthe container was created from, so a switch that fails leaves the\ninstallation where it was."
               },
               "version": {
                 "type": "string"
@@ -387,6 +409,28 @@
           }
         }
       },
+      "ServiceImage": {
+        "type": "object",
+        "description": "One of the deployment's containers, by the reference it was created from.",
+        "required": [
+          "role",
+          "service",
+          "reference"
+        ],
+        "properties": {
+          "reference": {
+            "type": "string",
+            "description": "`ghcr.io/firetower-cloud/firetower:stable`, as Compose recorded it on\nthe container. Opaque here: nothing in the updater reads a meaning out\nof the tag."
+          },
+          "role": {
+            "$ref": "#/components/schemas/ImageRole"
+          },
+          "service": {
+            "type": "string",
+            "description": "The compose service, as the deployment names it."
+          }
+        }
+      },
       "Status": {
         "type": "object",
         "description": "What the updater is, and what it is standing on.",
@@ -428,6 +472,13 @@
           },
           "dockerVersion": {
             "type": "string"
+          },
+          "images": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ServiceImage"
+            },
+            "description": "The deployment's own containers, and the image each was created from.\n\n**This is where an installation's channel is read.** It is the tag on\nthe control plane's image, and nothing anywhere stores it — a row\nsaying `beta` beside a compose file saying `:stable` would drift, and\nthe operator would be shown an error about image versions whose real\ncause was a stale setting.\n\nEmpty from an updater older than API version 2, which is absence\nrather than an answer: a control plane that cannot be told what it is\nrunning says so instead of assuming."
           },
           "project": {
             "type": "string",

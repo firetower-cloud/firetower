@@ -27,6 +27,7 @@
 //! a person starts a run.
 
 pub mod agents;
+pub mod channel;
 pub mod check;
 pub mod client;
 pub mod deploy;
@@ -45,6 +46,11 @@ pub struct Updates {
     pub store: store::Store,
     pub updater: Result<client::Updater, client::Absent>,
     pub feed: check::Feed,
+    /// Where the channel manifest is published, and what it last said. The
+    /// channel itself is never held here — it is read from the running
+    /// container every time it is asked for.
+    pub channel_source: channel::Source,
+    pub channel_manifest: channel::Manifests,
     /// Where each agent publishes itself, and what it last said.
     pub agent_feeds: agents::Feeds,
     pub agent_releases: agents::Releases,
@@ -77,6 +83,8 @@ impl Updates {
             store: store::Store::new(pool),
             updater,
             feed: check::Feed::from_env(),
+            channel_source: channel::Source::from_env(),
+            channel_manifest: Default::default(),
             agent_feeds: agents::Feeds::from_env(),
             agent_releases: Default::default(),
             http: check::client(),
@@ -261,6 +269,11 @@ pub struct UpdateStatus {
     pub control_plane: ControlPlaneTarget,
     pub hosts: Vec<HostTarget>,
     pub active_run: Option<String>,
+    /// Which channel this installation is on, and what each channel offers.
+    /// Here as well as on its own path because the one screen that draws it
+    /// already asks for this, and the channel is what decides which release
+    /// `latest` above is.
+    pub channel: channel::ChannelStatus,
 }
 
 /// What a run would do to the deployment's files, asked before agreeing.
@@ -273,6 +286,10 @@ pub struct UpgradePlan {
     pub env_missing: Vec<String>,
     /// Whether the updater itself is behind and will be recreated first.
     pub updater_upgrade: bool,
+    /// The channel change this run would make, when it is a switch rather
+    /// than an ordinary upgrade. `None` on every ordinary plan.
+    #[serde(default)]
+    pub channel_change: Option<channel::ChannelSwitch>,
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]

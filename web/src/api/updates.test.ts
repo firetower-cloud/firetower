@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import type { FilePlan, HostTarget, UpdateRun, UpdateStatus } from "./generated/model";
+import type {
+  ChannelStatus,
+  FilePlan,
+  HostTarget,
+  UpdateRun,
+  UpdateStatus,
+} from "./generated/model";
 import {
   countEnded,
   diffLines,
@@ -31,6 +37,28 @@ const host = (over: Partial<HostTarget> = {}): HostTarget => ({
   ...over,
 });
 
+const channel = (over: Partial<ChannelStatus> = {}): ChannelStatus => ({
+  channel: "general",
+  tag: "stable",
+  image: "ghcr.io/firetower-cloud/firetower:stable",
+  recognised: true,
+  pinned: false,
+  problem: null,
+  switchable: true,
+  reason: null,
+  mayChange: true,
+  manifest: {
+    outcome: "found",
+    problem: null,
+    schemaVersion: 1,
+    packages: [],
+    readAt: null,
+    url: "https://example.test/channels.json",
+  },
+  offers: [],
+  ...over,
+});
+
 const status = (over: Partial<UpdateStatus> = {}): UpdateStatus => ({
   current: "0.30.1",
   latest: {
@@ -55,6 +83,7 @@ const status = (over: Partial<UpdateStatus> = {}): UpdateStatus => ({
     host({ hostId: "h_3", name: "gcp-old", upgradable: false, reason: "up to date" }),
   ],
   activeRun: null,
+  channel: channel(),
   ...over,
 });
 

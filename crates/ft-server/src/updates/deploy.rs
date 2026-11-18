@@ -75,12 +75,12 @@ pub fn plan(copies: Copies<'_>) -> FilePlan {
 
     let release_change = match verdict {
         FileVerdict::Update | FileVerdict::Edited | FileVerdict::New => {
-            Some(unified(name, old.unwrap_or(""), new.unwrap_or("")))
+            Some(unified_diff(name, old.unwrap_or(""), new.unwrap_or("")))
         }
         _ => None,
     };
     let your_edits = match verdict {
-        FileVerdict::Edited => Some(unified(name, old.unwrap_or(""), local.unwrap_or(""))),
+        FileVerdict::Edited => Some(unified_diff(name, old.unwrap_or(""), local.unwrap_or(""))),
         _ => None,
     };
 
@@ -108,7 +108,8 @@ fn normalise(text: &str) -> String {
     s
 }
 
-fn unified(name: &str, from: &str, to: &str) -> String {
+/// A unified diff, the way every file change on the Updates screen is shown.
+pub fn unified_diff(name: &str, from: &str, to: &str) -> String {
     let diff = TextDiff::from_lines(from, to);
     let mut out = String::new();
     for hunk in diff.unified_diff().context_radius(3).iter_hunks() {

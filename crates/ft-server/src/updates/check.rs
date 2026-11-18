@@ -79,10 +79,10 @@ pub fn client() -> reqwest::Client {
         .expect("a client with a user agent")
 }
 
-/// The newest release, as the feed describes it.
-pub async fn latest(http: &reqwest::Client, feed: &Feed) -> Result<Latest> {
-    let body: serde_json::Value = http
-        .get(&feed.releases_url)
+/// The releases, as the feed returns them. One fetch, because a check now has
+/// two questions to ask of the same page.
+pub async fn releases(http: &reqwest::Client, feed: &Feed) -> Result<serde_json::Value> {
+    http.get(&feed.releases_url)
         .header("accept", "application/vnd.github+json")
         .send()
         .await
@@ -91,8 +91,27 @@ pub async fn latest(http: &reqwest::Client, feed: &Feed) -> Result<Latest> {
         .context("the releases feed refused")?
         .json()
         .await
-        .context("reading the releases feed")?;
-    pick_release(&body)
+        .context("reading the releases feed")
+}
+
+/// The newest release, as the feed describes it.
+pub async fn latest(http: &reqwest::Client, feed: &Feed) -> Result<Latest> {
+    pick_release(&releases(http, feed).await?)
+}
+
+/// One named version, from a list of releases.
+///
+/// `None` when the page does not reach back that far, which is ordinary
+/// rather than an error: general access skips versions, so the release it
+/// holds can be further back than one page of a feed that interleaves three
+/// packages. The version is still known — it came from the channel manifest —
+/// and only its notes are missing.
+pub fn pick_version(body: &serde_json::Value, want: &Version) -> Option<Latest> {
+    body.as_array()?
+        .iter()
+        .filter(|r| !flag(r, "draft"))
+        .filter_map(|r| read_release(r).ok())
+        .find(|r| r.version == *want)
 }
 
 /// The newest control plane release in a list of releases. A draft, a
@@ -221,6 +240,25 @@ mod tests {
             {"tag_name": "desktop-latest", "draft": false, "prerelease": true}
         ]);
         assert_eq!(pick_release(&body).unwrap().version, Version::new(0, 34, 1));
+    }
+
+    #[test]
+    fn a_named_version_is_found_in_the_list_or_is_simply_not_there() {
+        let body = serde_json::json!([
+            {"tag_name": "desktop-v0.4.0", "draft": false, "prerelease": false},
+            {"tag_name": "firetower-v0.34.1", "draft": false, "prerelease": false},
+            {"tag_name": "firetower-v0.34.0", "draft": false, "prerelease": false, "body": "## notes"}
+        ]);
+        assert_eq!(
+            pick_version(&body, &Version::new(0, 34, 0))
+                .unwrap()
+                .notes
+                .unwrap(),
+            "## notes"
+        );
+        // A general access that has skipped a long way is behind the page,
+        // and that is not a failure to report.
+        assert!(pick_version(&body, &Version::new(0, 20, 0)).is_none());
     }
 
     #[test]
