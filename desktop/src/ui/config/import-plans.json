@@ -204,16 +204,27 @@
       "appliable": false,
       "entries": [
         {
+          "key": "designer",
+          "name": "Designer",
+          "outcome": {
+            "answered": false,
+            "filed": "your own space",
+            "kind": "new"
+          },
+          "path": "profiles/designer/PROFILE.md",
+          "warnings": []
+        },
+        {
           "key": "engineer",
           "name": "Engineer",
           "outcome": {
             "kind": "blocked",
             "problems": [
               {
-                "key": "settings.effort",
+                "key": "settings.mode",
                 "line": 6,
                 "path": "profiles/engineer/PROFILE.md",
-                "says": "`maximum` is not an effort ClaudeCode offers. Write one of `low`, `medium`, `high`, `xhigh`, `max`."
+                "says": "`yolo` is not a permission mode Claude Code offers. Write one of `auto`, `default`, `plan`, `acceptEdits`, `dontAsk`."
               }
             ]
           },
@@ -417,8 +428,8 @@
                 "field": "on_child_limit"
               },
               {
-                "after": "model Opus (opus[1m]) (the default) · effort Extra high (xhigh) (the default) · mode Auto (auto) (the default) · sandbox ClaudeCode decides when it starts",
-                "before": "model Haiku (haiku) · effort Extra high (xhigh) (the default) · mode Auto (auto) (the default) · sandbox ClaudeCode decides when it starts",
+                "after": "model Opus (opus[1m]) (the default) · effort Extra high (xhigh) (the default) · mode Auto (auto) (the default) · sandbox Claude Code decides when it starts",
+                "before": "model Haiku (haiku) · effort Extra high (xhigh) (the default) · mode Auto (auto) (the default) · sandbox Claude Code decides when it starts",
                 "change": "reset",
                 "field": "settings",
                 "settings": [
@@ -441,8 +452,8 @@
                     "setting": "mode"
                   },
                   {
-                    "after": "ClaudeCode decides when it starts",
-                    "before": "ClaudeCode decides when it starts",
+                    "after": "Claude Code decides when it starts",
+                    "before": "Claude Code decides when it starts",
                     "change": "unchanged",
                     "setting": "sandbox"
                   }
@@ -1172,8 +1183,8 @@
                 "field": "on_child_limit"
               },
               {
-                "after": "model Opus (opus[1m]) (the default) · effort Extra high (xhigh) (the default) · mode Auto (auto) (the default) · sandbox ClaudeCode decides when it starts",
-                "before": "model Haiku (haiku) · effort Extra high (xhigh) (the default) · mode Auto (auto) (the default) · sandbox ClaudeCode decides when it starts",
+                "after": "model Opus (opus[1m]) (the default) · effort Extra high (xhigh) (the default) · mode Auto (auto) (the default) · sandbox Claude Code decides when it starts",
+                "before": "model Haiku (haiku) · effort Extra high (xhigh) (the default) · mode Auto (auto) (the default) · sandbox Claude Code decides when it starts",
                 "change": "reset",
                 "field": "settings",
                 "settings": [
@@ -1196,8 +1207,8 @@
                     "setting": "mode"
                   },
                   {
-                    "after": "ClaudeCode decides when it starts",
-                    "before": "ClaudeCode decides when it starts",
+                    "after": "Claude Code decides when it starts",
+                    "before": "Claude Code decides when it starts",
                     "change": "unchanged",
                     "setting": "sandbox"
                   }
