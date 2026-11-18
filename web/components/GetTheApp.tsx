@@ -5,23 +5,40 @@
  *
  * The pairing method as it is today — this server's address and a password
  * sign-in — and the app itself, for each of the three desk platforms and for
- * the phone. The download links come from the latest GitHub release, asked
- * for when the page opens, so the page never carries a version number that
- * goes stale.
+ * the phone.
+ *
+ * **The desk downloads are the general-access build**, which is a pin and not
+ * a date: the version a maintainer promoted, named by the channel manifest and
+ * read from it by this control plane (`generalPin`). The bundles are then
+ * fetched from the release that pin names, **by its own tag** — nothing here
+ * finds the general-access build by scanning the releases feed. General access
+ * can lag beta by more than one page of releases, and reading a pin by
+ * enumerating releases is the failure the manifest exists to prevent (#454,
+ * specification §05).
  *
  * And, under the downloads, the one route onto the beta channel for a copy
  * that cannot reach it any other way — see `BetaRoute`. Downloading the app is
  * this surface's job (`docs/which-surface.md`), which is why that route lives
- * here and not on the desktop client's Updates screen.
+ * here and not on the desktop client's Updates screen. That block reads the
+ * newest desktop release, which is what a beta is, and is the only thing on
+ * this card that still comes from the feed.
  */
 import { useEffect, useState } from "react";
 import { useMe } from "@/src/api/generated/auth/auth";
+import { useGetChannel } from "@/src/api/generated/updates/updates";
+import type { ManifestView } from "@/src/api/generated/model";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardHead } from "@/components/ui/Card";
 import { Copyable, CopyButton } from "@/components/ui/Copy";
 import { QrCode } from "@/components/ui/QrCode";
 
 const RELEASES = "https://github.com/firetower-cloud/firetower/releases";
+
+/** Every release, newest first. The beta build and the phone's APK are in here. */
+const FEED = "https://api.github.com/repos/firetower-cloud/firetower/releases?per_page=30";
+
+/** One release, by the tag naming it. How a pin is turned into bundles. */
+const BY_TAG = "https://api.github.com/repos/firetower-cloud/firetower/releases/tags/";
 
 /** What the Linux build cannot do yet, in full, for the one line that cannot hold it. */
 const LINUX_DOC = "https://github.com/firetower-cloud/firetower/blob/main/docs/linux.md";
@@ -39,38 +56,137 @@ const VERIFY_DOC =
  */
 const TESTFLIGHT = "https://testflight.apple.com/join/uhgjMk1y";
 
-type Downloads = {
-  mac?: string;
-  windows?: string;
-  linux?: string;
-  version?: string;
+/**
+ * What the page knows about the version general access is pinned to.
+ *
+ * Three states and no fourth: a version to offer, a reason there is none, or
+ * the lookup still out. **No state falls through to the newest release.**
+ * That fallback is the defect this exists to close — from the first release
+ * deliberately left unpromoted the newest desktop release is a *beta*, and
+ * this card is the one surface whose whole job is handing somebody a build to
+ * install.
+ */
+export type Pin =
+  /** Still being asked. Nothing is known either way yet. */
+  | { state: "looking" }
   /**
-   * The release page the beta bundle is on.
-   *
-   * The same lookup as `version`, and deliberately a second name for it: the
-   * newest desktop release *is* the beta build, because every released version
-   * reaches beta as it is cut and nothing holds one back. So this stays
-   * correct however far beta runs ahead of general access, which is the thing
-   * the number beside it will not do — see `downloadNote`.
+   * A version to offer. `behind` is set when the most recent read of the
+   * manifest did not succeed and this is the pin from the last one that did —
+   * a general-access version that may be stale, which is a different thing
+   * from a beta, and is said out loud rather than quietly served.
    */
-  betaRelease?: string;
+  | { state: "pinned"; version: string; behind?: string; detail?: string }
+  /** No version to offer, and why — which is never "so here is the newest". */
+  | { state: "none"; why: string; detail?: string };
+
+/**
+ * The general-access pin, as this page comes to have it.
+ *
+ * **The control plane reads the manifest, not this page**, and that is not a
+ * preference. A release asset cannot be fetched from a browser at all:
+ * `github.com/…/releases/download/…` redirects to
+ * `release-assets.githubusercontent.com`, which answers with no
+ * `access-control-allow-origin` on either hop, so the document is unreadable
+ * from here however the request is phrased — measured on both hops rather
+ * than assumed (#454).
+ *
+ * Reading it server-side is the better path anyway, and costs nothing in
+ * version skew: the console is a static export compiled into the control
+ * plane's binary, so this page and the endpoint it calls ship as one
+ * artefact. `updates/channel.rs` bounds the document's size, bounds how long
+ * the read may take, and keeps a durable record of having read one before —
+ * which is what makes a later absence a *destroyed* manifest rather than a
+ * fresh start, and is the one thing a browser could not honestly keep.
+ *
+ * So this is a reading of that read's six outcomes, and only `found` hands
+ * over a version — or a document that read before and is still held, which
+ * `behind` then marks as possibly stale.
+ */
+export function generalPin({
+  pending,
+  failed,
+  manifest,
+}: {
+  /** This server has not answered yet. */
+  pending: boolean;
+  /** This server could not be asked at all. */
+  failed: boolean;
+  manifest?: ManifestView;
+}): Pin {
+  if (pending) return { state: "looking" };
+  // A server that did not answer has said nothing about the manifest, which
+  // is not the same as a manifest that is not there.
+  if (failed || !manifest)
+    return {
+      state: "none",
+      why: "this server could not be asked which version general access is at.",
+    };
+  const desktop = manifest.packages.find((p) => p.package === "desktop");
+  if (!desktop?.general)
+    return { state: "none", why: whyNoPin(manifest), detail: manifest.problem ?? undefined };
+  return manifest.outcome === "found"
+    ? { state: "pinned", version: desktop.general }
+    : {
+        state: "pinned",
+        version: desktop.general,
+        behind: whyNoPin(manifest),
+        detail: manifest.problem ?? undefined,
+      };
+}
+
+/**
+ * Why there is no pin, in a sentence that says what to do about it.
+ *
+ * **The six outcomes are kept apart here because the operator's next action
+ * differs** — which is the whole reason the control plane keeps them apart:
+ * ask again after a failed fetch, republish a destroyed document, fix a
+ * malformed one, wait for a promotion that has not happened. Collapsing them
+ * into one "could not check" is the mistake this design has already paid for,
+ * and `vanished` is the one that gets worse while nobody acts on it, so it
+ * must never read as a network hiccup.
+ */
+function whyNoPin(manifest: ManifestView): string {
+  switch (manifest.outcome) {
+    case "absent":
+      return "no channel manifest has been published yet, so nothing has been promoted to general access.";
+    case "vanished":
+      return "the channel manifest was published before and is gone now. It has been destroyed rather than never written, and somebody has to put it back — this one does not come right on its own.";
+    case "unreadable":
+      return "this server could not read the channel manifest just now, which is worth asking again.";
+    case "malformed":
+      return "what came back from the channel manifest is not that document, so it has to be fixed before anything here can name a version.";
+    case "incomplete":
+      return "the channel manifest is missing a version it has to carry, so it has to be fixed before anything here can name one.";
+    case "found":
+      // It read, and says nothing about this package — a document written
+      // before the desktop had a channel, or before its first promotion.
+      return "the channel manifest names no general-access version for the desktop app yet.";
+  }
+}
+
+/** What the feed answers: the beta build, and the phone's APK. */
+type Releases = {
+  /**
+   * False when GitHub could not be asked at all, which is not an empty feed.
+   *
+   * There is no *settled* beside it, as there is on `Build`: nothing on this
+   * side of the card distinguishes a lookup still out from one that failed.
+   * The beta route says "could not be looked up just now" in both, which is
+   * true of both, and the phone's code keeps its own placeholder.
+   */
+  reached: boolean;
+  /**
+   * The newest desktop release, which **is** the beta build: every released
+   * version reaches beta as it is cut and nothing holds one back. So this
+   * stays correct however far beta runs ahead of general access — which is
+   * exactly what the pin above it will not do, and why they are two lookups.
+   */
+  beta?: { version: string; href: string; mac?: string; windows?: string; linux?: string };
   android?: string;
   androidVersion?: string;
-  /**
-   * Whether the lookup has answered — however it answered.
-   *
-   * Without this, *still looking*, *answered and there is no such file* and
-   * *the lookup itself failed* are one state with one sentence, and the
-   * sentence is the hopeful one: a release whose macOS job did not run says
-   * "Looking for the latest release…" for as long as anybody is prepared to
-   * sit there.
-   */
-  settled: boolean;
-  /** False when GitHub could not be asked at all, which is not a missing file. */
-  reached: boolean;
 };
 
-const LOOKING: Downloads = { settled: false, reached: true };
+const ASKING: Releases = { reached: true };
 
 /** As much of a GitHub release as this page reads. */
 type Release = {
@@ -79,12 +195,30 @@ type Release = {
   assets: { name: string; browser_download_url: string }[];
 };
 
-/** The latest release's installers, by file name. Nothing to show while it is unknown. */
-function useDownloads(): Downloads {
-  const [found, setFound] = useState<Downloads>(LOOKING);
+/** The installers on one release, by file name. */
+function bundles(of: Release | undefined) {
+  const by = (test: (n: string) => boolean) =>
+    of?.assets.find((a) => test(a.name))?.browser_download_url;
+  return {
+    mac: by((n) => n.endsWith(".dmg")),
+    windows: by((n) => n.endsWith("-setup.exe")) ?? by((n) => n.endsWith(".exe")),
+    // One Linux download, and it is the one that can update itself.
+    linux: by((n) => n.endsWith(".AppImage")),
+  };
+}
+
+/**
+ * The newest releases: the beta desktop build, and the phone's APK.
+ *
+ * The one lookup on this page that is a scan, and the right shape for what it
+ * answers — *the newest release* is precisely the question being asked here.
+ * The general-access build is a pin, and is never found this way.
+ */
+function useReleases(): Releases {
+  const [found, setFound] = useState<Releases>(ASKING);
   useEffect(() => {
     let live = true;
-    fetch("https://api.github.com/repos/firetower-cloud/firetower/releases?per_page=30")
+    fetch(FEED)
       // A refusal is a failed lookup and not an empty release list — the
       // common one is this unauthenticated request being rate-limited, and
       // answering it with `[]` would put "Not in this release" under all
@@ -96,8 +230,6 @@ function useDownloads(): Downloads {
       .then((releases: Release[]) => {
         if (!live) return;
         const desktop = releases.find((r) => r.tag_name.startsWith("desktop-v"));
-        const by = (of: typeof desktop, test: (n: string) => boolean) =>
-          of?.assets.find((a) => test(a.name))?.browser_download_url;
 
         // The phone is asked for the newest `mobile-v*` release that actually
         // carries an APK, not simply the newest one: a release whose Android
@@ -110,27 +242,28 @@ function useDownloads(): Downloads {
         // that stays correct across releases is the one looked up on load.
         const apk = releases
           .filter((r) => r.tag_name.startsWith("mobile-v"))
-          .map((r) => ({ tag: r.tag_name, url: by(r, (n) => n.endsWith(".apk")) }))
+          .map((r) => ({
+            tag: r.tag_name,
+            url: r.assets.find((a) => a.name.endsWith(".apk"))?.browser_download_url,
+          }))
           .find((r) => r.url);
 
         setFound({
-          settled: true,
           reached: true,
-          version: desktop?.tag_name.replace(/^desktop-v/, ""),
-          // The page GitHub already has for this release, rather than a tag
-          // URL assembled here: one less shape of ours to keep in step with
-          // theirs, and it is where the bundles are.
-          betaRelease: desktop?.html_url,
-          mac: by(desktop, (n) => n.endsWith(".dmg")),
-          windows: by(desktop, (n) => n.endsWith("-setup.exe")) ?? by(desktop, (n) => n.endsWith(".exe")),
-          // One Linux download, and it is the one that can update itself.
-          linux: by(desktop, (n) => n.endsWith(".AppImage")),
+          beta: desktop && {
+            version: desktop.tag_name.replace(/^desktop-v/, ""),
+            // The page GitHub already has for this release, rather than a tag
+            // URL assembled here: one less shape of ours to keep in step with
+            // theirs, and it is where the bundles are.
+            href: desktop.html_url,
+            ...bundles(desktop),
+          },
           android: apk?.url,
           androidVersion: apk?.tag.replace(/^mobile-v/, ""),
         });
       })
       .catch(() => {
-        if (live) setFound({ settled: true, reached: false });
+        if (live) setFound({ reached: false });
       });
     return () => {
       live = false;
@@ -139,9 +272,84 @@ function useDownloads(): Downloads {
   return found;
 }
 
+/** The bundles the general-access pin resolves to. */
+export type Build = {
+  /** Whether the lookup has answered, including by not needing to be made. */
+  settled: boolean;
+  /** Whether a release was actually read. A 404 and a refusal are both false. */
+  read: boolean;
+  /** Which of those two it was, when a lookup was made and read nothing. */
+  missing?: "gone" | "unreachable";
+  mac?: string;
+  windows?: string;
+  linux?: string;
+};
+
+const NOTHING_TO_LOOK_UP: Build = { settled: true, read: false };
+const LOOKING_UP: Build = { settled: false, read: false };
+
+/**
+ * The release a pin names, fetched **by its tag** rather than found in a feed.
+ *
+ * `releases/tags/desktop-v<pin>` is the lookup of a value. Searching the feed
+ * for it would work today and stop working the day general access falls more
+ * than a page of releases behind beta — which is normal rather than
+ * exceptional, because promotion skips versions as a matter of course. It
+ * costs one more of GitHub's sixty unauthenticated requests an hour, and that
+ * is what a pin being a value rather than a guess costs.
+ */
+function useGeneralBuild(version?: string): Build {
+  // The answer, and the pin it is the answer *to*. Keeping the two together
+  // is what lets a pin that has just changed read as "still looking" without
+  // the effect setting state to say so, and it means an answer about an older
+  // pin can never be drawn against a newer one.
+  const [answered, setAnswered] = useState<{ pin?: string; build: Build }>({
+    build: NOTHING_TO_LOOK_UP,
+  });
+  useEffect(() => {
+    if (!version) return;
+    let live = true;
+    fetch(`${BY_TAG}desktop-v${encodeURIComponent(version)}`)
+      .then((r) => {
+        // A pin naming a release that is not on GitHub is an answer, not a
+        // refusal, and the card says which version it went looking for.
+        if (r.status === 404) return undefined;
+        if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
+        return r.json() as Promise<Release>;
+      })
+      .then((release) => {
+        if (!live) return;
+        setAnswered({
+          pin: version,
+          build: release
+            ? { settled: true, read: true, ...bundles(release) }
+            : { settled: true, read: false, missing: "gone" },
+        });
+      })
+      .catch(() => {
+        if (live)
+          setAnswered({ pin: version, build: { settled: true, read: false, missing: "unreachable" } });
+      });
+    return () => {
+      live = false;
+    };
+  }, [version]);
+  if (!version) return NOTHING_TO_LOOK_UP;
+  return answered.pin === version ? answered.build : LOOKING_UP;
+}
+
 export function GetTheApp() {
   const { data: me } = useMe();
-  const downloads = useDownloads();
+  const releases = useReleases();
+  // This server's own read of the channel manifest. One ask, cached by the
+  // query client, and the only place the general-access version comes from.
+  const channel = useGetChannel();
+  const pin = generalPin({
+    pending: channel.isPending,
+    failed: channel.isError,
+    manifest: channel.data?.manifest,
+  });
+  const build = useGeneralBuild(pin.state === "pinned" ? pin.version : undefined);
   const address = typeof window === "undefined" ? "" : window.location.origin;
 
   return (
@@ -165,34 +373,7 @@ export function GetTheApp() {
         </div>
       </Card>
 
-      <Card className="mt-4">
-        <CardHead note={<span className="text-meta text-mute">{downloadNote(downloads.version)}</span>}><span className="text-ui text-bone">Download</span></CardHead>
-        <div className="flex flex-wrap gap-3 px-4 pt-4 pb-3">
-          <Platform name="macOS" hint="Apple silicon and Intel" href={downloads.mac} glyph={<AppleGlyph />} settled={downloads.settled} reached={downloads.reached} />
-          <Platform name="Windows" hint="64-bit, installs per user" href={downloads.windows} glyph={<WindowsGlyph />} settled={downloads.settled} reached={downloads.reached} />
-          {/* The third tile, the same shape as the other two. The tier is a
-              tag on it rather than a different kind of tile: one download, one
-              press, and the block below carries everything that is particular
-              about it. */}
-          <Platform name="Linux" hint="AppImage, x86_64" href={downloads.linux} glyph={<TuxGlyph />} tag="Experimental" settled={downloads.settled} reached={downloads.reached} />
-        </div>
-
-        {showsOnLinux(downloads) && <OnLinux />}
-
-        {/* A dropped connection is not a release with nothing in it, and it is
-            not Linux's fault — said once, under the tiles, with the link to
-            every release already below it. */}
-        {!downloads.reached && <p className="px-4 pb-3 text-meta text-mute">Couldn&apos;t reach GitHub.</p>}
-
-        {/* Last in the card, under the tiles and the platform note that
-            belongs to one of them, and directly above the other line on this
-            card that points at GitHub. */}
-        <BetaRoute found={downloads} />
-
-        <p className="px-4 pb-4 text-meta text-mute">
-          Every release, with its notes, is on <a className="text-dim underline decoration-line underline-offset-2" href={RELEASES} target="_blank" rel="noreferrer">GitHub</a>.
-        </p>
-      </Card>
+      <DownloadCard pin={pin} build={build} releases={releases} />
 
       {/* The phone is the one client that cannot be installed from this page by
           clicking: the link is on this screen and the device that needs it is
@@ -210,9 +391,9 @@ export function GetTheApp() {
           />
           <Phone
             name="Android"
-            hint={downloads.androidVersion ? `APK · ${downloads.androidVersion}` : "APK"}
-            href={downloads.android}
-            shown={downloads.android?.split("/").pop()}
+            hint={releases.androidVersion ? `APK · ${releases.androidVersion}` : "APK"}
+            href={releases.android}
+            shown={releases.android?.split("/").pop()}
             glyph={<AndroidGlyph />}
           />
         </div>
@@ -222,27 +403,166 @@ export function GetTheApp() {
 }
 
 /**
- * The version line under *Download*, which names a channel rather than a date.
+ * The Download card: the general-access build, and the route onto beta.
+ *
+ * Everything it draws is in its arguments, which is what lets every state of
+ * it — pinned, pinned and stale, no pin for each of six reasons, a pin whose
+ * release is not there, a refusal — be rendered and asserted on rather than
+ * described. **The two versions on this card come from two different places
+ * on purpose**: the tiles and the line above them from the pin, the badge
+ * under *Beta builds* from the newest release. They differ from the first
+ * release left unpromoted, and that is the whole point of the change.
+ */
+export function DownloadCard({
+  pin,
+  build,
+  releases,
+}: {
+  pin: Pin;
+  build: Build;
+  releases: Releases;
+}) {
+  // Settled once both the pin and the lookup it leads to have answered: a
+  // tile that said "Not in this release" while the pin was still out would be
+  // a claim about a release nobody had named yet.
+  const settled = pin.state !== "looking" && build.settled;
+  const note = generalNote(pin, build);
+  return (
+    <Card className="mt-4">
+      <CardHead note={<span className="text-meta text-mute">{downloadNote(pin)}</span>}><span className="text-ui text-bone">Download</span></CardHead>
+      <div className="flex flex-wrap gap-3 px-4 pt-4 pb-3">
+        <Platform name="macOS" hint="Apple silicon and Intel" href={build.mac} glyph={<AppleGlyph />} settled={settled} resolved={build.read} />
+        <Platform name="Windows" hint="64-bit, installs per user" href={build.windows} glyph={<WindowsGlyph />} settled={settled} resolved={build.read} />
+        {/* The third tile, the same shape as the other two. The tier is a
+            tag on it rather than a different kind of tile: one download, one
+            press, and the block below carries everything that is particular
+            about it. */}
+        <Platform name="Linux" hint="AppImage, x86_64" href={build.linux} glyph={<TuxGlyph />} tag="Experimental" settled={settled} resolved={build.read} />
+      </div>
+
+      {/* Why there is no general-access build above, or why the one there is
+          may be behind. Directly under the tiles it is about, and above the
+          Linux advice and the dropped-connection line — a reader looking at
+          three tiles that are not links wants this sentence first. */}
+      {note && <GeneralNote note={note} />}
+
+      {showsOnLinux({ settled, resolved: build.read, linux: build.linux }) && <OnLinux />}
+
+      {/* A dropped connection is not a release with nothing in it, and it is
+          not Linux's fault — said once, under the tiles, with the link to
+          every release already below it. */}
+      {(!releases.reached || build.missing === "unreachable") && (
+        <p className="px-4 pb-3 text-meta text-mute">Couldn&apos;t reach GitHub.</p>
+      )}
+
+      {/* Last in the card, under the tiles and the platform note that
+          belongs to one of them, and directly above the other line on this
+          card that points at GitHub. */}
+      <BetaRoute
+        found={{
+          version: releases.beta?.version,
+          betaRelease: releases.beta?.href,
+          mac: releases.beta?.mac,
+          windows: releases.beta?.windows,
+          linux: releases.beta?.linux,
+        }}
+      />
+
+      <p className="px-4 pb-4 text-meta text-mute">
+        Every release, with its notes, is on <a className="text-dim underline decoration-line underline-offset-2" href={RELEASES} target="_blank" rel="noreferrer">GitHub</a>.
+      </p>
+    </Card>
+  );
+}
+
+/** What the card has to say about the general-access build, if anything. */
+export type Note = {
+  /** What is wrong, and what would put it right. */
+  says: string;
+  /** Said only where there is nothing to download, because it is the thing somebody would otherwise assume. */
+  next?: string;
+  /** This server's own words for the failure, for whoever has to act on it. */
+  detail?: string;
+};
+
+/**
+ * The line under the tiles that says why they are empty, or stale.
+ *
+ * The page used to need no such line, because the version it drew was the
+ * newest release and the newest release is always there. A pin can be
+ * unreadable, missing, destroyed, or name a release that is not on the host —
+ * and in every one of those the honest card offers **nothing** and says which
+ * it is. Falling back to the newest release is the one thing it must never
+ * do: that is a beta, and handing it out under a general-access label is the
+ * failure this whole design avoids everywhere else.
+ */
+export function generalNote(pin: Pin, build: Build): Note | undefined {
+  if (pin.state === "looking") return undefined;
+  if (pin.state === "none")
+    return {
+      says: `There is no general-access build to offer here: ${pin.why}`,
+      next: "The newest release is not offered in its place — a release nobody has promoted is a beta, and the route onto beta is below.",
+      detail: pin.detail,
+    };
+  // A pin that names a release GitHub does not have. Not a refusal, and not
+  // an empty release: the tiles say nothing about platforms because there is
+  // no release to have platforms.
+  if (build.missing === "gone")
+    return {
+      says: `General access is at ${pin.version}, and there is no desktop-v${pin.version} release on GitHub to download it from.`,
+      next: "The newest release is not offered in its place — a release nobody has promoted is a beta, and the route onto beta is below.",
+    };
+  if (pin.behind)
+    return {
+      says: `General access was ${pin.version} when the channel manifest last read, and the most recent read did not succeed: ${pin.behind}`,
+      detail: pin.detail,
+    };
+  return undefined;
+}
+
+/**
+ * That note, drawn.
+ *
+ * `--text-meta` so it is an aside and `--color-text` so it is legible: these
+ * sentences change what somebody does next — ask again, republish a document,
+ * wait for a promotion — and `--color-dim` is recorded in the sheet at 2.94:1
+ * on `--color-panel`, below the floor for normal text. The server's own words
+ * for the failure are the one part that is a diagnostic rather than an
+ * instruction, so that is the part drawn in the tier reserved for them.
+ */
+function GeneralNote({ note }: { note: Note }) {
+  return (
+    <div className="px-4 pb-3">
+      <p className="text-meta text-text">{note.says}</p>
+      {note.next && <p className="mt-1 text-meta text-text">{note.next}</p>}
+      {note.detail && <p className="mt-1 text-meta text-dim">{note.detail}</p>}
+    </div>
+  );
+}
+
+/**
+ * The version line under *Download*, which names a channel and its pin.
  *
  * It says *general access* because the block below it opens by saying the
  * downloads above are general access, and that sentence needs something above
- * it to be about. The number is the one the tiles have always resolved — the
- * newest desktop release.
+ * it to be about. The number is the channel manifest's `desktop.general` pin,
+ * read by this control plane — **not the newest desktop release**, which is
+ * the same number only while the two channels are level and is a beta from
+ * the first release left unpromoted.
  *
- * **Which is the general-access pin only while the two channels are level**,
- * and they are: the release that introduces channels sets beta and general
- * access to itself, so nothing diverges on the day this lands (#415). The
- * first release deliberately left unpromoted is where they part, and from then
- * on the tiles and this line want the channel manifest's `desktop.general`
- * pin, which #448 publishes. **That is #454, and it has a deadline rather
- * than a backlog slot: it has to land before the first unpromoted release**,
- * because nothing else in the code will say so. It is deliberately *not*
- * derived from the releases feed: general access can lag beta by more than a
- * page of releases, and reading a pin by enumerating releases is the failure
- * the manifest exists to prevent.
+ * Three states, three lines, and the unknown one is not the hopeful one: a
+ * pin that could not be read says so, and the note under the tiles says which
+ * of the six reasons it was and what to do about it.
  */
-export function downloadNote(version?: string): string {
-  return version ? `General access: ${version}` : "The general-access release";
+export function downloadNote(pin: Pin): string {
+  switch (pin.state) {
+    case "pinned":
+      return `General access: ${pin.version}`;
+    case "looking":
+      return "The general-access release";
+    case "none":
+      return "General access: unknown";
+  }
 }
 
 /** What the beta route can honestly offer, once the release lookup has answered. */
@@ -473,29 +793,34 @@ function CheckingIt() {
  * opacity and *answered*, which is a different sentence. The footprint is the
  * same in all three, so the card does not jump when the release resolves.
  *
- * The one state with nothing of its own to say is a lookup that failed — the
- * tile keeps describing its platform, and the card says once, underneath,
- * that GitHub could not be reached. "Not in this release" is a claim about a
- * release we were never told anything about.
+ * It looks for *the general-access release* rather than the latest one, and
+ * says so, because that is what these tiles are now: the release the channel
+ * manifest pins, which is the newest one only while the channels are level.
+ *
+ * The one state with nothing of its own to say is a release that was never
+ * read — GitHub refused, the pin names a release that is not there, or there
+ * is no pin to resolve at all. The tile keeps describing its platform and the
+ * card says underneath which of those it was. "Not in this release" is a
+ * claim about a release we were never told anything about.
  */
 export function tileLine({
   hint,
   href,
   settled,
-  reached,
+  resolved,
 }: {
   hint: string;
   href?: string;
   settled: boolean;
-  reached: boolean;
+  /** Whether a general-access release was actually read. */
+  resolved: boolean;
 }): string {
   if (href) return hint;
-  if (!settled) return "Looking for the latest release…";
-  // Answered, and there is no such file in it.
-  if (reached) return "Not in this release";
-  // Nobody answered, so nothing is known about what the release holds: the
-  // tile goes on describing its platform and the card says once, underneath,
-  // that GitHub could not be reached.
+  if (!settled) return "Looking for the general-access release…";
+  // A release was read, and there is no such file in it.
+  if (resolved) return "Not in this release";
+  // No release was read, so nothing is known about what one holds: the tile
+  // goes on describing its platform and the card says underneath why.
   return hint;
 }
 
@@ -506,7 +831,7 @@ function Platform({
   glyph,
   tag,
   settled,
-  reached,
+  resolved,
 }: {
   name: string;
   hint: string;
@@ -515,9 +840,9 @@ function Platform({
   /** The tier, for a platform that is not held to the same promise as the others. */
   tag?: string;
   settled: boolean;
-  reached: boolean;
+  resolved: boolean;
 }) {
-  const line = tileLine({ hint, href, settled, reached });
+  const line = tileLine({ hint, href, settled, resolved });
   const inner = (
     <>
       <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-raise text-bone">{glyph}</span>
@@ -549,12 +874,13 @@ function Platform({
  * the lookup comes back with, and the card should not grow under somebody's
  * cursor when the links arrive.
  *
- * Drawn again when the lookup **failed**, which is the same argument the tiles
- * make one line above: nothing is known about the release, the Linux tile is
- * still offering an AppImage, and where to keep a file is not a claim about
- * any particular release. Hiding it there would take away the advice *and*
- * this card's only link to `docs/linux.md` on the one path where the reader
- * has least to go on.
+ * Drawn again when no release was read — GitHub refused, or there is no pin
+ * to resolve — which is the same argument the tiles make one line above:
+ * nothing is known about the general-access release, the Linux tile is still
+ * offering an AppImage, and where to keep a file is not a claim about any
+ * particular release. Hiding it there would take away the advice *and* this
+ * card's only link to `docs/linux.md` on the one path where the reader has
+ * least to go on.
  *
  * Hidden in exactly one case — the release was read and has no AppImage in it.
  * Then there positively is no Linux download, the tile says so itself, and
@@ -562,14 +888,14 @@ function Platform({
  */
 export function showsOnLinux({
   settled,
-  reached,
+  resolved,
   linux,
 }: {
   settled: boolean;
-  reached: boolean;
+  resolved: boolean;
   linux?: string;
 }) {
-  return !settled || !reached || Boolean(linux);
+  return !settled || !resolved || Boolean(linux);
 }
 
 /**
