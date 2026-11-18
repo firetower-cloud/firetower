@@ -1928,6 +1928,50 @@ mod tests {
         assert_eq!(exported(&state, &admin, &id).await.key, "qa-engineer");
     }
 
+    /// **Changing only the name is a rename, and leaves one profile.**
+    ///
+    /// The key is the identity, so a file whose `name` moved is the same
+    /// profile under a new name — not a second one beside it. The plan says
+    /// so in words rather than leaving a changed `name` row to be inferred,
+    /// and the apply writes the row it named.
+    #[tokio::test]
+    async fn changing_only_the_name_renames_the_profile_it_is() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let id = keyed(&state, &admin, "QA", "qa-engineer").await;
+
+        let renamed = DroppedFile {
+            path: "profiles/qa-engineer/PROFILE.md".into(),
+            text: format!(
+                "---\nname: Quality\ndoes: {}\n---\n\n{}\n",
+                asked_for("QA").does,
+                asked_for("QA").instructions
+            ),
+        };
+        let plan = planned(&state, &admin, plan_for(vec![renamed.clone()])).await;
+        let PlanOutcome::Rename(rename) = &plan.entries[0].outcome else {
+            panic!("{:#?}", plan.entries[0].outcome)
+        };
+        assert_eq!(
+            (rename.from.as_str(), rename.to.as_str()),
+            ("QA", "Quality")
+        );
+
+        accept(&state, &admin, plan_for(vec![renamed]), reviewing(&plan))
+            .await
+            .expect("a rename applies");
+
+        let library = state
+            .roles
+            .visible(me.id.as_str(), Level::Viewer)
+            .await
+            .unwrap();
+        assert_eq!(library.len(), 1, "a rename is one profile, not two");
+        assert_eq!(library[0].id, id);
+        assert_eq!(library[0].name, "Quality");
+        assert_eq!(library[0].key.as_deref(), Some("qa-engineer"));
+    }
+
     /// **Firetower's own export, fed straight back, through the accept.**
     ///
     /// The round trip the whole format rests on, and the half that could not
