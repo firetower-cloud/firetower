@@ -33,6 +33,20 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTheme } from "~/design/theme";
 
+/**
+ * The grabber band above a sheet's children, and the air below them.
+ *
+ * Exported because a sheet with a **pinned footer** has to bound its own
+ * scrolling part rather than leave it to `maxHeight`: a percentage ceiling
+ * clamps the sheet's own box, and a list long enough to overflow then pushes
+ * whatever is under it past the bottom edge instead of scrolling. Anything
+ * doing that arithmetic needs these two numbers, and they belong here with
+ * the padding they are about rather than copied into the caller. `SkillSheet`
+ * is the first to need them.
+ */
+export const GRABBER = 17;
+export const SKIRT = 14;
+
 export function Sheet({
   open,
   onClose,
@@ -99,7 +113,7 @@ export function Sheet({
           className="rounded-t-sheet bg-float"
           style={[
             {
-              paddingBottom: insets.bottom + 14,
+              paddingBottom: insets.bottom + SKIRT,
               marginLeft: insets.left,
               marginRight: insets.right,
               ...(maxHeight ? { maxHeight } : {}),

@@ -13,6 +13,7 @@ import { useMe } from "~/api/generated/auth/auth";
 import { useGetUpdates } from "~/api/generated/updates/updates";
 import { showsDot } from "~/api/updates";
 import { useListTrackers, useListTrackerScopes } from "~/api/generated/trackers/trackers";
+import { useListSkills, useSessionSkills } from "~/api/generated/skills/skills";
 import {
   getListSessionsQueryKey,
   useGetSession,
@@ -29,6 +30,7 @@ import type {
   RemoteRepo,
   Repo,
   Session,
+  Skill,
   Task,
   TaskScope,
 } from "~/api/generated/model";
@@ -195,6 +197,33 @@ export function useTrackers() {
 export function useTrackerScopes(id: string, enabled: boolean): Feed<TaskScope[]> {
   const q = useListTrackerScopes(id, { query: { enabled: enabled && !!id } });
   return { data: q.data ?? [], loading: enabled && q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/* ── skills ──────────────────────────────────────────────────────────────
+   Both of these are the desk's, under the desk's names: `desktop/src/data.ts`
+   has `useSkills` and `useSessionSkillIds` and the phone's sheet reads the
+   same two answers. The wrapper is deliberately **not** called
+   `useSessionSkills` — that is the generated hook's own name, and two hooks of
+   one name in one app is how an import comes to resolve to the wrong one. */
+
+/** Every skill this person can reach, with their own defaults folded in. */
+export function useSkills(): Feed<Skill[]> {
+  const q = useListSkills();
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/** What one session is reading. Empty until somebody chooses. */
+export function useSessionSkillIds(session: string) {
+  const q = useSessionSkills(session);
+  return {
+    data: q.data?.selected ?? [],
+    // Each of the session's repositories with this person's defaults there,
+    // and what they have on everywhere: what "from defaults" is measured against.
+    repos: q.data?.repos ?? [],
+    alwaysOn: q.data?.alwaysOn ?? [],
+    loading: q.isPending,
+    error: q.error ? why(q.error) : null,
+  };
 }
 
 /** One directory of a session's workspace, off the worker. */

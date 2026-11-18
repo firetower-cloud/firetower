@@ -60,11 +60,14 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { KeyboardStickyView, useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
-import { ArrowUp, ChevronDown, Mic, Paperclip, Plus, Square, X } from "lucide-react-native";
-import type { Attached, Control, ControlKind } from "~/api/generated/model";
+import { ArrowUp, ChevronDown, Diamond, Mic, Paperclip, Plus, Square, X } from "lucide-react-native";
+import type { Agent, Attached, Control, ControlKind } from "~/api/generated/model";
 import { getSessionControlsQueryKey, useChooseControl, useSessionControls } from "~/api/generated/conversation/conversation";
 import { Picker } from "~/ui/Picker";
+import { SkillSheet } from "~/ui/SkillSheet";
 import { planPick, shownValue } from "~/ui/controls";
+import { useSessionSkillIds } from "~/data";
+import { chipLabel, chipShows } from "~/skills";
 import { useQueryClient } from "@tanstack/react-query";
 import { megabytes, type Picked } from "~/ui/attach";
 import { AttachMenu } from "~/ui/AttachMenu";
@@ -121,6 +124,7 @@ const TAP_REST = "h-9 w-9 items-center justify-center rounded-full";
 
 export function Composer({
   sessionId,
+  agent,
   acp = false,
   working,
   model,
@@ -133,6 +137,16 @@ export function Composer({
 }: {
   /** Whose composer this is — the key a seeded draft was left under. */
   sessionId: string;
+  /**
+   * Which agent is in there.
+   *
+   * Only the skills sheet reads it, and only to know which token budget the
+   * meter is drawn against — `BUDGET` is per agent and a session metered
+   * against the wrong one is told a selection fits that the agent will drop
+   * whole. Not derived from `acp`, which is a different question about the
+   * same field.
+   */
+  agent: Agent;
   acp?: boolean;
   working: boolean;
   /**
@@ -191,6 +205,17 @@ export function Composer({
   const [picking, setPicking] = useState<ControlKind | null>(null);
   /* What was just chosen, until the list is refetched and agrees. */
   const [chosen, setChosen] = useState<Partial<Record<string, string>>>({});
+
+  /**
+   * How many skills this session is reading, and the sheet that changes them.
+   *
+   * The chip is an indicator and the sheet is the control — the desk's words
+   * for the same pair. The count is read from the server rather than kept
+   * here, so a phone and a desk open on one session agree, and the chip is
+   * **absent** until it has arrived rather than reading zero.
+   */
+  const [choosing, setChoosing] = useState(false);
+  const skills = useSessionSkillIds(sessionId);
 
   const offered: Control[] = controls.data ?? [];
   const inForce = (c: Control) => shownValue({ acp, control: c, chosen, model, mode });
@@ -572,6 +597,37 @@ export function Composer({
                       className="flex-1"
                       contentContainerStyle={{ alignItems: "center", paddingRight: 4 }}
                     >
+                      {/* First, before the session's own controls, and inside
+                          the scroller rather than beside it: the strip already
+                          scrolls because four pickers do not fit next to a
+                          `+`, a microphone and send, and pinning a fifth fixed
+                          object into the most crowded row on the phone is how
+                          that row stops fitting at 390. It is the same kind of
+                          object as the model and the mode — a thing that
+                          decides how the next turn is answered. */}
+                      {!chipShows(skills) ? null : (
+                        <Pressable
+                          testID="skills"
+                          accessibilityLabel="Skills this agent is reading"
+                          onPress={() => {
+                            Haptics.selectionAsync();
+                            setChoosing(true);
+                          }}
+                          className="flex-row items-center gap-1 px-2 py-2"
+                          hitSlop={4}
+                        >
+                          <Diamond color={color.mute} size={14} />
+                          <Text
+                            numberOfLines={1}
+                            className="max-w-[150px] font-medium text-ui text-dim"
+                            /* Tabular, so the number does not jiggle when the
+                               set changes under you. */
+                            style={{ fontVariant: ["tabular-nums"] }}
+                          >
+                            {chipLabel(skills.data.length)}
+                          </Text>
+                        </Pressable>
+                      )}
                       {offered.map((c) => (
                         <Pressable
                           key={c.kind}
@@ -601,6 +657,10 @@ export function Composer({
             )}
           </Animated.View>
         </GestureDetector>
+
+        {/* Mounted only once it is open, so a conversation nobody asked about
+            skills in never reads the library. */}
+        {choosing ? <SkillSheet session={{ id: sessionId, agent }} onClose={() => setChoosing(false)} /> : null}
 
         {/* The same sheet the repository picker uses — one shape for "choose
             one of these" everywhere in the app. */}
