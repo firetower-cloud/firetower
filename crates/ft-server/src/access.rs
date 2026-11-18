@@ -438,6 +438,29 @@ pub struct Grant {
     pub level: Level,
 }
 
+/// The same question against a pool or a transaction.
+///
+/// Free-standing so a write can authorise its destination **inside** the
+/// transaction it writes in: the import applies a whole drop or none of it, and
+/// a grant read on a second connection is a grant read before the lock. The
+/// method on [`Access`] is this with the pool handed in, so there is one
+/// spelling of what a grant is.
+pub async fn level_on_in<'e, E>(x: E, person: &str, directory: &str) -> Result<Option<Level>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let row =
+        sqlx::query("SELECT level FROM directory_access WHERE user_id = $1 AND directory_id = $2")
+            .bind(person)
+            .bind(directory)
+            .fetch_optional(x)
+            .await
+            .context("reading a grant")?;
+
+    row.map(|r| parse_level(&r.get::<String, _>("level")))
+        .transpose()
+}
+
 /// Teams, directories and grants, over the control plane's pool.
 #[derive(Clone)]
 pub struct Access {
@@ -453,17 +476,7 @@ impl Access {
 
     /// How much this person may do in this directory, if anything.
     pub async fn level_on(&self, person: &str, directory: &str) -> Result<Option<Level>> {
-        let row = sqlx::query(
-            "SELECT level FROM directory_access WHERE user_id = $1 AND directory_id = $2",
-        )
-        .bind(person)
-        .bind(directory)
-        .fetch_optional(&self.pool)
-        .await
-        .context("reading a grant")?;
-
-        row.map(|r| parse_level(&r.get::<String, _>("level")))
-            .transpose()
+        level_on_in(&self.pool, person, directory).await
     }
 
     /// The same question, refusing rather than answering `None`.
@@ -1558,6 +1571,28 @@ impl Access {
                     .await?;
             }
             other => {
+                // **A profile can be refused for a reason the path does not
+                // show.** It carries the key of the folder its `PROFILE.md`
+                // was in, `roles_author_key` makes that one profile within one
+                // directory, and an import is what writes the first of them.
+                // The index answers a clash with a constraint name once the
+                // transaction is already aborted, so nothing is left to look
+                // the other profile up with — asked here, where it can be
+                // named and the person can see which two are in the way.
+                if matches!(other, FiledKind::Role) {
+                    if let Some(key) = crate::roles::key_of_role(&mut **tx, id).await? {
+                        let beside = crate::roles::filed_beside(to);
+                        if let Some(held) =
+                            crate::roles::keyed_already(&mut **tx, &beside, &key, Some(id)).await?
+                        {
+                            bail!(
+                                "`{held}` is already filed there and carries the key `{key}`, so \
+                                 this profile stays where it is. File one of the two somewhere \
+                                 else, or rename the folder one of them was imported from."
+                            );
+                        }
+                    }
+                }
                 let table = Self::table(other);
                 let done = sqlx::query(&format!(
                     "UPDATE {table} SET path = $1::ltree WHERE id = $2"
@@ -2292,6 +2327,110 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(made_by.as_deref(), Some(admin.as_str()));
+    }
+
+    /// **Sharing a keyed profile into a directory that already holds that key
+    /// is refused in a sentence**, not by a constraint.
+    ///
+    /// `roles_author_key` is unique within the parent path, and the migration
+    /// that added it said this would bite as soon as something wrote a key —
+    /// which the import does. Before this, the move came back as "there is
+    /// already something filed at d/platform", which is about the path and is
+    /// not what happened.
+    #[tokio::test]
+    async fn a_profile_cannot_be_filed_where_its_key_already_is() {
+        let (db, access, _accounts, org, admin) = set_up().await;
+        let vault = vault(&db);
+        let shelf = access
+            .create_directory(&org, "Platform", &admin, &[])
+            .await
+            .unwrap();
+
+        let asked = |name: &str| crate::roles::NewRole {
+            name: name.into(),
+            does: "designs".into(),
+            placement: "lead".into(),
+            agent: None,
+            machine: None,
+            account: None,
+            settings: Default::default(),
+            instructions: String::new(),
+            on_usage_limit: None,
+            on_child_limit: None,
+            can_delegate: false,
+            delegate_scope: vec![],
+            include_always_on: None,
+            include_repo_defaults: None,
+            skill_scope: vec![],
+            directory: None,
+        };
+        // One `designer` already on the shelf, and one of their own.
+        crate::roles::create_in(
+            db.pool(),
+            org.as_str(),
+            admin.as_str(),
+            "admin",
+            crate::roles::Filing {
+                directory: Some(&shelf.slug),
+                key: Some("designer"),
+            },
+            &asked("Design System"),
+        )
+        .await
+        .unwrap();
+        let mine = crate::roles::create_in(
+            db.pool(),
+            org.as_str(),
+            admin.as_str(),
+            "admin",
+            crate::roles::Filing {
+                directory: None,
+                key: Some("designer"),
+            },
+            &asked("Designer"),
+        )
+        .await
+        .unwrap();
+
+        let from = access
+            .path_of(FiledKind::Role, mine.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        let no = access
+            .transfer(
+                &vault,
+                FiledKind::Role,
+                mine.as_str(),
+                &from.moved_to(ft_core::path::DIRECTORY, &shelf.slug),
+                "admin",
+            )
+            .await
+            .expect_err("two profiles filed together cannot share a key");
+        let says = format!("{no:#}");
+        assert!(
+            says.contains("Design System"),
+            "it names the profile: {says}"
+        );
+        assert!(says.contains("designer"), "and the key: {says}");
+        assert!(
+            says.contains("File one of the two somewhere else"),
+            "and what to do: {says}"
+        );
+        assert!(
+            !says.contains("roles_author_key"),
+            "not a constraint: {says}"
+        );
+
+        // And it is still where it was.
+        assert_eq!(
+            access
+                .path_of(FiledKind::Role, mine.as_str())
+                .await
+                .unwrap()
+                .unwrap(),
+            from
+        );
     }
 
     /// A subscription's credential is *attached*: it has no path, and moving
