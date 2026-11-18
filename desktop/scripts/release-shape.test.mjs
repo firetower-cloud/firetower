@@ -206,7 +206,7 @@ describe("latest.json", () => {
     // empty `held`, which compared as "nothing newer is there".
     const publish = job(RELEASE, "publish");
     const rolling = publish.slice(publish.indexOf("held="));
-    const upload = rolling.indexOf("release upload desktop-latest");
+    const upload = rolling.indexOf('release upload "$address"');
     expect(upload).toBeGreaterThan(0);
     // Every path that failed to read stops before the upload...
     const stops = [...rolling.matchAll(/exit 1/g)].map((m) => m.index);
@@ -227,7 +227,7 @@ describe("latest.json", () => {
     const rolling = publish.slice(publish.indexOf("held="));
     expect(rolling).toMatch(/sort -V/);
     // The guard has to sit before the upload it guards, or it guards nothing.
-    expect(rolling.indexOf("sort -V")).toBeLessThan(rolling.indexOf("release upload desktop-latest"));
+    expect(rolling.indexOf("sort -V")).toBeLessThan(rolling.indexOf('release upload "$address"'));
     // The versioned release is uploaded either way: a rebuilt old tag still
     // has to be readable and comparable afterwards.
     const versioned = publish.indexOf('release upload "$TAG" "$RUNNER_TEMP/latest.json"');
@@ -263,8 +263,12 @@ describe.skipIf(process.platform === "win32")("the rolling release only moves fo
       .split("\n")
       .map((line) => line.replace(/^ {10}/, ""))
       .join("\n");
-    const from = body.indexOf('held=""');
-    if (from === -1) throw new Error("the gate no longer opens with `held=\"\"` — this test is reading a file that moved");
+    // From the `case` that derives the addresses, so the gate under test is
+    // the whole of it: which address is written is as much a part of the rule
+    // as whether it moves.
+    const from = body.indexOf('case "$CHANNEL" in');
+    if (from === -1) throw new Error("the gate no longer opens by deriving the address from $CHANNEL — this test is reading a file that moved");
+    if (body.indexOf('held=""', from) === -1) throw new Error("the gate no longer has a `held=\"\"` — this test is reading a file that moved");
     return body.slice(from);
   }
 
@@ -272,10 +276,10 @@ describe.skipIf(process.platform === "win32")("the rolling release only moves fo
   const GH = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$GH_LOG"
 case "$*" in
-  *"releases/tags/desktop-latest"*)
+  *"releases/tags/$ROLLING"*)
     if [ -n "\${API_ERROR:-}" ]; then printf '%s\\n' "$API_ERROR" >&2; exit 1; fi
     printf '%s\\n' "\${API_ASSETS:-1}" ;;
-  *"release download desktop-latest"*)
+  *"release download $ROLLING"*)
     if [ -n "\${DOWNLOAD_FAILS:-}" ]; then echo "HTTP 500" >&2; exit 1; fi
     mkdir -p "$RUNNER_TEMP/held"
     printf '%s' "\${HELD_JSON:-}" > "$RUNNER_TEMP/held/latest.json" ;;
@@ -283,8 +287,17 @@ esac
 exit 0
 `;
 
-  /** Runs the gate for version 0.29.1 and reports what `gh` was asked to do. */
+  /**
+   * Runs the gate for version 0.29.1 and reports what `gh` was asked to do.
+   *
+   * `CHANNEL` picks which address the gate works on, and the gate derives
+   * `ROLLING` from it exactly as the job does — `ROLLING` is exported here
+   * only so the fake `gh` above can answer for whichever one that turned out
+   * to be. Defaults to beta, which is what a release writes.
+   */
   function run(env = {}) {
+    const channel = env.CHANNEL ?? "beta";
+    const rolling = channel === "general" ? "desktop-stable" : "desktop-beta";
     const dir = mkdtempSync(join(tmpdir(), "rolling-"));
     writeFileSync(join(dir, "gate.sh"), gate());
     const gh = join(dir, "gh");
@@ -304,13 +317,18 @@ exit 0
         GITHUB_REPOSITORY: "firetower-cloud/firetower",
         TAG: "desktop-v0.29.1",
         VERSION: "0.29.1",
+        CHANNEL: channel,
+        ROLLING: rolling,
         ...env,
       },
     });
     const asked = readFileSync(log, "utf8");
     return {
       status: result.status,
-      moved: /release upload desktop-latest/.test(asked),
+      moved: new RegExp(`release upload ${rolling}`).test(asked),
+      // The legacy address is written with general access's bytes and with
+      // nothing else's. A copy predating channels reads it forever.
+      alias: /release upload desktop-latest/.test(asked),
       output: `${result.stdout}${result.stderr}`,
     };
   }
@@ -365,6 +383,37 @@ exit 0
     // thing this branch buys is a log that says which thing went wrong —
     // which is the entire reason it is there.
     expect(r.output).toMatch(/would not download/);
+  });
+
+  /**
+   * The three addresses. A release writes beta; a promotion writes general
+   * access *and* the address that existed before channels, because every copy
+   * predating this work has that one compiled into its bundle and no way to
+   * ever read a different one.
+   */
+  it("writes the beta address on a release and the general one on a promotion", () => {
+    const beta = run({ CHANNEL: "beta", HELD_JSON: '{"version":"0.29.0"}' });
+    expect(beta).toMatchObject({ status: 0, moved: true });
+    expect(beta.output).toMatch(/desktop-beta/);
+
+    const general = run({ CHANNEL: "general", HELD_JSON: '{"version":"0.29.0"}' });
+    expect(general).toMatchObject({ status: 0, moved: true });
+    expect(general.output).toMatch(/desktop-stable/);
+  });
+
+  it("writes the legacy address with general access's bytes and with nothing else's", () => {
+    // The whole of why it cannot be retired: a copy that predates channels
+    // reads `desktop-latest` forever, so a beta manifest landing there would
+    // put every such copy on beta with nothing opting them in.
+    expect(run({ CHANNEL: "beta", HELD_JSON: '{"version":"0.29.0"}' }).alias).toBe(false);
+    expect(run({ CHANNEL: "general", HELD_JSON: '{"version":"0.29.0"}' }).alias).toBe(true);
+  });
+
+  it("refuses a channel it does not recognise, before reading anything", () => {
+    const r = run({ CHANNEL: "stable", HELD_JSON: '{"version":"0.29.0"}' });
+    expect(r.status).not.toBe(0);
+    expect(r.moved).toBe(false);
+    expect(r.alias).toBe(false);
   });
 
   it("does not move when the manifest it holds has no version in it", () => {
