@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0
  */
 
+export * from './acceptedDrop.ts';
 export * from './accessEntry.ts';
 export * from './accessOf.ts';
 export * from './accessOfParams.ts';
@@ -132,6 +133,7 @@ export * from './hostState.ts';
 export * from './hostTarget.ts';
 export * from './howReached.ts';
 export * from './imageLine.ts';
+export * from './importDone.ts';
 export * from './importPlan.ts';
 export * from './incomingFile.ts';
 export * from './installAgent.ts';
@@ -363,3 +365,4 @@ export * from './workspaceId.ts';
 export * from './workspaceSize.ts';
 export * from './workspaceUsage.ts';
 export * from './workSummary.ts';
+export * from './wroteProfile.ts';
