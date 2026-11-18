@@ -33,7 +33,7 @@
 # ## The order: each package's last write is the one its own readers consult
 #
 #   control plane   re-tag the images onto `stable`  →  write the channel
-#                   manifest **last**
+#                   manifest  →  copy the worker onto `worker-latest`
 #
 #   desktop         write the channel manifest **first**  →  rewrite the
 #                   desktop manifest at the general-access addresses last
@@ -46,6 +46,15 @@
 # moved `stable` tag until something tells it to want that version, and the
 # updater refuses an image whose stamped version is not the one it was told to
 # fetch — so an installation that pulls in the window is frozen, not moved.
+#
+# The control plane has a *second* reader, which is why its list has three
+# entries rather than two: `worker-latest`, consulted by a person hand-running
+# the published one-liner rather than by an installation. It comes after the
+# manifest because the question for it is not "what is the commit point" but
+# "which way does the window fail" — behind the pin, a hand-run install gets a
+# worker the control plane upgrades on its first connection; ahead of it, one
+# the control plane refuses. The safe direction is the one an interruption
+# leaves behind. See the job itself.
 #
 # For the desktop the answer is the opposite, and getting it the wrong way
 # round was a real defect rather than an inelegance. `desktop-stable` and
@@ -536,13 +545,101 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: .github/scripts/publish-channel-pin.sh "$PACKAGE:general=$VERSION"
 
+  # **The rolling worker release, last of all — and that order is the whole
+  # point of it.**
+  #
+  # `usefiretower.com/worker.sh` redirects here, so this release is what a
+  # hand-run `curl -fsSL https://usefiretower.com/worker.sh | sh` installs. It
+  # used to be moved by every release, which under a continuous beta means it
+  # holds a *beta* worker the moment the channels diverge — and a worker newer
+  # than its control plane is refused, so the recommended line in the install
+  # documentation broke on its first run. #459.
+  #
+  # It therefore follows general access, and this is the only thing that moves
+  # it. The worker still has no channel of its own: this is the general-access
+  # pointer answering for the one path with no control plane to ask.
+  #
+  # **After `pin_last`, because the two failure directions are not
+  # symmetrical** — this is the rule QA established for the desktop on #448,
+  # applied to a second reader of the same package:
+  #
+  #   * written **after** the manifest, an interruption leaves the rolling
+  #     release *behind* the pin. A hand-run install then gets a worker older
+  #     than its control plane, which the control plane replaces over the ssh
+  #     connection it already holds. An install-then-reinstall, not a failure.
+  #   * written **before** it, the window inverts: the rolling release holds
+  #     the new version while general access is still on the old one, so a
+  #     hand-run install gets a worker *ahead* of its control plane — the exact
+  #     refusal this change exists to prevent.
+  #
+  # So the safe direction is the one an interruption leaves behind, and the
+  # re-run finishes the job. The two orderings look equally arbitrary without
+  # that sentence, which is why it is here rather than in a pull request.
+  #
+  # It is not a second commit point and does not pretend to be: general access
+  # has already moved by the time this runs. What a failure here means is that
+  # the promotion is done and the one-liner is stale — a red run, named as
+  # such, fixed by re-running this job.
+  worker:
+    needs: [check, pin_last]
+    if: inputs.package == 'control_plane'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - name: the rolling worker release holds what general access holds
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: .github/scripts/publish-worker-rolling.sh "$VERSION"
+
+      # **The published one-liner, run as a person runs it.**
+      #
+      # `release.yml` has ended this way since before channels existed — the
+      # whole chain, before anybody is told the release exists: the rolling
+      # release, the script fetched from it, the tarball that script names, the
+      # checksum, and the binary answering. That check moved to the versioned
+      # release when a release stopped moving this one, so without this there
+      # would be nothing exercising the one-liner at all — which is the single
+      # path this ticket exists to fix.
+      #
+      # No `--version`, deliberately: pinning would prove the versioned release
+      # works and say nothing about what the unpinned line resolves to, and
+      # "the unpinned line resolves to the wrong thing" is the entire defect.
+      # The assertion is that the binary reports the version just promoted.
+      #
+      # It runs after the commit point, so it cannot gate the promotion — by
+      # now general access has moved. It gates the *announcement*: `promoted`
+      # needs this job, so a run that cannot install what it just published is
+      # red and says so rather than reporting a promotion that works.
+      - name: the published one-liner installs the promoted worker
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          export FIRETOWER_WORKER_ROOT="$RUNNER_TEMP/worker-smoke"
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/worker-latest/worker.sh" \
+            | sh -s -- --skip-packages
+          said="$("$FIRETOWER_WORKER_ROOT/bin/firetower-worker" --version)"
+          case "$said" in
+            *"$VERSION"*) echo "ok: a hand-run install gets $said" ;;
+            *) echo "::error::The published one-liner installed $said, and general access is now" \
+                    "$VERSION. worker-latest is not serving what was promoted; re-run this job." >&2
+               exit 1 ;;
+          esac
+
   # What happened, once whichever order this package uses has finished.
   promoted:
-    needs: [check, images, pin_first, desktop, pin_last]
+    needs: [check, images, pin_first, desktop, pin_last, worker]
     if: >-
       ${{ !cancelled() && needs.check.result == 'success'
           && (inputs.package != 'control_plane'
-              || (needs.images.result == 'success' && needs.pin_last.result == 'success'))
+              || (needs.images.result == 'success' && needs.pin_last.result == 'success'
+                  && needs.worker.result == 'success'))
           && (inputs.package != 'desktop'
               || (needs.pin_first.result == 'success' && needs.desktop.result == 'success')) }}
     runs-on: ubuntu-latest
