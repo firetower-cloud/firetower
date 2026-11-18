@@ -1,0 +1,56 @@
+# The release pipeline's own tests.
+#
+# `.github/scripts/` holds the three things a release and a promotion are made
+# of — the channel manifest's decision, the read that fetches it, and the
+# additive-only comparison — and the test files beside them. Nothing else ran
+# them, which for this particular code is the worst place to have a gap: a
+# promotion workflow is exercised a few times a month, by hand, on the one
+# occasion when being wrong is least recoverable.
+#
+# A workflow of its own, and not a job in `backend-ci` or `contract`, for the
+# reason `compose.yml` gives: `paths:` is per workflow and not per job, so
+# folding this in would mean every `crates/**` change also ran it, and every
+# edit here ran a Rust build. The filter these tests need is this narrow one,
+# so it needs a file.
+#
+# Node's own runner rather than a package: these are four `.mjs` files with no
+# dependencies, and a `package.json` at the repository root purely to run them
+# would be read by every tool that looks for one.
+name: pipeline
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches-ignore:
+      - "release-please--branches--**"
+    paths:
+      - ".github/scripts/**"
+      - ".github/workflows/promote.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/images.yml"
+      - ".github/workflows/desktop-release.yml"
+      - ".github/workflows/pipeline.yml"
+      - "api/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scripts:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
+    runs-on: depot-ubuntu-22.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      # Several of these run the workflows' own shell against a fake `gh`, so
+      # they need a shell that behaves like the runner's — which, on an Ubuntu
+      # runner, it is.
+      - name: the pipeline's scripts do what the workflows need them to
+        run: node --test .github/scripts/*.test.mjs

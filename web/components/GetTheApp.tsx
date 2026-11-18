@@ -8,6 +8,11 @@
  * the phone. The download links come from the latest GitHub release, asked
  * for when the page opens, so the page never carries a version number that
  * goes stale.
+ *
+ * And, under the downloads, the one route onto the beta channel for a copy
+ * that cannot reach it any other way — see `BetaRoute`. Downloading the app is
+ * this surface's job (`docs/which-surface.md`), which is why that route lives
+ * here and not on the desktop client's Updates screen.
  */
 import { useEffect, useState } from "react";
 import { useMe } from "@/src/api/generated/auth/auth";
@@ -20,6 +25,10 @@ const RELEASES = "https://github.com/firetower-cloud/firetower/releases";
 
 /** What the Linux build cannot do yet, in full, for the one line that cannot hold it. */
 const LINUX_DOC = "https://github.com/firetower-cloud/firetower/blob/main/docs/linux.md";
+
+/** The key, the command, and what each platform does on its own. Too long for a card. */
+const VERIFY_DOC =
+  "https://github.com/firetower-cloud/firetower/blob/main/docs/verifying-a-download.md";
 
 /**
  * The public TestFlight link, which is a constant.
@@ -35,6 +44,16 @@ type Downloads = {
   windows?: string;
   linux?: string;
   version?: string;
+  /**
+   * The release page the beta bundle is on.
+   *
+   * The same lookup as `version`, and deliberately a second name for it: the
+   * newest desktop release *is* the beta build, because every released version
+   * reaches beta as it is cut and nothing holds one back. So this stays
+   * correct however far beta runs ahead of general access, which is the thing
+   * the number beside it will not do — see `downloadNote`.
+   */
+  betaRelease?: string;
   android?: string;
   androidVersion?: string;
   /**
@@ -53,6 +72,13 @@ type Downloads = {
 
 const LOOKING: Downloads = { settled: false, reached: true };
 
+/** As much of a GitHub release as this page reads. */
+type Release = {
+  tag_name: string;
+  html_url: string;
+  assets: { name: string; browser_download_url: string }[];
+};
+
 /** The latest release's installers, by file name. Nothing to show while it is unknown. */
 function useDownloads(): Downloads {
   const [found, setFound] = useState<Downloads>(LOOKING);
@@ -67,7 +93,7 @@ function useDownloads(): Downloads {
         if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
         return r.json();
       })
-      .then((releases: { tag_name: string; assets: { name: string; browser_download_url: string }[] }[]) => {
+      .then((releases: Release[]) => {
         if (!live) return;
         const desktop = releases.find((r) => r.tag_name.startsWith("desktop-v"));
         const by = (of: typeof desktop, test: (n: string) => boolean) =>
@@ -91,6 +117,10 @@ function useDownloads(): Downloads {
           settled: true,
           reached: true,
           version: desktop?.tag_name.replace(/^desktop-v/, ""),
+          // The page GitHub already has for this release, rather than a tag
+          // URL assembled here: one less shape of ours to keep in step with
+          // theirs, and it is where the bundles are.
+          betaRelease: desktop?.html_url,
           mac: by(desktop, (n) => n.endsWith(".dmg")),
           windows: by(desktop, (n) => n.endsWith("-setup.exe")) ?? by(desktop, (n) => n.endsWith(".exe")),
           // One Linux download, and it is the one that can update itself.
@@ -136,7 +166,7 @@ export function GetTheApp() {
       </Card>
 
       <Card className="mt-4">
-        <CardHead note={<span className="text-meta text-mute">{downloads.version ? `Latest: ${downloads.version}` : "The latest release"}</span>}><span className="text-ui text-bone">Download</span></CardHead>
+        <CardHead note={<span className="text-meta text-mute">{downloadNote(downloads.version)}</span>}><span className="text-ui text-bone">Download</span></CardHead>
         <div className="flex flex-wrap gap-3 px-4 pt-4 pb-3">
           <Platform name="macOS" hint="Apple silicon and Intel" href={downloads.mac} glyph={<AppleGlyph />} settled={downloads.settled} reached={downloads.reached} />
           <Platform name="Windows" hint="64-bit, installs per user" href={downloads.windows} glyph={<WindowsGlyph />} settled={downloads.settled} reached={downloads.reached} />
@@ -153,6 +183,11 @@ export function GetTheApp() {
             not Linux's fault — said once, under the tiles, with the link to
             every release already below it. */}
         {!downloads.reached && <p className="px-4 pb-3 text-meta text-mute">Couldn&apos;t reach GitHub.</p>}
+
+        {/* Last in the card, under the tiles and the platform note that
+            belongs to one of them, and directly above the other line on this
+            card that points at GitHub. */}
+        <BetaRoute found={downloads} />
 
         <p className="px-4 pb-4 text-meta text-mute">
           Every release, with its notes, is on <a className="text-dim underline decoration-line underline-offset-2" href={RELEASES} target="_blank" rel="noreferrer">GitHub</a>.
@@ -182,6 +217,248 @@ export function GetTheApp() {
           />
         </div>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * The version line under *Download*, which names a channel rather than a date.
+ *
+ * It says *general access* because the block below it opens by saying the
+ * downloads above are general access, and that sentence needs something above
+ * it to be about. The number is the one the tiles have always resolved — the
+ * newest desktop release.
+ *
+ * **Which is the general-access pin only while the two channels are level**,
+ * and they are: the release that introduces channels sets beta and general
+ * access to itself, so nothing diverges on the day this lands (#415). The
+ * first release deliberately left unpromoted is where they part, and from then
+ * on the tiles and this line want the channel manifest's `desktop.general`
+ * pin, which #448 publishes. **That is #454, and it has a deadline rather
+ * than a backlog slot: it has to land before the first unpromoted release**,
+ * because nothing else in the code will say so. It is deliberately *not*
+ * derived from the releases feed: general access can lag beta by more than a
+ * page of releases, and reading a pin by enumerating releases is the failure
+ * the manifest exists to prevent.
+ */
+export function downloadNote(version?: string): string {
+  return version ? `General access: ${version}` : "The general-access release";
+}
+
+/** What the beta route can honestly offer, once the release lookup has answered. */
+export type BetaOffer = {
+  /** The version beta is at — absent unless there is a bundle to go with it. */
+  version?: string;
+  href: string;
+  /**
+   * Why the link is the releases index rather than the beta build's own page,
+   * when it is. The index is the worse answer: thirty releases across three
+   * packages, and the reader has just been told to use *the release page*. So
+   * it is never handed over silently — the sentence beside it says which of
+   * the two reasons it is.
+   */
+  insteadOf?: "unknown" | "empty";
+};
+
+/** What the lookup has to turn up before the route can name a build. */
+type BetaLookup = {
+  version?: string;
+  betaRelease?: string;
+  mac?: string;
+  windows?: string;
+  linux?: string;
+};
+
+/**
+ * Whether the route can name a build, and where its link goes.
+ *
+ * Two states send the reader to the releases index instead of a release page,
+ * and they are not the same sentence:
+ *
+ * - **Nothing resolved.** Still looking, GitHub refused, or the feed carried
+ *   no desktop release. The common one by far is the refusal: this feed is
+ *   fetched unauthenticated from the browser and GitHub allows sixty of those
+ *   an hour per address, which an admin console behind a shared address will
+ *   spend without anybody doing anything unusual.
+ * - **A release with nothing on it.** Every bundle upload failed, so the three
+ *   tiles above already say *Not in this release* — and a confident version
+ *   beside *Beta builds*, linking at an empty page, would be the only part of
+ *   the card still claiming otherwise.
+ *
+ * In both, the version is dropped rather than shown against a download nobody
+ * can get.
+ */
+export function betaOffer({ version, betaRelease, mac, windows, linux }: BetaLookup): BetaOffer {
+  if (!version || !betaRelease) return { href: RELEASES, insteadOf: "unknown" };
+  if (!mac && !windows && !linux) return { href: RELEASES, insteadOf: "empty" };
+  return { version, href: betaRelease };
+}
+
+/**
+ * The permanent route onto beta, which this page owns.
+ *
+ * Downloading the app is this surface's job (`docs/which-surface.md`), and
+ * this is the only way onto beta for a copy that predates release channels or
+ * stopped updating. So it is load-bearing documentation rather than a
+ * footnote, and it says *why* it exists rather than only offering a file.
+ *
+ * **The why is scoped, and has to be.** A copy that predates all of this
+ * cannot be switched from inside itself: its update address is compiled into
+ * the bundle, and the only way to a different address is to install from it
+ * once (#414, #415). That is not true of a copy carrying the channel release —
+ * it chooses its endpoint per check, with no restart, which is what the next
+ * sentence means by *a switch in the app under Updates* (spec §05, Decided).
+ * Saying it of every copy made the two sentences contradict each other one
+ * line apart, and made the page wrong for most of the people who will read it
+ * once the channel release has been taken.
+ *
+ * Three more things are said, because leaving any of them out leaves a wrong
+ * impression that this page is the only place to correct:
+ *
+ * - **What happens after.** Normal automatic updates, on that channel, from
+ *   the next release on — so the hand-install is once and not a habit.
+ * - **What switching back does not do.** It stops new betas. It does not
+ *   reinstall the general-access build, and a copy is never moved back to an
+ *   older one: a copy that took a beta is ahead of general access and waits
+ *   there until general access overtakes it (#424).
+ * - **That the route is permanent.** It is the same answer to a copy that
+ *   stopped updating for any reason, so it is not scaffolding for this change
+ *   and must not read as a migration step anybody is waiting to withdraw
+ *   (#415). Nothing here is phrased as *for now*, *until*, or *while*.
+ *
+ * **Every sentence here is `--color-text` or brighter**, including the
+ * closing one. The sheet records `--color-dim` at 2.94:1 on `--color-panel`,
+ * below the floor for normal text and spent deliberately on counts,
+ * timestamps and paths; `--color-mute` is fainter still. These are the
+ * sentences on this page that change what somebody does next, so none of them
+ * is drawn in a tier the design reserves for things nobody has to read. The
+ * closing line stays an aside by being `--text-meta` and last, which is the
+ * same rule `desktop/STYLE.md` applies everywhere else: a distinction is
+ * carried by shape, weight or position, never by fading something out.
+ *
+ * Drawn in every state of the lookup, including the ones that know nothing.
+ * Every sentence in it is true whatever the release turns out to hold, and the
+ * link has somewhere to go either way — the same argument `showsOnLinux` makes
+ * one block above.
+ */
+export function BetaRoute({ found }: { found: BetaLookup }) {
+  const offer = betaOffer(found);
+  return (
+    <div className="px-4 pt-0.5 pb-3.5">
+      {/* A rule and the card's own ground, not a shape of its own. This is the
+          last section of the Download card and it is not a warning: no tint,
+          no tone, nothing that answers *is something waiting on you*. It is
+          told apart by position and by the weight of its heading. */}
+      <div className="border-t border-line pt-3.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-ui text-bone">Beta builds</span>
+          {/* The version beta is at, which is the newest release by
+              construction — every released version reaches beta as it is cut.
+              Correct however far ahead of general access beta runs, and
+              withheld when there is no bundle behind it. */}
+          {offer.version && <Badge>{offer.version}</Badge>}
+        </div>
+        <p className="mt-2 text-ui text-text">
+          The downloads above are general access: the releases a maintainer has promoted. Beta has
+          every release as soon as it is cut.
+        </p>
+        <p className="mt-2 text-ui text-text">
+          A copy that predates all of this cannot be switched from inside itself: its update address
+          is compiled into the bundle, and the only way to a different address is to install from it
+          once. So joining beta on one is one download from the release page, for the copy you are
+          joining. From the next release on, that copy updates on beta by itself, and its channel is
+          a switch in the app under Updates.
+        </p>
+        <p className="mt-2 text-ui text-text">
+          Switching back in the app stops new betas. It does not reinstall the general-access build,
+          and a copy is never moved back to an older one.
+        </p>
+
+        <CheckingIt />
+
+        {/* The closing line earns its quietness from being smaller and last,
+            not from being too faint to read: `--text-meta` at `--color-text`
+            is an aside that clears the floor, where `--color-mute` at this
+            size was decoration. It carries the permanence of the route, which
+            is the one thing on this card somebody could leave believing the
+            opposite of. The link keeps its tier above its own prose — the
+            same step `OnLinux` and the card's footer line both take. */}
+        <p className="mt-3 text-meta text-text">
+          The same download is how a copy that stopped updating is brought back, so it stays on the
+          release page rather than being a one-off for this change.{" "}
+          <a
+            className="text-bone underline decoration-line underline-offset-2"
+            href={offer.href}
+            target="_blank"
+            rel="noreferrer"
+          >
+            {offer.insteadOf ? "All releases on GitHub" : "Beta builds on GitHub"}
+          </a>
+          {offer.insteadOf === "unknown" &&
+            " — that build's own page could not be looked up just now, so this is every release instead. The beta build is the newest one tagged desktop-v."}
+          {offer.insteadOf === "empty" &&
+            " — the newest release has no bundles on it yet, so this is every release instead. The beta build is the newest one carrying them."}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What is checked when a bundle is installed by hand, and what is not.
+ *
+ * This route goes around the one check that normally happens without anybody
+ * asking: every automatic update is verified against a signing key compiled
+ * into the app before it is installed. A file somebody downloads and opens
+ * themselves gets none of that, and this page is the page that sends them to
+ * do it — so it is the page that owes them the alternative.
+ *
+ * What each platform does on its own was established against the published
+ * artifacts rather than read off the configuration, and the three answers are
+ * different enough that one sentence covering all of them would be wrong:
+ *
+ * - **macOS** is notarised, and Gatekeeper checks the disk image on open.
+ * - **Windows** is not signed. The published installer's certificate table is
+ *   empty, so SmartScreen warns with no publisher to check — #455 is the
+ *   standing defect, and it is not this branch's to close.
+ * - **Linux** has nothing at all: an AppImage is executable and is executed.
+ *
+ * The remedy named is the detached signature published beside each bundle,
+ * made with the same minisign key the updater checks, and verified during the
+ * security review against the published bytes and against a one-byte
+ * modification. **Not a checksums file** — a digest published on the same
+ * release as the bundle it describes proves only that the two agree, which
+ * whoever replaced the bundle would also have arranged. The separate key is
+ * the whole guarantee.
+ *
+ * Drawn in the same recessed shape as `OnLinux`, because it is the same kind
+ * of thing: advice attached to the download rather than part of the argument
+ * for the route.
+ */
+function CheckingIt() {
+  return (
+    <div className="mt-3 rounded-md border border-line-soft bg-raise px-3 py-2.5">
+      <div className="eyebrow">Checking what you downloaded</div>
+      <p className="mt-1 text-meta text-dim">
+        An automatic update is verified against a signing key inside the app before it is installed.
+        <span className="text-text"> A bundle you install by hand is not</span>, so it is worth
+        checking it yourself.
+      </p>
+      <p className="mt-1.5 text-meta text-dim">
+        macOS is notarised and Gatekeeper checks the disk image when you open it.{" "}
+        <span className="text-text">The Windows installer is not signed</span> — Windows will warn,
+        and there is no publisher on it to recognise — and nothing checks an AppImage you run. For
+        both of those a detached signature is published beside the bundle, made with the same key
+        the updater checks.{" "}
+        <a
+          className="text-text underline decoration-line underline-offset-2"
+          href={VERIFY_DOC}
+          target="_blank"
+          rel="noreferrer"
+        >
+          How to check one.
+        </a>
+      </p>
     </div>
   );
 }

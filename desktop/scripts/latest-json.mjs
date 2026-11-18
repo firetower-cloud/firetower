@@ -293,7 +293,7 @@ export function readAssets(dir) {
  * signature has to verify against. `pubkey` is the boxed minisign public key
  * as `tauri.conf.json` carries it.
  */
-export function manifest({ version, repo, tag, assets, pubkey, pubDate = new Date().toISOString() }) {
+export function manifest({ version, repo, tag, assets, pubkey, channel = "beta", pubDate = new Date().toISOString() }) {
   const pub = publicKey(pubkey);
   const platforms = {};
   const missing = [];
@@ -338,7 +338,17 @@ export function manifest({ version, repo, tag, assets, pubkey, pubDate = new Dat
   // `notes` is empty and the release's own body carries the changelog, which
   // is what the CLI wrote here too — the Updates screen links to the release
   // rather than rendering this.
-  return { version, notes: "", pub_date: pubDate, platforms };
+  //
+  // **`channel` is for display, and the updater will never act on it.** There
+  // is no channel concept in the plugin or in its manifest format: a channel
+  // here is entirely Firetower's own construct — a preference stored on the
+  // machine, which picks between two addresses serving two of these
+  // documents. The plugin ignores fields it does not know and the whole
+  // document reaches the interface, which is the cheapest way to answer "why
+  // do I have this build and my colleague does not", since no version string
+  // ever carries the channel. It is said here because a field the plugin
+  // ignores is one somebody will later mistake for a mechanism.
+  return { version, channel, notes: "", pub_date: pubDate, platforms };
 }
 
 /**
@@ -366,6 +376,7 @@ if (asCommand) {
       tag: { type: "string" },
       version: { type: "string" },
       assets: { type: "string" },
+      channel: { type: "string", default: "beta" },
       out: { type: "string", default: "latest.json" },
     },
   });
@@ -386,6 +397,7 @@ if (asCommand) {
       tag: values.tag,
       assets: readAssets(values.assets),
       pubkey: updaterPublicKey(),
+      channel: values.channel,
     });
   } catch (e) {
     console.error(`\nlatest-json.mjs: ${e instanceof Error ? e.message : e}\n`);
@@ -393,5 +405,5 @@ if (asCommand) {
   }
 
   writeFileSync(values.out, `${JSON.stringify(written, null, 2)}\n`);
-  console.log(`${values.out}: ${Object.keys(written.platforms).join(", ")}`);
+  console.log(`${values.out}: ${written.channel}, ${Object.keys(written.platforms).join(", ")}`);
 }
