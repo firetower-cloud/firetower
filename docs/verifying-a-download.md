@@ -13,7 +13,7 @@ for a copy that predates it.
 
 ## What each platform does on its own
 
-| | |
+| | What checks it |
 |---|---|
 | **macOS** | The disk image is notarised. Gatekeeper checks it when you open it, and refuses it if it has been altered. Nothing else to do. |
 | **Windows** | **The installer is not signed.** Windows will warn about an unrecognised application, and there is no publisher on it to recognise. See [#455](https://github.com/firetower-cloud/firetower/issues/455). |
