@@ -189,12 +189,19 @@ jobs:
       # differ; and a count of zero is expected rather than alarming, because
       # beta is one-way for a control plane and few will volunteer.
       #
-      # The collector is a separate service. `TELEMETRY_COUNTS_URL` is a
-      # repository *variable* holding where to ask — not a secret and not a
-      # credential, because that endpoint is unauthenticated by necessity, the
-      # same reason `FIRETOWER_TELEMETRY_ENDPOINT` is. Unset, this says so
-      # rather than printing a zero: a count nobody can tell apart from "we did
-      # not ask" is worse than no count at all.
+      # The collector is a separate service, and **nothing can read these
+      # counts back today — that gap is #457.** `TELEMETRY_COUNTS_URL` is a
+      # repository *variable* holding where to ask once something can: not a
+      # secret and not a credential, because that endpoint is unauthenticated
+      # by necessity, the same reason `FIRETOWER_TELEMETRY_ENDPOINT` is.
+      #
+      # Unset, this says so rather than printing a zero. That is the same
+      # discipline as the channel manifest's read rule one job down: **a thing
+      # that cannot be read reports that it cannot be read, never a default
+      # that looks like data.** Here it matters more than usual, because zero
+      # is exactly what "nobody tested this build" looks like — which is the
+      # judgement this number exists to inform, so a zero standing in for
+      # "we did not ask" would quietly invert it.
       - name: how many installations reported running it
         env:
           COUNTS: ${{ vars.TELEMETRY_COUNTS_URL }}
@@ -207,9 +214,14 @@ jobs:
           if [ -z "${COUNTS:-}" ]; then
             say "Not known: no telemetry collector is configured for this repository."
             say ""
-            say "Set the \`TELEMETRY_COUNTS_URL\` repository variable to an endpoint answering"
-            say "\`?package=<p>&version=<v>\` with \`{\"installations\": <n>}\` and this line becomes a count."
-            say "Promotion is not blocked by it — the signal informs the decision, it does not gate it."
+            say "This is not an oversight — see #457. The counts are sent, and nothing can read"
+            say "them back: the collector is a separate service with no read API."
+            say ""
+            say "When one exists, set the \`TELEMETRY_COUNTS_URL\` repository variable to an endpoint"
+            say "answering \`?package=<p>&version=<v>\` with \`{\"installations\": <n>}\` and this line"
+            say "becomes a count. Promotion is not blocked by it — the signal informs the decision,"
+            say "it does not gate it. A zero is deliberately not printed here: it is what a build"
+            say "nobody tested looks like, which is the one thing this number is for."
             exit 0
           fi
           body=$(curl -fsS --max-time 20 "$COUNTS?package=$PACKAGE&version=$VERSION" 2>&1) || {
