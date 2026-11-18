@@ -54,6 +54,26 @@ use utoipa::ToSchema;
 /// The compose file both image lines live in.
 const COMPOSE_FILE: &str = "firetower.yml";
 
+/// The most of a channel manifest worth reading.
+///
+/// The document is a few hundred bytes. This is the ceiling on what a host
+/// that is not Firetower's can make this process allocate, which is the only
+/// thing on this path that is not ours to begin with.
+const MOST: usize = 64 * 1024;
+
+/// How long one read of it may take. Explicit here rather than left to
+/// whatever the shared client is configured with, because a fetch that never
+/// returns is the other half of the same problem.
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(20);
+
+/// Remembered across restarts: this installation has read a channel manifest
+/// at least once.
+///
+/// Durable, and that is the point — the process is replaced by the very
+/// upgrades this governs, so an answer that lived only in memory would call
+/// the first read after every upgrade a first start.
+const EVER_READ: &str = "updates.channel_manifest_read";
+
 // ── the channels ─────────────────────────────────────────────────────
 
 /// The two channels. There is no third: `edge` is the tip of the trunk and is
@@ -358,7 +378,7 @@ pub fn read(body: &str) -> Read {
 /// Fetch it. A 404 is absence — the bootstrap case — and every other way a
 /// read can fail is a reason to change nothing.
 pub async fn fetch(http: &reqwest::Client, source: &Source) -> Read {
-    let response = match http.get(&source.url).send().await {
+    let response = match http.get(&source.url).timeout(PATIENCE).send().await {
         Ok(r) => r,
         Err(e) => {
             return Read::Unreadable(format!("the channel manifest could not be fetched: {e}"))
@@ -374,9 +394,35 @@ pub async fn fetch(http: &reqwest::Client, source: &Source) -> Read {
             response.status()
         ));
     }
-    match response.text().await {
-        Ok(body) => read(&body),
-        Err(e) => Read::Unreadable(format!("the channel manifest could not be read: {e}")),
+
+    // A chunk at a time with a ceiling, rather than `text()`, which allocates
+    // whatever the far end decides to send. This is the one input on this
+    // path that Firetower does not produce: a release host that has been
+    // taken over, or has simply gone wrong, must not be able to take the
+    // control plane down by answering at length.
+    let mut response = response;
+    let mut body: Vec<u8> = Vec::new();
+    loop {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                if body.len() + chunk.len() > MOST {
+                    return Read::Unreadable(format!(
+                        "the channel manifest at {} is longer than {MOST} bytes, so it is not \
+                         being read. Nothing that size is this document.",
+                        source.url
+                    ));
+                }
+                body.extend_from_slice(&chunk);
+            }
+            Ok(None) => break,
+            Err(e) => {
+                return Read::Unreadable(format!("the channel manifest could not be read: {e}"))
+            }
+        }
+    }
+    match std::str::from_utf8(&body) {
+        Ok(text) => read(text),
+        Err(_) => Read::Malformed("the channel manifest is not text".into()),
     }
 }
 
@@ -409,8 +455,29 @@ pub struct Seen {
 
 impl Manifests {
     /// Ask again, and remember. Returns what this attempt said.
-    pub async fn refresh(&self, http: &reqwest::Client, source: &Source) -> Read {
-        let found = fetch(http, source).await;
+    ///
+    /// `first_start` is whether this installation has ever read a manifest —
+    /// see [`EVER_READ`]. It decides what absence means, and nothing else.
+    pub async fn refresh(
+        &self,
+        http: &reqwest::Client,
+        source: &Source,
+        first_start: bool,
+    ) -> Read {
+        let read_one_before = !first_start || self.0.read().await.held.is_some();
+        let found = match fetch(http, source).await {
+            // **Absence is the bootstrap case only the first time.** A
+            // document that has been read before and is now a 404 has gone,
+            // which is a failure rather than a fresh start — and treating it
+            // as a fresh start is precisely how an installation comes to
+            // accept an older pin from a manifest somebody destroyed.
+            Read::Absent if read_one_before => Read::Unreadable(format!(
+                "the channel manifest has gone from {}. This installation has read one before, \
+                 so this is not a first start",
+                source.url
+            )),
+            other => other,
+        };
         let mut held = self.0.write().await;
         if let Read::Found(manifest) = &found {
             held.held = Some(manifest.clone());
@@ -432,13 +499,60 @@ impl Manifests {
         }
     }
 
-    /// What is held, reading it once if nothing ever has. A process that was
-    /// just recreated has an empty cache and a screen in front of somebody.
-    pub async fn or_read(&self, http: &reqwest::Client, source: &Source) -> Seen {
-        if self.0.read().await.last.is_none() {
-            self.refresh(http, source).await;
+    /// Whether this process has ever asked.
+    pub async fn never_asked(&self) -> bool {
+        self.0.read().await.last.is_none()
+    }
+}
+
+/// Ask the host again, remember what it said, and record that a document
+/// read if one did.
+pub async fn refresh(state: &AppState) -> Read {
+    let updates = &state.updates;
+    let first_start = a_first_start(state).await;
+    let found = updates
+        .channel_manifest
+        .refresh(&updates.http, &updates.channel_source, first_start)
+        .await;
+    if matches!(found, Read::Found(_)) {
+        remember_a_read(state).await;
+    }
+    found
+}
+
+/// What is held, asking once if nothing in this process ever has. A control
+/// plane that was just recreated has an empty cache and a screen in front of
+/// somebody.
+pub async fn seen(state: &AppState) -> Seen {
+    if state.updates.channel_manifest.never_asked().await {
+        refresh(state).await;
+    }
+    state.updates.channel_manifest.seen().await
+}
+
+/// Whether absence may still mean "nothing has been published yet".
+///
+/// A database that will not answer counts as **has read one before**, which
+/// is the conservative direction: being wrong that way costs a switch that
+/// is not offered, and being wrong the other way costs an installation
+/// accepting an older pin from a manifest that vanished.
+async fn a_first_start(state: &AppState) -> bool {
+    match state.accounts.setting(EVER_READ).await {
+        Ok(seen) => seen.is_none(),
+        Err(e) => {
+            tracing::warn!("reading whether a channel manifest has ever been read: {e:#}");
+            false
         }
-        self.seen().await
+    }
+}
+
+async fn remember_a_read(state: &AppState) {
+    if let Err(e) = state
+        .accounts
+        .set_setting(EVER_READ, &Utc::now().to_rfc3339())
+        .await
+    {
+        tracing::warn!("recording that the channel manifest read: {e:#}");
     }
 }
 
@@ -697,10 +811,7 @@ pub struct ImageLine {
 pub async fn status(state: &AppState, updater: Option<&UpdaterStatus>) -> ChannelStatus {
     let updates = &state.updates;
     let running = running(updates, updater).await;
-    let seen = updates
-        .channel_manifest
-        .or_read(&updates.http, &updates.channel_source)
-        .await;
+    let seen = seen(state).await;
 
     // A read nobody has made is not a read that found nothing. Deliberately
     // not `unwrap_or(Read::Absent)`: absence is the bootstrap case, and
@@ -866,36 +977,28 @@ fn decide(
     (reason, offers)
 }
 
-/// The version a channel holds for the control plane, from a read that may be
-/// acted on. `Err` carries the reason nothing may move.
-pub async fn offered(updates: &Updates, channel: Channel) -> Result<String> {
-    let seen = updates
-        .channel_manifest
-        .or_read(&updates.http, &updates.channel_source)
-        .await;
-    offered_in(&seen, channel)
-}
-
-/// The same, on what a read actually said.
+/// The version an offer would take, from the offer that was validated.
 ///
-/// Only [`Read::Found`] names a version. **Not the held document** — a copy
-/// of what was published an hour ago is not what is published now, and the
-/// act this answers is irreversible. Every other outcome is a refusal that
-/// says which one it was.
-pub fn offered_in(seen: &Seen, channel: Channel) -> Result<String> {
-    match &seen.outcome {
-        Some(Read::Found(manifest)) => manifest
-            .pin(Package::ControlPlane, channel)
-            .map(str::to_string)
-            .ok_or_else(|| anyhow!("the channel manifest names no control plane version")),
-        Some(other) => Err(anyhow!(
-            "{}. Nothing is being moved.",
-            other
-                .problem()
-                .unwrap_or("no channel manifest has been published yet")
-        )),
-        None => Err(anyhow!("the channel manifest has not been read")),
-    }
+/// **The whole of the race this exists to close.** A switch used to be
+/// validated against one read of the manifest and then planned against
+/// another: the refresh is periodic, so a run could be accepted after a
+/// check against `0.55.0` and target whatever the next read named — an older
+/// pin included, which is the one move migrations cannot survive. The
+/// version is now carried from the snapshot that was checked, and this is
+/// the only place it comes from.
+fn version_to_take(offer: &Offer) -> Result<String> {
+    anyhow::ensure!(
+        offer.action.is_some(),
+        "{}",
+        offer
+            .reason
+            .clone()
+            .unwrap_or_else(|| "this channel cannot be taken from here".into())
+    );
+    offer
+        .version
+        .clone()
+        .context("the channel manifest names no control plane version")
 }
 
 // ── the switch ───────────────────────────────────────────────────────
@@ -905,11 +1008,15 @@ pub fn offered_in(seen: &Seen, channel: Channel) -> Result<String> {
 /// Returns the view for the screen and the file writes the run carries. The
 /// two come from one computation on purpose: what is shown as a diff is the
 /// bytes that would be written.
+/// `offer` is a row from a [`ChannelStatus`] the caller has already read and
+/// checked. It is passed whole, rather than a channel to look up again,
+/// because looking it up again is the race — see [`version_to_take`].
 pub async fn plan(
     state: &AppState,
-    to: Channel,
+    offer: &Offer,
     choices: &[super::FileChoice],
 ) -> Result<(ChannelSwitch, Vec<FileWrite>, super::UpgradePlan)> {
+    let to = offer.channel;
     let updates = &state.updates;
     let running = running(updates, None).await;
     let updater = updates
@@ -924,7 +1031,7 @@ pub async fn plan(
             .unwrap_or_else(|| "the updater does not say what this Firetower is running".into())
     );
 
-    let version = offered(updates, to).await?;
+    let version = version_to_take(offer)?;
     let to_version =
         version::parse(&version).with_context(|| format!("{version} is not a version"))?;
 
@@ -1137,6 +1244,76 @@ fn image_tag(compose: &str, repository: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A host that answers at length cannot be allowed to decide how much of
+    /// this process it uses. The body is read with a ceiling and what runs
+    /// past it is not a manifest.
+    #[tokio::test]
+    async fn a_body_that_runs_past_the_ceiling_is_not_read() {
+        let http = reqwest::Client::new();
+        let huge = "x".repeat(MOST + 1024);
+        let answer = body("200 OK", &huge);
+        let (source, serving) = host(Box::leak(answer.into_boxed_str())).await;
+        match fetch(&http, &source).await {
+            Read::Unreadable(why) => {
+                assert!(why.contains("longer than"), "{why}");
+                assert!(
+                    why.contains(&MOST.to_string()),
+                    "it says the ceiling: {why}"
+                );
+            }
+            other => panic!("a body that size must not be read: {other:?}"),
+        }
+        serving.abort();
+
+        // And the document itself, which is nowhere near it, still reads.
+        let fine = body(
+            "200 OK",
+            r#"{"schema_version":1,"control_plane":{"beta":"0.56.0","general":"0.54.1"}}"#,
+        );
+        let (source, serving) = host(Box::leak(fine.into_boxed_str())).await;
+        assert!(matches!(fetch(&http, &source).await, Read::Found(_)));
+        serving.abort();
+    }
+
+    /// Absence is the bootstrap case the first time and a failure every time
+    /// after. A manifest that has gone must not read as a fresh start, which
+    /// is how an installation comes to accept an older pin from a document
+    /// somebody destroyed.
+    #[tokio::test]
+    async fn a_manifest_that_disappears_is_not_a_first_start() {
+        let http = reqwest::Client::new();
+        let gone = body("404 Not Found", "Not Found");
+        let (source, serving) = host(Box::leak(gone.into_boxed_str())).await;
+
+        let fresh = Manifests::default();
+        assert_eq!(
+            fresh.refresh(&http, &source, true).await,
+            Read::Absent,
+            "nothing published yet, and nothing read before: a bootstrap"
+        );
+
+        // The same 404, to a cache that has read one.
+        let held = Manifests::default();
+        {
+            let mut inner = held.0.write().await;
+            inner.held = Some(super::tests::held());
+            inner.last = Some(Read::Found(super::tests::held()));
+        }
+        match held.refresh(&http, &source, true).await {
+            Read::Unreadable(why) => assert!(why.contains("has gone"), "{why}"),
+            other => panic!("a manifest that vanished is not absence: {other:?}"),
+        }
+
+        // And the durable answer alone is enough, for the process that comes
+        // up after an upgrade with an empty cache.
+        let restarted = Manifests::default();
+        match restarted.refresh(&http, &source, false).await {
+            Read::Unreadable(why) => assert!(why.contains("not a first start"), "{why}"),
+            other => panic!("a restart does not make it a first start again: {other:?}"),
+        }
+        serving.abort();
+    }
 
     /// The one address this reader and the workflow that publishes have to
     /// agree on, written out so a change to either has to change a test that
@@ -1621,47 +1798,50 @@ mod tests {
         assert!(beta.action.is_none(), "and nothing may be taken on it");
     }
 
-    /// What a switch would move to. A read that went wrong must not answer
-    /// this from the copy it kept — the version it would name is the one it
-    /// would then install, and that act cannot be undone.
+    /// What a switch would move to comes from the row that was checked, and
+    /// from nothing else. A row that could not be acted on when it was read
+    /// cannot become one on the way to the plan.
     #[test]
-    fn only_a_document_that_read_names_a_version_to_move_to() {
+    fn a_switch_takes_the_version_on_the_row_that_was_checked() {
         let manifest = held();
-        let ahead = ahead();
+        let stable = on("ghcr.io/firetower-cloud/firetower:stable");
+        let (_, offers) = decide(
+            &stable,
+            &Read::Found(manifest.clone()),
+            Some(&manifest),
+            Ok(None),
+            "u",
+        );
+        let beta = row(&offers, Channel::Beta);
+        assert_eq!(version_to_take(&beta).unwrap(), ahead());
 
-        let good = Seen {
-            outcome: Some(Read::Found(manifest.clone())),
-            held: Some(manifest.clone()),
-            read_at: None,
-        };
-        assert_eq!(offered_in(&good, Channel::Beta).unwrap(), ahead);
-
+        // The same row, as every failed read leaves it: no action, and so
+        // nothing to take — whatever version is still being displayed beside
+        // it from the document that last read.
         for bad in [
             Read::Absent,
             Read::Unreadable("rate limited".into()),
             Read::Malformed("not this document".into()),
             Read::Incomplete("no version in it".into()),
         ] {
-            // The held copy is still there, which is the trap: answering
-            // from it would look exactly like a successful read.
-            let seen = Seen {
-                outcome: Some(bad.clone()),
-                held: Some(manifest.clone()),
-                read_at: None,
-            };
-            let refused = offered_in(&seen, Channel::Beta)
-                .expect_err(&format!("{bad:?} must not name a version"))
-                .to_string();
-            assert!(!refused.contains(&ahead), "{bad:?}: {refused}");
+            let (_, offers) = decide(&stable, &bad, Some(&manifest), Ok(None), "u");
+            let beta = row(&offers, Channel::Beta);
+            assert!(
+                version_to_take(&beta).is_err(),
+                "{bad:?} must not name a version to move to"
+            );
         }
 
-        // And a cache nobody has filled is not an empty document either.
-        let never = Seen {
-            outcome: None,
-            held: None,
-            read_at: None,
+        // And a row whose action was refused for its own reason.
+        let backwards = Offer {
+            action: None,
+            reason: Some("nothing is ever moved backwards".into()),
+            ..row(&offers, Channel::Beta)
         };
-        assert!(offered_in(&never, Channel::Beta).is_err());
+        assert!(version_to_take(&backwards)
+            .unwrap_err()
+            .to_string()
+            .contains("backwards"));
     }
 
     #[test]

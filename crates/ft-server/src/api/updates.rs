@@ -254,11 +254,31 @@ pub(super) async fn plan_channel(
     Json(req): Json<ChannelPlanRequest>,
 ) -> ApiResult<Json<UpgradePlan>> {
     admin_only(&principal)?;
-    let (switch, _, mut plan) = channel::plan(&state, req.channel, &req.files)
+    // One read, and the row it produced is what gets planned — the same rule
+    // the switch itself keeps, so a preview can never describe a version the
+    // switch would not take.
+    let found = channel::status(&state, None).await;
+    let offer = offer_in(&found, req.channel)?;
+    let (switch, _, mut plan) = channel::plan(&state, offer, &req.files)
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
     plan.channel_change = Some(switch);
     Ok(Json(plan))
+}
+
+/// The row for a channel, from a status that has already been read.
+fn offer_in(
+    found: &channel::ChannelStatus,
+    channel: channel::Channel,
+) -> ApiResult<&channel::Offer> {
+    if let Some(reason) = found.reason.clone() {
+        return Err(ApiError::new(ErrorCode::ActionFailed, reason));
+    }
+    found
+        .offers
+        .iter()
+        .find(|o| o.channel == channel)
+        .ok_or_else(|| ApiError::not_found("channel"))
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -306,15 +326,13 @@ pub(super) async fn switch_channel(
 
     // Read again rather than trusting what the screen was shown: the channel
     // comes from the running container, and this is the moment it matters.
+    //
+    // **Read once.** Everything below is decided from this one snapshot and
+    // the run is built from it — a second read between the check and the
+    // plan is how a switch validated against one version came to target
+    // another.
     let found = channel::status(&state, None).await;
-    if let Some(reason) = found.reason.clone() {
-        return Err(ApiError::new(ErrorCode::ActionFailed, reason));
-    }
-    let offer = found
-        .offers
-        .iter()
-        .find(|o| o.channel == req.channel)
-        .ok_or_else(|| ApiError::not_found("channel"))?;
+    let offer = offer_in(&found, req.channel)?;
     if offer.action.is_none() {
         return Err(ApiError::new(
             ErrorCode::ActionFailed,
@@ -338,7 +356,7 @@ pub(super) async fn switch_channel(
         ));
     }
 
-    let (switch, files, _) = channel::plan(&state, req.channel, &req.files)
+    let (switch, files, _) = channel::plan(&state, offer, &req.files)
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
 

@@ -34,10 +34,7 @@ pub async fn check(state: &AppState) -> Result<Checked> {
     // offered, so the channel manifest is read on this pass and the feed is
     // asked second — for the notes of whatever the manifest named.
     let on = channel::running(updates, None).await.channel;
-    let manifest = updates
-        .channel_manifest
-        .refresh(&updates.http, &updates.channel_source)
-        .await;
+    let manifest = channel::refresh(state).await;
 
     let found = match what_to_offer(&manifest, on) {
         Offered::Pinned(version) => described(updates, &version).await,
