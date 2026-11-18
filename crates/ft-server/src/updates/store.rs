@@ -63,6 +63,12 @@ pub struct Targets {
 pub struct Plan {
     #[serde(default)]
     pub files: Vec<ft_updater_api::FileWrite>,
+    /// The tag the updater should fetch this version from, when it is not the
+    /// one the containers are already on — see
+    /// [`ft_updater_api::JobKind::UpgradeControlPlane`]. Set when `files`
+    /// move the image line, which is what a channel switch is.
+    #[serde(default)]
+    pub tag: Option<String>,
 }
 
 #[derive(Debug, Clone)]

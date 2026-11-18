@@ -287,6 +287,19 @@ async fn preflight(state: &AppState, run: &Run, log: &Log) -> Result<String> {
         if let Some(job) = status.busy {
             anyhow::bail!("the updater is still busy with job {job}");
         }
+        // Asked here as well as when the run was made: this step is walked
+        // into again after a restart, and an updater that cannot be told
+        // which image to fetch would pull the tag it is already on — which
+        // for a switch is the channel being left.
+        if run.plan.tag.is_some() && status.api_version < 2 {
+            anyhow::bail!(
+                "the updater beside this control plane is {} (contract version {}) and cannot be \
+                 told which image to fetch, so the image line cannot be moved. Upgrade this \
+                 Firetower first; the updater is brought with it.",
+                status.version,
+                status.api_version
+            );
+        }
         log.say(&format!(
             "updater {} (api {}) at {}, Docker {}",
             status.version, status.api_version, status.deploy_dir, status.docker_version
@@ -412,6 +425,7 @@ async fn upgrade_updater(state: &AppState, run: &Run, log: &Log) -> Result<Strin
             let job = updater
                 .start(JobKind::UpgradeUpdater {
                     version: run.to_version.clone(),
+                    tag: run.plan.tag.clone(),
                 })
                 .await?;
             log.say(&format!("updater job {}: recreating the updater", job.id))
@@ -490,6 +504,7 @@ async fn upgrade_control_plane(
         .start(JobKind::UpgradeControlPlane {
             version: run.to_version.clone(),
             files,
+            tag: run.plan.tag.clone(),
         })
         .await?;
     store.set_job_id(&run.id, step.position, &job.id.0).await?;

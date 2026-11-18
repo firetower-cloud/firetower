@@ -25,7 +25,14 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 /// The shape of this contract. See the module header for the rule it carries.
-pub const API_VERSION: u32 = 1;
+///
+/// 2 — the updater reports the image reference each of its containers was
+/// created from, and takes a tag to fetch and recreate from. An updater at 1
+/// can read both requests, because an unknown field is ignored, but it would
+/// pull the tag its container is already on: which is the one thing a channel
+/// switch must not do. So the control plane asks this number before it offers
+/// to switch, and that is what this number is for.
+pub const API_VERSION: u32 = 2;
 
 /// The header a request carries its credential in.
 pub const TOKEN_HEADER: &str = "authorization";
@@ -61,6 +68,41 @@ pub struct Status {
     pub docker_version: String,
     /// The job in progress, if one is.
     pub busy: Option<JobId>,
+    /// The deployment's own containers, and the image each was created from.
+    ///
+    /// **This is where an installation's channel is read.** It is the tag on
+    /// the control plane's image, and nothing anywhere stores it — a row
+    /// saying `beta` beside a compose file saying `:stable` would drift, and
+    /// the operator would be shown an error about image versions whose real
+    /// cause was a stale setting.
+    ///
+    /// Empty from an updater older than API version 2, which is absence
+    /// rather than an answer: a control plane that cannot be told what it is
+    /// running says so instead of assuming.
+    #[serde(default)]
+    pub images: Vec<ServiceImage>,
+}
+
+/// One of the deployment's containers, by the reference it was created from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ServiceImage {
+    pub role: ImageRole,
+    /// The compose service, as the deployment names it.
+    pub service: String,
+    /// `ghcr.io/firetower-cloud/firetower:stable`, as Compose recorded it on
+    /// the container. Opaque here: nothing in the updater reads a meaning out
+    /// of the tag.
+    pub reference: String,
+}
+
+/// Which of the two this is. They are published together and upgraded
+/// together, so they can never be on different channels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ImageRole {
+    ControlPlane,
+    Updater,
 }
 
 /// The deployment's own files, as they are on the machine.
@@ -107,7 +149,14 @@ pub enum JobKind {
     /// a helper container, so the reply the control plane gets is the new
     /// updater's status rather than this job's outcome.
     #[serde(rename_all = "camelCase")]
-    UpgradeUpdater { version: String },
+    UpgradeUpdater {
+        version: String,
+        /// Which tag to fetch the version from. See
+        /// [`JobKind::UpgradeControlPlane`]; the same rule, for the container
+        /// beside it.
+        #[serde(default)]
+        tag: Option<String>,
+    },
     /// Pull the control plane's next image, rewrite the files the release
     /// changed, have Compose recreate the service, and wait for it to answer.
     ///
@@ -117,6 +166,22 @@ pub enum JobKind {
         version: String,
         #[serde(default)]
         files: Vec<FileWrite>,
+        /// Which tag to fetch the version from, when it is not the tag the
+        /// container is already on.
+        ///
+        /// The compose file is the intent and the container is the fact, and
+        /// a channel switch is the moment they differ: the file is being
+        /// rewritten to `:beta` in this same job, so the image to pull is
+        /// `:beta` and the one the container came from is not. `None` keeps
+        /// the old behaviour — fetch the tag the container is on — which is
+        /// what every ordinary upgrade still wants.
+        ///
+        /// Whatever is fetched is still checked against `version` before
+        /// anything is recreated, and a rollback still goes back to the tag
+        /// the container was created from, so a switch that fails leaves the
+        /// installation where it was.
+        #[serde(default)]
+        tag: Option<String>,
     },
 }
 
@@ -200,9 +265,102 @@ pub struct Refusal {
     pub message: String,
 }
 
+// ── reading an image reference ───────────────────────────────────────
+//
+// Both sides read one: the updater to know what to pull and what to put back,
+// the control plane to know which channel an installation is on. One
+// implementation, in the crate they share, because two would be two answers
+// for a registry with a port in it — and the wrong one would be silent.
+
+/// The tags this project publishes, and what each means.
+///
+/// All four together, because the one that catches people out is `latest`:
+/// it keeps its conventional meaning and is therefore the one somebody pins
+/// by mistake.
+pub mod tags {
+    /// General access — the version a maintainer has promoted. **This is the
+    /// tag an installation should be pinned to.**
+    pub const STABLE: &str = "stable";
+    /// Beta — every release, as soon as it is cut. Moved on every release.
+    pub const BETA: &str = "beta";
+    /// The newest build published. A convention for whoever pulls by hand,
+    /// and not a channel: an installation pinned here follows beta's builds
+    /// without having chosen beta.
+    pub const LATEST: &str = "latest";
+    /// The tip of the trunk. Unreleased, and not a channel either.
+    pub const EDGE: &str = "edge";
+}
+
+/// Split `repo:tag` — or `repo` alone, which Docker reads as `:latest`.
+///
+/// The colon that separates a tag is the last one after the last slash, so a
+/// registry with a port (`localhost:5000/firetower:latest`) comes apart right.
+pub fn split_reference(reference: &str) -> (String, String) {
+    let after_slash = reference.rfind('/').map(|i| i + 1).unwrap_or(0);
+    match reference[after_slash..].rfind(':') {
+        Some(i) => (
+            reference[..after_slash + i].to_string(),
+            reference[after_slash + i + 1..].to_string(),
+        ),
+        None => (reference.to_string(), tags::LATEST.to_string()),
+    }
+}
+
+/// A full version is a pin; `latest`, `edge`, `stable`, `beta` and
+/// `major.minor` all float.
+///
+/// A pinned container is one the updater refuses to move at all, which is why
+/// the control plane has to be able to say so before offering anything.
+pub fn is_pinned(tag: &str) -> bool {
+    let parts: Vec<&str> = tag.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reference_comes_apart_at_the_right_colon() {
+        assert_eq!(
+            split_reference("ghcr.io/firetower-cloud/firetower:latest"),
+            ("ghcr.io/firetower-cloud/firetower".into(), "latest".into())
+        );
+        // The trap: the colon in the registry's port is not the tag's.
+        assert_eq!(
+            split_reference("localhost:5000/firetower"),
+            ("localhost:5000/firetower".into(), "latest".into())
+        );
+        assert_eq!(
+            split_reference("localhost:5000/firetower:0.31.0"),
+            ("localhost:5000/firetower".into(), "0.31.0".into())
+        );
+        // A bare repository with no registry and no tag.
+        assert_eq!(
+            split_reference("firetower"),
+            ("firetower".into(), "latest".into())
+        );
+        for tag in [tags::STABLE, tags::BETA, tags::EDGE] {
+            assert_eq!(
+                split_reference(&format!("ghcr.io/firetower-cloud/firetower:{tag}")).1,
+                tag
+            );
+        }
+    }
+
+    #[test]
+    fn only_a_full_version_pins_a_container() {
+        assert!(is_pinned("0.31.0"));
+        assert!(!is_pinned(tags::LATEST));
+        assert!(!is_pinned(tags::EDGE));
+        assert!(!is_pinned(tags::STABLE));
+        assert!(!is_pinned(tags::BETA));
+        assert!(!is_pinned("0.31"), "a two-part version floats");
+        assert!(!is_pinned("v0.31.0"));
+    }
 
     /// The tag is what the other side switches on; a rename here is the kind
     /// of change API_VERSION exists for.
@@ -211,6 +369,7 @@ mod tests {
         let json = serde_json::to_value(JobKind::UpgradeControlPlane {
             version: "0.31.0".into(),
             files: vec![],
+            tag: None,
         })
         .unwrap();
         assert_eq!(json["kind"], "upgradeControlPlane");
@@ -222,10 +381,22 @@ mod tests {
         .unwrap();
         assert_eq!(backup["fromVersion"], "0.30.1");
 
-        // An older control plane that sends no `files` is still understood.
+        // An older control plane that sends no `files` and no `tag` is still
+        // understood, and asking for no tag is asking for the one the
+        // container is already on.
         let old: JobKind =
             serde_json::from_str(r#"{"kind":"upgradeControlPlane","version":"0.31.0"}"#).unwrap();
-        assert!(matches!(old, JobKind::UpgradeControlPlane { files, .. } if files.is_empty()));
+        assert!(
+            matches!(old, JobKind::UpgradeControlPlane { files, tag, .. } if files.is_empty() && tag.is_none())
+        );
+
+        let switching = serde_json::to_value(JobKind::UpgradeControlPlane {
+            version: "0.55.0".into(),
+            files: vec![],
+            tag: Some(tags::BETA.into()),
+        })
+        .unwrap();
+        assert_eq!(switching["tag"], "beta");
     }
 
     #[test]

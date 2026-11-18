@@ -102,6 +102,7 @@ async fn status(State(app): State<App>) -> Result<Json<Status>, Response> {
         config_files: site.config_files.clone(),
         docker_version,
         busy: app.jobs.busy(),
+        images: app.jobs.images().await,
     }))
 }
 
@@ -151,7 +152,7 @@ async fn get_job(State(app): State<App>, Path(id): Path<String>) -> Response {
     // is the number that already moves when a request or response changes
     // shape, and `the_contract_states_the_api_version` below keeps the two
     // honest since the attribute cannot read the constant.
-    info(title = "Firetower updater", version = "1"),
+    info(title = "Firetower updater", version = "2"),
     components(schemas(ft_updater_api::JobKind, ft_updater_api::JobState, ft_updater_api::JobStep))
 )]
 pub struct ApiDoc;
