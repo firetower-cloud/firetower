@@ -96,6 +96,93 @@ export const CreateRoleResponse = zod.object({
 }).describe('A role, as the interface and the spawn tool read it.')
 
 /**
+ * **The plan is a presentation, and this is where that pays for itself.** The
+ * input is the plan endpoint's input plus the fingerprint of what was shown:
+ * no resolved ids, no overwrite targets, no permission flags. Every write
+ * below is derived here, by `import::decide` over those same files and a
+ * snapshot of what this person can see *now*, and then authorised again
+ * against the row it would overwrite inside the transaction that overwrites
+ * it.
+ *
+ * Three gates, in this order, and each one answers a different question:
+ *
+ * 1. **Is this drop appliable at all**, as read at this moment? A bundle that
+ *    has become blocked since the review stops the set.
+ * 2. **Is it still what was reviewed?** The fingerprint of every entry
+ *    derived here against the ones handed back. A profile that was filed
+ *    elsewhere, or whose pinned machine was deleted, changes an entry without
+ *    changing `updated_at` — see [`import::PlanEntry::digest`].
+ * 3. **May this person still perform each write?** Writer on every row
+ *    overwritten and Editor on the directory anything new is filed in, read
+ *    inside the transaction, plus `check_account` and `check_skills` — the
+ *    same two the editor's own save goes through, so an import cannot be a
+ *    way around either.
+ *
+ * Then one transaction, two passes: every profile written, then every team
+ * wired, because a team may name a profile from the same drop. The set
+ * applies whole or not at all.
+ * @summary Apply a drop somebody has reviewed.
+ */
+export const ApplyRoleImportBody = zod.object({
+  "drop": zod.object({
+  "answers": zod.array(zod.object({
+  "answer": zod.union([zod.object({
+  "kind": zod.enum(['sameProfile']),
+  "profile": zod.string()
+}).describe('It is that profile: overwrite that row, and adopt the key onto it.\n\n`profile` is an id the client read off a [`PlanProposal`]. It is **not\ntrusted**: it is looked up in the asker\'s own visible set and checked\nfor Editor, here and again at apply. Any profile they could already\noverwrite through `PUT /api/v1/roles/{id}` is allowed, and nothing else.'),zod.object({
+  "kind": zod.enum(['newProfile'])
+}).describe('It is a new profile: create it, and leave the proposed row alone.')]).describe('The two answers a candidate takes.\n\nThere is no third and there is no default. An unanswered candidate blocks\nthe apply the way an unresolved name does, because a default answer is a\nguess with a nicer name.'),
+  "key": zod.string().describe('The bundle this answers for — its folder name.')
+}).describe('What somebody decided about one candidate.')).optional().describe('What the person said about each candidate the previous plan proposed,\nkeyed by the bundle\'s key. Empty on the first call.'),
+  "files": zod.array(zod.object({
+  "path": zod.string().describe('Relative, inside the drop: `designer/PROFILE.md`. Never absolute and\nnever climbing out.'),
+  "text": zod.string()
+}).describe('One file of a drop.\n\n`text`, not base64 — which is how a skill\'s bundle travels, because one may\nhold a font. A profile bundle is one UTF-8 markdown file; a `PROFILE.md`\nthat is not text is not a profile, and a client that cannot read it as text\nhas already found that out.')).describe('Every file in what was dropped, with the path it had inside the drop.')
+}).describe('The files and the answers, exactly as [`plan`] takes them.'),
+  "reviewed": zod.array(zod.string()).describe('The `digest` of every entry being imported.\n\nThe whole of what the plan derived from these files, which is what\nmakes leaving a row out work: its file is not sent, so it is not in the\nplan derived here either, and the rows that remain still fingerprint to\nwhat was on screen.')
+}).describe('A drop somebody has reviewed and accepted.\n\n**The drop, plus the fingerprint of what they were shown.** The resolution\ninputs are the plan endpoint\'s own and nothing more: the same files, the\nsame answers, read and resolved again by the same function. The one thing\nadded is [`ImportPlan::digest`], which cannot widen anything — a caller who\ntampers with it gets a refusal, and a caller who sends the right one still\nhas every write re-derived and re-authorised against what they can see at\nthat moment.\n\nThere is deliberately no way to send a plan: no outbound type derives\n`Deserialize`, so an endpoint that accepted one could not be written\nwithout somebody adding the derive and reading the module doc above.')
+
+export const ApplyRoleImportResponse = zod.object({
+  "wrote": zod.array(zod.object({
+  "created": zod.boolean().describe('Whether this made a profile. False is an overwrite in place, which\nincludes a rename.'),
+  "key": zod.string().describe('The folder\'s name, which the row now carries as its key.'),
+  "name": zod.string(),
+  "path": zod.string().describe('The file it came from.'),
+  "profile": zod.string().describe('The profile\'s id, whether it was made now or already here.')
+}).describe('One profile, after the write.')).describe('One per bundle, in the plan\'s order.')
+}).describe('What an apply wrote, profile by profile.')
+
+/**
+ * **So a client can refuse before it asks rather than after**, which is what
+ * [`import::PlanLimits`] has always said it was for and what nothing could
+ * read until there was an endpoint for it. The desktop needs the figures
+ * *before* it expands an archive: a zip that unpacks into more than this is a
+ * drop that is refused, and inflating it first to find that out is the denial
+ * of service the threat model's fifth finding is about.
+ *
+ * The same figures the plan carries, from the same constants. Nothing about
+ * this installation is in them, so it needs no authorisation beyond being
+ * signed in.
+ * @summary What an import will take, before anything is dropped.
+ */
+export const roleImportLimitsResponseDepthMin = 0;
+
+export const roleImportLimitsResponseFileBytesMin = 0;
+
+export const roleImportLimitsResponseFilesMin = 0;
+
+export const roleImportLimitsResponseTotalBytesMin = 0;
+
+
+
+export const RoleImportLimitsResponse = zod.object({
+  "depth": zod.int().min(roleImportLimitsResponseDepthMin),
+  "fileBytes": zod.int().min(roleImportLimitsResponseFileBytesMin),
+  "files": zod.int().min(roleImportLimitsResponseFilesMin),
+  "totalBytes": zod.int().min(roleImportLimitsResponseTotalBytesMin)
+}).describe('What this endpoint will take, said out loud so a client can refuse before it\nasks rather than after.')
+
+/**
  * **Read-only, with no exceptions.** It takes the files, says what each one is
  * against the library, and writes nothing — see `roles::import` for why the
  * plan it returns cannot be used as a capability by the apply (#356).
@@ -146,6 +233,7 @@ export const planRoleImportResponseLimitsTotalBytesMin = 0;
 export const PlanRoleImportResponse = zod.object({
   "appliable": zod.boolean().describe('Whether this drop could be applied as it stands.\n\nFalse while anything is blocked **or** any candidate is unanswered. It\nis a convenience for the review\'s footer and not a permission: the apply\nre-derives it, because this plan may be minutes old and a profile may\nhave moved since.'),
   "entries": zod.array(zod.object({
+  "digest": zod.string().describe('A fingerprint of this entry, which an accept hands back for every row\nit is importing.\n\n**Not a plan and not a capability.** It conveys no authority: the apply\nreads the files again, resolves them again and re-authorises every\nwrite, and only then checks that what it derived is what was reviewed.\nThe one thing a fingerprint can do is make an apply *refuse*.\n\nPer entry rather than per plan because excluding a row is a thing a\nperson does: the rows that are left are unchanged by it, so they still\nmatch — and a row whose meaning *did* change, because the bundle it\nnamed a teammate in is the one that was left out, does not, and is\nrefused rather than written unreviewed.\n\nIt is also why conflict detection does not rest on `updated_at`. Filing\na profile moves its path without touching that timestamp, and deleting\na machine clears a pin through a foreign key without touching it\neither. Both change an entry — its target\'s path, a `before` column in\na diff — so both change this, and nobody has to remember to add a field\nto a staleness check.'),
   "key": zod.string().describe('The folder\'s name: this bundle\'s key, and the profile\'s identity.'),
   "name": zod.string().nullish().describe('The `name` the file gives. Absent when the file did not parse, which is\nalso when there are no field values to show.'),
   "outcome": zod.union([zod.object({

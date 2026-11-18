@@ -633,40 +633,15 @@ fn encode(raw: &str) -> String {
     out
 }
 
-/// Split `repo:tag` — or `repo` alone, which Docker reads as `:latest`.
-///
-/// The colon that separates a tag is the last one after the last slash, so a
-/// registry with a port (`localhost:5000/firetower:latest`) comes apart right.
-pub fn split_reference(reference: &str) -> (String, String) {
-    let after_slash = reference.rfind('/').map(|i| i + 1).unwrap_or(0);
-    match reference[after_slash..].rfind(':') {
-        Some(i) => (
-            reference[..after_slash + i].to_string(),
-            reference[after_slash + i + 1..].to_string(),
-        ),
-        None => (reference.to_string(), "latest".to_string()),
-    }
-}
+/// Splitting a reference lives in the contract crate, because the control
+/// plane reads the tag off what [`Container::image_ref`] reports and that tag
+/// is the installation's channel. Two copies of this would be two answers for
+/// `localhost:5000/firetower`, and the wrong one would be silent.
+pub use ft_updater_api::split_reference;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_reference_comes_apart_at_the_right_colon() {
-        assert_eq!(
-            split_reference("ghcr.io/firetower-cloud/firetower:latest"),
-            ("ghcr.io/firetower-cloud/firetower".into(), "latest".into())
-        );
-        assert_eq!(
-            split_reference("localhost:5000/firetower"),
-            ("localhost:5000/firetower".into(), "latest".into())
-        );
-        assert_eq!(
-            split_reference("localhost:5000/firetower:0.31.0"),
-            ("localhost:5000/firetower".into(), "0.31.0".into())
-        );
-    }
 
     #[test]
     fn a_multiplexed_stream_is_read_in_order() {

@@ -28,7 +28,7 @@ use crate::docker::{split_reference, Docker};
 use crate::redact::redact;
 use crate::site::Site;
 use anyhow::{anyhow, Context, Result};
-use ft_updater_api::{FileWrite, Job, JobId, JobKind, JobState, JobStep};
+use ft_updater_api::{FileWrite, ImageRole, Job, JobId, JobKind, JobState, JobStep, ServiceImage};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -225,9 +225,16 @@ impl Jobs {
         tokio::spawn(async move {
             let outcome = match &kind {
                 JobKind::Backup { from_version } => jobs.backup(&reporter, from_version).await,
-                JobKind::UpgradeUpdater { version } => jobs.upgrade_self(&reporter, version).await,
-                JobKind::UpgradeControlPlane { version, files } => {
-                    jobs.upgrade_control_plane(&reporter, version, files).await
+                JobKind::UpgradeUpdater { version, tag } => {
+                    jobs.upgrade_self(&reporter, version, tag.as_deref()).await
+                }
+                JobKind::UpgradeControlPlane {
+                    version,
+                    files,
+                    tag,
+                } => {
+                    jobs.upgrade_control_plane(&reporter, version, files, tag.as_deref())
+                        .await
                 }
             };
             match outcome {
@@ -360,7 +367,12 @@ impl Jobs {
 
     // ── the updater itself ─────────────────────────────────────────────
 
-    async fn upgrade_self(&self, say: &Reporter, version: &str) -> Result<JobState> {
+    async fn upgrade_self(
+        &self,
+        say: &Reporter,
+        version: &str,
+        fetch_tag: Option<&str>,
+    ) -> Result<JobState> {
         say.step("find the updater");
         let me = self
             .service_container(&self.site.service)
@@ -369,6 +381,7 @@ impl Jobs {
         say.done(me.name.clone());
 
         let (repo, tag) = split_reference(&me.image_ref);
+        let tag = fetch_tag.unwrap_or(&tag).to_string();
         let pulled = self.pull_release(say, &repo, &tag, version).await?;
         say.edit(|job| {
             job.previous_image = Some(me.image_id.clone());
@@ -427,6 +440,7 @@ impl Jobs {
         say: &Reporter,
         version: &str,
         files: &[FileWrite],
+        fetch_tag: Option<&str>,
     ) -> Result<JobState> {
         let service = control_plane_service();
 
@@ -438,8 +452,19 @@ impl Jobs {
         say.done(format!("{} on {}", current.name, short(&current.image_id)));
         say.edit(|job| job.previous_image = Some(current.image_id.clone()));
 
-        let (repo, tag) = split_reference(&current.image_ref);
-        let pulled = self.pull_release(say, &repo, &tag, version).await?;
+        // Two tags, and the difference is the whole of a channel switch: the
+        // one to fetch from is what the compose file will say once this job
+        // has written it, and the one to go back to is the one the container
+        // was created from. They are the same for every ordinary upgrade.
+        let (repo, was_on) = split_reference(&current.image_ref);
+        let fetch = fetch_tag.unwrap_or(&was_on).to_string();
+        if fetch != was_on {
+            say.say(format!(
+                "fetching :{fetch} rather than :{was_on} — the deployment file this job writes \
+                 moves {repo} to :{fetch}"
+            ));
+        }
+        let pulled = self.pull_release(say, &repo, &fetch, version).await?;
         say.edit(|job| job.image = Some(pulled.clone()));
 
         // Files, remembered so a rollback can undo them.
@@ -470,10 +495,13 @@ impl Jobs {
             say.done("already on that image; nothing to recreate");
             return Ok(JobState::Done);
         }
+        // `was_on`, not `fetch`: a rollback restores the files, so the
+        // compose file goes back to naming the tag this container came from,
+        // and that is the name the previous image has to answer to.
         let back_to = Rollback {
             service: &service,
             repo: &repo,
-            tag: &tag,
+            tag: &was_on,
             previous: &current.image_id,
         };
         if let Err(e) = self.compose_up(say, &service).await {
@@ -730,6 +758,34 @@ impl Jobs {
         ))
     }
 
+    /// The image each of the deployment's own containers was created from.
+    ///
+    /// The control plane's tag is the installation's channel, and this is the
+    /// only place it can be read — see [`ft_updater_api::Status::images`].
+    /// Asked of the daemon every time rather than remembered: a container
+    /// recreated between two asks is the case this exists for, and a
+    /// remembered answer would be the stored setting the design refuses.
+    ///
+    /// A container that cannot be found is left out rather than guessed at.
+    pub async fn images(&self) -> Vec<ServiceImage> {
+        let mut found = Vec::new();
+        for (role, service) in [
+            (ImageRole::ControlPlane, control_plane_service()),
+            (ImageRole::Updater, self.site.service.clone()),
+        ] {
+            match self.service_container(&service).await {
+                Ok(Some(container)) => found.push(ServiceImage {
+                    role,
+                    service,
+                    reference: container.image_ref,
+                }),
+                Ok(None) => tracing::debug!("no `{service}` container in this project"),
+                Err(e) => tracing::warn!("reading the `{service}` container's image: {e:#}"),
+            }
+        }
+        found
+    }
+
     async fn service_container(&self, service: &str) -> Result<Option<crate::docker::Container>> {
         let mut found = self
             .docker
@@ -764,14 +820,10 @@ impl Jobs {
     }
 }
 
-/// A full version is a pin; `latest`, `edge` and `major.minor` float.
-pub fn is_pinned(tag: &str) -> bool {
-    let parts: Vec<&str> = tag.split('.').collect();
-    parts.len() == 3
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.chars().all(|c| c.is_ascii_digit()))
-}
+/// Whether a tag pins a container to one build. In the contract crate beside
+/// [`split_reference`], because the control plane has to be able to say that
+/// an installation pinned to an exact version cannot be moved at all.
+pub use ft_updater_api::is_pinned;
 
 /// Keep the newest `keep` dumps, and sweep the remains of killed ones.
 ///
@@ -817,7 +869,7 @@ async fn prune(dir: &std::path::Path, keep: usize) -> Vec<String> {
     }
 
     // Newest first, so everything past `keep` is the oldest.
-    dumps.sort_by(|a, b| b.0.cmp(&a.0));
+    dumps.sort_by_key(|(made, _)| std::cmp::Reverse(*made));
     let mut dropped = 0;
     for (_, path) in dumps.into_iter().skip(keep) {
         if tokio::fs::remove_file(&path).await.is_ok() {
@@ -1328,6 +1380,7 @@ mod tests {
                 id: JobId("test".into()),
                 kind: JobKind::UpgradeUpdater {
                     version: "0.39.0".into(),
+                    tag: None,
                 },
                 state: JobState::Running,
                 steps: Vec::new(),
@@ -1342,6 +1395,30 @@ mod tests {
         (jobs, reporter)
     }
 
+    /// A channel switch rewrites the compose file to a different tag in the
+    /// same job, so the image to fetch is the one the file will name and not
+    /// the one the container came from. Without this the switch pulls
+    /// `:stable`, finds the general-access version, and refuses the move it
+    /// was asked to make.
+    #[tokio::test]
+    async fn an_explicit_tag_is_what_gets_fetched() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon(seen.clone(), Awkward::default()).await;
+        let (jobs, say) = jobs_for(docker);
+
+        jobs.upgrade_self(&say, "0.39.0", Some("beta"))
+            .await
+            .unwrap();
+
+        let asked = seen.lock().unwrap().clone();
+        assert!(
+            asked.iter().any(|r| r.contains(
+                "/images/create?fromImage=ghcr.io%2Ffiretower-cloud%2Ffiretower-updater&tag=beta"
+            )),
+            "it should have pulled :beta, not the container's :latest: {asked:#?}"
+        );
+    }
+
     /// Nothing else pulls the helper image before this point — the
     /// control-plane step does, and that runs afterwards — so on the first
     /// upgrade of any install it is not on the machine. Creating a container
@@ -1353,7 +1430,7 @@ mod tests {
         let (docker, _dir) = fake_daemon(seen.clone(), Awkward::default()).await;
         let (jobs, say) = jobs_for(docker);
 
-        jobs.upgrade_self(&say, "0.39.0").await.unwrap();
+        jobs.upgrade_self(&say, "0.39.0", None).await.unwrap();
 
         let asked = seen.lock().unwrap().clone();
         let pulled_helper = asked
@@ -1385,7 +1462,7 @@ mod tests {
         .await;
         let (jobs, say) = jobs_for(docker);
 
-        let outcome = jobs.upgrade_self(&say, "0.39.0").await;
+        let outcome = jobs.upgrade_self(&say, "0.39.0", None).await;
         let said = format!("{:#}", outcome.unwrap_err());
         assert!(
             said.contains("helper container"),
@@ -1417,7 +1494,7 @@ mod tests {
         .await;
         let (jobs, say) = jobs_for(docker);
 
-        jobs.upgrade_self(&say, "0.39.0")
+        jobs.upgrade_self(&say, "0.39.0", None)
             .await
             .expect("the copy already here is good enough");
 

@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   CircleDashed,
   Download,
+  FolderDown,
   FolderGit2,
   GitBranch,
   GitBranchPlus,
@@ -42,7 +43,7 @@ import {
   UsersRound,
   type LucideIcon,
 } from "lucide-react";
-import { Group as Rowset, Note, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
+import { Blank, Dropping, Group as Rowset, Note, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { Pop } from "~/ui/Pop";
 import { CreateMenu } from "~/ui/config/CreateMenu";
@@ -57,6 +58,9 @@ import {
   deleteRole,
   exportRole,
   setDefaultRole,
+  planRoleImport,
+  applyRoleImport,
+  useRoleImportLimits,
 } from "~/api/generated/roles/roles";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { useAccounts, useAgents, useDirectories, useHosts, useSkills, why } from "~/data";
@@ -65,7 +69,20 @@ import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
 import { machineLabel, machines, stateLabel } from "~/api/environments";
 import { canRun } from "~/components/WhereItRuns";
-import type { Agent, Control, ControlKind, Role, NewRole } from "~/api/generated/model";
+import type {
+  Agent,
+  CandidateDecision,
+  Control,
+  ControlKind,
+  ImportDone,
+  ImportPlan,
+  ProfileDrop,
+  Role,
+  NewRole,
+} from "~/api/generated/model";
+import { ImportProfiles } from "~/ui/config/ImportProfiles";
+import type { Selection } from "~/ui/config/import-plan";
+import { readProfileDrop, readProfileFiles, type Dropped } from "~/profiles";
 import { navigate } from "~/shims/next-navigation";
 import { useConfirm } from "~/ui/Confirm";
 import { Badge, IconButton } from "~/components/ui";
@@ -218,6 +235,133 @@ export function Roles() {
   const cache = useQueryClient();
   const confirm = useConfirm();
 
+  /* ── importing a folder of bundles ────────────────────────────────── */
+
+  /** What the endpoint will take, so a drop can be refused before it is read. */
+  const limits = useRoleImportLimits();
+  const [over, setOver] = useState(false);
+  const [review, setReview] = useState<Review | null>(null);
+  /** What the last accept did, said once above the list it changed. */
+  const [imported, setImported] = useState<ImportDone | null>(null);
+  const picker = useRef<HTMLInputElement>(null);
+
+  /** Plan a drop, and show what it would do. */
+  const look = async (drop: ProfileDrop) => {
+    setImported(null);
+    try {
+      const plan = await planRoleImport(drop);
+      setReview({ drop, plan, refused: null, applying: false });
+    } catch (e) {
+      /* A bound, named by the server: too many files, one too large, a path
+         that climbs out. Not a plan — see `ImportProfiles`'s `refused`. */
+      setReview({ drop, plan: null, refused: why(e), applying: false });
+    }
+  };
+
+  /** Read what was dropped, within the bounds, then plan it. */
+  const read = async (job: Promise<Dropped>) => {
+    const { files, refused } = await job;
+    if (refused) {
+      setImported(null);
+      setReview({ drop: { files: [], answers: [] }, plan: null, refused, applying: false });
+      return;
+    }
+    /* Nothing at all — a drag that let go of a link, or a folder the reader
+       skipped entirely. There is nothing to review and nothing to say. */
+    if (files.length === 0) return;
+    await look({ files, answers: [] });
+  };
+
+  /**
+   * A drop nothing could be checked against.
+   *
+   * The bounds are the server's, so without them there is no size this window
+   * may refuse at — and reading an archive to find out is the thing being
+   * avoided. Rare: one small request, made when this screen opens.
+   */
+  const unbounded = async () => {
+    const again = await confirm({
+      title: "Nothing was read",
+      body: "Firetower has not said what an import takes, so nothing was read. Try again, or reopen this screen.",
+      action: "Try again",
+      cancel: "Close",
+    });
+    if (again) await limits.refetch();
+  };
+
+  /** Answering a candidate plans again, which is what brings its diff. */
+  const answer = async (key: string, decision: CandidateDecision) => {
+    if (!review?.plan) return;
+    const answers = [
+      ...(review.drop.answers ?? []).filter((a) => a.key !== key),
+      { key, answer: decision },
+    ];
+    await look({ files: review.drop.files, answers });
+  };
+
+  /**
+   * Accept it.
+   *
+   * **What is sent is what was reviewed, minus whatever was unticked.** An
+   * excluded row's file does not travel, so the plan the server derives for
+   * itself holds the rows that are left — and the fingerprints of those rows
+   * are what say they are the ones that were on screen.
+   */
+  const accept = async (sel: Selection) => {
+    if (!review?.plan) return;
+    const kept = review.plan.entries.filter((e) => !sel.excluded.has(e.path));
+    const left = new Set(
+      review.plan.entries.filter((e) => sel.excluded.has(e.path)).map((e) => e.path),
+    );
+    const drop: ProfileDrop = {
+      files: review.drop.files.filter((f) => !left.has(f.path)),
+      answers: (review.drop.answers ?? []).filter((a) => kept.some((e) => e.key === a.key)),
+    };
+    setReview({ ...review, applying: true });
+    try {
+      const done = await applyRoleImport({ drop, reviewed: kept.map((e) => e.digest) });
+      await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+      setReview(null);
+      setImported(done);
+    } catch (e) {
+      /* **Nothing was written**, which the server's own sentence says. The
+         plan it refused is the stale one on screen, so the way out is to read
+         the current one — the same files, planned again. */
+      setReview({ ...review, applying: false });
+      const again = await confirm({
+        title: "Nothing was imported",
+        body: why(e),
+        action: "Read it again",
+        cancel: "Close",
+      });
+      if (again) await look(review.drop);
+      else setReview(null);
+    }
+  };
+
+  const surface = {
+    onDragOver: (e: React.DragEvent) => {
+      if (![...(e.dataTransfer?.types ?? [])].includes("Files")) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      setOver(true);
+    },
+    onDragLeave: () => setOver(false),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault();
+      setOver(false);
+      const bounds = limits.data;
+      if (!bounds) {
+        void unbounded();
+        return;
+      }
+      /* **Started while the event is live.** The entries of a `DataTransfer`
+         are only readable during the handler, so the reading begins here and
+         is awaited after. */
+      void read(readProfileDrop(e.dataTransfer, bounds));
+    },
+  };
+
   // By name only. A description search returned the whole roster, because these
   // profiles reference each other ("hand off to the Security Advisor"), so the
   // term is in every one. Managers first, then alphabetical.
@@ -237,6 +381,21 @@ export function Roles() {
     await deleteRole(role.id);
     await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
   };
+
+  /* **The review replaces the pane.** It is the whole of what somebody is
+     doing until they accept it or leave, and it carries its own way back. */
+  if (review && (review.plan || review.refused)) {
+    return (
+      <ImportProfiles
+        plan={review.plan ?? nothingRead(limits.data)}
+        refused={review.refused}
+        applying={review.applying}
+        onClose={() => setReview(null)}
+        onApply={accept}
+        onAnswer={(key, decision) => void answer(key, decision)}
+      />
+    );
+  }
 
   if (editing) {
     /* **Read-only says what the screen is, rather than disabling its
@@ -274,11 +433,47 @@ export function Roles() {
           note: "Fill in the form by hand.",
           onPick: () => setEditing({ draft: { ...BLANK } }),
         },
+        {
+          icon: FolderDown,
+          label: "Import a folder",
+          note: "PROFILE.md files you already have.",
+          onPick: () => picker.current?.click(),
+        },
       ]}
     />
   );
 
   return (
+    <div {...surface} className="relative">
+      {over && (
+        <Dropping says="One profile, a folder of them, or a .zip of either. Nothing is written until you have looked." />
+      )}
+      {/* `webkitdirectory` is how a window asks for a folder, and the same
+          input takes a .zip — one control rather than two, which is what
+          `AddSkill` does for a skill. */}
+      <input
+        ref={picker}
+        type="file"
+        multiple
+        // @ts-expect-error — webkitdirectory is not in the DOM types
+        webkitdirectory=""
+        directory=""
+        className="hidden"
+        onChange={(e) => {
+          const bounds = limits.data;
+          /* **Copied out before the input is cleared.** `value = ""` empties
+             the `FileList` this handler is holding, not a stale copy of it,
+             so reading after the reset reads nothing at all. The reset is
+             what lets the same folder be picked twice running. */
+          const chosen = Array.from(e.target.files ?? []);
+          e.target.value = "";
+          if (!bounds) {
+            void unbounded();
+            return;
+          }
+          void read(readProfileFiles(chosen, bounds));
+        }}
+      />
     <Section
       /* **Agent profiles**, which is what the rail calls it. "Profiles" alone
          is the account's word on every other product somebody has used. */
@@ -300,6 +495,19 @@ export function Roles() {
         ) : undefined
       }
     >
+      {imported && (
+        <Note
+          icon={Check}
+          control={
+            <button onClick={() => setImported(null)} className="btn quiet">
+              Dismiss
+            </button>
+          }
+        >
+          {wrote(imported)}
+        </Note>
+      )}
+
       <Rows
         feed={{ data: shown, loading: rows.loading, error: rows.error }}
         icon={UsersRound}
@@ -316,7 +524,12 @@ export function Roles() {
               No profile matches <Typed>{q.trim()}</Typed>.
             </Note>
           ) : (
-            "No profiles yet"
+            /* **The blank carries the gesture rather than describing it.** The
+               page is a drop surface while it is empty, and this is the
+               sentence that says so. */
+            <Blank icon={UsersRound} title="No profiles yet" action={newProfile}>
+              Ask an agent to write one, or drop in a folder of profiles you already have.
+            </Blank>
           )
         }
         /* **It says this is optional**, which is the one job the page's own
@@ -340,11 +553,64 @@ export function Roles() {
       {!blank && (
         <WhereTo>
           A profile is filed like a skill or a machine, so sharing one uses the same sheet.{" "}
-          <b>The team is the only thing that makes one a manager</b>.
+          <b>The team is the only thing that makes one a manager</b>. Drop a folder of
+          PROFILE.md files anywhere on this page to import them.
         </WhereTo>
       )}
     </Section>
+    </div>
   );
+}
+
+/**
+ * A drop being reviewed: what it held, and what the server said about it.
+ *
+ * `plan` and `refused` are the two answers the endpoint gives and never both:
+ * a drop past one of the published bounds is refused whole, so there is
+ * nothing to classify per profile. `applying` is the accept in flight.
+ */
+type Review = {
+  drop: ProfileDrop;
+  plan: ImportPlan | null;
+  refused: string | null;
+  applying: boolean;
+};
+
+/**
+ * The plan a refusal is drawn over: no entries, and the bounds.
+ *
+ * The review reads nothing else out of it in that state — the sentence is the
+ * server's and the figures beside it are these, so somebody who has hit one
+ * bound can see the rest without hitting them too. The same shape an empty
+ * drop comes back as, which is why it is not a shape being invented here.
+ *
+ * The bounds are absent only while the one request that carries them is in
+ * flight, and a drop is not read at all without them, so the zeroes are
+ * unreachable rather than a default.
+ */
+const nothingRead = (limits: ImportPlan["limits"] | undefined): ImportPlan => ({
+  appliable: false,
+  whyNot: [],
+  entries: [],
+  ignored: [],
+  limits: limits ?? { files: 0, fileBytes: 0, totalBytes: 0, depth: 0 },
+});
+
+/**
+ * What an accept did, in the words that do not claim more than it did.
+ *
+ * Created and overwritten, counted apart. **A renamed folder is a new profile
+ * and the one it was renamed from is still there**, so a sentence about five
+ * profiles "imported" would describe a library that has six — the counts say
+ * what happened and the list below shows it.
+ */
+function wrote(done: ImportDone): string {
+  const made = done.wrote.filter((w) => w.created).length;
+  const over = done.wrote.length - made;
+  const profiles = (n: number) => (n === 1 ? "1 profile" : `${n} profiles`);
+  if (made > 0 && over > 0) return `${profiles(made)} created, ${profiles(over)} overwritten.`;
+  if (over > 0) return `${profiles(over)} overwritten.`;
+  return `${profiles(made)} created.`;
 }
 
 /**

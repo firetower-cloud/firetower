@@ -55,6 +55,11 @@ pub struct Run {
 pub struct Targets {
     pub control_plane: bool,
     pub host_ids: Vec<String>,
+    /// The channel this run moves the installation onto, when it is a switch
+    /// rather than an ordinary upgrade. What makes a run say, afterwards,
+    /// that it was the act that changed the channel.
+    #[serde(default)]
+    pub channel: Option<super::channel::Channel>,
 }
 
 /// Decided when the run was made and carried with it.
@@ -63,6 +68,12 @@ pub struct Targets {
 pub struct Plan {
     #[serde(default)]
     pub files: Vec<ft_updater_api::FileWrite>,
+    /// The tag the updater should fetch this version from, when it is not the
+    /// one the containers are already on — see
+    /// [`ft_updater_api::JobKind::UpgradeControlPlane`]. Set when `files`
+    /// move the image line, which is what a channel switch is.
+    #[serde(default)]
+    pub tag: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -429,6 +440,7 @@ mod tests {
             targets: Targets {
                 control_plane: true,
                 host_ids: vec![],
+                channel: None,
             },
             when_idle: false,
             plan: Plan::default(),

@@ -26,9 +26,12 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AcceptedDrop,
   ApiError,
+  ImportDone,
   ImportPlan,
   NewRole,
+  PlanLimits,
   ProfileDrop,
   ProfileFile,
   Role,
@@ -243,7 +246,246 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getCreateRoleMutationOptions(options), queryClient);
     }
-    export const getPlanRoleImportUrl = () => {
+    export const getApplyRoleImportUrl = () => {
+
+
+
+
+  return `/api/v1/roles/import/apply`
+}
+
+/**
+ * **The plan is a presentation, and this is where that pays for itself.** The
+ * input is the plan endpoint's input plus the fingerprint of what was shown:
+ * no resolved ids, no overwrite targets, no permission flags. Every write
+ * below is derived here, by `import::decide` over those same files and a
+ * snapshot of what this person can see *now*, and then authorised again
+ * against the row it would overwrite inside the transaction that overwrites
+ * it.
+ *
+ * Three gates, in this order, and each one answers a different question:
+ *
+ * 1. **Is this drop appliable at all**, as read at this moment? A bundle that
+ *    has become blocked since the review stops the set.
+ * 2. **Is it still what was reviewed?** The fingerprint of every entry
+ *    derived here against the ones handed back. A profile that was filed
+ *    elsewhere, or whose pinned machine was deleted, changes an entry without
+ *    changing `updated_at` — see [`import::PlanEntry::digest`].
+ * 3. **May this person still perform each write?** Writer on every row
+ *    overwritten and Editor on the directory anything new is filed in, read
+ *    inside the transaction, plus `check_account` and `check_skills` — the
+ *    same two the editor's own save goes through, so an import cannot be a
+ *    way around either.
+ *
+ * Then one transaction, two passes: every profile written, then every team
+ * wired, because a team may name a profile from the same drop. The set
+ * applies whole or not at all.
+ * @summary Apply a drop somebody has reviewed.
+ */
+export const applyRoleImport = async (acceptedDrop: AcceptedDrop, options?: Parameters<typeof http>[1]): Promise<ImportDone> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<ImportDone>(getApplyRoleImportUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(acceptedDrop)
+  }
+);}
+
+
+
+
+
+export const getApplyRoleImportMutationKey = () => ['applyRoleImport'] as const;
+
+export const getApplyRoleImportMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyRoleImport>>, TError,ApplyRoleImportMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof applyRoleImport>>, TError,ApplyRoleImportMutationVariables, TContext> => {
+
+const mutationKey = getApplyRoleImportMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof applyRoleImport>>, ApplyRoleImportMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  applyRoleImport(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ApplyRoleImportMutationResult = NonNullable<Awaited<ReturnType<typeof applyRoleImport>>>
+    export type ApplyRoleImportMutationBody = AcceptedDrop
+    export type ApplyRoleImportMutationError = ApiError
+    export type ApplyRoleImportMutationVariables = {data: AcceptedDrop}
+
+    /**
+ * @summary Apply a drop somebody has reviewed.
+ */
+export const useApplyRoleImport = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof applyRoleImport>>, TError,ApplyRoleImportMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof applyRoleImport>>,
+        TError,
+        ApplyRoleImportMutationVariables,
+        TContext
+      > => {
+      return useMutation(getApplyRoleImportMutationOptions(options), queryClient);
+    }
+    export const getRoleImportLimitsUrl = () => {
+
+
+
+
+  return `/api/v1/roles/import/limits`
+}
+
+/**
+ * **So a client can refuse before it asks rather than after**, which is what
+ * [`import::PlanLimits`] has always said it was for and what nothing could
+ * read until there was an endpoint for it. The desktop needs the figures
+ * *before* it expands an archive: a zip that unpacks into more than this is a
+ * drop that is refused, and inflating it first to find that out is the denial
+ * of service the threat model's fifth finding is about.
+ *
+ * The same figures the plan carries, from the same constants. Nothing about
+ * this installation is in them, so it needs no authorisation beyond being
+ * signed in.
+ * @summary What an import will take, before anything is dropped.
+ */
+export const roleImportLimits = async ( options?: Parameters<typeof http>[1]): Promise<PlanLimits> => {
+
+  return http<PlanLimits>(getRoleImportLimitsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getRoleImportLimitsQueryKey = () => {
+    return [
+    `/api/v1/roles/import/limits`
+    ] as const;
+    }
+
+
+export const getRoleImportLimitsQueryOptions = <TData = Awaited<ReturnType<typeof roleImportLimits>>, TError = ApiError>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof roleImportLimits>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getRoleImportLimitsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof roleImportLimits>>> = ({ signal }) => roleImportLimits({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof roleImportLimits>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type RoleImportLimitsQueryResult = NonNullable<Awaited<ReturnType<typeof roleImportLimits>>>
+export type RoleImportLimitsQueryError = ApiError
+
+
+export function useRoleImportLimits<TData = Awaited<ReturnType<typeof roleImportLimits>>, TError = ApiError>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof roleImportLimits>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof roleImportLimits>>,
+          TError,
+          Awaited<ReturnType<typeof roleImportLimits>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRoleImportLimits<TData = Awaited<ReturnType<typeof roleImportLimits>>, TError = ApiError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof roleImportLimits>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof roleImportLimits>>,
+          TError,
+          Awaited<ReturnType<typeof roleImportLimits>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRoleImportLimits<TData = Awaited<ReturnType<typeof roleImportLimits>>, TError = ApiError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof roleImportLimits>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary What an import will take, before anything is dropped.
+ */
+
+export function useRoleImportLimits<TData = Awaited<ReturnType<typeof roleImportLimits>>, TError = ApiError>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof roleImportLimits>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getRoleImportLimitsQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary What an import will take, before anything is dropped.
+ */
+export const useSetRoleImportLimitsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (updater: Awaited<ReturnType<typeof roleImportLimits>> | undefined | ((old: Awaited<ReturnType<typeof roleImportLimits>> | undefined) => Awaited<ReturnType<typeof roleImportLimits>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof roleImportLimits>>>({ exact: $exactMatch, queryKey: getRoleImportLimitsQueryKey() }, updater);
+  };
+}
+
+/**
+ * @summary What an import will take, before anything is dropped.
+ */
+export const useGetRoleImportLimitsQueryData = () => {
+  const queryClient = useQueryClient();
+  return () =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof roleImportLimits>>>(getRoleImportLimitsQueryKey());
+}
+
+
+export const getPlanRoleImportUrl = () => {
 
 
 

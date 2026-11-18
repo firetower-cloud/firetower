@@ -12,12 +12,49 @@ import * as zod from 'zod';
  * Readable by anybody. What it says is narrowed to them — see [`as_seen_by`].
  * @summary Where everything stands against the newest release.
  */
+export const getUpdatesResponseChannelManifestSchemaVersionMin = 0;
+
 export const getUpdatesResponseControlPlaneUpdaterApiVersionMin = 0;
 
 
 
 export const GetUpdatesResponse = zod.object({
   "activeRun": zod.string().nullish(),
+  "channel": zod.object({
+  "channel": zod.enum(['general', 'beta']).describe('The channel in force, derived from the tag on the running image.\nGeneral access when it could not be read, which `recognised` and\n`problem` qualify.'),
+  "image": zod.string().nullish().describe('The whole reference, for a screen that names it.'),
+  "manifest": zod.object({
+  "outcome": zod.enum(['absent', 'found', 'vanished', 'unreadable', 'malformed', 'incomplete']).describe('The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module\'s header.'),
+  "packages": zod.array(zod.object({
+  "beta": zod.string(),
+  "general": zod.string(),
+  "generalPromotedAt": zod.iso.datetime({"offset":true}).nullish().describe('When general access last moved to what it holds. The only thing that\nmakes a stuck promotion visible, and recorded nowhere else.'),
+  "package": zod.enum(['controlPlane', 'desktop']).describe('The packages that release separately, and so are pinned separately.\n\nMobile is deliberately absent: it has no general-access channel to be\npromoted into. A later third package is what the document\'s schema version\nexists to make safe.')
+}).describe('What one package\'s channels hold.')).describe('Every package\'s pins, from the last document that read. A failed read\nleaves these alone rather than emptying them, and `outcome` is what\nsays the figures may be behind.'),
+  "problem": zod.string().nullish().describe('Why it did not read, in words.'),
+  "readAt": zod.iso.datetime({"offset":true}).nullish(),
+  "schemaVersion": zod.int().min(getUpdatesResponseChannelManifestSchemaVersionMin).nullish().describe('The shape of the document that read.'),
+  "url": zod.string().describe('Where it is published. Reported so an installation that cannot read it\ncan say what it could not reach.')
+}).describe('What the last read of the channel manifest said, and what it holds.'),
+  "mayChange": zod.boolean().optional().describe('Whether the person asking may take it. Only an administrator: the\nchannel is the whole deployment\'s, not a resource anybody holds a\ngrant on.'),
+  "offers": zod.array(zod.object({
+  "action": zod.union([zod.null(),zod.enum(['switch', 'pin']).describe('What can be done about this row, if anything.')]).optional(),
+  "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
+  "irreversible": zod.boolean().describe('Whether taking it cannot be undone at the moment it is taken. See\n[`Channel::irreversible`] — it is the version that cannot be walked\nback, not the membership.'),
+  "offers": zod.string().describe('What being on it means, in one line.'),
+  "on": zod.boolean().describe('Whether this is the channel in force.'),
+  "reason": zod.string().nullish().describe('Why there is nothing to do here, in words.'),
+  "since": zod.iso.datetime({"offset":true}).nullish().describe('When general access last moved to what it holds. Always `None` for\nbeta: every release reaches beta, so the date a beta build appeared is\nits own release date and the manifest does not record it twice.'),
+  "tag": zod.string().describe('The image tag that is this channel.'),
+  "version": zod.string().nullish().describe('The version it holds for the control plane. `None` when the manifest\ncould not be read — never a zero, and never the newest release.')
+}).describe('One channel, as a row on a screen.')).describe('One per channel, in a fixed order: general access, then beta.'),
+  "pinned": zod.boolean().describe('The image line names an exact version, so no upgrade can move this\ninstallation until it is changed.'),
+  "problem": zod.string().nullish().describe('Why the channel is an assumption, in words. `None` when it was read.'),
+  "reason": zod.string().nullish().describe('Why it would not. `None` when it would.'),
+  "recognised": zod.boolean().describe('Whether the tag names a channel. False makes `channel` an assumption.'),
+  "switchable": zod.boolean().describe('Whether this server would carry out a switch at all, from anybody.'),
+  "tag": zod.string().nullish().describe('The tag that image was created from. `None` when nothing could be\nasked — which is a third answer, not a false one.')
+}).describe('Which channel this installation is on, and what each channel offers.\nHere as well as on its own path because the one screen that draws it\nalready asks for this, and the channel is what decides which release\n`latest` above is.'),
   "checkError": zod.string().nullish(),
   "checkedAt": zod.iso.datetime({"offset":true}).nullish(),
   "controlPlane": zod.object({
@@ -64,14 +101,193 @@ export const GetUpdatesResponse = zod.object({
 export const BackUpNowResponse = zod.string()
 
 /**
+ * Readable by anybody, like the rest of this screen: the channel explains
+ * which releases a person is being offered, and a member who cannot see it
+ * has no way to ask about it. `mayChange` is what narrows — only an
+ * administrator may move it, and a client should draw a fact rather than a
+ * control when that is false.
+ *
+ * The same answer is on `GET /api/v1/updates` as `channel`, for the screen
+ * that wants both in one ask.
+ * @summary Which channel this installation is on, and what each channel offers.
+ */
+export const getChannelResponseManifestSchemaVersionMin = 0;
+
+
+
+export const GetChannelResponse = zod.object({
+  "channel": zod.enum(['general', 'beta']).describe('The channel in force, derived from the tag on the running image.\nGeneral access when it could not be read, which `recognised` and\n`problem` qualify.'),
+  "image": zod.string().nullish().describe('The whole reference, for a screen that names it.'),
+  "manifest": zod.object({
+  "outcome": zod.enum(['absent', 'found', 'vanished', 'unreadable', 'malformed', 'incomplete']).describe('The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module\'s header.'),
+  "packages": zod.array(zod.object({
+  "beta": zod.string(),
+  "general": zod.string(),
+  "generalPromotedAt": zod.iso.datetime({"offset":true}).nullish().describe('When general access last moved to what it holds. The only thing that\nmakes a stuck promotion visible, and recorded nowhere else.'),
+  "package": zod.enum(['controlPlane', 'desktop']).describe('The packages that release separately, and so are pinned separately.\n\nMobile is deliberately absent: it has no general-access channel to be\npromoted into. A later third package is what the document\'s schema version\nexists to make safe.')
+}).describe('What one package\'s channels hold.')).describe('Every package\'s pins, from the last document that read. A failed read\nleaves these alone rather than emptying them, and `outcome` is what\nsays the figures may be behind.'),
+  "problem": zod.string().nullish().describe('Why it did not read, in words.'),
+  "readAt": zod.iso.datetime({"offset":true}).nullish(),
+  "schemaVersion": zod.int().min(getChannelResponseManifestSchemaVersionMin).nullish().describe('The shape of the document that read.'),
+  "url": zod.string().describe('Where it is published. Reported so an installation that cannot read it\ncan say what it could not reach.')
+}).describe('What the last read of the channel manifest said, and what it holds.'),
+  "mayChange": zod.boolean().optional().describe('Whether the person asking may take it. Only an administrator: the\nchannel is the whole deployment\'s, not a resource anybody holds a\ngrant on.'),
+  "offers": zod.array(zod.object({
+  "action": zod.union([zod.null(),zod.enum(['switch', 'pin']).describe('What can be done about this row, if anything.')]).optional(),
+  "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
+  "irreversible": zod.boolean().describe('Whether taking it cannot be undone at the moment it is taken. See\n[`Channel::irreversible`] — it is the version that cannot be walked\nback, not the membership.'),
+  "offers": zod.string().describe('What being on it means, in one line.'),
+  "on": zod.boolean().describe('Whether this is the channel in force.'),
+  "reason": zod.string().nullish().describe('Why there is nothing to do here, in words.'),
+  "since": zod.iso.datetime({"offset":true}).nullish().describe('When general access last moved to what it holds. Always `None` for\nbeta: every release reaches beta, so the date a beta build appeared is\nits own release date and the manifest does not record it twice.'),
+  "tag": zod.string().describe('The image tag that is this channel.'),
+  "version": zod.string().nullish().describe('The version it holds for the control plane. `None` when the manifest\ncould not be read — never a zero, and never the newest release.')
+}).describe('One channel, as a row on a screen.')).describe('One per channel, in a fixed order: general access, then beta.'),
+  "pinned": zod.boolean().describe('The image line names an exact version, so no upgrade can move this\ninstallation until it is changed.'),
+  "problem": zod.string().nullish().describe('Why the channel is an assumption, in words. `None` when it was read.'),
+  "reason": zod.string().nullish().describe('Why it would not. `None` when it would.'),
+  "recognised": zod.boolean().describe('Whether the tag names a channel. False makes `channel` an assumption.'),
+  "switchable": zod.boolean().describe('Whether this server would carry out a switch at all, from anybody.'),
+  "tag": zod.string().nullish().describe('The tag that image was created from. `None` when nothing could be\nasked — which is a third answer, not a false one.')
+}).describe('Which channel this installation is on, and what each channel offers.')
+
+/**
+ * **One act, not two.** The channel is read back from the container that is
+ * running, so writing the file alone would leave the installation reporting
+ * general access while its file said beta — a switch that appears not to
+ * have worked. So this is an ordinary upgrade run with the image lines moved
+ * in the same step that recreates the control plane, which means the
+ * rollback that already exists puts both back together.
+ *
+ * Nothing here is automatic. A channel decides which release is offered and
+ * nothing else about how it is taken: this call is the press, and the run it
+ * makes is the same run the Upgrade button makes.
+ * @summary Switch channel: rewrite both image lines and move onto that channel's
+version, as one run.
+ */
+export const SwitchChannelBody = zod.object({
+  "acknowledgeOneWay": zod.boolean().optional().describe('Taken as read: the version this moves onto cannot be walked back.\nRequired for beta, where `irreversible` on the plan is the sentence a\nclient has to put in front of somebody first; ignored for general\naccess, which never moves an installation backwards anyway.'),
+  "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "replace": zod.boolean().describe('Replace an edited file with the release\'s copy, keeping the edited one\nas `.backup`. Files the release changed and nobody edited are replaced\nwithout being asked.')
+})).optional()
+})
+
+export const SwitchChannelResponse = zod.object({
+  "createdAt": zod.iso.datetime({"offset":true}),
+  "error": zod.string().nullish(),
+  "finishedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "fromVersion": zod.string(),
+  "id": zod.string(),
+  "startedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "startedBy": zod.string().nullish(),
+  "state": zod.enum(['planned', 'waitingIdle', 'waitingDecision', 'running', 'succeeded', 'failed', 'cancelled']),
+  "steps": zod.array(zod.object({
+  "detail": zod.string().nullish(),
+  "finishedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "log": zod.string(),
+  "position": zod.int(),
+  "startedAt": zod.iso.datetime({"offset":true}).nullish(),
+  "state": zod.enum(['pending', 'running', 'done', 'failed', 'warned', 'skipped']),
+  "target": zod.string(),
+  "title": zod.string()
+})),
+  "targets": zod.object({
+  "channel": zod.union([zod.null(),zod.enum(['general', 'beta']).describe('The channel this run moves the installation onto, when it is a switch\nrather than an ordinary upgrade. What makes a run say, afterwards,\nthat it was the act that changed the channel.')]).optional(),
+  "controlPlane": zod.boolean(),
+  "hostIds": zod.array(zod.string())
+}),
+  "toVersion": zod.string(),
+  "whenIdle": zod.boolean()
+})
+
+/**
+ * An ordinary upgrade plan, plus `channelChange`: the image lines as they
+ * are and as they would be, the version the installation would be moved
+ * onto in the same act, and whether that act can be undone.
+ * @summary What switching would write, before it is taken.
+ */
+export const PlanChannelBody = zod.object({
+  "channel": zod.enum(['general', 'beta']).describe('The channel to move to. The one in force is a legitimate answer: it\nis how an installation running an unrecognised tag comes to actually\nbe on the channel it is being treated as.'),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "replace": zod.boolean().describe('Replace an edited file with the release\'s copy, keeping the edited one\nas `.backup`. Files the release changed and nobody edited are replaced\nwithout being asked.')
+})).optional().describe('What to do about a deployment file the release changed and somebody\nhere has edited — the same choice an ordinary upgrade asks for.')
+})
+
+export const PlanChannelResponse = zod.object({
+  "channelChange": zod.union([zod.null(),zod.object({
+  "act": zod.enum(['switch', 'pin']).describe('The two shapes the one act takes.'),
+  "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
+  "diff": zod.string().describe('The same, as a unified diff — the way every other change to this file\nis shown.'),
+  "file": zod.string().describe('The deployment file being rewritten.'),
+  "from": zod.enum(['general', 'beta']).describe('The channel it is leaving. The same as `channel` when the act is a\npin rather than a move.'),
+  "irreversible": zod.boolean().describe('Whether this cannot be undone at the moment it is taken. True for\nbeta, always — see [`Channel::irreversible`].'),
+  "lines": zod.array(zod.object({
+  "from": zod.string(),
+  "to": zod.string()
+})).describe('The image lines, as they are and as they would be.'),
+  "tag": zod.string().describe('The tag both image lines are being moved to.'),
+  "version": zod.string().describe('The version this installation would be moved onto, in the same act.')
+}).describe('The channel change this run would make, when it is a switch rather\nthan an ordinary upgrade. `None` on every ordinary plan.')]).optional(),
+  "envMissing": zod.array(zod.string()).describe('Variables the release\'s `.env.example` requires that `.env` lacks.'),
+  "files": zod.array(zod.object({
+  "name": zod.string(),
+  "releaseChange": zod.string().nullish().describe('Unified diff, previous release → this release.'),
+  "verdict": zod.enum(['Unchanged', 'Update', 'Edited', 'New', 'Unshipped']),
+  "yourEdits": zod.string().nullish().describe('Unified diff, previous release → what is on the machine.')
+}).describe('One file, and what would happen to it.')),
+  "updaterUpgrade": zod.boolean().describe('Whether the updater itself is behind and will be recreated first.'),
+  "version": zod.string()
+}).describe('What a run would do to the deployment\'s files, asked before agreeing.')
+
+/**
  * @summary Ask the releases feed now rather than waiting for the next check.
  */
+export const checkUpdatesResponseChannelManifestSchemaVersionMin = 0;
+
 export const checkUpdatesResponseControlPlaneUpdaterApiVersionMin = 0;
 
 
 
 export const CheckUpdatesResponse = zod.object({
   "activeRun": zod.string().nullish(),
+  "channel": zod.object({
+  "channel": zod.enum(['general', 'beta']).describe('The channel in force, derived from the tag on the running image.\nGeneral access when it could not be read, which `recognised` and\n`problem` qualify.'),
+  "image": zod.string().nullish().describe('The whole reference, for a screen that names it.'),
+  "manifest": zod.object({
+  "outcome": zod.enum(['absent', 'found', 'vanished', 'unreadable', 'malformed', 'incomplete']).describe('The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module\'s header.'),
+  "packages": zod.array(zod.object({
+  "beta": zod.string(),
+  "general": zod.string(),
+  "generalPromotedAt": zod.iso.datetime({"offset":true}).nullish().describe('When general access last moved to what it holds. The only thing that\nmakes a stuck promotion visible, and recorded nowhere else.'),
+  "package": zod.enum(['controlPlane', 'desktop']).describe('The packages that release separately, and so are pinned separately.\n\nMobile is deliberately absent: it has no general-access channel to be\npromoted into. A later third package is what the document\'s schema version\nexists to make safe.')
+}).describe('What one package\'s channels hold.')).describe('Every package\'s pins, from the last document that read. A failed read\nleaves these alone rather than emptying them, and `outcome` is what\nsays the figures may be behind.'),
+  "problem": zod.string().nullish().describe('Why it did not read, in words.'),
+  "readAt": zod.iso.datetime({"offset":true}).nullish(),
+  "schemaVersion": zod.int().min(checkUpdatesResponseChannelManifestSchemaVersionMin).nullish().describe('The shape of the document that read.'),
+  "url": zod.string().describe('Where it is published. Reported so an installation that cannot read it\ncan say what it could not reach.')
+}).describe('What the last read of the channel manifest said, and what it holds.'),
+  "mayChange": zod.boolean().optional().describe('Whether the person asking may take it. Only an administrator: the\nchannel is the whole deployment\'s, not a resource anybody holds a\ngrant on.'),
+  "offers": zod.array(zod.object({
+  "action": zod.union([zod.null(),zod.enum(['switch', 'pin']).describe('What can be done about this row, if anything.')]).optional(),
+  "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
+  "irreversible": zod.boolean().describe('Whether taking it cannot be undone at the moment it is taken. See\n[`Channel::irreversible`] — it is the version that cannot be walked\nback, not the membership.'),
+  "offers": zod.string().describe('What being on it means, in one line.'),
+  "on": zod.boolean().describe('Whether this is the channel in force.'),
+  "reason": zod.string().nullish().describe('Why there is nothing to do here, in words.'),
+  "since": zod.iso.datetime({"offset":true}).nullish().describe('When general access last moved to what it holds. Always `None` for\nbeta: every release reaches beta, so the date a beta build appeared is\nits own release date and the manifest does not record it twice.'),
+  "tag": zod.string().describe('The image tag that is this channel.'),
+  "version": zod.string().nullish().describe('The version it holds for the control plane. `None` when the manifest\ncould not be read — never a zero, and never the newest release.')
+}).describe('One channel, as a row on a screen.')).describe('One per channel, in a fixed order: general access, then beta.'),
+  "pinned": zod.boolean().describe('The image line names an exact version, so no upgrade can move this\ninstallation until it is changed.'),
+  "problem": zod.string().nullish().describe('Why the channel is an assumption, in words. `None` when it was read.'),
+  "reason": zod.string().nullish().describe('Why it would not. `None` when it would.'),
+  "recognised": zod.boolean().describe('Whether the tag names a channel. False makes `channel` an assumption.'),
+  "switchable": zod.boolean().describe('Whether this server would carry out a switch at all, from anybody.'),
+  "tag": zod.string().nullish().describe('The tag that image was created from. `None` when nothing could be\nasked — which is a third answer, not a false one.')
+}).describe('Which channel this installation is on, and what each channel offers.\nHere as well as on its own path because the one screen that draws it\nalready asks for this, and the channel is what decides which release\n`latest` above is.'),
   "checkError": zod.string().nullish(),
   "checkedAt": zod.iso.datetime({"offset":true}).nullish(),
   "controlPlane": zod.object({
@@ -120,6 +336,20 @@ export const PlanUpdateBody = zod.object({
 })
 
 export const PlanUpdateResponse = zod.object({
+  "channelChange": zod.union([zod.null(),zod.object({
+  "act": zod.enum(['switch', 'pin']).describe('The two shapes the one act takes.'),
+  "channel": zod.enum(['general', 'beta']).describe('The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.'),
+  "diff": zod.string().describe('The same, as a unified diff — the way every other change to this file\nis shown.'),
+  "file": zod.string().describe('The deployment file being rewritten.'),
+  "from": zod.enum(['general', 'beta']).describe('The channel it is leaving. The same as `channel` when the act is a\npin rather than a move.'),
+  "irreversible": zod.boolean().describe('Whether this cannot be undone at the moment it is taken. True for\nbeta, always — see [`Channel::irreversible`].'),
+  "lines": zod.array(zod.object({
+  "from": zod.string(),
+  "to": zod.string()
+})).describe('The image lines, as they are and as they would be.'),
+  "tag": zod.string().describe('The tag both image lines are being moved to.'),
+  "version": zod.string().describe('The version this installation would be moved onto, in the same act.')
+}).describe('The channel change this run would make, when it is a switch rather\nthan an ordinary upgrade. `None` on every ordinary plan.')]).optional(),
   "envMissing": zod.array(zod.string()).describe('Variables the release\'s `.env.example` requires that `.env` lacks.'),
   "files": zod.array(zod.object({
   "name": zod.string(),
@@ -151,6 +381,7 @@ export const ListRunsResponseItem = zod.object({
   "title": zod.string()
 })),
   "targets": zod.object({
+  "channel": zod.union([zod.null(),zod.enum(['general', 'beta']).describe('The channel this run moves the installation onto, when it is a switch\nrather than an ordinary upgrade. What makes a run say, afterwards,\nthat it was the act that changed the channel.')]).optional(),
   "controlPlane": zod.boolean(),
   "hostIds": zod.array(zod.string())
 }),
@@ -194,6 +425,7 @@ export const CreateRunResponse = zod.object({
   "title": zod.string()
 })),
   "targets": zod.object({
+  "channel": zod.union([zod.null(),zod.enum(['general', 'beta']).describe('The channel this run moves the installation onto, when it is a switch\nrather than an ordinary upgrade. What makes a run say, afterwards,\nthat it was the act that changed the channel.')]).optional(),
   "controlPlane": zod.boolean(),
   "hostIds": zod.array(zod.string())
 }),
@@ -225,6 +457,7 @@ export const GetRunResponse = zod.object({
   "title": zod.string()
 })),
   "targets": zod.object({
+  "channel": zod.union([zod.null(),zod.enum(['general', 'beta']).describe('The channel this run moves the installation onto, when it is a switch\nrather than an ordinary upgrade. What makes a run say, afterwards,\nthat it was the act that changed the channel.')]).optional(),
   "controlPlane": zod.boolean(),
   "hostIds": zod.array(zod.string())
 }),
@@ -262,6 +495,7 @@ export const CancelRunResponse = zod.object({
   "title": zod.string()
 })),
   "targets": zod.object({
+  "channel": zod.union([zod.null(),zod.enum(['general', 'beta']).describe('The channel this run moves the installation onto, when it is a switch\nrather than an ordinary upgrade. What makes a run say, afterwards,\nthat it was the act that changed the channel.')]).optional(),
   "controlPlane": zod.boolean(),
   "hostIds": zod.array(zod.string())
 }),
@@ -299,6 +533,7 @@ export const ContinueRunResponse = zod.object({
   "title": zod.string()
 })),
   "targets": zod.object({
+  "channel": zod.union([zod.null(),zod.enum(['general', 'beta']).describe('The channel this run moves the installation onto, when it is a switch\nrather than an ordinary upgrade. What makes a run say, afterwards,\nthat it was the act that changed the channel.')]).optional(),
   "controlPlane": zod.boolean(),
   "hostIds": zod.array(zod.string())
 }),

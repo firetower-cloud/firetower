@@ -12,7 +12,7 @@
  * second frame inside the sheet's own, and what makes a list read as a list is
  * the repeat — every border added is one more thing competing with it.
  */
-import { CircleSlash2, ExternalLink, Info, Loader2, Lock, RefreshCw, Shapes, TriangleAlert } from "lucide-react";
+import { CircleSlash2, ExternalLink, FolderDown, Info, Loader2, Lock, RefreshCw, Shapes, TriangleAlert } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "~/components/ui";
 import type { Trouble as TroubleKind } from "~/data";
@@ -368,6 +368,27 @@ export function Row({
  * drawn beside a `Blank` — a note about operating things you do not have is a
  * paragraph nobody can use.
  */
+/**
+ * The whole-page drop surface, said while something is over it.
+ *
+ * One component and two sentences rather than two overlays: Skills and
+ * Profiles take the same three shapes — one bundle, a folder of them, or a
+ * `.zip` of either — and the only difference is the noun.
+ */
+export function Dropping({ says }: { says: string }) {
+  return (
+    <div className="drop">
+      <div>
+        <span className="mx-auto grid h-14 w-14 place-items-center text-dim">
+          <FolderDown className="h-7 w-7" strokeWidth={1.5} />
+        </span>
+        <b className="mt-2 block text-lede font-mid text-bone">Drop the folder</b>
+        <p className="mt-1 max-w-[46ch] text-ui text-dim">{says}</p>
+      </div>
+    </div>
+  );
+}
+
 export function Blank({
   icon,
   title,
