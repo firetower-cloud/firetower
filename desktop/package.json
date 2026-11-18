@@ -23,7 +23,8 @@
     "test": "vitest run",
     "check:states": "node scripts/check-states.mjs",
     "assert:design": "node scripts/assert-design.mjs",
-    "assert:connected": "node scripts/assert-connected.mjs"
+    "assert:connected": "node scripts/assert-connected.mjs",
+    "shoot:channels": "node scripts/shoot-channels.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",
