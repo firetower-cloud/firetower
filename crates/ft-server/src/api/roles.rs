@@ -676,6 +676,330 @@ pub(super) async fn plan_role_import(
     import::plan(&dropped, &here).map(Json).map_err(refused)
 }
 
+/// What an import will take, before anything is dropped.
+///
+/// **So a client can refuse before it asks rather than after**, which is what
+/// [`import::PlanLimits`] has always said it was for and what nothing could
+/// read until there was an endpoint for it. The desktop needs the figures
+/// *before* it expands an archive: a zip that unpacks into more than this is a
+/// drop that is refused, and inflating it first to find that out is the denial
+/// of service the threat model's fifth finding is about.
+///
+/// The same figures the plan carries, from the same constants. Nothing about
+/// this installation is in them, so it needs no authorisation beyond being
+/// signed in.
+#[utoipa::path(
+    get, path = "/api/v1/roles/import/limits", tag = "roles",
+    responses((status = 200, body = import::PlanLimits), (status = 401, body = ApiError)),
+)]
+pub(super) async fn role_import_limits(
+    Extension(principal): Extension<Principal>,
+) -> ApiResult<Json<import::PlanLimits>> {
+    whoever(&principal)?;
+    Ok(Json(import::PlanLimits::ours()))
+}
+
+/// Apply a drop somebody has reviewed.
+///
+/// **The plan is a presentation, and this is where that pays for itself.** The
+/// input is the plan endpoint's input plus the fingerprint of what was shown:
+/// no resolved ids, no overwrite targets, no permission flags. Every write
+/// below is derived here, by `import::decide` over those same files and a
+/// snapshot of what this person can see *now*, and then authorised again
+/// against the row it would overwrite inside the transaction that overwrites
+/// it.
+///
+/// Three gates, in this order, and each one answers a different question:
+///
+/// 1. **Is this drop appliable at all**, as read at this moment? A bundle that
+///    has become blocked since the review stops the set.
+/// 2. **Is it still what was reviewed?** The fingerprint of every entry
+///    derived here against the ones handed back. A profile that was filed
+///    elsewhere, or whose pinned machine was deleted, changes an entry without
+///    changing `updated_at` — see [`import::PlanEntry::digest`].
+/// 3. **May this person still perform each write?** Writer on every row
+///    overwritten and Editor on the directory anything new is filed in, read
+///    inside the transaction, plus `check_account` and `check_skills` — the
+///    same two the editor's own save goes through, so an import cannot be a
+///    way around either.
+///
+/// Then one transaction, two passes: every profile written, then every team
+/// wired, because a team may name a profile from the same drop. The set
+/// applies whole or not at all.
+#[utoipa::path(
+    post, path = "/api/v1/roles/import/apply", tag = "roles",
+    request_body = import::AcceptedDrop,
+    responses(
+        (status = 200, body = import::ImportDone),
+        (status = 400, body = ApiError),
+        (status = 401, body = ApiError),
+    ),
+)]
+pub(super) async fn apply_role_import(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(accepted): Json<import::AcceptedDrop>,
+) -> ApiResult<Json<import::ImportDone>> {
+    let me = whoever(&principal)?;
+    let here = visible_to(&state, me).await?;
+    let decided = import::decide(&accepted.drop, &here).map_err(refused)?;
+
+    if !decided.plan.appliable {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "{} Nothing was written. Drop the folder again to see what it would do now.",
+                decided.plan.why_not.join(" ")
+            ),
+        ));
+    }
+    // **What is applied is what was reviewed, row for row.** Set equality
+    // both ways: a row whose fingerprint has moved is one the library changed
+    // underneath, and a row the accept never names is one nobody looked at.
+    let mut reviewed = accepted.reviewed.clone();
+    let mut derived: Vec<String> = decided
+        .plan
+        .entries
+        .iter()
+        .map(|entry| entry.digest.clone())
+        .collect();
+    reviewed.sort();
+    derived.sort();
+    if reviewed != derived {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "what this drop would do has changed since it was reviewed, so nothing was written. \
+             Drop the folder again and read the plan before accepting it."
+                .to_string(),
+        ));
+    }
+
+    // The editor's own two checks, on the way in, before anything is opened.
+    // Not a second opinion: they are the gates `create_role` and `update_role`
+    // apply, and an import that skipped them would be a way to pin a skill or
+    // spend a subscription the Profiles screen refuses.
+    for write in &decided.writes {
+        check_account(&state, me.id.as_str(), &write.asked).await?;
+        check_skills(&state, me.id.as_str(), &write.asked).await?;
+    }
+
+    let mut tx = state.db.pool().begin().await?;
+    let mut made: std::collections::BTreeMap<&str, String> = Default::default();
+    let mut done: Vec<import::WroteProfile> = Vec::new();
+
+    // **One pass, in the plan's order**, which is path order: a deterministic
+    // order to take row locks in, so two imports of overlapping drops wait for
+    // each other rather than deadlocking.
+    for write in &decided.writes {
+        let created = matches!(write.onto, import::Onto::Create);
+        let id = match &write.onto {
+            import::Onto::Create => {
+                let filed = match &write.filed {
+                    None => None,
+                    Some(directory) => {
+                        // Read in the transaction, so a grant withdrawn since
+                        // the review refuses rather than filing a profile
+                        // where this person may no longer write.
+                        let may = matches!(
+                            crate::access::level_on_in(&mut *tx, me.id.as_str(), &directory.id)
+                                .await?,
+                            Some(level) if level >= Level::Writer
+                        );
+                        if !may {
+                            return Err(ApiError::new(
+                                ErrorCode::InvalidRequest,
+                                format!(
+                                    "you can no longer file anything in `{}`, so nothing was \
+                                     written. Ask for Editor on it, or remove the `directory:` \
+                                     line from `{}` and the profile stays in your own space.",
+                                    directory.name, write.path
+                                ),
+                            ));
+                        }
+                        Some(directory.slug.as_str())
+                    }
+                };
+                let parent = match &write.filed {
+                    Some(directory) => format!("d.{}", directory.slug),
+                    None => format!("u.{}", me.slug),
+                };
+                if let Some(held) =
+                    crate::roles::keyed_already(&mut *tx, &parent, &write.key, None).await?
+                {
+                    return Err(key_clash(Some(&held), write, &write.filed));
+                }
+                crate::roles::create_in(
+                    &mut *tx,
+                    me.org_id.as_str(),
+                    me.id.as_str(),
+                    &me.slug,
+                    crate::roles::Filing {
+                        directory: filed,
+                        key: Some(&write.key),
+                    },
+                    &write.asked,
+                )
+                .await
+                .map_err(|e| taken_meanwhile(e, write, &write.filed))?
+                .as_str()
+                .to_string()
+            }
+            import::Onto::Replace {
+                profile,
+                was,
+                adopts_key,
+            } => {
+                // Writer, now, through the one predicate — and inside the
+                // transaction, so the answer cannot change between the check
+                // and the write it decides.
+                if !crate::roles::may_write_in(&mut *tx, me.id.as_str(), profile).await? {
+                    return Err(ApiError::new(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "`{}` is no longer a profile you can change, so nothing was written. \
+                             Ask for Editor where it is filed, or leave `{}` out of the drop.",
+                            write.asked.name, write.path
+                        ),
+                    ));
+                }
+                // And it is still the row the review was about. The lock is
+                // held to the commit, so what is checked here is what is
+                // written below.
+                let standing = crate::roles::standing_in(&mut *tx, profile).await?;
+                if standing.as_ref() != Some(was) {
+                    return Err(ApiError::new(
+                        ErrorCode::InvalidRequest,
+                        format!(
+                            "`{}` changed while this drop was being reviewed, so nothing was \
+                             written. Drop the folder again to see what it would do now.",
+                            write.asked.name
+                        ),
+                    ));
+                }
+                if *adopts_key {
+                    let parent =
+                        crate::roles::filed_beside(&ft_core::ResourcePath::from_stored(&was.path));
+                    if let Some(held) =
+                        crate::roles::keyed_already(&mut *tx, &parent, &write.key, Some(profile))
+                            .await?
+                    {
+                        return Err(key_clash(Some(&held), write, &filed_in(&was.path, &here)));
+                    }
+                }
+                crate::roles::replace_in(
+                    &mut *tx,
+                    profile,
+                    adopts_key.then_some(write.key.as_str()),
+                    &write.asked,
+                )
+                .await
+                .map_err(|e| taken_meanwhile(e, write, &filed_in(&was.path, &here)))?;
+                profile.clone()
+            }
+        };
+        made.insert(write.path.as_str(), id.clone());
+        done.push(import::WroteProfile {
+            path: write.path.clone(),
+            key: write.key.clone(),
+            profile: id,
+            name: write.asked.name.clone(),
+            created,
+        });
+    }
+
+    // The second pass. Every id exists now, including the ones this drop made,
+    // which is the whole reason there are two.
+    for write in &decided.writes {
+        if write.team.is_empty() {
+            continue;
+        }
+        let mut team: Vec<String> = Vec::new();
+        for mate in &write.team {
+            match mate {
+                import::Teammate::Here(id) => team.push(id.clone()),
+                // Resolution found the bundle, and the pass above wrote it.
+                // Absent is a bug rather than a state: it would mean the two
+                // passes disagreed about what the drop holds, and writing a
+                // short team would quietly widen what the profile may
+                // delegate to — `delegate_scope = []` is *any* profile the
+                // owner can see.
+                import::Teammate::InDrop(path) => match made.get(path.as_str()) {
+                    Some(id) => team.push(id.clone()),
+                    None => {
+                        return Err(ApiError::new(
+                            ErrorCode::InvalidRequest,
+                            format!(
+                                "`{}` names a teammate this drop no longer holds, so nothing was \
+                                 written. Drop the folder again to see what it would do now.",
+                                write.path
+                            ),
+                        ))
+                    }
+                },
+            }
+        }
+        crate::roles::set_team_in(&mut *tx, &made[write.path.as_str()], &team).await?;
+    }
+
+    tx.commit().await?;
+    Ok(Json(import::ImportDone { wrote: done }))
+}
+
+/// A write the key's own index refused, in the window `key_is_taken` cannot
+/// close: another import committing the same key in the same directory between
+/// the read above and this write. Rare, and it is the one failure that would
+/// otherwise reach somebody as a constraint name.
+fn taken_meanwhile(
+    e: anyhow::Error,
+    write: &import::Write,
+    filed: &Option<import::Dir>,
+) -> ApiError {
+    match crate::roles::key_already_filed_there(&e) {
+        true => key_clash(None, write, filed),
+        false => wrote(e),
+    }
+}
+
+/// What a key already in use says.
+///
+/// A key is one profile within one directory, so two of them is a question
+/// about folder names rather than a fault in either file.
+fn key_clash(
+    held_by: Option<&str>,
+    write: &import::Write,
+    filed: &Option<import::Dir>,
+) -> ApiError {
+    let somewhere = match filed {
+        Some(directory) => format!("`{}`", directory.name),
+        None => "your own space".to_string(),
+    };
+    // Named when it is known. The write's own refusal arrives from the index
+    // with the transaction already aborted, so there is nothing left to look
+    // the profile up with — and a sentence that cannot name it still names the
+    // key, the place and both ways out.
+    let holder = match held_by {
+        Some(name) => format!("already holds `{name}`, which carries"),
+        None => "already holds a profile carrying".to_string(),
+    };
+    ApiError::new(
+        ErrorCode::InvalidRequest,
+        format!(
+            "{somewhere} {holder} the key `{}`. Two profiles filed together cannot share one, so \
+             nothing was written. Rename the folder `{}` is in, or file one of the two somewhere \
+             else.",
+            write.key, write.path
+        ),
+    )
+}
+
+/// The directory a path is filed in, as this person sees it.
+fn filed_in(path: &str, here: &import::Here) -> Option<import::Dir> {
+    let slug = ft_core::ResourcePath::from_stored(path)
+        .directory_slug()?
+        .to_string();
+    here.directories.iter().find(|d| d.slug == slug).cloned()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1411,5 +1735,740 @@ mod tests {
             !drawn.contains(theirs.as_str()),
             "the plan named a profile the asker cannot see"
         );
+    }
+
+    // ── applying one ────────────────────────────────────────────────────
+
+    /// The two calls a person makes, in order: plan it, then accept exactly
+    /// what came back.
+    async fn applied(
+        state: &AppState,
+        who: &Principal,
+        drop: ProfileDrop,
+    ) -> ApiResult<import::ImportDone> {
+        let plan = planned(state, who, drop.clone()).await;
+        accept(state, who, drop, reviewing(&plan)).await
+    }
+
+    /// What an accept hands back: the fingerprint of every row it is
+    /// importing, which is every row of the plan when nothing was excluded.
+    fn reviewing(plan: &import::ImportPlan) -> Vec<String> {
+        plan.entries.iter().map(|e| e.digest.clone()).collect()
+    }
+
+    async fn planned(state: &AppState, who: &Principal, drop: ProfileDrop) -> import::ImportPlan {
+        plan_role_import(State(state.clone()), Extension(who.clone()), Json(drop))
+            .await
+            .expect("a plan")
+            .0
+    }
+
+    async fn accept(
+        state: &AppState,
+        who: &Principal,
+        drop: ProfileDrop,
+        reviewed: Vec<String>,
+    ) -> ApiResult<import::ImportDone> {
+        apply_role_import(
+            State(state.clone()),
+            Extension(who.clone()),
+            Json(import::AcceptedDrop { drop, reviewed }),
+        )
+        .await
+        .map(|json| json.0)
+    }
+
+    /// One profile, by id, as the person who asked sees it.
+    async fn row(state: &AppState, who: &Principal, id: &str) -> Role {
+        let me = whoever(who).unwrap();
+        state
+            .roles
+            .one(me.id.as_str(), id, Level::Viewer)
+            .await
+            .unwrap()
+            .expect("the profile is there")
+    }
+
+    /// Whatever a refusal said, as text to assert on. Folded, because a
+    /// sentence that leads a message and one that follows another differ by a
+    /// capital and no test is about that.
+    fn said(e: &ApiError) -> String {
+        format!("{e:?}").to_lowercase()
+    }
+
+    /// **The whole feature, through both calls.** Five profiles arrive from
+    /// five files, every field is what the file says, and the two teams point
+    /// at profiles the same drop created.
+    #[tokio::test]
+    async fn a_drop_writes_every_profile_and_wires_a_team_from_the_same_drop() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let host = state
+            .db
+            .ensure_test_host("fire-01", me.id.as_str())
+            .await
+            .unwrap();
+
+        // A manager naming two teammates that do not exist yet. The order is
+        // deliberate: `engineering-manager` sorts before the two folders it
+        // names, so the team cannot be wired as the rows are written.
+        let manager = DroppedFile {
+            path: "profiles/engineering-manager/PROFILE.md".into(),
+            text: "---\nname: Engineering Manager\ndoes: runs delivery\nengine: ClaudeCode\n\
+                   placement: new\nmachine: fire-01\ncan_delegate: true\n\
+                   delegates_to:\n  - Designer\n  - Engineer\n\
+                   include_always_on: false\non_usage_limit: engine\non_child_limit: reroute\n\
+                   settings:\n  model: opus\n  effort: high\n---\n\n# Manager\n\nYou own delivery.\n"
+                .into(),
+        };
+        let done = applied(
+            &state,
+            &admin,
+            plan_for(vec![
+                manager,
+                bundle("designer", "Designer"),
+                bundle("engineer", "Engineer"),
+            ]),
+        )
+        .await
+        .expect("a drop of three applies");
+
+        assert_eq!(done.wrote.len(), 3);
+        assert!(done.wrote.iter().all(|w| w.created));
+
+        let library = state
+            .roles
+            .visible(me.id.as_str(), Level::Viewer)
+            .await
+            .unwrap();
+        assert_eq!(library.len(), 3);
+
+        let lead = library
+            .iter()
+            .find(|r| r.name == "Engineering Manager")
+            .unwrap();
+        // The key is the folder's name, written here and nowhere else.
+        assert_eq!(lead.key.as_deref(), Some("engineering-manager"));
+        assert_eq!(lead.does, "runs delivery");
+        assert_eq!(lead.agent.as_deref(), Some("ClaudeCode"));
+        assert_eq!(lead.placement, "new");
+        assert_eq!(lead.machine.as_deref(), Some(host.id.as_str()));
+        assert!(lead.can_delegate);
+        assert!(!lead.include_always_on);
+        assert!(lead.include_repo_defaults);
+        assert_eq!(lead.on_usage_limit, "engine");
+        assert_eq!(lead.on_child_limit, "reroute");
+        assert_eq!(lead.settings.model.as_deref(), Some("opus"));
+        assert_eq!(lead.settings.effort.as_deref(), Some("high"));
+        assert_eq!(lead.instructions, "# Manager\n\nYou own delivery.");
+
+        // The second pass: both teammates, by the ids this drop just made.
+        let designer = library.iter().find(|r| r.name == "Designer").unwrap();
+        let engineer = library.iter().find(|r| r.name == "Engineer").unwrap();
+        let mut team = lead.delegate_scope.clone();
+        team.sort();
+        let mut wanted = vec![designer.id.clone(), engineer.id.clone()];
+        wanted.sort();
+        assert_eq!(team, wanted, "a team naming its own drop resolves");
+    }
+
+    /// Cycles are a library somebody might mean, so they apply.
+    #[tokio::test]
+    async fn two_profiles_that_delegate_to_each_other_both_apply() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let pair = |key: &str, name: &str, mate: &str| DroppedFile {
+            path: format!("profiles/{key}/PROFILE.md"),
+            text: format!(
+                "---\nname: {name}\ndoes: half of a pair\ncan_delegate: true\n\
+                 delegates_to:\n  - {mate}\n---\n\nInstructions.\n"
+            ),
+        };
+        applied(
+            &state,
+            &admin,
+            plan_for(vec![
+                pair("designer", "Designer", "Engineer"),
+                pair("engineer", "Engineer", "Designer"),
+            ]),
+        )
+        .await
+        .expect("A to B and B to A is a legal library");
+
+        let library = state
+            .roles
+            .visible(me.id.as_str(), Level::Viewer)
+            .await
+            .unwrap();
+        let designer = library.iter().find(|r| r.name == "Designer").unwrap();
+        let engineer = library.iter().find(|r| r.name == "Engineer").unwrap();
+        assert_eq!(designer.delegate_scope, vec![engineer.id.clone()]);
+        assert_eq!(engineer.delegate_scope, vec![designer.id.clone()]);
+    }
+
+    /// **A profile matched by its name gains the folder's key**, which is the
+    /// one moment a row stops being matched by one and starts being matched by
+    /// the other. `qa-engineer/` against the library's `QA` is the live case.
+    #[tokio::test]
+    async fn a_profile_matched_by_its_name_adopts_the_folders_key() {
+        let (state, admin) = fixture().await;
+        let id = made(&state, &admin, &asked_for("QA")).await;
+        assert_eq!(row(&state, &admin, &id).await.key, None);
+
+        let done = applied(&state, &admin, plan_for(vec![bundle("qa-engineer", "QA")]))
+            .await
+            .expect("an exact name match is the only candidate");
+
+        assert_eq!(done.wrote.len(), 1);
+        assert!(!done.wrote[0].created, "it overwrote the row it matched");
+        assert_eq!(done.wrote[0].profile, id);
+        let now = row(&state, &admin, &id).await;
+        assert_eq!(now.key.as_deref(), Some("qa-engineer"));
+        // And the next export writes it back into the folder it came from.
+        assert_eq!(exported(&state, &admin, &id).await.key, "qa-engineer");
+    }
+
+    /// **Firetower's own export, fed straight back, through the accept.**
+    ///
+    /// The round trip the whole format rests on, and the half that could not
+    /// be asserted before there was an apply: five overwrites with empty
+    /// diffs, accepted, and nothing about any row different afterwards.
+    /// `qa-engineer`/`QA` is in the set because it is the one that diverges.
+    #[tokio::test]
+    async fn the_five_fstack_profiles_export_and_apply_back_with_nothing_changing() {
+        let (state, admin) = fixture().await;
+        let library = [
+            ("designer", "Designer"),
+            ("engineer", "Engineer"),
+            ("engineering-manager", "Engineering Manager"),
+            ("qa-engineer", "QA"),
+            ("security-advisor", "Security Advisor"),
+        ];
+        let mut ids = Vec::new();
+        for (key, name) in library {
+            ids.push(keyed(&state, &admin, name, key).await);
+        }
+        let mut files = Vec::new();
+        for id in &ids {
+            let file = exported(&state, &admin, id).await;
+            files.push(DroppedFile {
+                path: file.path,
+                text: file.text,
+            });
+        }
+
+        let mut before = Vec::new();
+        for id in &ids {
+            before.push(row(&state, &admin, id).await);
+        }
+
+        let plan = planned(&state, &admin, plan_for(files.clone())).await;
+        assert_eq!(plan.entries.len(), 5);
+        assert!(plan.appliable);
+        for entry in &plan.entries {
+            let PlanOutcome::Overwrite(over) = &entry.outcome else {
+                panic!(
+                    "`{}` is {:#?} rather than an overwrite",
+                    entry.key, entry.outcome
+                )
+            };
+            assert!(
+                over.diff.iter().all(|f| f.change == FieldChange::Unchanged),
+                "`{}` round-tripped with changes",
+                entry.key
+            );
+            assert!(!over.adopts_key, "every row already carries its key");
+        }
+
+        let done = accept(&state, &admin, plan_for(files), reviewing(&plan))
+            .await
+            .expect("five empty overwrites apply");
+        assert_eq!(done.wrote.len(), 5);
+        assert!(done.wrote.iter().all(|w| !w.created));
+
+        for (was, id) in before.iter().zip(&ids) {
+            let now = row(&state, &admin, id).await;
+            // **Every column, read off the response model** rather than a
+            // list written here: a field added to a profile is covered by
+            // this the day it is added. All but the timestamp, which an
+            // overwrite in place moves whether or not a column changed.
+            assert_eq!(
+                but_the_clock(&now),
+                but_the_clock(was),
+                "`{}` changed when it was imported back",
+                was.name
+            );
+        }
+    }
+
+    /// One profile as everything about it except when it was last written.
+    fn but_the_clock(role: &Role) -> serde_json::Value {
+        let mut said = serde_json::to_value(role).expect("a profile serialises");
+        said.as_object_mut().expect("an object").remove("updatedAt");
+        said
+    }
+
+    /// **An edit between the review and the accept refuses.**
+    ///
+    /// Somebody changes one of the profiles while the review is on screen, so
+    /// the diff that was accepted is no longer the diff that would happen. The
+    /// fingerprint is what catches it, before anything is opened — and the
+    /// profile that was *not* edited is not written either, because the set is
+    /// one unit.
+    #[tokio::test]
+    async fn an_edit_between_the_review_and_the_accept_refuses_rather_than_overwriting() {
+        let (state, admin) = fixture().await;
+        let designer = made(&state, &admin, &asked_for("Designer")).await;
+        let engineer = made(&state, &admin, &asked_for("Engineer")).await;
+
+        // `designer/` sorts first, so it is written before `engineer/` is
+        // reached: a half-applied set would leave it changed.
+        let files = vec![
+            bundle("designer", "Designer"),
+            bundle("engineer", "Engineer"),
+        ];
+        let plan = planned(&state, &admin, plan_for(files.clone())).await;
+        assert!(plan.appliable);
+
+        // Somebody edits the second one while the review is on screen.
+        sqlx::query("UPDATE roles SET does = 'edited by somebody else', updated_at = updated_at + interval '1 second' WHERE id = $1")
+            .bind(&engineer)
+            .execute(state.db.pool())
+            .await
+            .unwrap();
+
+        let before = every_row(&state).await;
+        let no = accept(&state, &admin, plan_for(files), reviewing(&plan))
+            .await
+            .expect_err("an edited row is not overwritten blind");
+        assert!(said(&no).contains("nothing was written"), "{}", said(&no));
+
+        assert_eq!(
+            before,
+            every_row(&state).await,
+            "a write survived the refusal"
+        );
+        let first = row(&state, &admin, &designer).await;
+        assert_eq!(first.does, asked_for("Designer").does);
+        assert_eq!(first.key, None, "the key adoption rolled back too");
+    }
+
+    /// **Nothing survives a refusal in the middle of the set.**
+    ///
+    /// The one test atomicity needs: a drop whose first bundle is written and
+    /// whose second is refused *inside the transaction*, which is where the
+    /// `&self.pool` trap bites. `architect/` sorts first and creates cleanly;
+    /// `designer/` is then refused for a key already filed where it would go.
+    /// With either write taking a connection of its own, the architect stays
+    /// behind — half a library, from a drop that was refused.
+    #[tokio::test]
+    async fn nothing_survives_a_refusal_in_the_middle_of_the_set() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let shelf = state
+            .access
+            .create_directory(&me.org_id, "Platform", &me.id, &[])
+            .await
+            .unwrap();
+        crate::roles::create_in(
+            state.db.pool(),
+            me.org_id.as_str(),
+            me.id.as_str(),
+            &me.slug,
+            crate::roles::Filing {
+                directory: Some(&shelf.slug),
+                key: Some("designer"),
+            },
+            &asked_for("Design System"),
+        )
+        .await
+        .unwrap();
+        // A second row carrying the key, so the bundle is a question rather
+        // than a match and the answer below can file a third one.
+        keyed(&state, &admin, "Designer", "designer").await;
+
+        let before = every_row(&state).await;
+        let drop = ProfileDrop {
+            files: vec![
+                bundle("architect", "Architect"),
+                DroppedFile {
+                    path: "profiles/designer/PROFILE.md".into(),
+                    text: "---\nname: Fresh Designer\ndoes: designs\ndirectory: Platform\n---\n\nHello.\n"
+                        .into(),
+                },
+            ],
+            answers: vec![import::CandidateAnswer {
+                key: "designer".into(),
+                answer: import::CandidateDecision::NewProfile,
+            }],
+        };
+        let no = applied(&state, &admin, drop)
+            .await
+            .expect_err("the second bundle cannot be filed, so neither is");
+        assert!(said(&no).contains("nothing was written"), "{}", said(&no));
+        assert_eq!(
+            before,
+            every_row(&state).await,
+            "the first profile of the drop survived a refusal of the second"
+        );
+        assert!(
+            state
+                .roles
+                .by_name(me.id.as_str(), "Architect")
+                .await
+                .unwrap()
+                .is_none(),
+            "a half-imported library"
+        );
+    }
+
+    /// **Leaving a blocked bundle out imports the rest**, which is what the
+    /// banner's own button offers. The two that are left are the two that were
+    /// reviewed, so they still match what was on screen.
+    #[tokio::test]
+    async fn excluding_a_blocked_bundle_imports_the_rest() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let broken = DroppedFile {
+            path: "profiles/broken/PROFILE.md".into(),
+            text: "Just some prose, and no frontmatter at all.\n".into(),
+        };
+        let good = vec![
+            bundle("designer", "Designer"),
+            bundle("engineer", "Engineer"),
+        ];
+        let mut all = good.clone();
+        all.push(broken);
+
+        let plan = planned(&state, &admin, plan_for(all)).await;
+        assert!(!plan.appliable, "a blocked bundle stops the set");
+        // What the screen sends after the person unticks it: the files of the
+        // rows that are left, and the fingerprints of those rows.
+        let kept: Vec<String> = plan
+            .entries
+            .iter()
+            .filter(|e| !matches!(e.outcome, PlanOutcome::Blocked(_)))
+            .map(|e| e.digest.clone())
+            .collect();
+        assert_eq!(kept.len(), 2);
+
+        let done = accept(&state, &admin, plan_for(good), kept)
+            .await
+            .expect("the two that were reviewed import");
+        assert_eq!(done.wrote.len(), 2);
+        let library = state
+            .roles
+            .visible(me.id.as_str(), Level::Viewer)
+            .await
+            .unwrap();
+        assert_eq!(library.len(), 2);
+        assert!(!library.iter().any(|r| r.key.as_deref() == Some("broken")));
+    }
+
+    /// **Leaving out the bundle another one named is not a smaller import.**
+    ///
+    /// The manager's team no longer resolves, so what it would do has changed
+    /// — and it is refused rather than written with a team it was never shown.
+    #[tokio::test]
+    async fn excluding_the_teammate_a_profile_names_refuses_rather_than_writing_it() {
+        let (state, admin) = fixture().await;
+        let manager = DroppedFile {
+            path: "profiles/engineering-manager/PROFILE.md".into(),
+            text: "---\nname: Engineering Manager\ndoes: runs delivery\ncan_delegate: true\n\
+                   delegates_to:\n  - Designer\n---\n\nYou own delivery.\n"
+                .into(),
+        };
+        let both = vec![manager.clone(), bundle("designer", "Designer")];
+        let plan = planned(&state, &admin, plan_for(both)).await;
+        assert!(plan.appliable, "the teammate is in the drop");
+        let lead = plan
+            .entries
+            .iter()
+            .find(|e| e.key == "engineering-manager")
+            .unwrap();
+
+        let before = every_row(&state).await;
+        let no = accept(
+            &state,
+            &admin,
+            plan_for(vec![manager]),
+            vec![lead.digest.clone()],
+        )
+        .await
+        .expect_err("its team came out of the drop with it");
+        assert!(said(&no).contains("nothing was written"), "{}", said(&no));
+        assert!(said(&no).contains("drop the folder again"), "{}", said(&no));
+        assert_eq!(before, every_row(&state).await);
+    }
+
+    /// **Filing moves a path and leaves the timestamp alone**, so a check that
+    /// rested on `updated_at` would have overwritten this one.
+    #[tokio::test]
+    async fn a_profile_filed_elsewhere_refuses_though_its_timestamp_never_moved() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let id = made(&state, &admin, &asked_for("Designer")).await;
+        let files = vec![bundle("designer", "Designer")];
+        let plan = planned(&state, &admin, plan_for(files.clone())).await;
+        assert!(plan.appliable);
+
+        let was = row(&state, &admin, &id).await;
+        let shelf = state
+            .access
+            .create_directory(&me.org_id, "Platform", &me.id, &[])
+            .await
+            .unwrap();
+        let from = state
+            .access
+            .path_of(crate::access::FiledKind::Role, &id)
+            .await
+            .unwrap()
+            .unwrap();
+        state
+            .access
+            .transfer(
+                &state.vault,
+                crate::access::FiledKind::Role,
+                &id,
+                &from.moved_to(ft_core::path::DIRECTORY, &shelf.slug),
+                "admin",
+            )
+            .await
+            .unwrap();
+
+        let now = row(&state, &admin, &id).await;
+        assert_ne!(now.path, was.path, "it moved");
+        assert_eq!(now.updated_at, was.updated_at, "and the timestamp did not");
+
+        let no = accept(&state, &admin, plan_for(files), reviewing(&plan))
+            .await
+            .expect_err("a plan about where it was is not a plan about where it is");
+        assert!(
+            said(&no).contains("has changed since it was reviewed"),
+            "{}",
+            said(&no)
+        );
+        assert_eq!(row(&state, &admin, &id).await.does, was.does);
+    }
+
+    /// **A deleted machine clears a pin through a foreign key**, which changes
+    /// what the accepted diff meant while the timestamp stays put.
+    #[tokio::test]
+    async fn a_pin_cleared_by_a_deleted_machine_refuses_though_its_timestamp_never_moved() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let host = state
+            .db
+            .ensure_test_host("fire-01", me.id.as_str())
+            .await
+            .unwrap();
+        let mut new = asked_for("Designer");
+        new.machine = Some(host.id.as_str().to_string());
+        new.placement = "new".into();
+        let id = made(&state, &admin, &new).await;
+
+        // The file leaves the machine to the lead, so the plan's diff reads
+        // `fire-01` on the left — which is the value that is about to vanish.
+        let files = vec![bundle("designer", "Designer")];
+        let plan = planned(&state, &admin, plan_for(files.clone())).await;
+        let PlanOutcome::Overwrite(over) = &plan.entries[0].outcome else {
+            panic!("{:#?}", plan.entries[0].outcome)
+        };
+        let machine = over.diff.iter().find(|f| f.field == "machine").unwrap();
+        assert_eq!(machine.before, "fire-01");
+        assert_eq!(machine.change, FieldChange::Reset);
+
+        let was = row(&state, &admin, &id).await;
+        sqlx::query("DELETE FROM hosts WHERE id = $1")
+            .bind(host.id.as_str())
+            .execute(state.db.pool())
+            .await
+            .unwrap();
+        let now = row(&state, &admin, &id).await;
+        assert_eq!(now.machine, None, "the foreign key cleared the pin");
+        assert_eq!(
+            now.updated_at, was.updated_at,
+            "and the timestamp did not move"
+        );
+
+        let no = accept(&state, &admin, plan_for(files), reviewing(&plan))
+            .await
+            .expect_err("the reset that was accepted is no longer the reset that would happen");
+        assert!(
+            said(&no).contains("has changed since it was reviewed"),
+            "{}",
+            said(&no)
+        );
+    }
+
+    /// A fingerprint nobody produced is not a review.
+    #[tokio::test]
+    async fn an_accept_that_was_never_reviewed_writes_nothing() {
+        let (state, admin) = fixture().await;
+        let before = every_row(&state).await;
+        let no = accept(
+            &state,
+            &admin,
+            plan_for(vec![bundle("designer", "Designer")]),
+            vec!["not a plan this server produced".to_string()],
+        )
+        .await
+        .expect_err("an accept carries the plan it accepted");
+        assert!(said(&no).contains("nothing was written"), "{}", said(&no));
+        assert_eq!(before, every_row(&state).await);
+    }
+
+    /// **The High finding, asserted.** A caller who hands back an answer
+    /// naming somebody else's profile overwrites nothing: the id is re-resolved
+    /// against what *they* can see, and a profile they cannot see is not there.
+    #[tokio::test]
+    async fn an_answer_naming_a_profile_you_cannot_see_writes_nothing() {
+        let (state, admin) = fixture().await;
+        let ana = colleague(&state, "ana").await;
+        let hers = made(&state, &ana, &asked_for("Designer")).await;
+        let was = row(&state, &ana, &hers).await;
+
+        let drop = ProfileDrop {
+            files: vec![bundle("designer", "Her Designer")],
+            answers: vec![import::CandidateAnswer {
+                key: "designer".into(),
+                answer: import::CandidateDecision::SameProfile {
+                    profile: hers.clone(),
+                },
+            }],
+        };
+        // The plan says so first, in a sentence, and the apply refuses rather
+        // than taking the id.
+        let plan = planned(&state, &admin, drop.clone()).await;
+        assert!(!plan.appliable);
+        let no = accept(&state, &admin, drop, reviewing(&plan))
+            .await
+            .expect_err("an id from a plan is not a capability");
+        assert!(said(&no).contains("nothing was written"), "{}", said(&no));
+
+        let now = row(&state, &ana, &hers).await;
+        assert_eq!(
+            (&now.name, &now.does, &now.key),
+            (&was.name, &was.does, &was.key)
+        );
+    }
+
+    /// A profile somebody may read and not write is not overwritten by a
+    /// bundle that matches its name.
+    #[tokio::test]
+    async fn a_profile_you_may_read_and_not_write_is_not_overwritten() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let ana = colleague(&state, "ana").await;
+        let hers = whoever(&ana).unwrap();
+
+        // Hers, filed where the administrator can look and not write.
+        let shelf = state
+            .access
+            .create_directory(
+                &hers.org_id,
+                "Ana's shelf",
+                &hers.id,
+                &[crate::access::NewGrant {
+                    subject_kind: crate::access::SubjectKind::Person,
+                    subject_id: me.id.as_str().to_string(),
+                    level: Level::Viewer,
+                }],
+            )
+            .await
+            .unwrap();
+        let id = made(&state, &ana, &asked_for("Designer")).await;
+        let from = state
+            .access
+            .path_of(crate::access::FiledKind::Role, &id)
+            .await
+            .unwrap()
+            .unwrap();
+        state
+            .access
+            .transfer(
+                &state.vault,
+                crate::access::FiledKind::Role,
+                &id,
+                &from.moved_to(ft_core::path::DIRECTORY, &shelf.slug),
+                "ana",
+            )
+            .await
+            .unwrap();
+
+        let was = row(&state, &ana, &id).await;
+        let before = every_row(&state).await;
+        let no = applied(
+            &state,
+            &admin,
+            plan_for(vec![bundle("designer", "Designer")]),
+        )
+        .await
+        .expect_err("a profile you cannot write is not one you can import onto");
+        assert!(said(&no).contains("nothing was written"), "{}", said(&no));
+        assert_eq!(before, every_row(&state).await);
+        assert_eq!(row(&state, &ana, &id).await.does, was.does);
+    }
+
+    /// **A key is one profile within one directory**, and this is the ticket
+    /// that writes the first keys, so it owns the refusal. Reached through a
+    /// candidate answered *a new profile*: two visible rows carry the key, so
+    /// the bundle is a question rather than a match, and the answer files a
+    /// third beside one of them.
+    #[tokio::test]
+    async fn a_key_already_filed_in_that_directory_refuses_and_names_the_profile() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let shelf = state
+            .access
+            .create_directory(&me.org_id, "Platform", &me.id, &[])
+            .await
+            .unwrap();
+
+        // One `designer` on the shelf, and one of their own: two rows carrying
+        // the key, which is what makes the bundle a candidate.
+        crate::roles::create_in(
+            state.db.pool(),
+            me.org_id.as_str(),
+            me.id.as_str(),
+            &me.slug,
+            crate::roles::Filing {
+                directory: Some(&shelf.slug),
+                key: Some("designer"),
+            },
+            &asked_for("Design System"),
+        )
+        .await
+        .unwrap();
+        keyed(&state, &admin, "Designer", "designer").await;
+
+        let drop = ProfileDrop {
+            files: vec![DroppedFile {
+                path: "profiles/designer/PROFILE.md".into(),
+                text:
+                    "---\nname: Fresh Designer\ndoes: designs\ndirectory: Platform\n---\n\nHello.\n"
+                        .into(),
+            }],
+            answers: vec![import::CandidateAnswer {
+                key: "designer".into(),
+                answer: import::CandidateDecision::NewProfile,
+            }],
+        };
+        let before = every_row(&state).await;
+        let no = applied(&state, &admin, drop)
+            .await
+            .expect_err("two profiles filed together cannot share a key");
+        let says = said(&no);
+        assert!(
+            says.contains("design system"),
+            "it names the profile: {says}"
+        );
+        assert!(says.contains("designer"), "and the key: {says}");
+        assert!(says.contains("rename the folder"), "and what to do: {says}");
+        assert!(
+            !says.contains("roles_author_key"),
+            "not a constraint: {says}"
+        );
+        assert_eq!(before, every_row(&state).await);
     }
 }

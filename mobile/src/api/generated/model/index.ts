@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0
  */
 
+export * from './acceptedDrop';
 export * from './accessEntry';
 export * from './accessOf';
 export * from './accessOfParams';
@@ -126,6 +127,7 @@ export * from './hostReadinessParams';
 export * from './hostState';
 export * from './hostTarget';
 export * from './howReached';
+export * from './importDone';
 export * from './importPlan';
 export * from './incomingFile';
 export * from './installAgent';
@@ -351,3 +353,4 @@ export * from './workspaceId';
 export * from './workspaceSize';
 export * from './workspaceUsage';
 export * from './workSummary';
+export * from './wroteProfile';
