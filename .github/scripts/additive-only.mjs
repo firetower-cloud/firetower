@@ -198,14 +198,36 @@ const requestBody = (operation) => operation.requestBody?.content?.["application
  * parameter were equally silent.
  *
  * `parameters` may also sit on the path item, shared by every method under it.
- * This contract has none there today and no `$ref` parameters either, but both
- * are legal, so the path item's are merged in and a `$ref` is left alone rather
- * than guessed at.
+ * This contract has none there today, but it is legal, so the path item's are
+ * merged in — keyed by `in:name`, so moving a parameter between the two is
+ * correctly a no-op rather than a removal and an addition.
+ *
+ * **A `$ref` parameter is skipped, and that is an unhandled case rather than a
+ * decision — #462.** Skipping both sides is only safe when both sides are a
+ * `$ref`. Across the boundary it is wrong three ways: extracting an inline
+ * parameter to `#/components/parameters/` — the obvious tidy-up the moment a
+ * second endpoint wants it — fails the build claiming the parameters are gone;
+ * the same refactor undone fails claiming a new required one; and a `$ref`
+ * parameter genuinely deleted passes silently, which is the one case this
+ * function exists to catch.
+ *
+ * Nothing can reach it today: the contract has zero `$ref` parameters, no
+ * `components.parameters` block, and the generator does not emit them. The fix
+ * is the precedent `resolve()` already sets for `#/components/schemas/` — the
+ * same few lines against a different map, after which `in:name` comes from the
+ * resolved object and all three cases fall out right.
+ *
+ * Written as a hole rather than a choice on purpose. This is the third time in
+ * this one file that a silence has been read as intent — the one-directional
+ * comparison looked deliberate until it was shown to be a bug, and the silence
+ * on response enum values looked like a rule until the premise under it turned
+ * out to be unenforced (#461). The next person's only evidence about a gap is
+ * whether it looks like one.
  */
 function parameters(pathItem, operation) {
   const out = new Map();
   for (const p of [...(pathItem.parameters ?? []), ...(operation.parameters ?? [])]) {
-    if (!p || p.$ref) continue;
+    if (!p || p.$ref) continue; // #462 — unhandled, not skipped on purpose.
     out.set(`${p.in}:${p.name}`, p);
   }
   return out;

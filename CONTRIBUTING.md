@@ -132,7 +132,9 @@ Two silences are deliberate rather than gaps, and both are argued at
 `.github/scripts/additive-only.mjs`: a **response** may come to produce *fewer*
 kinds of thing (a reader that coped with `string | null` copes with `string`),
 and a response enum may gain a variant — which is safe only because clients are
-required to tolerate values they do not know, and nothing checks that they do. This is not a style preference: channels let a desktop
+required to tolerate values they do not know, and nothing checks that they do
+(#461). A third silence is a known hole rather than either: a `$ref` parameter
+is not compared at all (#462), which nothing in this contract can reach yet. This is not a style preference: channels let a desktop
 copy and its control plane drift arbitrarily far apart in either direction, and
 a copy is never downgraded, so nothing a client may already be reading can be
 taken away. Add beside the old thing and leave it in place. See
