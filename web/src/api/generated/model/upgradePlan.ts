@@ -5,12 +5,14 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { ChannelSwitch } from './channelSwitch';
 import type { FilePlan } from './filePlan';
 
 /**
  * What a run would do to the deployment's files, asked before agreeing.
  */
 export interface UpgradePlan {
+  channelChange?: null | ChannelSwitch;
   /** Variables the release's `.env.example` requires that `.env` lacks. */
   envMissing: string[];
   files: FilePlan[];

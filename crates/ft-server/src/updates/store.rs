@@ -55,6 +55,11 @@ pub struct Run {
 pub struct Targets {
     pub control_plane: bool,
     pub host_ids: Vec<String>,
+    /// The channel this run moves the installation onto, when it is a switch
+    /// rather than an ordinary upgrade. What makes a run say, afterwards,
+    /// that it was the act that changed the channel.
+    #[serde(default)]
+    pub channel: Option<super::channel::Channel>,
 }
 
 /// Decided when the run was made and carried with it.
@@ -435,6 +440,7 @@ mod tests {
             targets: Targets {
                 control_plane: true,
                 host_ids: vec![],
+                channel: None,
             },
             when_idle: false,
             plan: Plan::default(),

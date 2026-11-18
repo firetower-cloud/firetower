@@ -8515,6 +8515,120 @@
         }
       }
     },
+    "/api/v1/updates/channel": {
+      "get": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Which channel this installation is on, and what each channel offers.",
+        "description": "Readable by anybody, like the rest of this screen: the channel explains\nwhich releases a person is being offered, and a member who cannot see it\nhas no way to ask about it. `mayChange` is what narrows — only an\nadministrator may move it, and a client should draw a fact rather than a\ncontrol when that is false.\n\nThe same answer is on `GET /api/v1/updates` as `channel`, for the screen\nthat wants both in one ask.",
+        "operationId": "get_channel",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelStatus"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "Switch channel: rewrite both image lines and move onto that channel's\nversion, as one run.",
+        "description": "**One act, not two.** The channel is read back from the container that is\nrunning, so writing the file alone would leave the installation reporting\ngeneral access while its file said beta — a switch that appears not to\nhave worked. So this is an ordinary upgrade run with the image lines moved\nin the same step that recreates the control plane, which means the\nrollback that already exists puts both back together.\n\nNothing here is automatic. A channel decides which release is offered and\nnothing else about how it is taken: this call is the press, and the run it\nmakes is the same run the Upgrade button makes.",
+        "operationId": "switch_channel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateRun"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "One is already in progress",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/updates/channel/plan": {
+      "post": {
+        "tags": [
+          "updates"
+        ],
+        "summary": "What switching would write, before it is taken.",
+        "description": "An ordinary upgrade plan, plus `channelChange`: the image lines as they\nare and as they would be, the version the installation would be moved\nonto in the same act, and whether that act can be undone.",
+        "operationId": "plan_channel",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpgradePlan"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/updates/check": {
       "post": {
         "tags": [
@@ -9397,6 +9511,14 @@
             "minimum": 0
           }
         }
+      },
+      "Act": {
+        "type": "string",
+        "description": "The two shapes the one act takes.",
+        "enum": [
+          "switch",
+          "pin"
+        ]
       },
       "Administered": {
         "type": "object",
@@ -10281,6 +10403,159 @@
           "diff",
           "files"
         ]
+      },
+      "Channel": {
+        "type": "string",
+        "description": "The two channels. There is no third: `edge` is the tip of the trunk and is\ndeliberately not selectable.",
+        "enum": [
+          "general",
+          "beta"
+        ]
+      },
+      "ChannelPlanRequest": {
+        "type": "object",
+        "required": [
+          "channel"
+        ],
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/Channel",
+            "description": "The channel to move to. The one in force is a legitimate answer: it\nis how an installation running an unrecognised tag comes to actually\nbe on the channel it is being treated as."
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileChoice"
+            },
+            "description": "What to do about a deployment file the release changed and somebody\nhere has edited — the same choice an ordinary upgrade asks for."
+          }
+        }
+      },
+      "ChannelStatus": {
+        "type": "object",
+        "description": "Which channel this installation is on, and what each channel offers.",
+        "required": [
+          "channel",
+          "recognised",
+          "pinned",
+          "switchable",
+          "manifest",
+          "offers"
+        ],
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/Channel",
+            "description": "The channel in force, derived from the tag on the running image.\nGeneral access when it could not be read, which `recognised` and\n`problem` qualify."
+          },
+          "image": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The whole reference, for a screen that names it."
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/ManifestView"
+          },
+          "mayChange": {
+            "type": "boolean",
+            "description": "Whether the person asking may take it. Only an administrator: the\nchannel is the whole deployment's, not a resource anybody holds a\ngrant on."
+          },
+          "offers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Offer"
+            },
+            "description": "One per channel, in a fixed order: general access, then beta."
+          },
+          "pinned": {
+            "type": "boolean",
+            "description": "The image line names an exact version, so no upgrade can move this\ninstallation until it is changed."
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the channel is an assumption, in words. `None` when it was read."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it would not. `None` when it would."
+          },
+          "recognised": {
+            "type": "boolean",
+            "description": "Whether the tag names a channel. False makes `channel` an assumption."
+          },
+          "switchable": {
+            "type": "boolean",
+            "description": "Whether this server would carry out a switch at all, from anybody."
+          },
+          "tag": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The tag that image was created from. `None` when nothing could be\nasked — which is a third answer, not a false one."
+          }
+        }
+      },
+      "ChannelSwitch": {
+        "type": "object",
+        "description": "What a switch would write, and what it would move to.",
+        "required": [
+          "channel",
+          "from",
+          "act",
+          "tag",
+          "version",
+          "irreversible",
+          "file",
+          "lines",
+          "diff"
+        ],
+        "properties": {
+          "act": {
+            "$ref": "#/components/schemas/Act"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "diff": {
+            "type": "string",
+            "description": "The same, as a unified diff — the way every other change to this file\nis shown."
+          },
+          "file": {
+            "type": "string",
+            "description": "The deployment file being rewritten."
+          },
+          "from": {
+            "$ref": "#/components/schemas/Channel",
+            "description": "The channel it is leaving. The same as `channel` when the act is a\npin rather than a move."
+          },
+          "irreversible": {
+            "type": "boolean",
+            "description": "Whether this cannot be undone. True for beta, always."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImageLine"
+            },
+            "description": "The image lines, as they are and as they would be."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The tag both image lines are being moved to."
+          },
+          "version": {
+            "type": "string",
+            "description": "The version this installation would be moved onto, in the same act."
+          }
+        }
       },
       "Checkout": {
         "type": "object",
@@ -12573,6 +12848,21 @@
         ],
         "description": "How somebody came by the access they have to a directory.\n\nNot `Route`, which is taken: the sharing sheet already has one, meaning\n*owner, directory or exception*. Two schemas of the same name do not\ncollide loudly — one silently replaces the other in every generated client,\nand the first sign is a field typed as something unrelated.\n\nFlattened, `directory_access` answers *what* they may do and loses *why* —\nwhich is the only thing that matters when the question is how to take it\naway. Revoking a grant that was never theirs to begin with changes nothing;\nthe team is what has to be left."
       },
+      "ImageLine": {
+        "type": "object",
+        "required": [
+          "from",
+          "to"
+        ],
+        "properties": {
+          "from": {
+            "type": "string"
+          },
+          "to": {
+            "type": "string"
+          }
+        }
+      },
       "ImportPlan": {
         "type": "object",
         "description": "What a drop would do, bundle by bundle.",
@@ -12853,6 +13143,66 @@
               "null"
             ],
             "format": "float"
+          }
+        }
+      },
+      "ManifestOutcome": {
+        "type": "string",
+        "description": "The same five, as the API names them.",
+        "enum": [
+          "absent",
+          "found",
+          "unreadable",
+          "malformed",
+          "incomplete"
+        ]
+      },
+      "ManifestView": {
+        "type": "object",
+        "description": "What the last read of the channel manifest said, and what it holds.",
+        "required": [
+          "outcome",
+          "packages",
+          "url"
+        ],
+        "properties": {
+          "outcome": {
+            "$ref": "#/components/schemas/ManifestOutcome",
+            "description": "The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module's header."
+          },
+          "packages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Pins"
+            },
+            "description": "Every package's pins, from the last document that read. A failed read\nleaves these alone rather than emptying them, and `outcome` is what\nsays the figures may be behind."
+          },
+          "problem": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it did not read, in words."
+          },
+          "readAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "schemaVersion": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "The shape of the document that read.",
+            "minimum": 0
+          },
+          "url": {
+            "type": "string",
+            "description": "Where it is published. Reported so an installation that cannot read it\ncan say what it could not reach."
           }
         }
       },
@@ -13820,6 +14170,71 @@
           }
         }
       },
+      "Offer": {
+        "type": "object",
+        "description": "One channel, as a row on a screen.",
+        "required": [
+          "channel",
+          "tag",
+          "offers",
+          "on",
+          "irreversible"
+        ],
+        "properties": {
+          "action": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Act",
+                "description": "What can be done about this row, if anything."
+              }
+            ]
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "irreversible": {
+            "type": "boolean",
+            "description": "Whether taking it cannot be undone."
+          },
+          "offers": {
+            "type": "string",
+            "description": "What being on it means, in one line."
+          },
+          "on": {
+            "type": "boolean",
+            "description": "Whether this is the channel in force."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why there is nothing to do here, in words."
+          },
+          "since": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When general access last moved to what it holds. Always `None` for\nbeta: every release reaches beta, so the date a beta build appeared is\nits own release date and the manifest does not record it twice."
+          },
+          "tag": {
+            "type": "string",
+            "description": "The image tag that is this channel."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The version it holds for the control plane. `None` when the manifest\ncould not be read — never a zero, and never the newest release."
+          }
+        }
+      },
       "Only": {
         "type": "object",
         "description": "What to act on, when a session holds more than one repository.",
@@ -13893,6 +14308,14 @@
           "needs_you",
           "overran",
           "unknown"
+        ]
+      },
+      "Package": {
+        "type": "string",
+        "description": "The packages that release separately, and so are pinned separately.\n\nMobile is deliberately absent: it has no general-access channel to be\npromoted into. A later third package is what the document's schema version\nexists to make safe.",
+        "enum": [
+          "controlPlane",
+          "desktop"
         ]
       },
       "Page": {
@@ -14010,6 +14433,34 @@
           "text": {
             "type": "string",
             "description": "The system prompt the agent was handed, composed when this run\nlaunched. Empty for a plain agent, which is most of them."
+          }
+        }
+      },
+      "Pins": {
+        "type": "object",
+        "description": "What one package's channels hold.",
+        "required": [
+          "package",
+          "beta",
+          "general"
+        ],
+        "properties": {
+          "beta": {
+            "type": "string"
+          },
+          "general": {
+            "type": "string"
+          },
+          "generalPromotedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When general access last moved to what it holds. The only thing that\nmakes a stuck promotion visible, and recorded nowhere else."
+          },
+          "package": {
+            "$ref": "#/components/schemas/Package"
           }
         }
       },
@@ -17436,6 +17887,27 @@
           }
         }
       },
+      "SwitchRequest": {
+        "type": "object",
+        "required": [
+          "channel"
+        ],
+        "properties": {
+          "acknowledgeOneWay": {
+            "type": "boolean",
+            "description": "Taken as read: moving to beta cannot be undone. Required for beta,\nwhere `irreversible` on the plan is the sentence a client has to put\nin front of somebody first; ignored for general access, which can."
+          },
+          "channel": {
+            "$ref": "#/components/schemas/Channel"
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileChoice"
+            }
+          }
+        }
+      },
       "SwitchedAccount": {
         "type": "object",
         "required": [
@@ -17454,6 +17926,17 @@
           "hostIds"
         ],
         "properties": {
+          "channel": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Channel",
+                "description": "The channel this run moves the installation onto, when it is a switch\nrather than an ordinary upgrade. What makes a run say, afterwards,\nthat it was the act that changed the channel."
+              }
+            ]
+          },
           "controlPlane": {
             "type": "boolean"
           },
@@ -18502,7 +18985,8 @@
           "current",
           "updateAvailable",
           "controlPlane",
-          "hosts"
+          "hosts",
+          "channel"
         ],
         "properties": {
           "activeRun": {
@@ -18510,6 +18994,10 @@
               "string",
               "null"
             ]
+          },
+          "channel": {
+            "$ref": "#/components/schemas/ChannelStatus",
+            "description": "Which channel this installation is on, and what each channel offers.\nHere as well as on its own path because the one screen that draws it\nalready asks for this, and the channel is what decides which release\n`latest` above is."
           },
           "checkError": {
             "type": [
@@ -18677,6 +19165,17 @@
           "updaterUpgrade"
         ],
         "properties": {
+          "channelChange": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ChannelSwitch",
+                "description": "The channel change this run would make, when it is a switch rather\nthan an ordinary upgrade. `None` on every ordinary plan."
+              }
+            ]
+          },
           "envMissing": {
             "type": "array",
             "items": {

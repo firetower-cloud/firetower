@@ -27,8 +27,11 @@ import type {
 
 import type {
   ApiError,
+  ChannelPlanRequest,
+  ChannelStatus,
   NewRun,
   PlanRequest,
+  SwitchRequest,
   UpdateRun,
   UpdateStatus,
   UpgradePlan
@@ -249,6 +252,320 @@ export const useBackUpNow = <TError = ApiError,
         TContext
       > => {
       return useMutation(getBackUpNowMutationOptions(options), queryClient);
+    }
+    export const getGetChannelUrl = () => {
+
+
+
+
+  return `/api/v1/updates/channel`
+}
+
+/**
+ * Readable by anybody, like the rest of this screen: the channel explains
+ * which releases a person is being offered, and a member who cannot see it
+ * has no way to ask about it. `mayChange` is what narrows — only an
+ * administrator may move it, and a client should draw a fact rather than a
+ * control when that is false.
+ *
+ * The same answer is on `GET /api/v1/updates` as `channel`, for the screen
+ * that wants both in one ask.
+ * @summary Which channel this installation is on, and what each channel offers.
+ */
+export const getChannel = async ( options?: Parameters<typeof http>[1]): Promise<ChannelStatus> => {
+
+  return http<ChannelStatus>(getGetChannelUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetChannelQueryKey = () => {
+    return [
+    `/api/v1/updates/channel`
+    ] as const;
+    }
+
+
+export const getGetChannelQueryOptions = <TData = Awaited<ReturnType<typeof getChannel>>, TError = unknown>( options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getChannel>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetChannelQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getChannel>>> = ({ signal }) => getChannel({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getChannel>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type GetChannelQueryResult = NonNullable<Awaited<ReturnType<typeof getChannel>>>
+export type GetChannelQueryError = unknown
+
+
+export function useGetChannel<TData = Awaited<ReturnType<typeof getChannel>>, TError = unknown>(
+  options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof getChannel>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getChannel>>,
+          TError,
+          Awaited<ReturnType<typeof getChannel>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetChannel<TData = Awaited<ReturnType<typeof getChannel>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getChannel>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getChannel>>,
+          TError,
+          Awaited<ReturnType<typeof getChannel>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useGetChannel<TData = Awaited<ReturnType<typeof getChannel>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getChannel>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Which channel this installation is on, and what each channel offers.
+ */
+
+export function useGetChannel<TData = Awaited<ReturnType<typeof getChannel>>, TError = unknown>(
+  options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof getChannel>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getGetChannelQueryOptions(options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary Which channel this installation is on, and what each channel offers.
+ */
+export const useSetGetChannelQueryData = () => {
+  const queryClient = useQueryClient();
+  return (updater: Awaited<ReturnType<typeof getChannel>> | undefined | ((old: Awaited<ReturnType<typeof getChannel>> | undefined) => Awaited<ReturnType<typeof getChannel>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof getChannel>>>({ exact: $exactMatch, queryKey: getGetChannelQueryKey() }, updater);
+  };
+}
+
+/**
+ * @summary Which channel this installation is on, and what each channel offers.
+ */
+export const useGetGetChannelQueryData = () => {
+  const queryClient = useQueryClient();
+  return () =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof getChannel>>>(getGetChannelQueryKey());
+}
+
+
+export const getSwitchChannelUrl = () => {
+
+
+
+
+  return `/api/v1/updates/channel`
+}
+
+/**
+ * **One act, not two.** The channel is read back from the container that is
+ * running, so writing the file alone would leave the installation reporting
+ * general access while its file said beta — a switch that appears not to
+ * have worked. So this is an ordinary upgrade run with the image lines moved
+ * in the same step that recreates the control plane, which means the
+ * rollback that already exists puts both back together.
+ *
+ * Nothing here is automatic. A channel decides which release is offered and
+ * nothing else about how it is taken: this call is the press, and the run it
+ * makes is the same run the Upgrade button makes.
+ * @summary Switch channel: rewrite both image lines and move onto that channel's
+version, as one run.
+ */
+export const switchChannel = async (switchRequest: SwitchRequest, options?: Parameters<typeof http>[1]): Promise<UpdateRun> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<UpdateRun>(getSwitchChannelUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(switchRequest)
+  }
+);}
+
+
+
+
+
+export const getSwitchChannelMutationKey = () => ['switchChannel'] as const;
+
+export const getSwitchChannelMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchChannel>>, TError,SwitchChannelMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof switchChannel>>, TError,SwitchChannelMutationVariables, TContext> => {
+
+const mutationKey = getSwitchChannelMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof switchChannel>>, SwitchChannelMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  switchChannel(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SwitchChannelMutationResult = NonNullable<Awaited<ReturnType<typeof switchChannel>>>
+    export type SwitchChannelMutationBody = SwitchRequest
+    export type SwitchChannelMutationError = ApiError
+    export type SwitchChannelMutationVariables = {data: SwitchRequest}
+
+    /**
+ * @summary Switch channel: rewrite both image lines and move onto that channel's
+version, as one run.
+ */
+export const useSwitchChannel = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchChannel>>, TError,SwitchChannelMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof switchChannel>>,
+        TError,
+        SwitchChannelMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSwitchChannelMutationOptions(options), queryClient);
+    }
+    export const getPlanChannelUrl = () => {
+
+
+
+
+  return `/api/v1/updates/channel/plan`
+}
+
+/**
+ * An ordinary upgrade plan, plus `channelChange`: the image lines as they
+ * are and as they would be, the version the installation would be moved
+ * onto in the same act, and whether that act can be undone.
+ * @summary What switching would write, before it is taken.
+ */
+export const planChannel = async (channelPlanRequest: ChannelPlanRequest, options?: Parameters<typeof http>[1]): Promise<UpgradePlan> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<UpgradePlan>(getPlanChannelUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(channelPlanRequest)
+  }
+);}
+
+
+
+
+
+export const getPlanChannelMutationKey = () => ['planChannel'] as const;
+
+export const getPlanChannelMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planChannel>>, TError,PlanChannelMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof planChannel>>, TError,PlanChannelMutationVariables, TContext> => {
+
+const mutationKey = getPlanChannelMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof planChannel>>, PlanChannelMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  planChannel(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type PlanChannelMutationResult = NonNullable<Awaited<ReturnType<typeof planChannel>>>
+    export type PlanChannelMutationBody = ChannelPlanRequest
+    export type PlanChannelMutationError = ApiError
+    export type PlanChannelMutationVariables = {data: ChannelPlanRequest}
+
+    /**
+ * @summary What switching would write, before it is taken.
+ */
+export const usePlanChannel = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof planChannel>>, TError,PlanChannelMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof planChannel>>,
+        TError,
+        PlanChannelMutationVariables,
+        TContext
+      > => {
+      return useMutation(getPlanChannelMutationOptions(options), queryClient);
     }
     export const getCheckUpdatesUrl = () => {
 

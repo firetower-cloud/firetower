@@ -5,6 +5,7 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { ChannelStatus } from './channelStatus.ts';
 import type { ControlPlaneTarget } from './controlPlaneTarget.ts';
 import type { HostTarget } from './hostTarget.ts';
 import type { Release } from './release.ts';
@@ -12,6 +13,13 @@ import type { Release } from './release.ts';
 export interface UpdateStatus {
   /** @nullable */
   activeRun?: string | null;
+  /**
+     * Which channel this installation is on, and what each channel offers.
+     * Here as well as on its own path because the one screen that draws it
+     * already asks for this, and the channel is what decides which release
+     * `latest` above is.
+     */
+  channel: ChannelStatus;
   /** @nullable */
   checkError?: string | null;
   /** @nullable */

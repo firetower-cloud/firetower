@@ -5,8 +5,10 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { Channel } from './channel';
 
 export interface Targets {
+  channel?: null | Channel;
   controlPlane: boolean;
   hostIds: string[];
 }

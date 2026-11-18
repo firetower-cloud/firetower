@@ -48,6 +48,14 @@ const RESUME_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 const MOST_ATTEMPTS: i32 = 3;
 
 /// The steps a run has, in order.
+///
+/// **A channel switch recreates the updater last, and the ordinary upgrade
+/// first.** The two containers' image lines live in one file, and that file
+/// is written by the control-plane step — which is also what restores it if
+/// the new control plane does not answer. Recreating the updater before the
+/// line has moved would bring it back from the tag it is already on; moving
+/// the write earlier would take the rollback's copy of the file with it, and
+/// a switch that half failed is the one thing this ordering buys.
 pub fn steps_for(
     targets: &super::store::Targets,
     host_names: &[(String, String)],
@@ -58,8 +66,24 @@ pub fn steps_for(
     )];
     if targets.control_plane {
         steps.push((BACKUP.into(), "Back up the database".into()));
-        steps.push((UPDATER.into(), "Upgrade the updater".into()));
-        steps.push((CONTROL_PLANE.into(), "Upgrade the control plane".into()));
+        let control_plane = match targets.channel {
+            Some(channel) => (
+                CONTROL_PLANE.to_string(),
+                format!("Move the control plane onto {}", channel.name()),
+            ),
+            None => (
+                CONTROL_PLANE.to_string(),
+                "Upgrade the control plane".to_string(),
+            ),
+        };
+        let updater = (UPDATER.to_string(), "Upgrade the updater".to_string());
+        if targets.channel.is_some() {
+            steps.push(control_plane);
+            steps.push(updater);
+        } else {
+            steps.push(updater);
+            steps.push(control_plane);
+        }
     }
     for id in &targets.host_ids {
         let name = host_names
@@ -974,6 +998,7 @@ mod tests {
             &super::super::store::Targets {
                 control_plane: true,
                 host_ids: vec!["h_1".into(), "h_2".into()],
+                channel: None,
             },
             &[("h_1".into(), "fire-01".into())],
         );
@@ -999,11 +1024,30 @@ mod tests {
             &super::super::store::Targets {
                 control_plane: false,
                 host_ids: vec!["h_1".into()],
+                channel: None,
             },
             &[],
         );
         assert_eq!(workers_only.len(), 2);
         assert!(!workers_only.iter().any(|(t, _)| t == BACKUP));
+    }
+
+    /// A switch writes the image line in the control-plane step, so the
+    /// updater cannot be recreated before it — it would come back from the
+    /// tag the installation is leaving.
+    #[test]
+    fn a_channel_switch_moves_the_control_plane_before_the_updater() {
+        let steps = steps_for(
+            &super::super::store::Targets {
+                control_plane: true,
+                host_ids: vec![],
+                channel: Some(super::super::channel::Channel::Beta),
+            },
+            &[],
+        );
+        let targets: Vec<&str> = steps.iter().map(|(t, _)| t.as_str()).collect();
+        assert_eq!(targets, vec![PREFLIGHT, BACKUP, CONTROL_PLANE, UPDATER]);
+        assert_eq!(steps[2].1, "Move the control plane onto beta");
     }
 
     #[test]

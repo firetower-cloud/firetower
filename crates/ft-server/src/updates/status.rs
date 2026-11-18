@@ -2,7 +2,7 @@
 
 use super::store::Checked;
 use super::{
-    check, client, deploy, version, ControlPlaneTarget, FileChoice, HostTarget, Release,
+    channel, check, client, deploy, version, ControlPlaneTarget, FileChoice, HostTarget, Release,
     UpdateStatus, UpdaterView, Updates, UpgradePlan,
 };
 use crate::AppState;
@@ -29,32 +29,70 @@ pub async fn check(state: &AppState) -> Result<Checked> {
         .agent_releases
         .refresh(&updates.http, &updates.agent_feeds)
         .await;
-    let found = match check::latest(&updates.http, &updates.feed).await {
-        Ok(latest) => {
-            let cli_minimum =
-                check::cli_minimum(&updates.http, &updates.feed, &latest.version).await;
-            Checked {
-                checked_at: chrono::Utc::now(),
-                latest_version: Some(latest.version.to_string()),
-                published_at: latest.published_at,
-                notes_url: latest.notes_url,
-                notes: latest.notes,
-                cli_minimum,
-                error: None,
+
+    // Which channel this installation is on decides which release it is
+    // offered, so the channel manifest is read on this pass and the feed is
+    // asked second — for the notes of whatever the manifest named.
+    let on = channel::running(updates, None).await.channel;
+    let manifest = updates
+        .channel_manifest
+        .refresh(&updates.http, &updates.channel_source)
+        .await;
+
+    let found = match &manifest {
+        // A read that went wrong moves nothing. `record_check` keeps the
+        // version the last good check found, so the screen holds still and
+        // says why rather than reporting a version nobody published.
+        bad if !bad.is_usable() && !matches!(bad, channel::Read::Absent) => Checked {
+            checked_at: chrono::Utc::now(),
+            latest_version: None,
+            published_at: None,
+            notes_url: None,
+            notes: None,
+            cli_minimum: None,
+            error: bad
+                .problem()
+                .map(|why| format!("{why}. Nothing is being moved.")),
+        },
+        channel::Read::Found(document) => {
+            match document
+                .pin(channel::Package::ControlPlane, on)
+                .and_then(version::parse)
+            {
+                Some(pinned) => offered(updates, &pinned).await,
+                None => Checked {
+                    checked_at: chrono::Utc::now(),
+                    latest_version: None,
+                    published_at: None,
+                    notes_url: None,
+                    notes: None,
+                    cli_minimum: None,
+                    error: Some(format!(
+                        "the channel manifest names no control plane version for {}. Nothing is \
+                         being moved.",
+                        on.name()
+                    )),
+                },
             }
         }
-        Err(e) => {
-            tracing::warn!("checking for a release: {e:#}");
-            Checked {
-                checked_at: chrono::Utc::now(),
-                latest_version: None,
-                published_at: None,
-                notes_url: None,
-                notes: None,
-                cli_minimum: None,
-                error: Some(format!("{e:#}")),
+        // Absence is the bootstrap: nothing has been published yet, so this
+        // installation follows the newest release exactly as it did before
+        // channels existed.
+        _ => match check::latest(&updates.http, &updates.feed).await {
+            Ok(latest) => offered(updates, &latest.version).await,
+            Err(e) => {
+                tracing::warn!("checking for a release: {e:#}");
+                Checked {
+                    checked_at: chrono::Utc::now(),
+                    latest_version: None,
+                    published_at: None,
+                    notes_url: None,
+                    notes: None,
+                    cli_minimum: None,
+                    error: Some(format!("{e:#}")),
+                }
             }
-        }
+        },
     };
     updates.store.record_check(&found).await?;
 
@@ -64,6 +102,37 @@ pub async fn check(state: &AppState) -> Result<Checked> {
         }
     }
     Ok(found)
+}
+
+/// One version, with whatever the feed can say about it.
+///
+/// The version is the answer; its notes are a nicety. A release that has
+/// fallen off the feed's page — routine for a general access that has skipped
+/// versions — is still the release being offered, so a feed that cannot
+/// supply the notes is a warning beside the version rather than a check that
+/// found nothing.
+async fn offered(updates: &Updates, version: &semver::Version) -> Checked {
+    let found = match check::releases(&updates.http, &updates.feed).await {
+        Ok(body) => Ok(check::pick_version(&body, version)),
+        Err(e) => Err(e),
+    };
+    let cli_minimum = check::cli_minimum(&updates.http, &updates.feed, version).await;
+    let (release, error) = match found {
+        Ok(release) => (release, None),
+        Err(e) => {
+            tracing::warn!("reading the releases feed: {e:#}");
+            (None, Some(format!("{e:#}")))
+        }
+    };
+    Checked {
+        checked_at: chrono::Utc::now(),
+        latest_version: Some(version.to_string()),
+        published_at: release.as_ref().and_then(|r| r.published_at),
+        notes_url: release.as_ref().and_then(|r| r.notes_url.clone()),
+        notes: release.and_then(|r| r.notes),
+        cli_minimum,
+        error,
+    }
 }
 
 /// Every few hours, for as long as the control plane runs.
@@ -131,7 +200,7 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
 
     let hosts = state.db.hosts().await?;
 
-    let updater = updater_view(updates).await;
+    let (updater, answered) = updater_view(updates).await;
     let control_plane = ControlPlaneTarget {
         version: current.to_string(),
         upgradable: newer && updater.reachable,
@@ -191,42 +260,61 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
         control_plane,
         hosts: targets,
         active_run,
+        // The updater was asked once, above, and this is the other half of
+        // the same answer.
+        channel: channel::status(state, answered.as_ref()).await,
     })
 }
 
-async fn updater_view(updates: &Updates) -> UpdaterView {
+/// What the updater says, and what it said — the status itself comes back
+/// too, because the channel is read out of the same answer and asking twice
+/// would be two round trips for one fact.
+async fn updater_view(updates: &Updates) -> (UpdaterView, Option<ft_updater_api::Status>) {
     match &updates.updater {
-        Err(absent) => UpdaterView {
-            configured: matches!(absent, client::Absent::NoToken),
-            reachable: false,
-            version: None,
-            api_version: None,
-            problem: Some(absent.explain()),
-        },
+        Err(absent) => (
+            UpdaterView {
+                configured: matches!(absent, client::Absent::NoToken),
+                reachable: false,
+                version: None,
+                api_version: None,
+                problem: Some(absent.explain()),
+            },
+            None,
+        ),
         Ok(updater) => match tokio::time::timeout(Duration::from_secs(4), updater.status()).await {
-            Ok(Ok(status)) => UpdaterView {
-                configured: true,
-                reachable: true,
-                version: Some(status.version),
-                api_version: Some(status.api_version),
-                problem: status
-                    .busy
-                    .map(|_| "the updater is busy with an earlier job".to_string()),
-            },
-            Ok(Err(e)) => UpdaterView {
-                configured: true,
-                reachable: false,
-                version: None,
-                api_version: None,
-                problem: Some(format!("the updater is not answering: {e:#}")),
-            },
-            Err(_) => UpdaterView {
-                configured: true,
-                reachable: false,
-                version: None,
-                api_version: None,
-                problem: Some("the updater is not answering".into()),
-            },
+            Ok(Ok(status)) => (
+                UpdaterView {
+                    configured: true,
+                    reachable: true,
+                    version: Some(status.version.clone()),
+                    api_version: Some(status.api_version),
+                    problem: status
+                        .busy
+                        .as_ref()
+                        .map(|_| "the updater is busy with an earlier job".to_string()),
+                },
+                Some(status),
+            ),
+            Ok(Err(e)) => (
+                UpdaterView {
+                    configured: true,
+                    reachable: false,
+                    version: None,
+                    api_version: None,
+                    problem: Some(format!("the updater is not answering: {e:#}")),
+                },
+                None,
+            ),
+            Err(_) => (
+                UpdaterView {
+                    configured: true,
+                    reachable: false,
+                    version: None,
+                    api_version: None,
+                    problem: Some("the updater is not answering".into()),
+                },
+                None,
+            ),
         },
     }
 }
@@ -246,6 +334,7 @@ pub async fn plan(state: &AppState, to: &Version, control_plane: bool) -> Result
             files: Vec::new(),
             env_missing: Vec::new(),
             updater_upgrade: false,
+            channel_change: None,
         });
     }
 
@@ -292,6 +381,7 @@ pub async fn plan(state: &AppState, to: &Version, control_plane: bool) -> Result
         files,
         env_missing,
         updater_upgrade,
+        channel_change: None,
     })
 }
 
@@ -307,6 +397,17 @@ pub async fn files_to_write(
     // Only reached for a run that moves the control plane — `create_run`
     // leaves the plan empty otherwise — so the full plan is the right one.
     let planned = plan(state, to, true).await?;
+    files_from_plan(state, to, planned, choices).await
+}
+
+/// The same, for a caller that has the plan already. A channel switch needs
+/// both halves and there is no reason to ask the release for its files twice.
+pub async fn files_from_plan(
+    state: &AppState,
+    to: &Version,
+    planned: UpgradePlan,
+    choices: &[FileChoice],
+) -> Result<Vec<ft_updater_api::FileWrite>> {
     let mut writes = Vec::new();
     for file in planned.files {
         let chosen = choices.iter().find(|c| c.name == file.name);
