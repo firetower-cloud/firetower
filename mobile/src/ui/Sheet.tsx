@@ -25,12 +25,23 @@
  * `activeOffsetY(8)` so a press that drifts a pixel is still a press, and so a
  * sheet with a scrolling list inside it does not steal the list's own scroll
  * on the first few points of travel.
+ *
+ * ## The surface is full width; its content is not
+ *
+ * At 951 a list in an unclamped sheet puts the name at one end and the tick at
+ * the other, which is the exact failure `measure.ts` was written to name. So
+ * the rows are clamped to `COLUMN` and centred — and the **sheet itself stays
+ * full width**, because it is a modal over the whole screen rather than a
+ * popover belonging to a column. Anchoring it to one would break on the
+ * rotation it is most likely to survive. Nothing changes below 640, so the
+ * phone and the Duo's front panel are untouched.
  */
 import { useEffect, type ReactNode } from "react";
 import { Modal, Pressable, View } from "react-native";
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { COLUMN_MAX } from "~/ui/measure";
 import { useTheme } from "~/design/theme";
 
 export function Sheet({
@@ -107,12 +118,21 @@ export function Sheet({
             slide,
           ]}
         >
-          {/* A generous target: the bar is 5pt tall and the grab is the whole
-              28pt band around it. */}
-          <View className="items-center pb-0.5 pt-2.5">
-            <View className="h-[5px] w-[38px] rounded-full bg-settling" />
+          {/* The grabber is inside the clamp with everything else: centred
+              content under an off-centre handle reads as a misalignment
+              rather than as a column. `flexShrink` because this is now what
+              stands between `maxHeight` and a scroller, and a column child
+              does not shrink on its own. */}
+          <View
+            style={{ width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center", flexShrink: 1, minHeight: 0 }}
+          >
+            {/* A generous target: the bar is 5pt tall and the grab is the whole
+                28pt band around it. */}
+            <View className="items-center pb-0.5 pt-2.5">
+              <View className="h-[5px] w-[38px] rounded-full bg-settling" />
+            </View>
+            {children}
           </View>
-          {children}
         </Animated.View>
       </GestureDetector>
     </Modal>
