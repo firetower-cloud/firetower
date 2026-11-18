@@ -78,6 +78,60 @@ jobs:
       version: ${{ needs.please.outputs.mobile_version }}
       ref: ${{ github.sha }}
 
+  # Every released version is on beta, and this is what says so.
+  #
+  # Beta is continuous: merging release-please's pull request *is* the beta
+  # deploy. There is no second gate and no way to hold a release back from it,
+  # which is why this job has no condition of its own beyond "something was
+  # released" — the `beta` image tag and the `desktop-beta` address are moved
+  # by the jobs above, and this records the same fact in the one document every
+  # installation reads.
+  #
+  # The `general` pins are not touched here and never are by a release.
+  # General access is a pin moved by `promote.yml`, by hand, and that
+  # separation is the whole of the design.
+  #
+  # After the jobs that publish the artifacts, and only for the packages whose
+  # job actually succeeded: a manifest saying 0.57.0 is on beta when the image
+  # never pushed would point every beta installation at something that is not
+  # there. `!cancelled()` rather than `always()` so a cancelled run does not
+  # publish half a release, and `result == 'success'` per package rather than
+  # one condition for both, because the two release independently.
+  channels:
+    needs: [please, image, desktop]
+    if: >-
+      ${{ !cancelled()
+          && (needs.please.outputs.released == 'true'
+              || needs.please.outputs.desktop_released == 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROL_PLANE: ${{ needs.please.outputs.released == 'true' && needs.image.result == 'success' && needs.please.outputs.version || '' }}
+          DESKTOP: ${{ needs.please.outputs.desktop_released == 'true' && needs.desktop.result == 'success' && needs.please.outputs.desktop_version || '' }}
+        run: |
+          set -euo pipefail
+          pins=()
+          # `if` rather than `[ … ] && …`: under `set -e` a bare test that is
+          # false is the statement's exit status, so a desktop-only release
+          # would end this step successfully having published nothing.
+          if [ -n "$CONTROL_PLANE" ]; then pins+=("control_plane:beta=$CONTROL_PLANE"); fi
+          if [ -n "$DESKTOP" ]; then pins+=("desktop:beta=$DESKTOP"); fi
+          if [ ${#pins[@]} -eq 0 ]; then
+            echo "::warning::Nothing published, so nothing is going on beta." \
+                 "A package that released but whose artifacts did not build is" \
+                 "deliberately left off the manifest: pointing beta at a build" \
+                 "that is not in the registry is worse than lagging by one release."
+            exit 0
+          fi
+          .github/scripts/publish-channel-pin.sh "${pins[@]}"
+
   # The worker, as a binary a machine installs: one per shape it runs on, plus
   # the installer script and a checksum file, all on the release the job
   # above cut. `usefiretower.com/worker.sh` redirects to the newest release's
