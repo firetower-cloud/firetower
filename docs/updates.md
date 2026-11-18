@@ -44,6 +44,18 @@ release's.
 variable, the screen names it and waits for you to add it. The `Caddyfile` is
 compared the same way and, like `firetower upgrade`, is not rewritten.
 
+## Which release you are offered
+
+Which version the screen offers depends on the **channel** the installation is
+on, which is the tag on the image it is running: `:stable` is general access and
+`:beta` is every release as it is cut. Nothing stores it.
+
+An installation pinned to `:latest` is on no channel at all and cannot be
+upgraded from this screen until its image line is changed — the updater refuses
+an image whose stamped version is not the one it was told to fetch, and says so
+naming the tag to use. [docs/channels.md](channels.md) has all four tags, which
+one to pin, and why `latest` is not it.
+
 ## The updater
 
 ```

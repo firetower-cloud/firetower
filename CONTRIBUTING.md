@@ -121,6 +121,25 @@ fails if the result differs — so forgetting `just gen` is caught rather than
 merged. Running `just gen-check` before you push turns that into a local
 failure instead of a red job.
 
+**The API is additive-only.** No removing a path, no removing a field or query
+parameter a client may read, no narrowing a type — including dropping an enum
+variant the server used to accept — and no making an optional request field or
+parameter required. The same `contract` workflow compares the contract your
+branch produces against the one at its merge base and fails on any of those,
+in request bodies, response bodies and parameters alike.
+
+Two silences are deliberate rather than gaps, and both are argued at
+`.github/scripts/additive-only.mjs`: a **response** may come to produce *fewer*
+kinds of thing (a reader that coped with `string | null` copes with `string`),
+and a response enum may gain a variant — which is safe only because clients are
+required to tolerate values they do not know, and nothing checks that they do
+(#461). A third silence is a known hole rather than either: a `$ref` parameter
+is not compared at all (#462), which nothing in this contract can reach yet. This is not a style preference: channels let a desktop
+copy and its control plane drift arbitrarily far apart in either direction, and
+a copy is never downgraded, so nothing a client may already be reading can be
+taken away. Add beside the old thing and leave it in place. See
+[docs/channels.md](docs/channels.md).
+
 While developing, the interface and the control plane are two processes on two
 ports, so the interface has to be told where the API is. That lives in
 `web/.env.development`, which is committed. If every request 404s from Next
