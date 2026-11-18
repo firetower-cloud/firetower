@@ -13269,10 +13269,11 @@
       },
       "ManifestOutcome": {
         "type": "string",
-        "description": "The same five, as the API names them.",
+        "description": "The same six, as the API names them.",
         "enum": [
           "absent",
           "found",
+          "vanished",
           "unreadable",
           "malformed",
           "incomplete"

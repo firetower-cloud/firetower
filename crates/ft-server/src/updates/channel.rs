@@ -32,14 +32,17 @@
 //! | --- | --- |
 //! | [`Read::Absent`] | No document yet. The bootstrap case, and the only one that is not a problem: the installation keeps following the newest release, as it did before channels existed. |
 //! | [`Read::Found`] | It read. That is the answer. |
+//! | [`Read::Vanished`] | It was read before and is gone now. **Absence is the bootstrap case only on a first start** — a document that existed and does not any more has been destroyed, and somebody has to republish it. |
 //! | [`Read::Unreadable`] | The read went wrong — a rate limit, a network failure, a status that is not a 404. |
 //! | [`Read::Malformed`] | Something came back and it is not this document. |
 //! | [`Read::Incomplete`] | It is this document and it names no version. |
 //!
-//! The last three **stop and change nothing**. A read that goes wrong must
+//! The last four **stop and change nothing**. A read that goes wrong must
 //! never be allowed to look like "general access is at version zero" — the
 //! rule the desktop release workflow writes out at length, inherited here by
-//! every reader.
+//! every reader. They are kept apart because the answer to each is
+//! different: retry a failed fetch, republish a destroyed document, fix a
+//! malformed one.
 
 use super::deploy;
 use super::{client, version, Updates};
@@ -242,17 +245,29 @@ impl Manifest {
 pub enum Read {
     Absent,
     Found(Manifest),
+    /// It was read before and is not there now. A separate state from
+    /// [`Read::Unreadable`] because the answer to it is different: a fetch
+    /// that failed is worth retrying, and a document that has been destroyed
+    /// has to be republished before anything can move. Waiting makes that one
+    /// worse.
+    Vanished(String),
     Unreadable(String),
     Malformed(String),
     Incomplete(String),
 }
 
-/// The same five, as the API names them.
+/// The same six, as the API names them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ManifestOutcome {
+    /// Nothing published yet. The bootstrap case, and the only one that is
+    /// not a problem — see [`Read::Absent`].
     Absent,
     Found,
+    /// Published before, and gone now. The document every installation reads
+    /// has been destroyed and has to be put back; this is the one state here
+    /// that gets worse while nobody acts on it.
+    Vanished,
     Unreadable,
     Malformed,
     Incomplete,
@@ -263,6 +278,7 @@ impl Read {
         match self {
             Read::Absent => ManifestOutcome::Absent,
             Read::Found(_) => ManifestOutcome::Found,
+            Read::Vanished(_) => ManifestOutcome::Vanished,
             Read::Unreadable(_) => ManifestOutcome::Unreadable,
             Read::Malformed(_) => ManifestOutcome::Malformed,
             Read::Incomplete(_) => ManifestOutcome::Incomplete,
@@ -274,7 +290,10 @@ impl Read {
     pub fn problem(&self) -> Option<&str> {
         match self {
             Read::Absent | Read::Found(_) => None,
-            Read::Unreadable(why) | Read::Malformed(why) | Read::Incomplete(why) => Some(why),
+            Read::Vanished(why)
+            | Read::Unreadable(why)
+            | Read::Malformed(why)
+            | Read::Incomplete(why) => Some(why),
         }
     }
 
@@ -471,9 +490,10 @@ impl Manifests {
             // which is a failure rather than a fresh start — and treating it
             // as a fresh start is precisely how an installation comes to
             // accept an older pin from a manifest somebody destroyed.
-            Read::Absent if read_one_before => Read::Unreadable(format!(
+            Read::Absent if read_one_before => Read::Vanished(format!(
                 "the channel manifest has gone from {}. This installation has read one before, \
-                 so this is not a first start",
+                 so the document has been destroyed rather than never published — it has to be \
+                 put back, and waiting will not bring it back",
                 source.url
             )),
             other => other,
@@ -1301,7 +1321,13 @@ mod tests {
             inner.last = Some(Read::Found(super::tests::held()));
         }
         match held.refresh(&http, &source, true).await {
-            Read::Unreadable(why) => assert!(why.contains("has gone"), "{why}"),
+            Read::Vanished(why) => {
+                assert!(why.contains("has gone"), "{why}");
+                assert!(
+                    why.contains("put back"),
+                    "the sentence is the value of this state — it has to say what to do: {why}"
+                );
+            }
             other => panic!("a manifest that vanished is not absence: {other:?}"),
         }
 
@@ -1309,9 +1335,20 @@ mod tests {
         // up after an upgrade with an empty cache.
         let restarted = Manifests::default();
         match restarted.refresh(&http, &source, false).await {
-            Read::Unreadable(why) => assert!(why.contains("not a first start"), "{why}"),
+            Read::Vanished(why) => assert!(why.contains("destroyed"), "{why}"),
             other => panic!("a restart does not make it a first start again: {other:?}"),
         }
+
+        // And it is its own answer, not a kind of unreadable: a fetch that
+        // failed is worth retrying, and a document somebody destroyed is not.
+        assert_eq!(
+            Read::Vanished("x".into()).outcome(),
+            ManifestOutcome::Vanished
+        );
+        assert_ne!(
+            Read::Vanished("x".into()).outcome(),
+            ManifestOutcome::Unreadable
+        );
         serving.abort();
     }
 
@@ -1493,6 +1530,7 @@ mod tests {
         ));
 
         for bad in [
+            Read::Vanished("it has gone".into()),
             Read::Unreadable("rate limited".into()),
             Read::Malformed("not json".into()),
             Read::Incomplete("no version".into()),
@@ -1716,6 +1754,11 @@ mod tests {
         let stable = on("ghcr.io/firetower-cloud/firetower:stable");
         let cases = [
             (
+                Read::Vanished("the channel manifest has gone from …; put it back".into()),
+                ManifestOutcome::Vanished,
+                "has gone",
+            ),
+            (
                 Read::Unreadable("the channel manifest at … answered 429 Too Many Requests".into()),
                 ManifestOutcome::Unreadable,
                 "429",
@@ -1751,7 +1794,7 @@ mod tests {
             }
         }
         seen.dedup();
-        assert_eq!(seen.len(), 3, "and the three are not interchangeable");
+        assert_eq!(seen.len(), 4, "and the four are not interchangeable");
     }
 
     /// Absence is the bootstrap case: not a failure, and still not a version
@@ -1820,6 +1863,7 @@ mod tests {
         // it from the document that last read.
         for bad in [
             Read::Absent,
+            Read::Vanished("it has gone".into()),
             Read::Unreadable("rate limited".into()),
             Read::Malformed("not this document".into()),
             Read::Incomplete("no version in it".into()),

@@ -7,7 +7,7 @@
  */
 
 /**
- * The same five, as the API names them.
+ * The same six, as the API names them.
  */
 export type ManifestOutcome = typeof ManifestOutcome[keyof typeof ManifestOutcome];
 
@@ -15,6 +15,7 @@ export type ManifestOutcome = typeof ManifestOutcome[keyof typeof ManifestOutcom
 export const ManifestOutcome = {
   absent: 'absent',
   found: 'found',
+  vanished: 'vanished',
   unreadable: 'unreadable',
   malformed: 'malformed',
   incomplete: 'incomplete',

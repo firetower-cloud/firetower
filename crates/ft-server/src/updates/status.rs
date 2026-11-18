@@ -84,6 +84,10 @@ enum Offered {
 fn what_to_offer(manifest: &channel::Read, on: channel::Channel) -> Offered {
     match manifest {
         channel::Read::Absent => Offered::TheNewestRelease,
+        // Explicit, rather than left to the catch-all below: the one state
+        // that must never fall through to "follow the newest release" is the
+        // one where the document was there and is not any more.
+        channel::Read::Vanished(why) => Offered::Stop(format!("{why}. Nothing is being moved.")),
         channel::Read::Found(document) => match document
             .pin(channel::Package::ControlPlane, on)
             .and_then(version::parse)
@@ -479,6 +483,7 @@ mod tests {
         );
 
         for failed in [
+            channel::Read::Vanished("it has gone".into()),
             channel::Read::Unreadable("rate limited".into()),
             channel::Read::Malformed("not this document".into()),
             channel::Read::Incomplete("no version in it".into()),

@@ -47,13 +47,24 @@ manifest — rather than something derived by scanning release tags. It names a
 version per channel per package, because the control plane and the desktop app
 release separately. The Updates screen reads it; nothing here writes it.
 
-Four outcomes of reading it, and they are not interchangeable: no document yet
-is **absence**, which is the bootstrap case and leaves the installation
-following the newest release as it did before channels existed; a document that
-reads is the answer; and a rate limit, a network failure, a document that is
-not this one, or one with no version in it each **stop and change nothing**. A
-read that goes wrong is never allowed to look like "general access is at
-version zero".
+Reading it has outcomes that are deliberately not interchangeable, because the
+answer to each is different:
+
+| Outcome | What it means, and what to do |
+| --- | --- |
+| **Absent** | No document yet. The bootstrap case, and the only one that is not a problem: the installation follows the newest release, as it did before channels existed. |
+| **Found** | It read. That is the answer. |
+| **Vanished** | It was read before and is gone now. The document every installation reads has been destroyed — somebody has to republish it, and waiting makes it worse. |
+| **Unreadable** | A rate limit, a network failure, a status that is not a 404, or a body longer than 64 KiB. Worth retrying. |
+| **Malformed** | Something came back and it is not this document. |
+| **Incomplete** | It is this document and it names no version. |
+
+Everything except absence and a document that reads **stops and changes
+nothing**: the version the last good check found is kept, and no channel can be
+switched until a document reads again. A read that goes wrong is never allowed
+to look like "general access is at version zero" — and **absence only counts as
+a first start if this installation has never read a manifest**, which is
+remembered across restarts.
 
 ### Switching
 

@@ -24,7 +24,7 @@ export const GetUpdatesResponse = zod.object({
   "channel": zod.enum(['general', 'beta']).describe('The channel in force, derived from the tag on the running image.\nGeneral access when it could not be read, which `recognised` and\n`problem` qualify.'),
   "image": zod.string().nullish().describe('The whole reference, for a screen that names it.'),
   "manifest": zod.object({
-  "outcome": zod.enum(['absent', 'found', 'unreadable', 'malformed', 'incomplete']).describe('The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module\'s header.'),
+  "outcome": zod.enum(['absent', 'found', 'vanished', 'unreadable', 'malformed', 'incomplete']).describe('The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module\'s header.'),
   "packages": zod.array(zod.object({
   "beta": zod.string(),
   "general": zod.string(),
@@ -119,7 +119,7 @@ export const GetChannelResponse = zod.object({
   "channel": zod.enum(['general', 'beta']).describe('The channel in force, derived from the tag on the running image.\nGeneral access when it could not be read, which `recognised` and\n`problem` qualify.'),
   "image": zod.string().nullish().describe('The whole reference, for a screen that names it.'),
   "manifest": zod.object({
-  "outcome": zod.enum(['absent', 'found', 'unreadable', 'malformed', 'incomplete']).describe('The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module\'s header.'),
+  "outcome": zod.enum(['absent', 'found', 'vanished', 'unreadable', 'malformed', 'incomplete']).describe('The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module\'s header.'),
   "packages": zod.array(zod.object({
   "beta": zod.string(),
   "general": zod.string(),
@@ -257,7 +257,7 @@ export const CheckUpdatesResponse = zod.object({
   "channel": zod.enum(['general', 'beta']).describe('The channel in force, derived from the tag on the running image.\nGeneral access when it could not be read, which `recognised` and\n`problem` qualify.'),
   "image": zod.string().nullish().describe('The whole reference, for a screen that names it.'),
   "manifest": zod.object({
-  "outcome": zod.enum(['absent', 'found', 'unreadable', 'malformed', 'incomplete']).describe('The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module\'s header.'),
+  "outcome": zod.enum(['absent', 'found', 'vanished', 'unreadable', 'malformed', 'incomplete']).describe('The outcome of the most recent read. Five, and they are not\ninterchangeable — see this module\'s header.'),
   "packages": zod.array(zod.object({
   "beta": zod.string(),
   "general": zod.string(),
