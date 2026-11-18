@@ -9,4 +9,6 @@ export { List, Columns, Row } from "./List";
 export { Avatar } from "./Avatar";
 export { Panel, PageHead } from "./Panel";
 export { Card, CardHead } from "./Card";
+export { Review } from "./Review";
+export { FileDiff } from "./FileDiff";
 export { CopyButton, Copyable } from "./Copy";
