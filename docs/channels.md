@@ -181,12 +181,23 @@ It refuses, and moves nothing, on:
 * any read of the current manifest that fails for a reason other than "there is
   not one yet".
 
-It also prints how many installations reported running the version being
-promoted, from the existing telemetry version counts — a beta version is one
-general access does not have yet, so counting installations on it counts beta
-testers. A count of zero is expected rather than alarming: beta is one-way for a
-control plane, few will volunteer, and an installation with telemetry off is
-invisible.
+It also reports how many installations are running the version being promoted,
+from the existing telemetry version counts — a beta version is one general
+access does not have yet, so counting installations on it counts beta testers.
+
+**That count cannot actually be read today, and the output says so.** The
+digests are posted to a collector that is a separate service with no read API,
+so there is nothing for the workflow to ask: see #457. Until there is, the step
+names the shortfall and points at the ticket. It deliberately does not print a
+zero in its place — zero is exactly what a build nobody tested looks like, which
+is the judgement the number exists to inform.
+
+When a collector does exist, set the `TELEMETRY_COUNTS_URL` repository variable
+to an endpoint answering `?package=<p>&version=<v>` with
+`{"installations": <n>}`. A real count of zero is expected rather than alarming:
+beta is one-way for a control plane, few will volunteer, and an installation
+with telemetry off is invisible. Promotion is not gated on any of this — the
+signal informs the decision, it does not block it.
 
 ---
 
