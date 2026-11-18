@@ -1138,6 +1138,27 @@ fn image_tag(compose: &str, repository: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    /// The one address this reader and the workflow that publishes have to
+    /// agree on, written out so a change to either has to change a test that
+    /// says why.
+    ///
+    /// Getting it wrong is silent: the read 404s, a 404 is correctly absence,
+    /// and absence is the bootstrap case — so the installation would go on
+    /// following the newest release while looking as though it had read a
+    /// manifest and found nothing to move to.
+    #[test]
+    fn the_manifest_is_read_from_the_release_the_promotion_uploads_to() {
+        assert!(
+            Source::DEFAULT.ends_with("/releases/download/channels/channels.json"),
+            "the release is `channels` and the asset is `channels.json`: {}",
+            Source::DEFAULT
+        );
+        // And nothing needs it in `.env` — the channel is derived, not
+        // configured, so the override exists for a test or a mirror.
+        assert_eq!(Source::from_env().url, Source::DEFAULT);
+        assert_eq!(Source::ENV, "FIRETOWER_CHANNEL_MANIFEST");
+    }
+
     /// A host that answers one canned response and goes away.
     ///
     /// On a socket rather than against a mocked client: what separates a 404
