@@ -613,6 +613,8 @@ const server = createServer(async (req, res) => {
   if (path === "/__reset") {
     scene = url.searchParams.get("scene") ?? "default";
     checkouts = START();
+    pinned = null;
+    repoDefaults = {};
     return json(res, { detail: `back to three, playing ${scene}` });
   }
 
@@ -632,6 +634,15 @@ const server = createServer(async (req, res) => {
     if (scene === "repos-denied") {
       return json(res, { code: "Forbidden", message: "you may not read this organisation's repositories" }, 403);
     }
+  }
+
+  /* The library failing, which is a different sentence from the library being
+     empty — "we could not ask" against "there are none". A picker that says
+     the second when the first is true is the empty state that costs the most
+     trust, so both have to be reachable from here. `throws` is the other half:
+     the right path answering with the wrong shape. */
+  if (path === "/api/v1/skills" && scene === "skills-error") {
+    return json(res, { code: "ActionFailed", message: "the control plane refused: upstream timed out" }, 500);
   }
 
   if (req.method === "POST" && path === "/api/v1/updates/plan") return json(res, PLAN);
@@ -836,6 +847,42 @@ const server = createServer(async (req, res) => {
     return [session(), ...asking, ...working];
   };
 
+  /* **Before the route table, which answers every method.** Its lookup is
+     `path in routes`, with no method in it — so a PUT to a path the table
+     also serves would come back as the GET fixture and the write would
+     silently do nothing. That is what these two are above it for. */
+  /* Confirming a selection. The whole set, never a delta — and it answers
+     with the session's skills as they now are, which is what the real handler
+     returns and what lets a client settle without a second request. */
+  if (req.method === "PUT" && /^\/api\/v1\/sessions\/[^/]+\/skills$/.test(path)) {
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    if (scene === "skills-refused") {
+      return json(res, { code: "ActionFailed", message: "the worker did not answer — nothing was changed" }, 500);
+    }
+    /* Only what can actually be delivered, as `set_for_session` does: a skill
+       whose current version is held is one the worker would never be given. */
+    const deliverable = new Set(SKILLS.filter((k) => !k.held).map((k) => k.id));
+    pinned = (body.selected ?? []).filter((id) => deliverable.has(id));
+    return json(res, sessionSkills());
+  }
+
+  /* Making a selection the default in one repository. The whole set again, so
+     unticking carries over — which is the reason the picker sends all of it. */
+  const defaults_of = /^\/api\/v1\/repos\/([^/]+)\/skill-defaults$/.exec(path);
+  if (req.method === "PUT" && defaults_of) {
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    repoDefaults[defaults_of[1]] = body.skills ?? [];
+    return json(res, { detail: "set" });
+  }
+
   const routes = {
     "/api/v1/bootstrap": { version: "0.34.1", eventsPath: "/api/v1/events", authModes: ["password"], organization: ORG.name, serverId: "o_1" },
     /* `locked` and `needs-setup` are what `Gate.tsx` stands between a
@@ -869,14 +916,16 @@ const server = createServer(async (req, res) => {
     /* `throws` answers the right path with the wrong shape, which is what a
        real client meets when a server drifts — and is the one way to get
        `Boundary`'s own screen on camera without planting a bug in the app. */
-    "/api/v1/skills": scene === "throws" ? { nope: true } : SKILLS,
+    "/api/v1/skills": scene === "throws" ? { nope: true } : library(),
     /* ── The seven the 404 found ──────────────────────────────────────
        Every one of these answered `[]` through the fall-through, so the
        screens that read them drew their empty state and nobody could tell
        that from the real thing. They are served explicitly now — some with
        content, some genuinely empty, and the difference is the point. */
-    /* Which skills this session reads. The composer's chip counts them. */
-    "/api/v1/sessions/s_1/skills": SKILLS.filter((k) => !k.held).slice(0, 2).map((k) => k.id),
+    /* Which skills this session reads. The composer's chip counts them, and
+       the picker's switch and meter read the other two fields. See
+       `sessionSkills` for what was wrong with this before. */
+    "/api/v1/sessions/s_1/skills": sessionSkills(),
     /* The run controls, per agent rather than per session. */
     "/api/v1/agents/ClaudeCode/controls": CLAUDE_CONTROLS,
     "/api/v1/agents/Codex/controls": [],
@@ -1247,7 +1296,7 @@ server.on("upgrade", (req, socket) => {
  * wrote that is waiting to be read.
  */
 const skill = (over) => ({
-  id: "sk_x", name: "a-skill", description: "", version: 1, tokens: 900, bytes: 61270, files: 3,
+  id: "sk_x", name: "a-skill", description: "", version: 1, tokens: 310, bytes: 61270, files: 3,
   alwaysOn: false, builtin: false, held: false, mayShare: true, mayWrite: true,
   author: null, risk: [], defaultIn: [], path: "u/kevin", currentVersionId: "sv_1",
   createdAt: minutesAgo(9000), updatedAt: minutesAgo(90), ...over,
@@ -1264,11 +1313,11 @@ const SKILLS = [
     alwaysOn: true,
   }),
   skill({
-    id: "sk_3", name: "claude-api", version: 2, defaultIn: ["acme/web"],
+    id: "sk_3", name: "claude-api", version: 2, defaultIn: ["acme/web"], tokens: 1400,
     description: "Reference for the Claude API and the Anthropic SDK: model ids, pricing, params, streaming, tool use, MCP, caching and token counting.",
   }),
   skill({
-    id: "sk_4", name: "dataviz", version: 1,
+    id: "sk_4", name: "dataviz", version: 1, tokens: 480,
     description: "Read before writing any chart, graph, plot or dashboard, in any medium. A form heuristic, a colour formula with a runnable validator, and mark specs.",
     risk: ["scripts"], defaultIn: ["acme/web"],
   }),
@@ -1284,10 +1333,76 @@ const SKILLS = [
   }),
   skill({
     id: "sk_7", name: "incident-timeline", version: 2, mayShare: false, mayWrite: false,
-    path: "d/platform", risk: ["tools"],
+    path: "d/platform", risk: ["tools"], tokens: 350,
     description: "Turn an incident channel into the note that goes to the customer. Use when somebody asks for a customer-facing write-up.",
   }),
 ];
+
+/**
+ * What a session is reading, in the shape `SessionSkills` actually has.
+ *
+ * **This route used to answer a bare array of ids**, and the contract has
+ * always said an object — `{ selected, repos, alwaysOn }`. Every client reads
+ * `data.selected`, which on an array is `undefined`, so the composer's skills
+ * chip has read **0 skills** in every mock-driven demo, screenshot and e2e run
+ * since the fixture was written, on a session the fixture meant to have two.
+ * The handler in `crates/ft-server/src/api/skills.rs` is correct; this was the
+ * mock being wrong about the contract, which is the worse of the two because
+ * nothing fails — it just quietly draws a feature as absent.
+ *
+ * All three fields are populated, because two of them are what the picker's
+ * defaults switch and its token meter are built out of: a fixture that
+ * satisfies the type and leaves `repos` and `alwaysOn` empty gives back a
+ * sheet with no switch, no provenance line and nothing to compare against.
+ *
+ * `held` stays out of `selected` and stays *in* the library, which is the
+ * distinction worth being able to see: held content is never a skill's current
+ * version, so `set_for_session` will not pin it — it is a row you can look at
+ * and cannot turn on.
+ */
+
+/** What `chooseSkills` last set. `null` means the fixture's own answer. */
+let pinned = null;
+/** What `setRepoDefaults` last set, by repository id. */
+let repoDefaults = {};
+
+const alwaysOnIds = () => SKILLS.filter((k) => k.alwaysOn).map((k) => k.id);
+
+const defaultsFor = (repoId, slug) =>
+  repoDefaults[repoId] ?? SKILLS.filter((k) => k.defaultIn.includes(slug)).map((k) => k.id);
+
+/** The session's repositories, deduplicated by repository the way
+ *  `api::skills::repo_defaults` does — a checkout with no repository behind it
+ *  contributes nothing, and two checkouts of one repository are one row. */
+const sessionRepos = () => {
+  const out = [];
+  for (const c of checkouts) {
+    if (!c.repoId || out.some((r) => r.repoId === c.repoId)) continue;
+    out.push({ repoId: c.repoId, slug: c.slug, defaults: defaultsFor(c.repoId, c.slug) });
+  }
+  return out;
+};
+
+const sessionSkills = () => ({
+  selected: pinned ?? SKILLS.filter((k) => !k.held).slice(0, 2).map((k) => k.id),
+  repos: sessionRepos(),
+  alwaysOn: alwaysOnIds(),
+});
+
+/** The library, with whatever `setRepoDefaults` has since been told. Only the
+ *  repositories that were actually written are touched, so a skill defaulted
+ *  somewhere outside this session keeps saying so. */
+const library = () =>
+  SKILLS.map((k) => {
+    let on = k.defaultIn;
+    for (const c of checkouts) {
+      if (!c.repoId || !(c.repoId in repoDefaults)) continue;
+      on = repoDefaults[c.repoId].includes(k.id)
+        ? [...new Set([...on, c.slug])]
+        : on.filter((slug) => slug !== c.slug);
+    }
+    return { ...k, defaultIn: on };
+  });
 
 /**
  * What Settings reads, which until the reconciliation was nothing at all.
