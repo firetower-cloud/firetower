@@ -15,7 +15,23 @@
  * there, and furniture repeating them implies they are still open.
  *
  * `/new` is still a route, because a task seeds it with a key and a URL and
- * the shelf has nowhere to put those. Nothing links to it from here.
+ * the shelf has nowhere to put those. **Nothing links to it from here**, and
+ * that sentence was aspirational for a release: the `host` chip, the two picks
+ * and the send button all pushed the form, so the modal was not an edge case
+ * — it was the whole start flow wearing a composer as a façade. Every control
+ * on this box now resolves in place and the send button creates the session.
+ * `(tabs)/tasks.tsx` is the one thing that still opens the form, which is what
+ * the form is now for.
+ *
+ * ## Where the shelf ends and the picks begin
+ *
+ * The shelf carries **where** the work happens — a repository and a machine.
+ * The picks, inside the card, carry **what does it** — the profile, then the
+ * run: engine, account, model, effort, permissions. That lines up one for one
+ * with the desk's footer bar, and it is why the profile is a pick rather than
+ * a third chip: a persona is not a place, putting it on the shelf would
+ * separate it from the engine it pins, and the strip already admits that two
+ * chips do not fit 390.
  *
  * ## It moves with the keyboard, not after it
  *
@@ -39,6 +55,13 @@
  * it, not an extra control competing for the same corner. With words in it,
  * send. That rule is `Composer`'s and this keeps it, because a person moving
  * between the two boxes should not have to learn a second one.
+ *
+ * **And it sends.** The box used to hand what you typed to `/new` as a title;
+ * it now creates the workspace and the sentence travels with it as the first
+ * prompt, which is what the desk does. A filled ↑ that does not send is the
+ * single most surprising control a phone can draw, and this was the only
+ * place in the app that drew one. See the head of `app/new.tsx`, which
+ * carries the rest of that argument and the half of it that did not change.
  */
 import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import {
@@ -53,12 +76,61 @@ import {
 } from "lucide-react-native";
 import { KeyboardStickyView } from "react-native-keyboard-controller";
 import * as Haptics from "expo-haptics";
+import type { Agent } from "~/api/generated/model";
+import { AgentMark } from "~/ui/AgentMark";
 import { useTheme } from "~/design/theme";
 import { size } from "~/design/tokens.generated";
 
-/** One unmade decision. `want` draws it as an invitation rather than a value. */
-/** One still-open choice about what will run. */
-export type Pick_ = { id: "agent" | "model"; label: string; onPress: () => void };
+/**
+ * One still-open choice about what will run.
+ *
+ * It was `{ id: "agent" | "model" }` with a bare `onPress`, which is as much
+ * as a control that pushed a form needed to know. A control that resolves in
+ * place has to say what it resolved *to*: hence the glyph, which carries an
+ * engine's mark when there is one, and `set`, which is how *a profile is in
+ * force* is legible without opening anything.
+ */
+export type Pick_ = {
+  id: string;
+  /**
+   * The mark on the left. An `Agent` draws that engine's own mark; `person` is
+   * the unset profile, which is a choice rather than a blank; `none` is a
+   * control whose subject this server has not named yet.
+   */
+  glyph: Agent | "person" | "none";
+  label: string;
+  /**
+   * Chosen rather than resolved. `bone` against `dim` — the desk's `data-set`
+   * said in weight, which is the only way a phone has to say it.
+   */
+  set?: boolean;
+  /**
+   * Shown, not chosen: something upstream decided it. No chevron and no
+   * press, because a control that looks like one and refuses is worse than a
+   * sentence.
+   *
+   * Nothing on the home sets this yet — the lock that exists today is the
+   * Agent row *inside* `RunSheet`, where a profile's pinned engine lands. The
+   * slot is here because whether a pick is a control is a property of the
+   * pick, not of the sheet behind it.
+   */
+  locked?: boolean;
+  onPress: () => void;
+};
+
+/**
+ * Why the composer cannot send, said once, between the shelf and the card.
+ *
+ * Which is where the desk puts `create.isError`. **Brick for a failure and
+ * dim for an absence** — a machine that is not there has not failed, and
+ * `STYLE.md` makes that distinction load-bearing. Neither is ember: ember
+ * answers *is an agent waiting on you*, and this is a thing you have not done
+ * yet.
+ *
+ * Nothing goes *under* the box. The bottom of the screen belongs to the
+ * message.
+ */
+export type Notice = { tone: "brick" | "dim"; say: string };
 
 export type Chip = {
   id: string;
@@ -112,8 +184,10 @@ export function StartBox({
   onChange,
   onStart,
   starting,
+  ready,
   chips,
   picks,
+  notice,
   onDictate,
   onAttach,
 }: {
@@ -121,14 +195,27 @@ export function StartBox({
   onChange: (next: string) => void;
   onStart: () => void;
   starting?: boolean;
+  /**
+   * Whether the workspace could actually be made.
+   *
+   * The ↑ appears as soon as there are words — that rule is the composer's and
+   * it does not bend — but it is live only when there is a machine, an agent
+   * it can run and an account to spend. Otherwise it is `overlay` and the
+   * notice above says which of the three is missing, so a dead button is
+   * never the only thing on screen explaining itself.
+   */
+  ready?: boolean;
   chips: Chip[];
   /** What the session will run, while that is still unsettled. */
   picks: Pick_[];
+  /** Why it will not send, when it will not. */
+  notice?: Notice | null;
   onDictate?: () => void;
   onAttach?: () => void;
 }) {
   const { color } = useTheme();
-  const ready = value.trim().length > 0;
+  const typed = value.trim().length > 0;
+  const live = ready !== false;
 
   return (
     /* `flex:none` under a `flex:1` scroller is the whole mechanism: the
@@ -149,6 +236,21 @@ export function StartBox({
         }}
       >
         <Shelf chips={chips} />
+
+        {/* Between the shelf and the card, and only once there is something
+            to send: it answers *why can't I send this* rather than
+            announcing itself at rest. */}
+        {notice && typed ? (
+          <Text
+            testID="start-notice"
+            className={`pb-2 font-sans ${notice.tone === "brick" ? "text-brick" : "text-dim"}`}
+            /* 18, between the shelf's 14 and the card's 24, so the line sits
+               under the chips and over the box rather than with either. */
+            style={{ paddingHorizontal: 18, fontSize: size.meta, lineHeight: size.meta * 1.5 }}
+          >
+            {notice.say}
+          </Text>
+        ) : null}
 
         <View
           /**
@@ -204,10 +306,11 @@ export function StartBox({
 
             {/* The decisions that are still open, and **the row scrolls**: two
                 pickers do not fit beside a paperclip and a send button at 390,
-                and which pickers exist is not ours to fix at two. They open the
-                form that collects them, the same way the shelf above does —
-                drawn as what they are rather than as a control that does
-                nothing, which is what these were on the desk for a while. */}
+                and which pickers exist is not ours to fix at two. They open a
+                sheet each and resolve in place — drawn as what they are rather
+                than as a control that does nothing, which is what these were
+                on the desk for a while and what they were here until the
+                sheets existed. */}
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -219,18 +322,25 @@ export function StartBox({
                 <Pressable
                   key={pick.id}
                   testID={`start-pick-${pick.id}`}
+                  disabled={pick.locked}
                   onPress={pick.onPress}
-                  className="h-[34px] flex-row items-center gap-1.5 px-1.5"
+                  className="h-[34px] max-w-[190px] flex-row items-center gap-1.5 px-1.5"
                 >
-                  {pick.id === "agent" ? (
-                    <UserRound color={color.mute} size={14} />
-                  ) : (
+                  {pick.glyph === "person" ? (
+                    <UserRound color={pick.set ? color.bone : color.mute} size={14} />
+                  ) : pick.glyph === "none" ? (
                     <Sparkles color={color.mute} size={14} />
+                  ) : (
+                    <AgentMark agent={pick.glyph} size={14} tone={pick.set ? color.bone : color.mute} />
                   )}
-                  <Text numberOfLines={1} className="font-sans text-dim" style={{ fontSize: size.ui }}>
+                  <Text
+                    numberOfLines={1}
+                    className={`font-sans ${pick.set ? "text-bone" : "text-dim"}`}
+                    style={{ fontSize: size.ui }}
+                  >
                     {pick.label}
                   </Text>
-                  <ChevronDown color={color.mute} size={13} />
+                  {pick.locked ? null : <ChevronDown color={color.mute} size={13} />}
                 </Pressable>
               ))}
             </ScrollView>
@@ -239,17 +349,18 @@ export function StartBox({
               <View className="h-10 w-10 items-center justify-center">
                 <ActivityIndicator color={color.mute} />
               </View>
-            ) : ready ? (
+            ) : typed ? (
               <Pressable
                 testID="start-send"
+                disabled={!live}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
                   onStart();
                 }}
-                className="h-10 w-10 items-center justify-center rounded-full bg-bone"
+                className={`h-10 w-10 items-center justify-center rounded-full ${live ? "bg-bone" : "bg-overlay"}`}
                 hitSlop={6}
               >
-                <ArrowUp color={color.ground} size={20} />
+                <ArrowUp color={live ? color.ground : color.mute} size={20} />
               </Pressable>
             ) : (
               <Pressable

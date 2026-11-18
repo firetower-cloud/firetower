@@ -36,21 +36,24 @@
  * are: both sections, typing, nothing waiting, nothing at all, seeded from a
  * task, no repository, and not answering.
  */
-import { Fragment, useCallback, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, View } from "react-native";
 import { BLEED, useEdges, useRail } from "~/ui/edges";
 import Animated from "react-native-reanimated";
 import { GestureDetector } from "react-native-gesture-handler";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { ChevronRight, Clock } from "lucide-react-native";
 import { useQueryClient } from "@tanstack/react-query";
-import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
+import { getListSessionsQueryKey, useCreateSession } from "~/api/generated/sessions/sessions";
+import { useAgentControls } from "~/api/generated/agents/agents";
 import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useListSchedules } from "~/api/generated/schedules/schedules";
-import type { Session } from "~/api/generated/model";
+import type { Agent, Control, ControlKind, Session } from "~/api/generated/model";
 import { banded, childrenElsewhere, fleetLine, group, lead, useSettled, useVanished, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
-import { useAgents, useRepos, useSessions } from "~/data";
+import { repoLabel, resolveStart, runLabel, seededSettings } from "~/api/start";
+import { useAccounts, useAgents, useHosts, useProfiles, useRepos, useSessions, why } from "~/data";
+import { takeConnected } from "~/workspace/connected";
 import { useServer } from "~/native/current";
 import { ServerChip } from "~/ui/ServerChip";
 import { ArtifactCard } from "~/ui/ArtifactCard";
@@ -58,6 +61,9 @@ import { useAnswering } from "~/api/answering";
 import { BandLabel } from "~/ui/BandLabel";
 import { useEndWorkspace } from "~/ui/end";
 import { Peek, usePeekable } from "~/ui/Peek";
+import { Picker } from "~/ui/Picker";
+import { ProfileSheet } from "~/ui/ProfileSheet";
+import { RunSheet } from "~/ui/RunSheet";
 import { Servers } from "~/ui/Servers";
 import { Unreachable } from "~/ui/Unreachable";
 import { WorkspaceRow } from "~/ui/WorkspaceRow";
@@ -145,10 +151,14 @@ export default function Home() {
   const cache = useQueryClient();
 
   const { data: sessions, loading, error } = useSessions();
-  const { data: repos } = useRepos();
-  const { data: agents } = useAgents();
+  const { data: repos, loading: findingRepos } = useRepos();
+  const { data: agents, loading: findingAgents } = useAgents();
+  const { data: hosts, loading: findingHosts } = useHosts();
+  const { data: accounts, loading: findingAccounts } = useAccounts();
+  const { data: profiles } = useProfiles();
   const { data: artifacts = [] } = useListArtifacts();
   const schedules = useListSchedules();
+  const create = useCreateSession();
 
   const [draft, setDraft] = useState("");
   const [peeking, setPeeking] = useState<string | null>(null);
@@ -248,14 +258,176 @@ export default function Home() {
     [cache],
   );
 
-  /* The decisions that are genuinely unmade. With no repository at all the
-     chip is an invitation rather than a value — it is the only setting a
-     phone owns, and it is two taps. */
+  /**
+   * ## Starting work, in place
+   *
+   * Everything below used to be a push to `/new`. The form asked six
+   * questions and five of them have an obvious answer, so what is held here
+   * is only what somebody has actually chosen — each empty until they do —
+   * and `resolveStart` turns that plus the server's lists into the whole
+   * launch. See `~/api/start`, which is where the rules are, and where they
+   * can be tested.
+   */
+  const [sheet, setSheet] = useState<null | "repo" | "host" | "profile" | "run">(null);
+  const [repoIds, setRepoIds] = useState<string[]>([]);
+  const [hostId, setHostId] = useState("");
+  const [agentKind, setAgentKind] = useState("");
+  const [accountId, setAccountId] = useState("");
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>({});
+
+  /* **The repository does not default, and it is the one thing here that
+     does not.** The machine, the agent and the account are all resolvable —
+     a wrong guess there is corrected before anything runs — but checking out
+     a repository somebody did not name is work done in the wrong place. The
+     chip is an invitation until it is answered, which is what the desk does
+     too. The shipped chip *read* `repos[0].slug` while sending nothing; it
+     now says what is true. */
+
+  /* The profile somebody marked default, once — so changing it here
+     afterwards sticks. The desk does exactly this. */
+  const defaulted = useRef(false);
+  useEffect(() => {
+    if (defaulted.current || profiles.length === 0) return;
+    defaulted.current = true;
+    const def = profiles.find((p) => p.isDefault);
+    if (def) setProfileId(def.id);
+  }, [profiles]);
+
+  /* Whatever was just connected on `/repos`, chosen here — the repository is
+     the reason anybody leaves this screen for that one. `new.tsx` has the
+     same hook for the same reason; `workspace/connected.ts` is why it is
+     taken once. */
+  useFocusEffect(
+    useCallback(() => {
+      const made = takeConnected();
+      if (made.length === 0) return;
+      setRepoIds((was) => [...was, ...made.filter((id) => !was.includes(id))]);
+    }, []),
+  );
+
+  /* One refusal is worth rewording: `NoCapacity` says in a code what its
+     message does not say in words, and it is the one people meet. */
+  const refused = create.isError
+    ? (create.error as { code?: string })?.code === "NoCapacity"
+      ? "No host is available to take this."
+      : why(create.error)
+    : null;
+
+  const start = resolveStart({
+    draft,
+    chose: { profileId, repoIds, hostId, agentKind, accountId },
+    profiles,
+    repos,
+    hosts,
+    agents,
+    accounts,
+    refused,
+  });
+
+  /* Model, effort, permissions and sandbox — the same pickers a conversation
+     offers, fed what Firetower knows about this engine before one is
+     running. Which pickers exist is the agent's business, not ours. */
+  const kind = start.agent?.kind;
+  const controlsQ = useAgentControls(kind ?? "", { query: { enabled: !!kind } });
+  const controls = (kind ? (controlsQ.data ?? []) : []) as Control[];
+  /* A fresh set each time the engine or the profile changes: a model is one
+     agent's, so carrying one across would seed a picker with a value it
+     cannot offer. Seeded from what the profile pins, when it pins for this
+     engine — and still changeable before you send. */
+  useEffect(() => {
+    setChosen(seededSettings(profiles.find((p) => p.id === profileId) ?? null, (kind as Agent) ?? null));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, profileId]);
+  const valueOf = useCallback(
+    (c: Control) => chosen[c.kind] ?? c.current ?? undefined,
+    [chosen],
+  );
+  const modelLabel = (() => {
+    const model = controls.find((c) => c.kind === "model");
+    if (!model) return undefined;
+    return model.choices.find((k) => k.value === valueOf(model))?.label;
+  })();
+
+  /**
+   * Whether this screen is still the one on screen when the create answers.
+   *
+   * It pushes the workspace on success, and somebody who has moved on — to
+   * another tab, or to another Firetower, which unmounts the whole tree —
+   * should not be pulled onto a workspace they stopped waiting for. The
+   * workspace is made either way, which is the other half of why this is
+   * `mutateAsync` and not `mutate`: react-query drops the callbacks passed to
+   * `mutate` once the caller has gone, so what was typed would have gone
+   * nowhere with nobody told. The desk carries the same hazard and the same
+   * answer.
+   */
+  const onScreen = useRef(true);
+  useEffect(() => {
+    onScreen.current = true;
+    return () => {
+      onScreen.current = false;
+    };
+  }, []);
+
+  const go = () => {
+    if (!start.ready || !start.agent) return;
+    void create
+      .mutateAsync({
+        data: {
+          name: start.name,
+          /* **What you typed is the first message.** The form sends no
+             prompt and that is still right — see the head of `new.tsx` — but
+             this is a composer, and a composer that fills its ↑ and then does
+             not send is the most surprising control a phone can draw. */
+          prompt: draft.trim() || undefined,
+          repos: start.repos.map((r) => ({ repoId: r.id })),
+          agent: start.agent.kind,
+          profile: profileId ?? undefined,
+          accountId: start.account?.id,
+          branch: start.branch,
+          hostId: start.host?.id,
+          settings: {
+            model: chosen.model,
+            effort: chosen.effort,
+            mode: chosen.mode,
+            sandbox: chosen.sandbox,
+          },
+        },
+      })
+      .then((made) => {
+        const s = made as { id: string; workspaceId?: string | null };
+        /* Emptied, because this screen is still mounted under the one being
+           pushed: coming back to a composer holding a sentence that has
+           already been sent is how the same work gets started twice. The desk
+           navigates away from its own composer and never has to. */
+        setDraft("");
+        if (onScreen.current) router.push(`/workspace/${s.workspaceId ?? s.id}`);
+      })
+      .catch(() => {
+        /* Said above the card, off the mutation's own state — which
+           `mutateAsync` records exactly as `mutate` does. Swallowed here
+           because an unhandled rejection is not a second way of telling
+           anybody. */
+      });
+  };
+
+  /* The decisions that are genuinely unmade, and **where** the work happens:
+     a repository and a machine. Both resolve in a sheet over this screen. */
   const chips: Chip[] = [
-    noRepo
-      ? { id: "repo", label: "Connect a repository", icon: "repo", want: true, onPress: () => router.push("/repos") }
-      : { id: "repo", label: repos[0]?.slug ?? "Repository", icon: "repo", onPress: () => router.push("/config") },
-    { id: "host", label: "Firetower’s machine", icon: "host", onPress: () => router.push("/new") },
+    {
+      id: "repo",
+      label: repoLabel(start.repos, repos.length),
+      icon: "repo",
+      want: start.repos.length === 0,
+      onPress: () => setSheet("repo"),
+    },
+    {
+      id: "host",
+      label: start.host?.name ?? "No machine",
+      icon: "host",
+      want: !start.host,
+      onPress: () => setSheet("host"),
+    },
   ];
 
   const header = (
@@ -460,10 +632,25 @@ export default function Home() {
   /* What will run, while it is still unsettled. The drawing puts these in the
      composer's control row rather than on the shelf: the shelf carries *where*
      the work happens — a repository and a machine — and these carry *what does
-     it*. They open the form that collects them, same as the shelf chips. */
+     it*. One sheet each, over this screen.
+
+     **The profile is a pick and not a third chip.** A persona is not a place;
+     putting it on the shelf would separate it from the engine it pins, and
+     the strip already admits that two chips do not fit 390. */
   const picks: Pick_[] = [
-    { id: "agent", label: "Just an agent", onPress: () => router.push("/new") },
-    { id: "model", label: agents[0]?.label ?? "Choose an agent", onPress: () => router.push("/new") },
+    {
+      id: "profile",
+      glyph: (start.profile?.agent as Agent | undefined) ?? "person",
+      label: start.profile?.name ?? "Just an agent",
+      set: !!start.profile,
+      onPress: () => setSheet("profile"),
+    },
+    {
+      id: "run",
+      glyph: start.agent?.kind ?? "none",
+      label: runLabel(start.agent, modelLabel),
+      onPress: () => setSheet("run"),
+    },
   ];
 
   const box = (
@@ -471,11 +658,102 @@ export default function Home() {
       value={draft}
       picks={picks}
       onChange={setDraft}
-      /* The shelf cannot carry a task's key and URL, so starting still goes
-         through the form — seeded with what has been typed. */
-      onStart={() => router.push(`/new?title=${encodeURIComponent(draft.trim())}`)}
+      onStart={go}
+      starting={create.isPending}
+      ready={start.ready}
+      notice={start.why}
       chips={chips}
     />
+  );
+
+  /**
+   * The four sheets, drawn at the root of every pose.
+   *
+   * They are `Modal`s, so they come from the bottom of the *screen* rather
+   * than of whichever column the composer is sitting in — which is what makes
+   * the 951 split free: unfolding with a sheet open re-clamps and re-centres
+   * it, and nothing about a control changes. The content is clamped to
+   * `COLUMN` inside `Sheet` and `Picker`.
+   */
+  const sheets = (
+    <>
+      <Picker
+        open={sheet === "repo"}
+        title="Repositories"
+        waiting={findingRepos ? "Reading your repositories" : undefined}
+        empty="No repository is connected to this Firetower yet."
+        chosen={repoIds}
+        choices={repos.map((r) => ({ id: r.id, label: r.slug, detail: r.remote }))}
+        onPick={(id) =>
+          setRepoIds(repoIds.includes(id) ? repoIds.filter((x) => x !== id) : [...repoIds, id])
+        }
+        onClose={() => setSheet(null)}
+        /* The one thing this list cannot hold: a repository nobody has
+           connected yet. Everything else a workspace needs is administered
+           from a desk; a repository is what the work is *in*. */
+        action={{
+          label: "Connect a repository",
+          onPress: () => {
+            setSheet(null);
+            router.push({ pathname: "/repos", params: { pick: "1" } });
+          },
+        }}
+      />
+      <Picker
+        open={sheet === "host"}
+        title="Where it runs"
+        waiting={findingHosts ? "Reading the machines" : undefined}
+        empty="No machine yet. Agents run on a machine added over ssh — a VM, a build box, a Mac. Adding one is done from the desktop app or the web console."
+        chosen={start.host?.id}
+        choices={hosts.map((h) => ({
+          id: h.id,
+          label: h.name,
+          detail: `${h.cpus} vCPU · worker ${h.workerVersion ?? "—"}`,
+          /* Dimmed and unchoosable, with the reason. A machine the scheduler
+             cannot reach has not failed; it is not there. */
+          blocked: h.state === "Online" ? undefined : `${h.state} — ${h.diagnosis ?? "not answering"}`,
+        }))}
+        onPick={(id) => {
+          setHostId(id);
+          setSheet(null);
+        }}
+        onClose={() => setSheet(null)}
+      />
+      {sheet === "profile" ? (
+        <ProfileSheet
+          profiles={profiles}
+          profileId={profileId}
+          onPick={(id) => {
+            setProfileId(id);
+            setSheet(null);
+          }}
+          onClose={() => setSheet(null)}
+        />
+      ) : null}
+      {sheet === "run" ? (
+        <RunSheet
+          agent={start.agent}
+          agents={agents}
+          host={start.host}
+          accounts={accounts}
+          accountId={start.account?.id ?? ""}
+          locked={start.locked}
+          controls={controls}
+          valueOf={valueOf}
+          findingAgents={findingAgents}
+          findingAccounts={findingAccounts}
+          onPickAgent={(k) => {
+            setAgentKind(k);
+            /* The account belonged to the old agent; it cannot belong to
+               this one. `new.tsx` does the same on the same event. */
+            setAccountId("");
+          }}
+          onPickAccount={setAccountId}
+          onPickControl={(k, v) => setChosen((was) => ({ ...was, [k]: v }))}
+          onClose={() => setSheet(null)}
+        />
+      ) : null}
+    </>
   );
 
   const scroller = (
@@ -556,6 +834,23 @@ export default function Home() {
    * highlight and timestamp stays inside the reserved 84. See `useRail`. The
    * left column is unaffected: it is still `content − panel` = 560, exactly
    * `READING_MAX`, and `pose.ts` still measures the frame.
+   *
+   * ## And the composer's sheets come from the bottom of the screen
+   *
+   * Not of the column. They are `Modal`s, so they are full width over both
+   * columns and the rail, which is right: a sheet is the task, and anchoring
+   * one to the left column would break on exactly the rotation it is most
+   * likely to have to survive. What a column's width *does* decide is the
+   * reading measure, so the rows inside clamp to `COLUMN` and centre — see
+   * `Sheet` and `Picker`, which carry that change and the measurement behind
+   * it.
+   *
+   * **Nothing a control does is pose-dependent.** The draft, the resolved
+   * profile, agent, machine and account, and whichever sheet is open all live
+   * in this component's state; `usePose` only re-measures. So unfolding with
+   * the box half-typed keeps the words and keeps the sheet open — it
+   * re-clamps and re-centres, and the only thing that moves is the box, from
+   * the foot of the screen to the foot of the left column.
    */
   if (pose.docked && !bare) {
     return (
@@ -672,6 +967,7 @@ export default function Home() {
             onEnd={endPeeked}
           />
         ) : null}
+        {sheets}
         {servers ? <Servers onClose={() => setServers(false)} /> : null}
       </View>
     );
@@ -706,6 +1002,7 @@ export default function Home() {
           onEnd={endPeeked}
         />
       ) : null}
+      {sheets}
       {servers ? <Servers onClose={() => setServers(false)} /> : null}
     </View>
   );
