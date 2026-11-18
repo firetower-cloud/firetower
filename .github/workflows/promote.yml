@@ -103,10 +103,16 @@ jobs:
                  "Nothing has been promoted. Promotion cannot be undone, so the two have to match."
             exit 1
           fi
-          case "$VERSION" in
-            [0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "::error::'$VERSION' is not a three-part version. Nothing has been promoted."; exit 1 ;;
-          esac
+          # Three numeric parts and nothing else. A `case` glob would let
+          # `1.2.3.4` and a leading `v` through, and while both would be caught
+          # further down — as a release that does not exist, or by the manifest
+          # writer refusing them — they would be caught *after* the tags had
+          # moved, and with an error naming the wrong thing.
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$VERSION' is not a three-part version, so there is nothing to promote." \
+                 "Give it without a leading v. Nothing has been promoted."
+            exit 1
+          fi
 
           case "$PACKAGE" in
             control_plane) tag="firetower-v$VERSION" ;;

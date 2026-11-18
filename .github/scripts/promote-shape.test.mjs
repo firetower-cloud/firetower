@@ -347,6 +347,18 @@ exit 0
     assert.equal(readFileSync(join(repo.dir, "gh.log"), "utf8").trim(), "");
   });
 
+  it("refuses a version that is not three numeric parts", () => {
+    // Caught here rather than further down, where it would be caught after the
+    // tags had already moved and with an error naming the wrong thing.
+    for (const version of ["0.57", "v0.57.0", "0.57.0.1", "latest", "0.57.x"]) {
+      const repo = repository({ manifest: published });
+      const r = check(repo, { version });
+      assert.notEqual(r.status, 0, `${version} must be refused`);
+      assert.match(r.output, /not a three-part version/, version);
+      assert.equal(readFileSync(join(repo.dir, "gh.log"), "utf8").trim(), "", `${version}: nothing is looked up`);
+    }
+  });
+
   it("refuses a version older than general access holds", () => {
     // Published, so it gets past the check above and reaches this one: the
     // two refusals are separate and a test that conflated them would pass on
