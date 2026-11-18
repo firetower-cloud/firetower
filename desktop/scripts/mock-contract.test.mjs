@@ -78,7 +78,7 @@ const ELSEWHERE = new Set(["session_skills"]);
 /**
  * The scenes worth sweeping as well as the default one.
  *
- * A scene is how the mock reaches a state the default fixture is not in, and
+ * A scene is how the mock reaches a state its default fixture is not in, and
  * three of the mismatches this file was written for were only reachable from
  * one — `limit-hit` served a spent subscription with no `observedAt` on it
  * and an `Account` where a `Switch` belongs. The slow ones are left out on
@@ -86,7 +86,8 @@ const ELSEWHERE = new Set(["session_skills"]);
  * their whole point.
  */
 const SCENES = [
-  "team", "team-failed", "ws-many", "ws-done", "ws-few", "calm", "longname",
+  "team", "team-delegated", "team-failed", "ws-many", "ws-done", "ws-few",
+  "calm", "longname",
   "codex", "codex-done", "subagent", "subagent-done", "scroll-asking",
   "one-repo", "merged", "locked", "needs-setup", "empty", "bare",
   "no-artifacts", "no-repos", "no-hosts", "fresh-install", "host-needs-app",
@@ -124,13 +125,10 @@ const reads = () => {
 
 const EVERY = reads();
 
-let port = 0;
-let mock = null;
-
 /**
  * A port nothing else on this machine is using.
  *
- * The mock takes its port as an argument and prints back whatever it was
+ * A mock takes its port as an argument and prints back whatever it was
  * given, so port 0 — "whichever is free" — would leave this with a literal 0
  * to connect to. The free port is found here and handed over.
  */
@@ -143,24 +141,24 @@ const freePort = () =>
     });
   });
 
-beforeAll(async () => {
-  port = await freePort();
-  mock = spawn(
+/** One mock, running, with its port. */
+const start = async (file) => {
+  const port = await freePort();
+  const child = spawn(
     "node",
-    [fileURLToPath(new URL("./mock-server.mjs", import.meta.url)), String(port)],
+    [fileURLToPath(new URL(`./${file}`, import.meta.url)), String(port)],
     { stdio: ["ignore", "pipe", "inherit"] },
   );
   await new Promise((settle, fail) => {
-    const giveUp = setTimeout(() => fail(new Error("the mock did not come up")), 15_000);
-    mock.on("error", fail);
-    mock.stdout.on("data", () => {
+    const giveUp = setTimeout(() => fail(new Error(`${file} did not come up`)), 15_000);
+    child.on("error", fail);
+    child.stdout.on("data", () => {
       clearTimeout(giveUp);
       settle();
     });
   });
-}, 30_000);
-
-afterAll(() => mock?.kill());
+  return { port, child };
+};
 
 /**
  * One read, checked.
@@ -170,7 +168,7 @@ afterAll(() => mock?.kill());
  * what hunts those. Anything it *does* answer has to be the shape the client
  * was generated against.
  */
-const check = async (read) => {
+const check = async (port, read) => {
   const answer = await fetch(`http://localhost:${port}${read.path}`);
   if (!(answer.headers.get("content-type") ?? "").includes("json")) {
     return answer.ok ? null : `${read.path} answered ${answer.status}`;
@@ -188,20 +186,42 @@ const check = async (read) => {
   return `${read.id} — ${read.path}\n    ${said.join("\n    ")}`;
 };
 
-const scene = (named) => fetch(`http://localhost:${port}/__reset?scene=${named}`);
+it("finds a generated schema for every read in the contract", () => {
+  // Guards the `pascal` rule above: a generator that changed its naming would
+  // otherwise turn this whole file into a hundred silent passes.
+  expect(EVERY.filter((r) => !r.schema).map((r) => r.id)).toEqual([]);
+});
 
-describe("every read the mock serves is the shape the contract gives it", () => {
-  it("finds a generated schema for every read in the contract", () => {
-    // Guards the `pascal` rule above: a generator that changed its naming
-    // would otherwise turn this whole file into a hundred silent passes.
-    expect(EVERY.filter((r) => !r.schema).map((r) => r.id)).toEqual([]);
-  });
+let running = null;
+const at = () => running.port;
 
+/**
+ * **`mock-server.mjs` only, and `mock-retired.mjs` deliberately not.**
+ *
+ * The sibling is a second fixture for the machine-retirement screens, and it
+ * had the same faults — `state: "ready"` was in both, separately — which are
+ * fixed alongside these. It is not swept here because it still answers
+ * **`[]` with a 200** for every path it does not serve, which is what this
+ * one did until the catch-all became a 404: three white screens came out of
+ * that, because `[]` is truthy and sails past a `data?.x` guard. Nothing can
+ * tell that apart from an answer, so every read it does not serve would be
+ * reported as an object-shaped route answering an array. Making its
+ * catch-all a 404 is the right fix and is a behaviour change to a harness
+ * two screenshot scripts drive, which is its own piece of work.
+ */
+beforeAll(async () => {
+  running = await start("mock-server.mjs");
+}, 30_000);
+afterAll(() => running?.child.kill());
+
+const put = (named) => fetch(`http://localhost:${at()}/__reset?scene=${named}`);
+
+describe("mock-server.mjs answers each read in the shape the contract gives it", () => {
   for (const read of EVERY) {
     const run = read.missing || ELSEWHERE.has(read.id) ? it.skip : it;
     run(`${read.id} — ${read.template}`, async () => {
-      await scene("default");
-      expect(await check(read)).toBeNull();
+      await put("default");
+      expect(await check(at(), read)).toBeNull();
     });
   }
 });
@@ -212,14 +232,14 @@ describe("every read the mock serves is the shape the contract gives it", () => 
  * One test per scene rather than per read: a scene's whole answer is one
  * thing to look at, and the message carries every read that disagreed.
  */
-describe("and in every scene the mock can be put into", () => {
+describe("and in every scene it can be put into", () => {
   for (const named of SCENES) {
     it(named, async () => {
-      await scene(named);
+      await put(named);
       const wrong = [];
       for (const read of EVERY) {
         if (read.missing || ELSEWHERE.has(read.id)) continue;
-        const said = await check(read);
+        const said = await check(at(), read);
         if (said) wrong.push(said);
       }
       expect(wrong, `playing ${named}`).toEqual([]);
