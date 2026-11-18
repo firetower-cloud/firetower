@@ -349,7 +349,16 @@ jobs:
     uses: ./.github/workflows/desktop-release.yml
     permissions:
       contents: write
-    secrets: inherit
+    # **No `secrets: inherit`, deliberately.** A release needs it because its
+    # build legs sign with a Developer ID certificate and an Azure identity. A
+    # promotion runs neither — `publish_only` skips both — and the publish job
+    # needs nothing but `github.token`, which is always present and is not
+    # inherited through `secrets:`.
+    #
+    # So "no bundle is re-signed" stops being a property of which jobs happen
+    # to run and becomes one of what this call can reach: the signing material
+    # is not available to a promotion even if a future edit un-skips a leg,
+    # because it was never passed down. Asserted in promote-shape.test.mjs.
     with:
       tag: ${{ needs.check.outputs.tag }}
       version: ${{ inputs.version }}

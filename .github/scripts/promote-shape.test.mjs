@@ -146,6 +146,20 @@ describe("the promotion workflow", () => {
     assert.match(job(DESKTOP, "linux"), /if: \$\{\{ !inputs\.publish_only \}\}/);
   });
 
+  it("cannot reach the signing material at all", () => {
+    // Not just "the signing legs are skipped" — the call does not pass the
+    // secrets down, so a promotion could not sign a bundle even if a future
+    // edit un-skipped a leg. A release needs `secrets: inherit` for exactly
+    // the jobs a promotion does not run.
+    const desktop = code(job(PROMOTE, "desktop"));
+    assert.doesNotMatch(desktop, /secrets:\s*inherit/);
+    // The positive control, so this cannot pass by reading the wrong block:
+    // the release that does need them says so.
+    assert.match(job(RELEASE, "desktop"), /secrets: inherit/);
+    // And nothing anywhere in the promotion names a signing secret.
+    assert.doesNotMatch(code(PROMOTE), /APPLE_|AZURE_|TAURI_SIGNING/);
+  });
+
   /**
    * The trap, asserted rather than only commented.
    *
