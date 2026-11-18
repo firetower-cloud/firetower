@@ -326,10 +326,15 @@ export function betaOffer({ version, betaRelease, mac, windows, linux }: BetaLoo
  *   and must not read as a migration step anybody is waiting to withdraw
  *   (#415). Nothing here is phrased as *for now*, *until*, or *while*.
  *
- * The prose is `--color-text` rather than `--color-dim`. The sheet records
- * `--color-dim` at 2.94:1 on `--color-panel`, below the floor for normal text
- * and spent deliberately on counts, timestamps and paths — and these are the
- * sentences on this page that change what somebody does next.
+ * **Every sentence here is `--color-text` or brighter**, including the
+ * closing one. The sheet records `--color-dim` at 2.94:1 on `--color-panel`,
+ * below the floor for normal text and spent deliberately on counts,
+ * timestamps and paths; `--color-mute` is fainter still. These are the
+ * sentences on this page that change what somebody does next, so none of them
+ * is drawn in a tier the design reserves for things nobody has to read. The
+ * closing line stays an aside by being `--text-meta` and last, which is the
+ * same rule `desktop/STYLE.md` applies everywhere else: a distinction is
+ * carried by shape, weight or position, never by fading something out.
  *
  * Drawn in every state of the lookup, including the ones that know nothing.
  * Every sentence in it is true whatever the release turns out to hold, and the
@@ -371,11 +376,18 @@ export function BetaRoute({ found }: { found: BetaLookup }) {
 
         <CheckingIt />
 
-        <p className="mt-3 text-meta text-mute">
+        {/* The closing line earns its quietness from being smaller and last,
+            not from being too faint to read: `--text-meta` at `--color-text`
+            is an aside that clears the floor, where `--color-mute` at this
+            size was decoration. It carries the permanence of the route, which
+            is the one thing on this card somebody could leave believing the
+            opposite of. The link keeps its tier above its own prose — the
+            same step `OnLinux` and the card's footer line both take. */}
+        <p className="mt-3 text-meta text-text">
           The same download is how a copy that stopped updating is brought back, so it stays on the
           release page rather than being a one-off for this change.{" "}
           <a
-            className="text-dim underline decoration-line underline-offset-2"
+            className="text-bone underline decoration-line underline-offset-2"
             href={offer.href}
             target="_blank"
             rel="noreferrer"

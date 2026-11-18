@@ -306,16 +306,19 @@ describe("the beta route", () => {
     }
   });
 
-  it("draws its sentences above the faintest tier", () => {
+  it("draws every one of its sentences above the faintest tiers", () => {
     // `--color-dim` is recorded in the sheet at 2.94:1 on `--color-panel`,
     // under the floor for normal text and spent on counts, timestamps and
-    // paths. These sentences decide whether somebody hand-installs a build,
-    // so they are `--color-text`.
+    // paths; `--color-mute` is fainter still. These sentences decide whether
+    // somebody hand-installs a build, so all four are `--color-text` —
+    // including the closing one, which carries the permanence of the route
+    // and is an aside by being `--text-meta` and last, not by fading.
     const markup = renderToStaticMarkup(<BetaRoute found={FOUND} />);
     for (const sentence of [
       "The downloads above are general access",
       "A copy that predates all of this",
       "Switching back in the app stops new betas",
+      "The same download is how a copy that stopped updating",
     ]) {
       // The paragraph's own class, not a window before it — a window picks
       // up the version badge, which is `--color-dim` and correctly so.
@@ -323,7 +326,18 @@ describe("the beta route", () => {
       expect(tag?.[1]).toBeDefined();
       expect(tag?.[1]).toContain("text-text");
       expect(tag?.[1]).not.toContain("text-dim");
+      expect(tag?.[1]).not.toContain("text-mute");
     }
+  });
+
+  it("keeps the closing line's link above the line it sits in", () => {
+    // Lifting the prose and leaving the link where it was would put a link
+    // one tier *below* its own sentence, which reads as a disabled control.
+    // `OnLinux` and this card's footer line both take the same step up.
+    const markup = renderToStaticMarkup(<BetaRoute found={FOUND} />);
+    const link = markup.match(/<a class="([^"]+)"[^>]*>Beta builds on GitHub/);
+    expect(link?.[1]).toContain("text-bone");
+    expect(link?.[1]).not.toContain("text-dim");
   });
 });
 
