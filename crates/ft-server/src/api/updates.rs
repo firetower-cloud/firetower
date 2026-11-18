@@ -314,7 +314,7 @@ pub(super) async fn switch_channel(
         .iter()
         .find(|o| o.channel == req.channel)
         .ok_or_else(|| ApiError::not_found("channel"))?;
-    let Some(_act) = offer.action else {
+    if offer.action.is_none() {
         return Err(ApiError::new(
             ErrorCode::ActionFailed,
             offer
@@ -322,7 +322,7 @@ pub(super) async fn switch_channel(
                 .clone()
                 .unwrap_or_else(|| "this channel cannot be taken from here".into()),
         ));
-    };
+    }
     if offer.irreversible && !req.acknowledge_one_way {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
