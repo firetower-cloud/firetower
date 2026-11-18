@@ -192,6 +192,7 @@ export * from './probedProvider';
 export * from './probeProvider';
 export * from './probeRequest';
 export * from './probeResponse';
+export * from './profileFile';
 export * from './proposal';
 export * from './provenance';
 export * from './providerChanges';

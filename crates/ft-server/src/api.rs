@@ -652,6 +652,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(roles::list_roles, roles::create_role))
         .routes(routes!(roles::update_role, roles::delete_role))
         .routes(routes!(roles::set_default_role))
+        .routes(routes!(roles::export_role))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))

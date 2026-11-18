@@ -48,6 +48,33 @@ rust-embed.workspace = true
 mime_guess.workspace = true
 zip.workspace = true
 
+# **libyaml, which reads a `PROFILE.md` and is the oracle the frontmatter
+# property is asserted against.**
+#
+# Two jobs, and it was only the second of them until `roles::profile_md`. A
+# `SKILL.md` is still read by `skills::read_frontmatter`, deliberately small
+# and deliberately the same shape as the desktop client's, because a YAML
+# library *there* would be one that disagrees with the client about a file
+# several agents read. A `PROFILE.md` is the opposite case on every count: a
+# person authors it, it carries nested maps and lists, and only the server
+# ever reads one. So this is no longer test-only, and the sentence it used to
+# carry — that nothing it does reaches a request — no longer holds. What
+# reaches it is an authenticated person's own uploaded file.
+#
+# `serde_yaml` is `unsafe-libyaml` is libyaml — which is what Codex links and
+# what pyyaml's `CSafeLoader` and Ruby's Psych both are — so an oracle that is
+# libyaml cannot be weaker than libyaml. The hand-written one was, and that is
+# why the oracle is here rather than modelled.
+#
+# It is published as `0.9.34+deprecated`: frozen upstream, which an oracle
+# wants and a dependency minds. It is a Rust transliteration rather than a
+# binding to C, `unsafe-libyaml` is the whole of the unsafe code, and
+# `serde_yaml_ng` and `saphyr` are the maintained alternatives if a reviewer
+# would rather have one. Picking either would mean the reader and the oracle
+# were two different libraries, which `docs/skills.md` §2 is the argument
+# against.
+serde_yaml = "0.9"
+
 lol_html = "=2.7.0"
 tiktoken-rs = { version = "0.12.1", default-features = false }
 
@@ -59,19 +86,3 @@ tempfile.workspace = true
 # The real worker, so the tunnel tests exercise the code that actually runs
 # rather than a fake that agrees with them.
 ft-worker.workspace = true
-# **libyaml, so the frontmatter property is asserted against the real reader
-# rather than against a model of it.** A dev-dependency only: `ft-server`
-# reads a `SKILL.md` with `skills::read_frontmatter`, deliberately small and
-# deliberately the same shape as the desktop client's, and a YAML library in
-# the server would be one that disagrees with the client. None of that is an
-# argument about test code. `serde_yaml` is `unsafe-libyaml` is libyaml —
-# which is what Codex links and what pyyaml's `CSafeLoader` and Ruby's Psych
-# both are — so an oracle that is libyaml cannot be weaker than libyaml. The
-# hand-written one was, and that is the whole reason this is here.
-#
-# It is published as `0.9.34+deprecated` — unmaintained upstream, which is
-# worth knowing and is not a reason to model libyaml by hand instead. It is
-# still the binding to the same C library every other reader here uses, it is
-# test-only so nothing it does reaches a request, and being frozen is a
-# property an oracle wants rather than one it minds.
-serde_yaml = "0.9"

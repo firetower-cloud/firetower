@@ -480,12 +480,19 @@ reader being blunter than the standard, and no rule is blind to it. Whitespace
 is dropped on both sides, so two readers' *folding* of a `description: >` is
 not a disagreement.
 
-**A real dependency rather than a model of one.** `ft-server` has no YAML
-library and should not: `read_frontmatter` is deliberately small and
-deliberately the same shape as the desktop client's, and a parser in the
-server would be one that disagrees with the client. None of that is an
-argument about test code, and an oracle that *is* libyaml cannot be weaker
-than libyaml. The hand-written one was.
+**A real dependency rather than a model of one.** An oracle that *is* libyaml
+cannot be weaker than libyaml, and the hand-written one was. That is the whole
+argument, and it is an argument about test code: **a `SKILL.md` is still read
+by `read_frontmatter`**, deliberately small and deliberately the same shape as
+the desktop client's, because a parser *there* would be one that disagrees with
+the client about a file several agents read.
+
+`ft-server` did carry no YAML library at all, which is no longer true and is
+not the same claim. `serde_yaml` is a dependency rather than a dev-dependency
+as of `roles::profile_md`, which reads a `PROFILE.md` — a file a person
+authors, carrying nested maps and lists, that only the server ever reads. None
+of the three reasons above applies to it, and the one that would have, "the
+repository has not settled on a reader", is this section.
 
 **And the property is asked of a corpus generated from YAML's node grammar,
 not from a list of value shapes somebody thought of.** That distinction is
