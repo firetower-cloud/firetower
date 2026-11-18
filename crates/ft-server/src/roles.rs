@@ -284,6 +284,73 @@ fn written(e: sqlx::Error, new: &NewRole, doing: &'static str) -> anyhow::Error 
     }
 }
 
+/// What can be said about one settings value, for one profile's engine.
+///
+/// **One answer, read by both halves of the import.** `check` below refuses a
+/// value outside [`Offer::Values`] and `import::plan` blocks one, which is what
+/// makes a profile the API accepts a profile the product can read back (#396).
+/// Before this they disagreed: `POST /roles` took `model: opus` on a Claude
+/// Code profile, export wrote it because export writes what the row holds, and
+/// the plan then blocked the file it had just produced.
+///
+/// Four cases, and the two that are **not** refusals are the point:
+///
+/// * **no engine pinned** — the valid set is not knowable until a lead
+///   chooses, which is the same reason a reset under `settings` can only name
+///   what determines it;
+/// * **[`Offer::NotThisEngine`]** — a sandbox on Claude Code. A legal value of
+///   a column shared across engines, with no meaning for this one. *Nothing in
+///   the row is wrong*, so refusing it would break the round trip for a row
+///   Firetower itself produced, and the plan warns rather than blocking.
+///
+/// Only a value outside a set this engine *does* have is a mistake: it will be
+/// discarded at launch by `Preferred::keeping_only`, silently, which is the
+/// failure the format exists to remove.
+///
+/// Built from `controls::has_control` and `controls::choices_for` rather than
+/// restating either. The pair already carries the distinction — "empty means
+/// the server cannot enumerate it, which is a third answer and not the same as
+/// the control being absent" — and a fourth spelling of the same question is
+/// how two halves come to disagree again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Offer {
+    /// This engine offers these and nothing else.
+    Values(Vec<String>),
+    /// The engine lists them itself once running, so nothing here can judge
+    /// the value. Codex's models and efforts, and only those.
+    WhenItStarts,
+    /// No engine is pinned, so which set applies is the lead's to decide.
+    WhenALeadPicks,
+    /// This engine has no such control.
+    NotThisEngine,
+}
+
+/// Which of the four a setting is in, for this profile's engine.
+pub fn offered(engine: Option<ft_core::Agent>, kind: ft_core::controls::ControlKind) -> Offer {
+    let Some(engine) = engine else {
+        return Offer::WhenALeadPicks;
+    };
+    if !ft_core::controls::has_control(engine, kind) {
+        return Offer::NotThisEngine;
+    }
+    match ft_core::controls::choices_for(engine, kind) {
+        values if values.is_empty() => Offer::WhenItStarts,
+        values => Offer::Values(values),
+    }
+}
+
+/// What a control is called in a refusal, with its article, so the sentence
+/// reads as one.
+pub fn named(kind: ft_core::controls::ControlKind) -> &'static str {
+    use ft_core::controls::ControlKind;
+    match kind {
+        ControlKind::Model => "a model",
+        ControlKind::Effort => "an effort",
+        ControlKind::Mode => "a permission mode",
+        ControlKind::Sandbox => "a sandbox",
+    }
+}
+
 /// Everything a well-formed role must be.
 ///
 /// Shape only — everything answerable without the database. Two fields need it
@@ -322,6 +389,35 @@ pub fn check(new: &NewRole) -> Result<(), Refused> {
         None => {}
         Some(agent) if ft_core::Agent::from_name(agent).is_some() => {}
         Some(agent) => return Err(Refused(format!("{agent} is not an agent Firetower runs"))),
+    }
+    // **`settings`, against what the pinned engine actually offers** (#396).
+    //
+    // Not validated at all until now, which is how a profile the API accepted
+    // became a file the product refused: `Preferred::keeping_only` discards an
+    // unofferable value at launch without a word, so `model: opus` on a Claude
+    // Code profile did nothing and nobody was told, and export then wrote it
+    // into a file the import plan blocked.
+    //
+    // Only `Offer::Values` is judged. The other three are deliberate — see
+    // [`offered`] — and a tightening here that started refusing a sandbox on
+    // Claude Code would be the round trip broken from the other side.
+    if let Some(engine) = new.agent.as_deref().and_then(ft_core::Agent::from_name) {
+        for (kind, value) in new.settings.pairs() {
+            let Offer::Values(offered) = offered(Some(engine), kind) else {
+                continue;
+            };
+            if !offered.iter().any(|v| v == value) {
+                return Err(Refused(format!(
+                    "\"{value}\" is not {} {engine:?} offers. It is one of {}.",
+                    named(kind),
+                    offered
+                        .iter()
+                        .map(|v| format!("\"{v}\""))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )));
+            }
+        }
     }
     // Absent is "leave it as it is" on both of these, so only a value that was
     // actually sent is judged. Neither has an open state to allow for: every
@@ -786,6 +882,113 @@ mod tests {
             skill_scope: vec![],
             settings: Default::default(),
             directory: None,
+        }
+    }
+
+    /// A profile pinned to an engine, with one setting set.
+    fn pinned(engine: &str, kind: ft_core::controls::ControlKind, value: &str) -> NewRole {
+        let mut asking = new("reviewer");
+        asking.agent = Some(engine.into());
+        asking.settings = ft_core::controls::Preferred::from_pairs([(kind, value.to_string())]);
+        asking
+    }
+
+    /// **A settings value the pinned engine does not offer is refused** (#396).
+    ///
+    /// The live case: `model: opus` on a Claude Code profile, whose models are
+    /// `opus[1m]` and four others. It was accepted, did nothing at launch
+    /// because `keeping_only` discards it without a word, and export then
+    /// wrote it into a file the import plan blocked — so Firetower's own export
+    /// of a profile Firetower accepted would not round-trip.
+    #[test]
+    fn a_settings_value_the_engine_does_not_offer_is_refused() {
+        use ft_core::controls::ControlKind;
+        let refused = check(&pinned("ClaudeCode", ControlKind::Model, "opus"))
+            .expect_err("`opus` is not one of Claude Code's models");
+        // The value, what it is not, whose set it is, and the set itself.
+        assert!(refused.0.contains("\"opus\""), "{}", refused.0);
+        assert!(refused.0.contains("is not a model"), "{}", refused.0);
+        assert!(refused.0.contains("ClaudeCode offers"), "{}", refused.0);
+        assert!(refused.0.contains("\"opus[1m]\""), "{}", refused.0);
+
+        // Each of the three sets this engine has, so none is checked by
+        // accident through another.
+        for (kind, value) in [
+            (ControlKind::Effort, "maximum"),
+            (ControlKind::Mode, "yolo"),
+        ] {
+            assert!(
+                check(&pinned("ClaudeCode", kind, value)).is_err(),
+                "{kind:?} = {value} should be refused"
+            );
+        }
+        // And on the other engine that has an enumerable set of its own.
+        assert!(check(&pinned("Codex", ControlKind::Mode, "plan")).is_err());
+    }
+
+    /// A value the engine does offer is accepted, including the one #396's
+    /// report named as a defect and is not: `plan` **is** one of Claude Code's
+    /// permission modes.
+    #[test]
+    fn a_settings_value_the_engine_offers_is_accepted() {
+        use ft_core::controls::{choices_for, ControlKind};
+        for kind in [ControlKind::Model, ControlKind::Effort, ControlKind::Mode] {
+            for value in choices_for(ft_core::Agent::ClaudeCode, kind) {
+                check(&pinned("ClaudeCode", kind, &value))
+                    .unwrap_or_else(|no| panic!("{kind:?} = {value} is offered: {no}"));
+            }
+        }
+        check(&pinned("ClaudeCode", ControlKind::Mode, "plan")).unwrap();
+    }
+
+    /// **No engine pinned, no opinion.** Which set applies is not knowable
+    /// until a lead chooses, which is the same reason a reset under `settings`
+    /// can only name what determines it.
+    #[test]
+    fn with_no_engine_pinned_a_settings_value_is_accepted() {
+        use ft_core::controls::ControlKind;
+        let mut asking = new("reviewer");
+        asking.settings = ft_core::controls::Preferred::from_pairs([
+            (ControlKind::Model, "something".to_string()),
+            (ControlKind::Effort, "else".to_string()),
+        ]);
+        assert!(asking.agent.is_none());
+        check(&asking).expect("nothing here knows which engine will run it");
+    }
+
+    /// **A control the engine does not have stays accepted, and this test is
+    /// here so that nobody tightens it.**
+    ///
+    /// `pref_sandbox` is one column for every engine and Claude Code has no
+    /// sandbox picker. The value is legal, it means nothing for that engine,
+    /// and nothing in the row is wrong — so refusing it would break the round
+    /// trip for a row Firetower itself produced, which is the opposite of what
+    /// #396 is for. The import plan warns about it for the same reason.
+    #[test]
+    fn a_control_the_engine_does_not_have_is_still_accepted() {
+        use ft_core::controls::ControlKind;
+        for value in ["workspace", "workspace+network", "anything-at-all"] {
+            check(&pinned("ClaudeCode", ControlKind::Sandbox, value))
+                .unwrap_or_else(|no| panic!("a sandbox on Claude Code is not a mistake: {no}"));
+        }
+        assert_eq!(
+            offered(Some(ft_core::Agent::ClaudeCode), ControlKind::Sandbox),
+            Offer::NotThisEngine
+        );
+    }
+
+    /// And a control the engine enumerates **itself** is accepted, because
+    /// nothing here can say whether the value is one of them.
+    #[test]
+    fn a_control_the_engine_lists_at_launch_is_accepted() {
+        use ft_core::controls::ControlKind;
+        for kind in [ControlKind::Model, ControlKind::Effort] {
+            check(&pinned("Codex", kind, "whatever-it-reports"))
+                .unwrap_or_else(|no| panic!("Codex lists its own {kind:?}: {no}"));
+            assert_eq!(
+                offered(Some(ft_core::Agent::Codex), kind),
+                Offer::WhenItStarts
+            );
         }
     }
 

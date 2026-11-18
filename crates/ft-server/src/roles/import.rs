@@ -116,7 +116,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::profile_md::{self, Field, Reading, Setting, Spelled, Spot};
-use super::{Refused, Role};
+use super::{named, offered, Offer, Refused, Role};
 
 // ── what the endpoint takes ─────────────────────────────────────────────
 
@@ -1691,7 +1691,7 @@ fn resolve(
         };
         let line = line_of(&said.spelled, Spot::Setting(setting));
         let key = Some(Spot::Setting(setting).spelling());
-        match offered(profile.engine, setting) {
+        match offered(profile.engine, kind_of(setting)) {
             Offer::Values(values) if !values.iter().any(|v| v == wrote) => {
                 out.push(PlanProblem::at(
                     p,
@@ -1699,7 +1699,7 @@ fn resolve(
                     key,
                     format!(
                         "`{wrote}` is not {} {:?} offers. Write one of {}.",
-                        article(setting),
+                        named(kind_of(setting)),
                         profile.engine.expect("an offered set needs an engine"),
                         values
                             .iter()
@@ -2092,7 +2092,7 @@ fn said_about_settings(bundle: &Bundle, said: &Reading) -> Vec<PlanProblem> {
         let Some(wrote) = written(setting, &said.profile.settings) else {
             continue;
         };
-        let says = match offered(said.profile.engine, setting) {
+        let says = match offered(said.profile.engine, kind_of(setting)) {
             Offer::WhenALeadPicks => format!(
                 "`{}: {wrote}` is taken as written. Which values are on offer depends on the \
                  engine, and this profile leaves that to whichever lead delegates to it.",
@@ -2132,59 +2132,6 @@ fn written(setting: Setting, settings: &ft_core::controls::Preferred) -> Option<
         Setting::Effort => settings.effort.as_deref(),
         Setting::Mode => settings.mode.as_deref(),
         Setting::Sandbox => settings.sandbox.as_deref(),
-    }
-}
-
-/// What can be said about one setting's value, for one engine.
-enum Offer {
-    /// These are the values that engine offers. Anything else is a mistake.
-    Values(Vec<String>),
-    /// The engine lists them itself, once it is running, so nothing here can
-    /// check the value. Codex's models and efforts, and only those.
-    WhenItStarts,
-    /// No engine is pinned, so which set applies is the lead's to decide.
-    WhenALeadPicks,
-    /// That engine has no such control, so the line would do nothing.
-    NotThisEngine,
-}
-
-/// Which of the four [`Offer`]s a setting is in.
-///
-/// Read off `controls::for_agent`, which is the one statement of what an engine
-/// can be asked to change — so a control added there is checked here without
-/// anybody remembering to come back. Its own doc carries the distinction this
-/// depends on: `models` and `efforts` are **passed in** "because one agent
-/// knows its own and the other does not", which is why an empty list for
-/// Codex's model is "not yet" and an absent sandbox for Claude Code is "never".
-fn offered(engine: Option<ft_core::Agent>, setting: Setting) -> Offer {
-    let Some(engine) = engine else {
-        return Offer::WhenALeadPicks;
-    };
-    let kind = kind_of(setting);
-    let values: Vec<String> = ft_core::controls::for_agent(engine, Vec::new(), Vec::new())
-        .into_iter()
-        .filter(|c| c.kind == kind)
-        .flat_map(|c| c.choices)
-        .map(|choice| choice.value)
-        .collect();
-    if !values.is_empty() {
-        return Offer::Values(values);
-    }
-    match (engine, kind) {
-        (
-            ft_core::Agent::Codex,
-            ft_core::controls::ControlKind::Model | ft_core::controls::ControlKind::Effort,
-        ) => Offer::WhenItStarts,
-        _ => Offer::NotThisEngine,
-    }
-}
-
-/// `a model`, `an effort` — so a refusal reads as a sentence.
-fn article(setting: Setting) -> String {
-    let word = setting.spelling();
-    match word.starts_with(['a', 'e', 'i', 'o', 'u']) {
-        true => format!("an {word}"),
-        false => format!("a {word}"),
     }
 }
 

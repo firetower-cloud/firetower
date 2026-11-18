@@ -121,6 +121,24 @@ impl Preferred {
         out
     }
 
+    /// The four, as the pairs they are, skipping the ones nobody chose.
+    ///
+    /// The inverse of [`Preferred::from_pairs`] and in the same place for the
+    /// same reason: a caller that walks the fields by hand is a caller that
+    /// will be short of one when a fifth control arrives. `roles::check` reads
+    /// this to ask [`offers`] about each value somebody sent.
+    pub fn pairs(&self) -> Vec<(ControlKind, &str)> {
+        [
+            (ControlKind::Model, &self.model),
+            (ControlKind::Effort, &self.effort),
+            (ControlKind::Mode, &self.mode),
+            (ControlKind::Sandbox, &self.sandbox),
+        ]
+        .into_iter()
+        .filter_map(|(kind, held)| held.as_deref().map(|value| (kind, value)))
+        .collect()
+    }
+
     /// What this person chose, minus anything the agent no longer offers.
     ///
     /// The second half of the rule: **a remembered value that has gone away

@@ -1171,6 +1171,268 @@ mod tests {
         assert!(plan.appliable);
     }
 
+    // ── the round trip, which is what #396 is about ─────────────────────
+
+    /// **Every profile the API accepts exports to a file the plan reports as
+    /// an overwrite with an empty diff.**
+    ///
+    /// The closing assertion of #396, and the one that proves it rather than
+    /// describing it. Before the write path checked `settings`, a profile
+    /// saved with `model: opus` on Claude Code exported into a file the plan
+    /// blocked — so the product refused its own export of a profile it had
+    /// accepted. QA hit it on three of five profiles.
+    ///
+    /// Walks the engines and, for each, every value that engine offers for
+    /// every control it has, plus the two cases the write path deliberately
+    /// does not judge: a control the engine lacks, and one it enumerates
+    /// itself. Each one is created through the handler, exported through the
+    /// handler, and planned through the handler.
+    #[tokio::test]
+    async fn every_profile_the_api_accepts_round_trips_through_its_own_export() {
+        use ft_core::controls::{choices_for, has_control, ControlKind};
+        const KINDS: [ControlKind; 4] = [
+            ControlKind::Model,
+            ControlKind::Effort,
+            ControlKind::Mode,
+            ControlKind::Sandbox,
+        ];
+
+        let (state, admin) = fixture().await;
+        let mut made_them = 0;
+        for engine in ft_core::Agent::all() {
+            // Every offered value for every control this engine has, and for
+            // the ones it does not, a value anyway: that is the case the write
+            // path accepts on purpose and the round trip has to survive.
+            let mut settings: Vec<(ControlKind, String)> = Vec::new();
+            for kind in KINDS {
+                match choices_for(engine, kind).into_iter().next() {
+                    Some(offered) => settings.push((kind, offered)),
+                    None if has_control(engine, kind) => {
+                        // Codex's model and effort: it lists them itself.
+                        settings.push((kind, "whatever-it-reports".into()))
+                    }
+                    None => settings.push((kind, "a-shared-column-value".into())),
+                }
+            }
+
+            let key = format!("{engine:?}").to_lowercase();
+            let mut asking = asked_for(&format!("Reviewer {engine:?}"));
+            asking.agent = Some(format!("{engine:?}"));
+            asking.settings = ft_core::controls::Preferred::from_pairs(settings);
+            let id = made(&state, &admin, &asking).await;
+            sqlx::query("UPDATE roles SET author_key = $2 WHERE id = $1")
+                .bind(&id)
+                .bind(&key)
+                .execute(state.db.pool())
+                .await
+                .unwrap();
+
+            let file = exported(&state, &admin, &id).await;
+            let plan = plan_role_import(
+                State(state.clone()),
+                Extension(admin.clone()),
+                Json(plan_for(vec![DroppedFile {
+                    path: file.path.clone(),
+                    text: file.text.clone(),
+                }])),
+            )
+            .await
+            .unwrap()
+            .0;
+
+            let entry = &plan.entries[0];
+            let PlanOutcome::Overwrite(over) = &entry.outcome else {
+                panic!(
+                    "`{key}` exported to a file its own plan calls {:#?}",
+                    entry.outcome
+                )
+            };
+            let changed: Vec<&FieldDiff> = over
+                .diff
+                .iter()
+                .filter(|f| f.change != FieldChange::Unchanged)
+                .collect();
+            assert!(
+                changed.is_empty(),
+                "`{key}` round-tripped with changes: {changed:#?}"
+            );
+            assert!(
+                over.diff.iter().all(|f| f
+                    .settings
+                    .iter()
+                    .all(|s| s.change == FieldChange::Unchanged)),
+                "`{key}` round-tripped with a setting changing: {:#?}",
+                over.diff
+            );
+            assert!(plan.appliable, "`{key}`: {:#?}", plan.why_not);
+            made_them += 1;
+        }
+        assert_eq!(made_them, ft_core::Agent::all().len());
+    }
+
+    /// And the value that broke it is refused on the way in, on **both** write
+    /// paths — the editor saves with `PUT`, so a check only on `POST` would
+    /// leave the row reachable.
+    #[tokio::test]
+    async fn an_unofferable_setting_is_refused_on_create_and_on_update() {
+        use ft_core::controls::ControlKind;
+        let (state, admin) = fixture().await;
+
+        let mut wrong = asked_for("Reviewer");
+        wrong.settings =
+            ft_core::controls::Preferred::from_pairs([(ControlKind::Model, "opus".to_string())]);
+        let refused = create_role(
+            State(state.clone()),
+            Extension(admin.clone()),
+            Json(wrong.clone()),
+        )
+        .await
+        .expect_err("`opus` is not one of Claude Code's models");
+        assert!(
+            format!("{refused:?}").contains("opus[1m]"),
+            "the refusal lists what is accepted: {refused:?}"
+        );
+
+        // The same value, through the update path, on a profile that is fine.
+        let id = made(&state, &admin, &asked_for("Reviewer")).await;
+        update_role(
+            State(state.clone()),
+            Extension(admin.clone()),
+            Path(id.clone()),
+            Json(wrong),
+        )
+        .await
+        .expect_err("and the editor's own save path refuses it too");
+
+        // The row is untouched, which is what "refused" has to mean.
+        let held: Option<String> = sqlx::query_scalar("SELECT pref_model FROM roles WHERE id = $1")
+            .bind(&id)
+            .fetch_one(state.db.pool())
+            .await
+            .unwrap();
+        assert_eq!(held, None);
+    }
+
+    /// The migration clears what the engine cannot offer and leaves the rest.
+    ///
+    /// Runs the migration's own SQL a second time rather than restating it:
+    /// the file is the thing under test, and the statements are `update`s, so
+    /// running them again is exactly what they did on the way up. The harness
+    /// migrates before a test can insert anything, which is why this is the
+    /// only way to see them work.
+    #[tokio::test]
+    async fn the_migration_clears_only_what_the_engine_cannot_offer() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let org = me.org_id.as_str().to_string();
+        let who = me.id.as_str().to_string();
+
+        // Written straight to the table, because the API now refuses the first
+        // of them — which is the point of the migration.
+        /// One row written straight to the table, with the three pins as the
+        /// one thing they are.
+        async fn row(
+            state: &AppState,
+            whose: (&str, &str),
+            n: usize,
+            agent: &str,
+            pins: (&str, &str, &str),
+        ) {
+            let ((org, who), (model, mode, sandbox)) = (whose, pins);
+            sqlx::query(
+                "INSERT INTO roles (id, org_id, path, created_by, name, slug, does, agent, \
+                 pref_model, pref_mode, pref_sandbox) \
+                 VALUES ($1, $2, ('u.' || (SELECT slug FROM principals WHERE id = $3) || '.r' \
+                 || $7)::ltree, $3, 'Reviewer', $1, 'reviews', $4, $5, $6, $8)",
+            )
+            .bind(format!("role_{n}"))
+            .bind(org)
+            .bind(who)
+            .bind(agent)
+            .bind(model)
+            .bind(mode)
+            .bind(n.to_string())
+            .bind(sandbox)
+            .execute(state.db.pool())
+            .await
+            .unwrap();
+        }
+        let row = |n, agent, model, mode, sandbox| {
+            row(&state, (&org, &who), n, agent, (model, mode, sandbox))
+        };
+        // 1: Claude Code with an unofferable model and mode, and a sandbox it
+        //    has no control for. 2: Claude Code, all offered. 3: Codex, whose
+        //    model it lists itself. 4: no engine at all.
+        row(1, "ClaudeCode", "opus", "yolo", "workspace").await;
+        row(2, "ClaudeCode", "opus[1m]", "plan", "workspace").await;
+        row(3, "Codex", "o3", "auto", "workspace").await;
+        row(4, "", "opus", "yolo", "workspace").await;
+        sqlx::query("UPDATE roles SET agent = NULL WHERE id = 'role_4'")
+            .execute(state.db.pool())
+            .await
+            .unwrap();
+
+        for statement in include_str!(
+            "../../../../migrations/server/20261118120000_profile_settings_offered.sql"
+        )
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty() && !s.lines().all(|l| l.trim_start().starts_with("--")))
+        {
+            sqlx::query(statement)
+                .execute(state.db.pool())
+                .await
+                .unwrap_or_else(|e| panic!("{statement}\n{e}"));
+        }
+
+        async fn held(
+            state: &AppState,
+            id: &str,
+        ) -> (Option<String>, Option<String>, Option<String>) {
+            sqlx::query_as("SELECT pref_model, pref_mode, pref_sandbox FROM roles WHERE id = $1")
+                .bind(id)
+                .fetch_one(state.db.pool())
+                .await
+                .unwrap()
+        }
+        let held = |id| held(&state, id);
+        // Cleared: both values that engine could never honour. Kept: the
+        // sandbox, which is a shared column with no meaning for Claude Code
+        // and nothing wrong with it.
+        assert_eq!(
+            held("role_1").await,
+            (None, None, Some("workspace".to_string()))
+        );
+        // Offered values are left exactly as they were.
+        assert_eq!(
+            held("role_2").await,
+            (
+                Some("opus[1m]".to_string()),
+                Some("plan".to_string()),
+                Some("workspace".to_string())
+            )
+        );
+        // Codex lists its own models, so nothing here may judge `o3`.
+        assert_eq!(
+            held("role_3").await,
+            (
+                Some("o3".to_string()),
+                Some("auto".to_string()),
+                Some("workspace".to_string())
+            )
+        );
+        // And a profile with no engine keeps everything: which set applies is
+        // not decided until a lead picks one.
+        assert_eq!(
+            held("role_4").await,
+            (
+                Some("opus".to_string()),
+                Some("yolo".to_string()),
+                Some("workspace".to_string())
+            )
+        );
+    }
+
     // ── the import plan ─────────────────────────────────────────────────
 
     fn bundle(key: &str, name: &str) -> DroppedFile {
