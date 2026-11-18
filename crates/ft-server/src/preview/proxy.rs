@@ -187,7 +187,10 @@ pub async fn serve(state: AppState, preview: Preview, mut request: Request) -> R
 ///
 /// The error side is a finished page rather than an error type, because every
 /// one of these is a different sentence somebody can act on and the caller has
-/// nothing to add to any of them.
+/// nothing to add to any of them. That is what the lint below objects to, and
+/// it is the point: boxing it would buy a pointer and cost the one thing this
+/// signature says.
+#[allow(clippy::result_large_err)]
 async fn connect(
     state: &AppState,
     session: &ft_core::Session,

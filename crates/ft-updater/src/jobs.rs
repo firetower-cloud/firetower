@@ -869,7 +869,7 @@ async fn prune(dir: &std::path::Path, keep: usize) -> Vec<String> {
     }
 
     // Newest first, so everything past `keep` is the oldest.
-    dumps.sort_by(|a, b| b.0.cmp(&a.0));
+    dumps.sort_by_key(|(made, _)| std::cmp::Reverse(*made));
     let mut dropped = 0;
     for (_, path) in dumps.into_iter().skip(keep) {
         if tokio::fs::remove_file(&path).await.is_ok() {

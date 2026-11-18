@@ -1565,7 +1565,7 @@ pub(super) async fn persona_for(
             .filter(|r| r.id != profile.id)
             .filter(|r| !scoped || profile.delegate_scope.contains(&r.id))
             .collect();
-        others.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        others.sort_by_key(|r| r.name.to_lowercase());
         if others.is_empty() {
             text.push_str(
                 "\n\nThere are no other profiles to hand to yet, so describe any one-off work \

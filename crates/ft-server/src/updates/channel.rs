@@ -986,7 +986,7 @@ pub fn retag(
             continue;
         };
         let (repository, was) = ft_updater_api::split_reference(image.reference);
-        if !repositories.iter().any(|r| *r == repository) {
+        if !repositories.contains(&repository) {
             out.push_str(line);
             continue;
         }

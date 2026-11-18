@@ -82,19 +82,22 @@ pub fn same(a: &[u8], b: &[u8]) -> bool {
     get, path = "/v1/status", tag = "updater",
     responses((status = 200, body = Status)),
 )]
-async fn status(State(app): State<App>) -> Result<Json<Status>, Response> {
-    let docker_version = app.docker.version().await.map_err(|e| {
-        refuse(
-            StatusCode::SERVICE_UNAVAILABLE,
-            format!("Docker is not answering: {e:#}"),
-        )
-    })?;
+async fn status(State(app): State<App>) -> Response {
+    let docker_version = match app.docker.version().await {
+        Ok(version) => version,
+        Err(e) => {
+            return refuse(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("Docker is not answering: {e:#}"),
+            )
+        }
+    };
     // The helper that recreated this updater outlives the process that
     // started it and may still have been running when this one swept at
     // boot. Status is asked rarely enough for this to cost nothing.
     app.jobs.sweep_helpers().await;
     let site = app.jobs.site();
-    Ok(Json(Status {
+    Json(Status {
         version: env!("CARGO_PKG_VERSION").to_string(),
         api_version: API_VERSION,
         project: site.project.clone(),
@@ -103,19 +106,19 @@ async fn status(State(app): State<App>) -> Result<Json<Status>, Response> {
         docker_version,
         busy: app.jobs.busy(),
         images: app.jobs.images().await,
-    }))
+    })
+    .into_response()
 }
 
 #[utoipa::path(
     get, path = "/v1/deploy", tag = "updater",
     responses((status = 200, body = DeployFiles)),
 )]
-async fn deploy(State(app): State<App>) -> Result<Json<DeployFiles>, Response> {
-    app.jobs
-        .site()
-        .deploy_files()
-        .map(Json)
-        .map_err(|e| refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")))
+async fn deploy(State(app): State<App>) -> Response {
+    match app.jobs.site().deploy_files() {
+        Ok(files) => Json(files).into_response(),
+        Err(e) => refuse(StatusCode::INTERNAL_SERVER_ERROR, format!("{e:#}")),
+    }
 }
 
 #[utoipa::path(
