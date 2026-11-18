@@ -28,6 +28,20 @@ const doc = ({ get, post, schemas = {}, path = "/api/v1/thing" } = {}) => ({
   components: { schemas },
 });
 
+/** A contract with one GET carrying query parameters. */
+const withParams = (params, path = "/api/v1/thing") => ({
+  openapi: "3.1.0",
+  paths: { [path]: { get: { parameters: params, responses: { 200: {} } } } },
+  components: { schemas: {} },
+});
+
+const param = (name, { required = false, type = "string", where = "query" } = {}) => ({
+  name,
+  in: where,
+  required,
+  schema: { type },
+});
+
 const object = (properties, required = []) => ({ type: "object", properties, required });
 const str = { type: "string" };
 const num = { type: "integer" };
@@ -128,6 +142,50 @@ describe("what is no longer promised", () => {
     assert.equal(found.length, 1);
     assert.match(found[0].where, /opts\.y/);
   });
+
+  /**
+   * Parameters were not looked at at all — which is not the documented "a
+   * change this does not model passes", but a part of the request it never
+   * read. One of the four promises lives here too, with 43 optional
+   * parameters across 137 operations to break it on.
+   */
+  it("catches an optional parameter made required", () => {
+    const was = withParams([param("then")]);
+    const now = withParams([param("then", { required: true })]);
+    const found = breaches(was, now);
+    assert.equal(found.length, 1);
+    assert.match(found[0].what, /was optional and is now required/);
+  });
+
+  it("catches a parameter that is gone", () => {
+    const was = withParams([param("kind", { required: true }), param("id", { required: true })]);
+    const now = withParams([param("id", { required: true })]);
+    const found = breaches(was, now);
+    assert.equal(found.length, 1);
+    assert.match(found[0].where, /\?kind/);
+    assert.match(found[0].what, /is gone/);
+  });
+
+  it("catches a narrowed parameter, and a new required one", () => {
+    const was = withParams([param("kind", { required: true })]);
+    assert.match(breaches(was, withParams([param("kind", { required: true, type: "integer" })]))[0].what, /no longer accepts/);
+    assert.match(
+      breaches(was, withParams([param("kind", { required: true }), param("scope", { required: true })]))[0].what,
+      /new required query parameter/,
+    );
+  });
+
+  it("reads parameters shared on the path item", () => {
+    // None in this contract today, but both are legal, and a shared parameter
+    // vanishing breaks every method under it at once.
+    const shared = (params) => ({
+      openapi: "3.1.0",
+      paths: { "/x": { parameters: params, get: { responses: { 200: {} } }, post: { responses: { 200: {} } } } },
+      components: { schemas: {} },
+    });
+    const found = breaches(shared([param("id", { required: true })]), shared([]));
+    assert.equal(found.length, 2, "one per method under the path item");
+  });
 });
 
 describe("what is still allowed, because the whole point is to add", () => {
@@ -195,6 +253,16 @@ describe("what is still allowed, because the whole point is to add", () => {
     const was = doc({ post: object({ name: str }, ["name"]) });
     const now = doc({ post: object({ name: { type: ["string", "null"] } }, []) });
     assert.deepEqual(breaches(was, now), []);
+  });
+
+  it("passes a parameter that starts accepting more, and a new optional one", () => {
+    // Same direction rule as a request body field, for the same reason: a
+    // parameter may come to accept more and nothing breaks.
+    const was = withParams([param("kind", { required: true })]);
+    assert.deepEqual(breaches(was, withParams([{ name: "kind", in: "query", required: true, schema: { type: ["string", "null"] } }])), []);
+    assert.deepEqual(breaches(was, withParams([param("kind", { required: true }), param("scope")])), []);
+    // And a required parameter becoming optional accepts strictly more.
+    assert.deepEqual(breaches(was, withParams([param("kind")])), []);
   });
 
   it("passes a new variant on a response enum", () => {

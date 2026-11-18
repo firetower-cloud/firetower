@@ -121,11 +121,18 @@ fails if the result differs — so forgetting `just gen` is caught rather than
 merged. Running `just gen-check` before you push turns that into a local
 failure instead of a red job.
 
-**The API is additive-only.** No removing a path, no removing a field a client
-may read, no narrowing a type — including dropping a variant from an enum — and
-no making an optional request field required. The same `contract` workflow
-compares the contract your branch produces against the one at its merge base and
-fails on any of those. This is not a style preference: channels let a desktop
+**The API is additive-only.** No removing a path, no removing a field or query
+parameter a client may read, no narrowing a type — including dropping an enum
+variant the server used to accept — and no making an optional request field or
+parameter required. The same `contract` workflow compares the contract your
+branch produces against the one at its merge base and fails on any of those,
+in request bodies, response bodies and parameters alike.
+
+Two silences are deliberate rather than gaps, and both are argued at
+`.github/scripts/additive-only.mjs`: a **response** may come to produce *fewer*
+kinds of thing (a reader that coped with `string | null` copes with `string`),
+and a response enum may gain a variant — which is safe only because clients are
+required to tolerate values they do not know, and nothing checks that they do. This is not a style preference: channels let a desktop
 copy and its control plane drift arbitrarily far apart in either direction, and
 a copy is never downgraded, so nothing a client may already be reading can be
 taken away. Add beside the old thing and leave it in place. See
