@@ -968,62 +968,97 @@ pub fn retag(
 ) -> Result<(String, Vec<ImageLine>)> {
     let mut out = String::with_capacity(compose.len());
     let mut lines = Vec::new();
+    let mut found: Vec<String> = Vec::new();
 
     for line in compose.split_inclusive('\n') {
-        let body = line.trim_end_matches(['\n', '\r']);
-        let ending = &line[body.len()..];
-        let indent: String = body.chars().take_while(|c| c.is_whitespace()).collect();
-        let rest = &body[indent.len()..];
-        let Some(value) = rest.strip_prefix("image:") else {
+        let Some(image) = ImageValue::read(line) else {
             out.push_str(line);
             continue;
         };
-        // A trailing comment is the operator's, and stays exactly as it is —
-        // spacing included. Two lines of this file are being moved and
-        // nothing else about it may change.
-        let hash = value
-            .char_indices()
-            .find(|(i, c)| *c == '#' && value[..*i].ends_with(char::is_whitespace));
-        let (head, comment) = match hash {
-            Some((at, _)) => value.split_at(at),
-            None => (value, ""),
-        };
-        let spacing = &head[head.trim_end().len()..];
-        let reference = head.trim();
-        let (repository, was) = ft_updater_api::split_reference(reference);
+        let (repository, was) = ft_updater_api::split_reference(image.reference);
         if !repositories.iter().any(|r| *r == repository) {
             out.push_str(line);
             continue;
         }
-        let replaced = format!("{indent}image: {repository}:{tag}{spacing}{comment}");
+        found.push(repository.clone());
+        let moved = format!("{repository}:{tag}");
         if was != tag {
             lines.push(ImageLine {
-                from: reference.to_string(),
-                to: format!("{repository}:{tag}"),
+                from: image.reference.to_string(),
+                to: moved.clone(),
             });
         }
-        out.push_str(&replaced);
-        out.push_str(ending);
+        out.push_str(&image.rewritten(&moved));
     }
 
     for repository in repositories {
-        let named = compose.lines().any(|l| {
-            l.trim_start()
-                .strip_prefix("image:")
-                .map(|v| {
-                    ft_updater_api::split_reference(v.trim().split(" #").next().unwrap_or("")).0
-                        == *repository
-                })
-                .unwrap_or(false)
-        });
         anyhow::ensure!(
-            named,
+            found.iter().any(|f| f == repository),
             "{COMPOSE_FILE} has no `image:` line for {repository}, so the channel cannot be \
              changed from here. Put the line back, or edit it on the machine."
         );
     }
 
     Ok((out, lines))
+}
+
+/// One `image:` line, taken apart so only the reference in it moves.
+///
+/// Everything around it is the operator's: the indentation, a trailing
+/// comment and the spacing before it, a quoted value, the line ending. Two
+/// lines of this file are being changed and nothing else about it may be.
+struct ImageValue<'a> {
+    indent: &'a str,
+    quote: &'a str,
+    reference: &'a str,
+    spacing: &'a str,
+    comment: &'a str,
+    ending: &'a str,
+}
+
+impl<'a> ImageValue<'a> {
+    fn read(line: &'a str) -> Option<Self> {
+        let body = line.trim_end_matches(['\n', '\r']);
+        let ending = &line[body.len()..];
+        let indent = &body[..body.len() - body.trim_start().len()];
+        let value = body.trim_start().strip_prefix("image:")?;
+        // A `#` only starts a comment after whitespace; one inside a
+        // reference is part of it.
+        let at = value
+            .char_indices()
+            .find(|(i, c)| *c == '#' && value[..*i].ends_with(char::is_whitespace))
+            .map(|(i, _)| i);
+        let (head, comment) = match at {
+            Some(at) => value.split_at(at),
+            None => (value, ""),
+        };
+        let spacing = &head[head.trim_end().len()..];
+        let trimmed = head.trim();
+        let quote = match trimmed.chars().next() {
+            Some(q @ ('"' | '\'')) if trimmed.len() > 1 && trimmed.ends_with(q) => &trimmed[..1],
+            _ => "",
+        };
+        Some(Self {
+            indent,
+            quote,
+            reference: trimmed[quote.len()..trimmed.len() - quote.len()].trim(),
+            spacing,
+            comment,
+            ending,
+        })
+    }
+
+    fn rewritten(&self, reference: &str) -> String {
+        let Self {
+            indent,
+            quote,
+            spacing,
+            comment,
+            ending,
+            ..
+        } = self;
+        format!("{indent}image: {quote}{reference}{quote}{spacing}{comment}{ending}")
+    }
 }
 
 /// The tag the control plane's image line will name once a run's writes have
@@ -1688,6 +1723,26 @@ mod tests {
             })
             .collect();
         assert_eq!(changed.len(), 4, "two lines, out and in: {diff}");
+    }
+
+    /// Somebody's own file, with the value quoted. Refusing it would send an
+    /// operator to the machine for a line this can read perfectly well.
+    #[test]
+    fn a_quoted_image_line_keeps_its_quotes() {
+        let quoted =
+            "services:\n  firetower:\n    image: \"ghcr.io/firetower-cloud/firetower:latest\"\n";
+        let (rewritten, lines) = retag(
+            quoted,
+            &["ghcr.io/firetower-cloud/firetower".to_string()],
+            "beta",
+        )
+        .unwrap();
+        assert_eq!(
+            rewritten,
+            "services:\n  firetower:\n    image: \"ghcr.io/firetower-cloud/firetower:beta\"\n"
+        );
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].from, "ghcr.io/firetower-cloud/firetower:latest");
     }
 
     #[test]
