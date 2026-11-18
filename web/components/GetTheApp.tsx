@@ -26,6 +26,10 @@ const RELEASES = "https://github.com/firetower-cloud/firetower/releases";
 /** What the Linux build cannot do yet, in full, for the one line that cannot hold it. */
 const LINUX_DOC = "https://github.com/firetower-cloud/firetower/blob/main/docs/linux.md";
 
+/** The key, the command, and what each platform does on its own. Too long for a card. */
+const VERIFY_DOC =
+  "https://github.com/firetower-cloud/firetower/blob/main/docs/verifying-a-download.md";
+
 /**
  * The public TestFlight link, which is a constant.
  *
@@ -183,7 +187,7 @@ export function GetTheApp() {
         {/* Last in the card, under the tiles and the platform note that
             belongs to one of them, and directly above the other line on this
             card that points at GitHub. */}
-        <BetaRoute version={downloads.version} release={downloads.betaRelease} />
+        <BetaRoute found={downloads} />
 
         <p className="px-4 pb-4 text-meta text-mute">
           Every release, with its notes, is on <a className="text-dim underline decoration-line underline-offset-2" href={RELEASES} target="_blank" rel="noreferrer">GitHub</a>.
@@ -240,6 +244,55 @@ export function downloadNote(version?: string): string {
   return version ? `General access: ${version}` : "The general-access release";
 }
 
+/** What the beta route can honestly offer, once the release lookup has answered. */
+export type BetaOffer = {
+  /** The version beta is at — absent unless there is a bundle to go with it. */
+  version?: string;
+  href: string;
+  /**
+   * Why the link is the releases index rather than the beta build's own page,
+   * when it is. The index is the worse answer: thirty releases across three
+   * packages, and the reader has just been told to use *the release page*. So
+   * it is never handed over silently — the sentence beside it says which of
+   * the two reasons it is.
+   */
+  insteadOf?: "unknown" | "empty";
+};
+
+/** What the lookup has to turn up before the route can name a build. */
+type BetaLookup = {
+  version?: string;
+  betaRelease?: string;
+  mac?: string;
+  windows?: string;
+  linux?: string;
+};
+
+/**
+ * Whether the route can name a build, and where its link goes.
+ *
+ * Two states send the reader to the releases index instead of a release page,
+ * and they are not the same sentence:
+ *
+ * - **Nothing resolved.** Still looking, GitHub refused, or the feed carried
+ *   no desktop release. The common one by far is the refusal: this feed is
+ *   fetched unauthenticated from the browser and GitHub allows sixty of those
+ *   an hour per address, which an admin console behind a shared address will
+ *   spend without anybody doing anything unusual.
+ * - **A release with nothing on it.** Every bundle upload failed, so the three
+ *   tiles above already say *Not in this release* — and a confident version
+ *   beside *Beta builds*, linking at an empty page, would be the only part of
+ *   the card still claiming otherwise.
+ *
+ * In both, the version is dropped rather than shown against a download nobody
+ * can get.
+ */
+export function betaOffer({ version, betaRelease, mac, windows, linux }: BetaLookup): BetaOffer {
+  if (!version || !betaRelease) return { href: RELEASES, insteadOf: "unknown" };
+  if (!mac && !windows && !linux) return { href: RELEASES, insteadOf: "empty" };
+  return { version, href: betaRelease };
+}
+
 /**
  * The permanent route onto beta, which this page owns.
  *
@@ -248,12 +301,15 @@ export function downloadNote(version?: string): string {
  * stopped updating. So it is load-bearing documentation rather than a
  * footnote, and it says *why* it exists rather than only offering a file.
  *
- * The why is the fact that makes the hand-install unavoidable: every installed
- * copy has its updater address compiled into the bundle
- * (`desktop/src-tauri/tauri.conf.json`), and the only way a copy ever reads a
- * different address is by updating — which it can only do *through that
- * address*. So such a copy cannot be moved onto beta remotely, by us or by
- * anybody; it needs one manual install, once (#414, #415).
+ * **The why is scoped, and has to be.** A copy that predates all of this
+ * cannot be switched from inside itself: its update address is compiled into
+ * the bundle, and the only way to a different address is to install from it
+ * once (#414, #415). That is not true of a copy carrying the channel release —
+ * it chooses its endpoint per check, with no restart, which is what the next
+ * sentence means by *a switch in the app under Updates* (spec §05, Decided).
+ * Saying it of every copy made the two sentences contradict each other one
+ * line apart, and made the page wrong for most of the people who will read it
+ * once the channel release has been taken.
  *
  * Three more things are said, because leaving any of them out leaves a wrong
  * impression that this page is the only place to correct:
@@ -269,12 +325,18 @@ export function downloadNote(version?: string): string {
  *   and must not read as a migration step anybody is waiting to withdraw
  *   (#415). Nothing here is phrased as *for now*, *until*, or *while*.
  *
- * Drawn in every state of the lookup, including a failed one. Every sentence
- * in it is true whatever the release turns out to hold, and the link has
- * somewhere to go either way — the same argument `showsOnLinux` makes one
- * block above.
+ * The prose is `--color-text` rather than `--color-dim`. The sheet records
+ * `--color-dim` at 2.94:1 on `--color-panel`, below the floor for normal text
+ * and spent deliberately on counts, timestamps and paths — and these are the
+ * sentences on this page that change what somebody does next.
+ *
+ * Drawn in every state of the lookup, including the ones that know nothing.
+ * Every sentence in it is true whatever the release turns out to hold, and the
+ * link has somewhere to go either way — the same argument `showsOnLinux` makes
+ * one block above.
  */
-export function BetaRoute({ version, release }: { version?: string; release?: string }) {
+export function BetaRoute({ found }: { found: BetaLookup }) {
+  const offer = betaOffer(found);
   return (
     <div className="px-4 pt-0.5 pb-3.5">
       {/* A rule and the card's own ground, not a shape of its own. This is the
@@ -286,36 +348,104 @@ export function BetaRoute({ version, release }: { version?: string; release?: st
           <span className="text-ui text-bone">Beta builds</span>
           {/* The version beta is at, which is the newest release by
               construction — every released version reaches beta as it is cut.
-              Correct however far ahead of general access beta runs. */}
-          {version && <Badge>{version}</Badge>}
+              Correct however far ahead of general access beta runs, and
+              withheld when there is no bundle behind it. */}
+          {offer.version && <Badge>{offer.version}</Badge>}
         </div>
-        <p className="mt-2 text-ui text-dim">
+        <p className="mt-2 text-ui text-text">
           The downloads above are general access: the releases a maintainer has promoted. Beta has
           every release as soon as it is cut.
         </p>
-        <p className="mt-2 text-ui text-dim">
-          Joining beta is one download from the release page, for the copy you are joining. Every
-          copy carries its update address inside the bundle, so installing by hand once is the only
-          way to reach a different one. From the next release on, that copy updates on beta by
-          itself, and its channel is a switch in the app under Updates.
+        <p className="mt-2 text-ui text-text">
+          A copy that predates all of this cannot be switched from inside itself: its update address
+          is compiled into the bundle, and the only way to a different address is to install from it
+          once. So joining beta on one is one download from the release page, for the copy you are
+          joining. From the next release on, that copy updates on beta by itself, and its channel is
+          a switch in the app under Updates.
         </p>
-        <p className="mt-2 text-ui text-dim">
+        <p className="mt-2 text-ui text-text">
           Switching back in the app stops new betas. It does not reinstall the general-access build,
           and a copy is never moved back to an older one.
         </p>
+
+        <CheckingIt />
+
         <p className="mt-3 text-meta text-mute">
           The same download is how a copy that stopped updating is brought back, so it stays on the
           release page rather than being a one-off for this change.{" "}
           <a
             className="text-dim underline decoration-line underline-offset-2"
-            href={release ?? RELEASES}
+            href={offer.href}
             target="_blank"
             rel="noreferrer"
           >
-            Beta builds on GitHub
+            {offer.insteadOf ? "All releases on GitHub" : "Beta builds on GitHub"}
           </a>
+          {offer.insteadOf === "unknown" &&
+            " — that build's own page could not be looked up just now, so this is every release instead. The beta build is the newest one tagged desktop-v."}
+          {offer.insteadOf === "empty" &&
+            " — the newest release has no bundles on it yet, so this is every release instead. The beta build is the newest one carrying them."}
         </p>
       </div>
+    </div>
+  );
+}
+
+/**
+ * What is checked when a bundle is installed by hand, and what is not.
+ *
+ * This route goes around the one check that normally happens without anybody
+ * asking: every automatic update is verified against a signing key compiled
+ * into the app before it is installed. A file somebody downloads and opens
+ * themselves gets none of that, and this page is the page that sends them to
+ * do it — so it is the page that owes them the alternative.
+ *
+ * What each platform does on its own was established against the published
+ * artifacts rather than read off the configuration, and the three answers are
+ * different enough that one sentence covering all of them would be wrong:
+ *
+ * - **macOS** is notarised, and Gatekeeper checks the disk image on open.
+ * - **Windows** is not signed. The published installer's certificate table is
+ *   empty, so SmartScreen warns with no publisher to check — #455 is the
+ *   standing defect, and it is not this branch's to close.
+ * - **Linux** has nothing at all: an AppImage is executable and is executed.
+ *
+ * The remedy named is the detached signature published beside each bundle,
+ * made with the same minisign key the updater checks, and verified during the
+ * security review against the published bytes and against a one-byte
+ * modification. **Not a checksums file** — a digest published on the same
+ * release as the bundle it describes proves only that the two agree, which
+ * whoever replaced the bundle would also have arranged. The separate key is
+ * the whole guarantee.
+ *
+ * Drawn in the same recessed shape as `OnLinux`, because it is the same kind
+ * of thing: advice attached to the download rather than part of the argument
+ * for the route.
+ */
+function CheckingIt() {
+  return (
+    <div className="mt-3 rounded-md border border-line-soft bg-raise px-3 py-2.5">
+      <div className="eyebrow">Checking what you downloaded</div>
+      <p className="mt-1 text-meta text-dim">
+        An automatic update is verified against a signing key inside the app before it is installed.
+        <span className="text-text"> A bundle you install by hand is not</span>, so it is worth
+        checking it yourself.
+      </p>
+      <p className="mt-1.5 text-meta text-dim">
+        macOS is notarised and Gatekeeper checks the disk image when you open it.{" "}
+        <span className="text-text">The Windows installer is not signed</span> — Windows will warn,
+        and there is no publisher on it to recognise — and nothing checks an AppImage you run. For
+        both of those a detached signature is published beside the bundle, made with the same key
+        the updater checks.{" "}
+        <a
+          className="text-text underline decoration-line underline-offset-2"
+          href={VERIFY_DOC}
+          target="_blank"
+          rel="noreferrer"
+        >
+          How to check one.
+        </a>
+      </p>
     </div>
   );
 }
