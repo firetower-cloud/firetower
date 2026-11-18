@@ -1,0 +1,1309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Firetower shipping — prototype for #406</title>
+<style>
+/* ═══════════════════════════════════════════════════════════════════════════
+   1. APPLICATION TOKENS — copied verbatim from backend/dashboard/app/globals.css
+   ═══════════════════════════════════════════════════════════════════════════
+   Palette comment from the source file, kept because it is the licence for the
+   one low-contrast series:
+
+     Series colours are the validated categorical slots, not picked by eye: the
+     set was run through the colour-blindness separation check in both modes
+     (worst adjacent CVD ΔE 9.2 light / 9.4 dark, against a floor of 8). The
+     dark column is the same three hues re-stepped for the dark surface — never
+     an automatic flip of the light values.
+
+     Slot 3 (aqua) sits below 3:1 against the light surface. That is allowed
+     here because every plotted value is also a direct label on the chart and a
+     row in the table below it, so no number is reachable only by telling
+     colours apart.
+
+   Re-validated for this prototype with the dataviz validator:
+     light #2a78d6,#eb6834,#1baf7a on #f4f4f2 → ALL CHECKS PASS
+       (contrast WARN on slots 2 and 3; relieved by direct labels + tables)
+     dark  #3987e5,#d95926,#199e70 on #222221 → ALL CHECKS PASS
+   ─────────────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: light;
+  --surface-1: #fcfcfb;
+  --surface-2: #f4f4f2;
+  --line: #e3e3df;
+  --grid: #ebebe7;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #78776f;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --danger: #c0392f;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #1a1a19;
+  --surface-2: #222221;
+  --line: #333331;
+  --grid: #2b2b29;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #8e8d84;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --danger: #e66767;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--surface-1);
+  color: var(--text-primary);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+main { max-width: 1080px; margin: 0 auto; padding: 30px 20px 64px; }
+
+h1 { font-size: 19px; margin: 0 0 3px; }
+.meta { color: var(--text-secondary); font-size: 13px; margin: 0 0 22px; }
+
+.panel {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  overflow: hidden;
+}
+.panel > header { padding: 13px 15px; border-bottom: 1px solid var(--line); }
+.panel h2 { font-size: 14px; margin: 0; font-weight: 600; }
+.note { color: var(--text-muted); font-size: 12px; margin: 2px 0 0; font-weight: 400; }
+
+section { margin-top: 12px; }
+
+/* ── stat tiles ─────────────────────────────────────────────────────────── */
+.kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
+.kpi { padding: 13px 15px; }
+.k-label { color: var(--text-muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.k-value { font-size: 27px; font-weight: 600; line-height: 1.15; margin-top: 5px; }
+.k-caption { font-size: 11.5px; color: var(--text-muted); }
+.spark { display: block; margin-top: 7px; }
+
+@media (max-width: 760px) {
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+}
+
+/* ── charts ─────────────────────────────────────────────────────────────── */
+.chart-card { margin-top: 12px; }
+.chart { position: relative; padding: 4px 16px 10px; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+/* Recessive by construction: hairline, solid, one step off the surface. */
+.grid { stroke: var(--grid); stroke-width: 1; }
+.axis { fill: var(--text-muted); font-size: 11px; }
+/* Text never wears the series colour — the mark beside it carries identity. */
+.value { fill: var(--text-primary); font-size: 12px; font-weight: 650; }
+/* The 2px ring is what keeps a marker legible where it crosses its own line. */
+.marker { stroke: var(--surface-2); stroke-width: 2; }
+.crosshair { stroke: var(--text-muted); stroke-width: 1; opacity: 0.45; }
+
+.tip {
+  position: absolute;
+  transform: translate(-50%, calc(-100% - 12px));
+  pointer-events: none;
+  background: var(--surface-1);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-size: 12px;
+  white-space: nowrap;
+  z-index: 5;
+  box-shadow: 0 4px 14px rgb(0 0 0 / 18%);
+}
+.t-day { color: var(--text-muted); font-size: 11px; margin-bottom: 3px; }
+.t-row { display: flex; align-items: center; gap: 7px; }
+/* A short stroke, not a filled box. */
+.t-key { width: 11px; height: 2px; border-radius: 2px; flex: none; }
+.t-val { font-weight: 650; color: var(--text-primary); }
+.t-name { color: var(--text-secondary); }
+
+/* ── tables ─────────────────────────────────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: right; padding: 7px 15px; border-bottom: 1px solid var(--line); }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
+tr:last-child td { border-bottom: none; }
+
+.empty { padding: 14px 15px; color: var(--text-muted); }
+.error { padding: 14px 15px; color: var(--danger); font-family: ui-monospace, monospace; font-size: 12px; }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   2. ADDITIONS THIS PAGE PROPOSES — every rule below is new and is listed in
+   the specification view under "Design system references → new tokens".
+   Nothing above this line was changed.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Navigation. The app has one page and no nav; this is the whole of it. Two
+   text links in the layout, no state, no JS, no active-colour — the current
+   page is marked by weight and an underline offset so it survives greyscale. */
+.app-nav { display: flex; gap: 16px; margin: 0 0 18px; font-size: 13px; }
+.app-nav a { color: var(--text-secondary); text-decoration: none; padding-bottom: 2px; }
+.app-nav a:hover { color: var(--text-primary); }
+.app-nav a[aria-current="page"] {
+  color: var(--text-primary); font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--text-primary);
+}
+.app-nav a:focus-visible { outline: 2px solid var(--series-1); outline-offset: 3px; border-radius: 3px; }
+
+/* The headline tile. Larger number, and the only tile allowed two caption
+   lines, because it is the only one the page is built around. */
+.kpi { display: flex; flex-direction: column; }
+.kpi .spark, .kpi > svg { margin-top: auto; padding-top: 7px; }
+.kpi--lead .k-value { font-size: 34px; }
+.kpi--lead .k-label { color: var(--text-secondary); }
+
+/* "Normal for us" — the IQR of this project's own rolling history, as text
+   beside the sparkline that draws it. No industry band anywhere on the page. */
+.k-band { font-size: 11.5px; color: var(--text-muted); margin-top: 1px; }
+.k-band b { color: var(--text-secondary); font-weight: 600; }
+
+/* Where this window sits against that band. Deliberately not a colour: for
+   half these series "above" is neither good nor bad, and the page never says
+   good. The glyph carries direction, the word carries the comparison. */
+.k-where { font-size: 11.5px; color: var(--text-secondary); margin-top: 3px; }
+.k-where .g { font-weight: 700; }
+
+/* Footnote markers. The honesty treatment: a superscript on the label, a
+   native title on hover, and one 11.5px line under the whole row. Not a tile,
+   not a banner, not a paragraph. */
+sup.fn { font-size: 10px; color: var(--text-muted); cursor: help; margin-left: 1px; }
+.footnotes { font-size: 11.5px; color: var(--text-muted); margin: -2px 0 0; display: grid; gap: 2px; }
+.footnotes b { color: var(--text-secondary); font-weight: 600; }
+
+/* Group heading: a full-width version of the existing .k-label type with a
+   hairline under it. Separates the two loops without two dashboards. */
+.group-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  color: var(--text-muted); font-size: 11.5px; text-transform: uppercase;
+  letter-spacing: 0.04em; border-bottom: 1px solid var(--line);
+  padding-bottom: 6px; margin: 26px 0 0;
+}
+.group-head span { text-transform: none; letter-spacing: 0; }
+
+/* Legend. Present whenever a chart carries two series. */
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 5px; font-size: 11.5px; color: var(--text-secondary); }
+.legend i { display: inline-block; width: 12px; height: 2px; border-radius: 2px; vertical-align: 3px; margin-right: 5px; }
+
+/* Jump from a chart to the row that carries its numbers. Makes the "every
+   plotted value is also a table row" promise usable rather than nominal. */
+.to-numbers { font-size: 11.5px; color: var(--text-secondary); text-decoration: none; white-space: nowrap; }
+.to-numbers:hover { color: var(--text-primary); }
+.panel > header.with-link { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+
+/* Ingest freshness. The one place --danger is used on this page. */
+.stale { color: var(--danger); font-weight: 600; }
+
+/* A prose column in a table of figures. The app's table rule right-aligns
+   everything but the first column, which is right for numbers and wrong for a
+   bug report's title. */
+th.lt, td.lt { text-align: left; }
+
+/* Tables keep every column on a narrow frame by scrolling rather than wrapping
+   a figure onto two lines. */
+.scroller { overflow-x: auto; }
+.scroller table { min-width: 560px; }
+
+/* SVG classes for the new marks. */
+.band-fill { fill: var(--text-muted); opacity: 0.1; }
+.band-edge { stroke: var(--text-muted); stroke-width: 1; opacity: 0.22; stroke-dasharray: 2 3; }
+.rule { stroke: var(--text-secondary); stroke-width: 1; opacity: 0.45; stroke-dasharray: 3 3; }
+.rule-label { fill: var(--text-muted); font-size: 10px; }
+.cov-fill { fill: var(--text-muted); opacity: 0.13; }
+.bar-rest { fill: var(--text-muted); opacity: 0.17; }
+.bar-ref { stroke: var(--text-primary); stroke-width: 2; }
+.strip-tick { stroke: var(--line); stroke-width: 1; }
+.focusable:focus-visible { outline: 2px solid var(--series-1); outline-offset: 2px; }
+
+@media (max-width: 440px) {
+  .kpis { grid-template-columns: 1fr; }
+}
+
+/* A 1000-unit viewBox scaled into a 390px frame renders 11px axis text at
+   4px. The chart keeps its coordinate space — changing it would mean measuring
+   the element — and the type is re-sized in user space so it lands back at
+   roughly 11px on glass. The telemetry page has the same arithmetic problem
+   today and the same two rules fix it there. */
+@media (max-width: 760px) {
+  .chart .axis, .chart .rule-label { font-size: 15px; }
+  .chart .value { font-size: 16px; }
+}
+@media (max-width: 440px) {
+  .chart .axis, .chart .rule-label { font-size: 26px; }
+  .chart .value { font-size: 28px; }
+  .chart svg path { stroke-width: 4; }
+  .chart svg circle { r: 8px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   3. ARTIFACT CHROME — not part of the application. Everything in this block
+   is scaffolding for reviewing the prototype and is thrown away on build.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.chrome {
+  position: sticky; top: 0; z-index: 40;
+  background: var(--surface-2); border-bottom: 1px solid var(--line);
+  padding: 8px 14px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  font-size: 12px; color: var(--text-secondary);
+}
+.chrome .brand { font-weight: 600; color: var(--text-primary); margin-right: 2px; }
+.chrome .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--surface-1); }
+.chrome .seg button {
+  appearance: none; border: 0; background: transparent; cursor: pointer;
+  font: inherit; color: var(--text-secondary); padding: 4px 10px;
+}
+.chrome .seg button[aria-pressed="true"] { background: var(--text-primary); color: var(--surface-1); }
+.chrome .seg button + button { border-left: 1px solid var(--line); }
+.chrome .spacer { flex: 1 1 auto; }
+.chrome label { display: inline-flex; gap: 5px; align-items: center; cursor: pointer; }
+.ribbon {
+  background: var(--surface-1); border-bottom: 1px solid var(--line);
+  padding: 7px 14px; font-size: 11.5px; color: var(--text-muted);
+}
+.stage { background: var(--surface-1); }
+.stage[data-w="760"], .stage[data-w="420"] {
+  container-type: inline-size; margin: 0 auto;
+  border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+}
+.stage[data-w="760"] { max-width: 760px; }
+.stage[data-w="420"] { max-width: 420px; }
+/* Width presets simulate a narrow frame: the app's own media queries are
+   mirrored as container queries so a preset shows the real breakpoints. */
+@container (max-width: 760px) {
+  .kpis { grid-template-columns: repeat(2, 1fr); }
+  .chart .axis, .chart .rule-label { font-size: 15px; }
+  .chart .value { font-size: 16px; }
+}
+@container (max-width: 440px) {
+  .kpis { grid-template-columns: 1fr; }
+  .chart .axis, .chart .rule-label { font-size: 26px; }
+  .chart .value { font-size: 28px; }
+  .chart svg path { stroke-width: 4; }
+  .chart svg circle { r: 8px; }
+}
+
+.doc { max-width: 1080px; margin: 0 auto; padding: 26px 20px 80px; }
+.doc h2 { font-size: 16px; margin: 30px 0 8px; }
+.doc h3 { font-size: 13.5px; margin: 20px 0 6px; }
+.doc p, .doc li { font-size: 13px; color: var(--text-secondary); max-width: 74ch; }
+.doc code { font-family: ui-monospace, monospace; font-size: 12px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
+.doc table { margin: 8px 0 4px; }
+.doc td, .doc th { font-size: 12.5px; vertical-align: top; text-align: left; }
+.doc td:first-child { font-weight: 500; color: var(--text-primary); }
+.doc th:first-child { white-space: nowrap; }
+.doc .lede { color: var(--text-primary); font-size: 14px; }
+.doc blockquote { margin: 8px 0; padding: 2px 0 2px 12px; border-left: 2px solid var(--line); color: var(--text-muted); font-size: 12.5px; }
+.doc .hr { height: 1px; background: var(--line); margin: 26px 0 0; }
+.verdict { display: inline-block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); border: 1px solid var(--line); border-radius: 5px; padding: 1px 6px; margin-left: 6px; }
+.states { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+.hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="chrome">
+  <span class="brand">Firetower shipping</span>
+  <span>prototype · issue #406</span>
+  <div class="seg" role="group" aria-label="View">
+    <button data-view="page" aria-pressed="true">Proposed page</button>
+    <button data-view="today" aria-pressed="false">Telemetry today</button>
+    <button data-view="spec" aria-pressed="false">Specification</button>
+  </div>
+  <div class="seg" role="group" aria-label="Frame width">
+    <button data-w="auto" aria-pressed="true">Auto</button>
+    <button data-w="760" aria-pressed="false">760</button>
+    <button data-w="420" aria-pressed="false">420</button>
+  </div>
+  <span class="spacer"></span>
+  <label><input type="checkbox" id="t-dark"> dark</label>
+  <label><input type="checkbox" id="t-stale"> stale ingest</label>
+  <label><input type="checkbox" id="t-fail"> query fails</label>
+</div>
+<div class="ribbon" id="ribbon">
+  Real figures, measured from <code>origin/main</code> and the GitHub REST API on
+  18 Nov 2026. 1,546 commits in the DAG, 369 on the first-parent trunk, 81 release
+  events, 215 merged pull requests, 6 externally-reported bugs. Nothing on this page
+  is invented.
+</div>
+
+<div class="stage" id="stage" data-w="auto">
+
+  <!-- ══════════════════ VIEW: the proposed page ══════════════════ -->
+  <main id="view-page">
+    <nav class="app-nav" aria-label="Dashboard">
+      <a href="#" >Telemetry</a>
+      <a href="#" aria-current="page">Shipping</a>
+    </nav>
+    <h1>Firetower shipping</h1>
+    <p class="meta" id="page-meta"></p>
+    <div id="page-body"></div>
+  </main>
+
+  <!-- ══════════════════ VIEW: telemetry as it is today ══════════════════ -->
+  <main id="view-today" class="hidden">
+    <nav class="app-nav" aria-label="Dashboard">
+      <a href="#" aria-current="page">Telemetry</a>
+      <a href="#">Shipping</a>
+    </nav>
+    <h1>Firetower telemetry</h1>
+    <p class="meta">
+      Daily counts across every installation. No per-person records, here or
+      anywhere upstream of here.
+    </p>
+    <div id="today-body"></div>
+  </main>
+
+  <!-- ══════════════════ VIEW: the specification ══════════════════ -->
+  <div id="view-spec" class="doc hidden"></div>
+</div>
+<script>
+const D={"days":["2026-09-10","2026-09-11","2026-09-12","2026-09-13","2026-09-14","2026-09-15","2026-09-16","2026-09-17","2026-09-18","2026-09-19","2026-09-20","2026-09-21","2026-09-22","2026-09-23","2026-09-24","2026-09-25","2026-09-26","2026-09-27","2026-09-28","2026-09-29","2026-09-30","2026-10-01","2026-10-02","2026-10-03","2026-10-04","2026-10-05","2026-10-06","2026-10-07","2026-10-08","2026-10-09","2026-10-10","2026-10-11","2026-10-12","2026-10-13","2026-10-14","2026-10-15","2026-10-16","2026-10-17","2026-10-18","2026-10-19","2026-10-20","2026-10-21","2026-10-22","2026-10-23","2026-10-24","2026-10-25","2026-10-26","2026-10-27","2026-10-28","2026-10-29","2026-10-30","2026-10-31","2026-11-01","2026-11-02","2026-11-03","2026-11-04","2026-11-05","2026-11-06","2026-11-07","2026-11-08","2026-11-09","2026-11-10","2026-11-11","2026-11-12","2026-11-13","2026-11-14","2026-11-15","2026-11-16","2026-11-17","2026-11-18"],"s":{"gap_med":[1.77,1.1,0.93,0.93,0.75,0.75,0.54,0.51,0.54,0.54,0.48,0.48,0.48,0.51,0.51,0.48,0.62,0.51,0.51,0.32,0.32,0.32,0.32,0.38,0.26,0.26,0.37,0.37,0.26,0.37,0.26,0.29,0.29,0.4,0.81,1.05,1.09,1.98,2.93,2.93,2.93,2.98,6.14,31.93,44.84,73.01,58.73,44.84,23.8,23.8,44.47,44.65,44.65,44.65,44.65,44.47,2.58,9.24,15.33,19.15,2.01,2.02,2.01,2.58,2.58,2.02,2.01,2.01,2.01,2.01],"gap_p90":[9.63,9.5,9.5,9.5,9.5,9.5,8.72,8.33,5.61,5.61,7.94,9.5,9.5,9.53,9.52,9.5,10.61,10.51,10.51,9.56,9.56,9.56,9.56,9.54,9.59,9.63,9.84,9.84,10.9,14.03,14.8,14.03,19.38,22.72,36.02,88.17,133.06,128.38,147.11,156.48,156.48,170.53,170.53,172.32,174.11,175.91,174.71,174.11,172.32,172.32,171.72,172.32,172.32,172.32,172.32,171.72,161.91,156.17,153.29,150.42,113.75,72.93,72.85,71.33,71.33,71.14,70.86,70.86,70.86,70.86],"releases":[8.75,9.75,10.0,9.75,10.75,11.25,12.0,12.25,12.75,12.0,12.25,11.75,11.25,11.75,11.75,12.25,12.25,11.25,10.75,10.5,10.5,10.5,10.5,10.75,10.25,9.25,9.25,9.25,7.75,6.75,6.5,6.75,5.75,5.25,4.0,3.75,3.25,3.25,2.5,2.25,2.5,2.0,1.75,1.25,1.25,1.25,1.5,1.75,2.0,2.0,2.0,1.75,1.75,1.75,1.5,1.5,2.25,2.25,2.25,2.25,2.75,3.0,3.25,3.25,3.25,3.25,3.5,3.5,3.25,3.25],"merges":[5.0,6.75,7.0,7.0,7.25,7.25,8.25,8.5,10.25,10.25,11.25,11.75,11.75,12.5,13.0,14.25,15.0,15.5,15.5,14.5,14.5,14.5,14.5,14.75,13.75,12.75,12.5,12.5,11.25,9.5,9.25,9.5,9.5,10.0,9.0,9.0,7.25,7.5,6.5,6.0,6.0,5.25,5.25,4.5,3.75,3.0,3.5,3.75,4.5,4.5,4.75,4.5,4.5,4.5,4.5,4.75,6.0,6.5,6.75,7.0,8.25,9.25,9.5,10.0,10.0,9.75,10.5,10.75,13.25,14.0],"lead_med":[0.07,0.1,0.1,0.1,0.1,0.1,0.13,0.14,0.23,0.23,0.23,0.24,0.24,0.4,0.31,0.39,0.46,0.4,0.4,0.56,0.56,0.56,0.56,0.62,0.67,0.88,0.93,0.93,0.88,1.17,0.88,1.17,0.84,0.76,0.76,0.69,1.45,1.13,1.13,0.74,0.74,0.67,0.8,0.74,0.67,0.74,0.74,0.8,0.82,0.82,0.85,0.82,0.82,0.82,0.82,0.85,0.82,0.85,0.85,0.82,0.86,2.8,3.0,3.8,3.8,3.81,5.15,4.57,3.19,3.8],"rework":[0.4263,0.4286,0.4293,0.4136,0.44,0.4421,0.4273,0.4299,0.4279,0.46,0.4954,0.4935,0.4866,0.4907,0.4793,0.4789,0.4974,0.5027,0.511,0.514,0.5196,0.52,0.5297,0.5466,0.5565,0.5615,0.5615,0.556,0.5481,0.547,0.5455,0.5668,0.5507,0.5522,0.559,0.5538,0.5615,0.525,0.5294,0.5338,0.5385,0.5433,0.5537,0.5492,0.5414,0.5338,0.5324,0.5324,0.5126,0.4762,0.4468,0.3855,0.359,0.3636,0.3684,0.3562,0.3976,0.3832,0.3739,0.4186,0.4326,0.4516,0.5026,0.5913,0.6031,0.6213,0.6213,0.6245,0.6325,0.6325],"coverage":[0.9793,0.9801,0.9777,0.9785,0.9801,0.9808,0.9807,0.9782,0.9789,0.9871,0.9859,0.9892,0.989,0.9888,0.989,0.9757,0.9741,0.9731,0.9725,0.972,0.9742,0.9762,0.977,0.9786,0.9786,0.978,0.9803,0.9806,0.982,0.9814,0.9839,0.9832,0.9815,0.9808,0.9794,0.9826,0.9819,0.9802,0.9791,0.9763,0.971,0.9698,0.9677,0.9945,0.9949,0.9949,0.9951,0.9952,0.9947,0.9593,0.8882,0.8662,0.8507,0.8485,0.7842,0.7518,0.7812,0.7871,0.7224,0.6849,0.7006,0.7214,0.7625,0.7976,0.8035,0.812,0.8131,0.8158,0.8333,0.8333],"nm_count":[290,302,314,325,351,365,363,367,379,389,355,371,364,357,363,370,347,334,327,322,349,378,392,420,421,409,406,412,388,377,372,358,324,312,291,288,276,253,239,211,207,199,186,181,196,196,205,207,188,172,170,142,134,132,139,141,160,202,263,311,334,359,421,494,509,532,535,543,594,594],"derived":[68,72,73,72,77,81,73,74,77,79,76,73,68,65,63,61,57,55,55,54,59,66,73,83,86,85,85,87,79,76,77,79,73,70,68,67,64,58,55,55,55,54,53,53,58,57,60,60,56,49,42,32,28,28,28,26,33,41,42,53,60,69,92,137,145,154,154,157,170,170],"cfr":[1.943,1.846,1.825,1.846,1.791,1.8,1.521,1.51,1.51,1.646,1.551,1.553,1.511,1.383,1.34,1.245,1.163,1.222,1.279,1.286,1.405,1.571,1.738,1.93,2.098,2.297,2.297,2.351,2.548,2.815,2.962,2.926,3.174,3.333,4.25,4.467,4.923,4.462,5.5,6.111,5.5,6.75,7.571,10.6,11.6,11.4,10.0,8.571,7.0,6.125,5.25,4.571,4.0,4.0,4.667,4.333,3.667,4.556,4.667,5.889,5.455,5.75,7.077,10.538,11.154,11.846,11.0,11.214,13.077,13.077],"reported_cum":[3,3,3,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,6,6,6,6,6,6,6,6,6,6,6],"reported_28d":[3,3,3,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1]},"bands":{"gap_med":[0.48,1.095,2.968],"gap_p90":[9.56,53.44,156.402],"releases":[2.25,3.875,10.5],"merges":[6.0,9.125,11.75],"lead_med":[0.415,0.78,0.88],"rework":[0.441,0.517,0.55],"derived":[55.0,67.5,77.0],"cfr":[1.793,3.833,6.056]},"weeks":[{"week":"2026-11-16","merges":14,"releases":0,"gap_med":null,"commits":62,"feat":8,"fix":22,"untyped":0,"rework":0.733},{"week":"2026-11-09","merges":19,"releases":5,"gap_med":1.77,"commits":237,"feat":34,"fix":118,"untyped":2,"rework":0.776},{"week":"2026-11-02","merges":11,"releases":4,"gap_med":1.47,"commits":208,"feat":41,"fix":34,"untyped":78,"rework":0.453},{"week":"2026-10-26","merges":7,"releases":3,"gap_med":2.01,"commits":46,"feat":15,"fix":4,"untyped":19,"rework":0.211},{"week":"2026-10-19","merges":5,"releases":2,"gap_med":44.84,"commits":44,"feat":13,"fix":13,"untyped":1,"rework":0.5},{"week":"2026-10-12","merges":5,"releases":0,"gap_med":170.53,"commits":13,"feat":6,"fix":3,"untyped":0,"rework":0.333},{"week":"2026-10-05","merges":1,"releases":2,"gap_med":0.31,"commits":31,"feat":16,"fix":8,"untyped":0,"rework":0.333},{"week":"2026-09-28","merges":1,"releases":1,"gap_med":2.98,"commits":108,"feat":27,"fix":47,"untyped":0,"rework":0.635},{"week":"2026-09-21","merges":19,"releases":7,"gap_med":0.58,"commits":87,"feat":23,"fix":23,"untyped":5,"rework":0.5},{"week":"2026-09-14","merges":17,"releases":17,"gap_med":0.21,"commits":132,"feat":28,"fix":45,"untyped":1,"rework":0.616},{"week":"2026-09-07","merges":18,"releases":16,"gap_med":0.26,"commits":94,"feat":32,"fix":23,"untyped":3,"rework":0.418},{"week":"2026-08-31","merges":8,"releases":5,"gap_med":4.67,"commits":21,"feat":9,"fix":2,"untyped":0,"rework":0.182},{"week":"2026-08-24","merges":2,"releases":11,"gap_med":0.97,"commits":108,"feat":40,"fix":37,"untyped":1,"rework":0.481},{"week":"2026-08-17","merges":0,"releases":7,"gap_med":null,"commits":102,"feat":48,"fix":29,"untyped":3,"rework":0.377},{"week":"2026-08-10","merges":0,"releases":1,"gap_med":null,"commits":16,"feat":4,"fix":3,"untyped":2,"rework":0.429}],"scopes":[{"scope":"desktop","feat":46,"fix":62,"n":108,"rework":0.574,"all_n":163,"all_rework":0.546},{"scope":"mobile","feat":19,"fix":48,"n":67,"rework":0.716,"all_n":92,"all_rework":0.663},{"scope":"server","feat":12,"fix":38,"n":50,"rework":0.76,"all_n":61,"all_rework":0.77},{"scope":"(no scope)","feat":14,"fix":8,"n":22,"rework":0.364,"all_n":212,"all_rework":0.42},{"scope":"artifacts","feat":10,"fix":8,"n":18,"rework":0.444,"all_n":18,"all_rework":0.444},{"scope":"schedules","feat":3,"fix":9,"n":12,"rework":0.75,"all_n":12,"all_rework":0.75},{"scope":"other (10 scopes)","feat":7,"fix":18,"n":25,"rework":0.72,"all_n":null,"all_rework":null}],"scope_total":[111,191],"releases_recent":[{"when":"2026-11-15T09:47:05+00:00","pkgs":["desktop-v0.30.0","firetower-v0.55.0","mobile-v0.17.0"]},{"when":"2026-11-11T17:57:38+00:00","pkgs":["desktop-v0.29.1","firetower-v0.54.1","mobile-v0.16.0"]},{"when":"2026-11-10T18:06:04+00:00","pkgs":["desktop-v0.29.0","firetower-v0.54.0","mobile-v0.15.0"]},{"when":"2026-11-09T12:12:15+00:00","pkgs":["desktop-v0.28.1","firetower-v0.53.1"]},{"when":"2026-11-09T10:37:59+00:00","pkgs":["desktop-v0.28.0","firetower-v0.53.0","mobile-v0.14.0"]},{"when":"2026-11-08T11:23:17+00:00","pkgs":["desktop-v0.27.0","firetower-v0.52.0","mobile-v0.13.0"]},{"when":"2026-11-05T20:06:40+00:00","pkgs":["desktop-v0.26.0","firetower-v0.51.0","mobile-v0.12.0"]},{"when":"2026-11-05T14:34:17+00:00","pkgs":["desktop-v0.25.0"]},{"when":"2026-11-05T08:13:51+00:00","pkgs":["desktop-v0.24.0","firetower-v0.50.0","mobile-v0.11.0"]},{"when":"2026-10-28T11:30:52+00:00","pkgs":["desktop-v0.23.0","firetower-v0.49.0","mobile-v0.10.0"]},{"when":"2026-10-27T11:14:00+00:00","pkgs":["desktop-v0.22.1"]},{"when":"2026-10-26T19:04:08+00:00","pkgs":["desktop-v0.22.0","firetower-v0.48.0","mobile-v0.9.1"]},{"when":"2026-10-25T10:50:22+00:00","pkgs":["desktop-v0.21.0","firetower-v0.47.0","mobile-v0.9.0"]},{"when":"2026-10-20T13:35:52+00:00","pkgs":["desktop-v0.20.0","firetower-v0.46.0","mobile-v0.8.0"]}],"reported":[{"num":73,"title":"When changing \"Ask\" parameter during a started conversation, nothing change","by":"RemiCarbonne","filed":"2026-09-10","closed":"2026-09-11","hours":14.7,"open_days":null},{"num":81,"title":"Image disapear when copy paste in the prompt","by":"RemiCarbonne","filed":"2026-09-10","closed":"2026-09-10","hours":1.0,"open_days":null},{"num":82,"title":"Can't use localhost workspace to work on app on the same server than firetower","by":"RemiCarbonne","filed":"2026-09-10","closed":"2026-09-11","hours":14.2,"open_days":null},{"num":102,"title":"bug: commit fails when the diff contains a binary file (path parsed as \"a/x b/x\")","by":"WassimSss","filed":"2026-09-13","closed":"2026-10-03","hours":472.0,"open_days":null},{"num":104,"title":"bug: \"Unknown command\" reply is not shown and the session stays on \"working\" forever","by":"WassimSss","filed":"2026-09-13","closed":null,"hours":null,"open_days":66},{"num":266,"title":"fix(worker): glibc aarch64 hosts on RPM distros get the musl Claude Code build","by":"mercierj","filed":"2026-11-08","closed":null,"hours":null,"open_days":10}],"facts":{"release_events":81,"package_releases":127,"github_releases":129,"trunk":369,"nonmerge":1309,"dag":1546,"merged_prs":215,"rp_prs":82,"work_prs":133,"work_merges":127,"unreleased":14,"unreleased_oldest_h":45.6,"fixes":411,"feats":344,"derived_total":325,"newcode":86,"untyped":115,"untyped_burst":99,"external_issues":20,"external_unclassified":19,"first_commit":"2026-08-13","pr_date":"2026-09-25","types_date":"2026-11-09","last_release":"2026-11-15T09:47:05+00:00","generated":"2026-11-18T12:00:00+00:00"}};
+/* ════════════════════════════════════════════════════════════════════════════
+   Chart library. A faithful port of backend/dashboard/components/TrendChart.tsx
+   and components/Kpis.tsx to plain DOM, with the four additions this page needs:
+   a second series on one axis, a horizontal "normal for us" band, dated axis
+   rules for the two process discontinuities, and a dashed segment where a
+   series' own input coverage is incomplete.
+   ════════════════════════════════════════════════════════════════════════════ */
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const shortDay = (iso) => { const p = iso.split("-"); return p[2] + " " + MONTHS[+p[1]-1]; };
+const el = (t, cls, html) => { const n = document.createElement(t); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
+const svgEl = (t, attrs) => { const n = document.createElementNS("http://www.w3.org/2000/svg", t); for (const k in attrs) if (attrs[k] != null) n.setAttribute(k, attrs[k]); return n; };
+
+/** Clean axis values. Verbatim from TrendChart.tsx. */
+function ticksFor(max) {
+  if (max <= 1) return [0, 1];
+  if (max <= 4) return [0, Math.ceil(max / 2), Math.ceil(max)];
+  const magnitude = Math.pow(10, Math.floor(Math.log10(max)));
+  let step = magnitude;
+  while (max / step > 4) step += magnitude;
+  const out = [];
+  for (let v = 0; v <= max + 1e-9; v += step) out.push(v);
+  if (out[out.length - 1] < max) out.push(out[out.length - 1] + step);
+  return out;
+}
+
+const fmtH  = (v) => v == null ? "—" : (v >= 100 ? Math.round(v) : v >= 10 ? v.toFixed(0) : v.toFixed(1)) + " h";
+const fmtWk = (v) => v == null ? "—" : v.toFixed(1);
+const fmtPc = (v) => v == null ? "—" : Math.round(v * 100) + "%";
+const fmtN  = (v) => v == null ? "—" : String(Math.round(v));
+const fmtR  = (v) => v == null ? "—" : v.toFixed(1);
+
+/** Where this window sits against the project's own IQR. Never a colour. */
+function where(v, band) {
+  if (v == null || !band) return "";
+  if (v > band[2]) return '<span class="g">↑</span> above normal';
+  if (v < band[0]) return '<span class="g">↓</span> below normal';
+  return '<span class="g">·</span> within normal';
+}
+
+/* ── the time chart ───────────────────────────────────────────────────────── */
+function timeChart(o) {
+  const card = el("div", "panel chart-card");
+  const head = el("header", o.link ? "with-link" : null);
+  const htxt = el("div");
+  htxt.appendChild(el("h2", null, o.title));
+  if (o.note) htxt.appendChild(el("p", "note", o.note));
+  if (o.series.length > 1) {
+    const lg = el("div", "legend");
+    o.series.forEach(s => lg.insertAdjacentHTML("beforeend",
+      '<span><i style="background:var(--series-' + s.slot + ')"></i>' + s.name + "</span>"));
+    htxt.appendChild(lg);
+  }
+  head.appendChild(htxt);
+  if (o.link) head.insertAdjacentHTML("beforeend",
+    '<a class="to-numbers" href="#' + o.link + '">the numbers ↓</a>');
+  card.appendChild(head);
+
+  const holder = el("div", "chart");
+  const W = 1000, H = o.tall ? 210 : 110;
+  const pad = { t: 16, r: 54, b: 30, l: 42 };
+  const iw = W - pad.l - pad.r, ih = H - pad.t - pad.b;
+  const days = o.days, last = days.length - 1;
+
+  let hiV = 0;
+  o.series.forEach(s => s.values.forEach(v => { if (v != null && v > hiV) hiV = v; }));
+  if (o.band) hiV = Math.max(hiV, o.band[2]);
+  const ticks = o.ticks || ticksFor(hiV);
+  const top = ticks[ticks.length - 1] || 1;
+  const X = (i) => pad.l + (last === 0 ? iw / 2 : (i * iw) / last);
+  const Y = (v) => pad.t + ih - (v / top) * ih;
+
+  const svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, role: "img", "aria-label": o.title });
+
+  ticks.forEach(t => {
+    svg.appendChild(svgEl("line", { x1: pad.l, x2: W - pad.r, y1: Y(t), y2: Y(t), class: "grid" }));
+    const tx = svgEl("text", { x: pad.l - 8, y: Y(t) + 4, "text-anchor": "end", class: "axis" });
+    tx.textContent = (o.tick || fmtN)(t);
+    svg.appendChild(tx);
+  });
+
+  /* Geometry for one series, shared by the line runs and the area wash. A
+     cumulative count is drawn as a step: it does not rise between events, and a
+     diagonal between two of them would be a trend nobody measured. */
+  function pathFor(s, from, to) {
+    const pts = [];
+    for (let i = from; i <= to; i++) {
+      if (s.values[i] == null) continue;
+      const x = X(i), y = Y(s.values[i]);
+      if (o.step && pts.length) pts.push([x, pts[pts.length - 1][1]]);
+      pts.push([x, y]);
+    }
+    return pts;
+  }
+
+  /* Draw order: the washes, then the reference band over them, then the dated
+     rules, then the lines. A band hidden under an area wash is not a band. */
+  if (o.topArea) {
+    let d = "M" + pad.l + "," + pad.t;
+    o.topArea.forEach((v, i) => { if (v != null) d += " L" + X(i).toFixed(1) + "," + Y(top - v * top).toFixed(1); });
+    d += " L" + X(last) + "," + pad.t + " Z";
+    svg.appendChild(svgEl("path", { d: d, class: "cov-fill" }));
+  }
+  if (o.tall && o.series.length === 1 && !o.noArea) {
+    const pts = pathFor(o.series[0], 0, last);
+    if (pts.length > 1) {
+      const d = pts.map((pt, i) => (i ? "L" : "M") + pt[0].toFixed(1) + "," + pt[1].toFixed(1)).join(" ")
+        + " L" + pts[pts.length - 1][0].toFixed(1) + "," + (pad.t + ih) + " L" + pts[0][0].toFixed(1) + "," + (pad.t + ih) + " Z";
+      svg.appendChild(svgEl("path", { d: d, fill: "var(--series-" + o.series[0].slot + ")", "fill-opacity": 0.1 }));
+    }
+  }
+
+  /* "Normal for us": the IQR of this project's own rolling history, in the
+     visual role an industry performance band would have taken. Neutral ink —
+     it is a reference, not a series, and the page carries no industry band. */
+  if (o.band) {
+    svg.appendChild(svgEl("rect", { x: pad.l, y: Y(o.band[2]), width: iw,
+      height: Math.max(1, Y(o.band[0]) - Y(o.band[2])), class: "band-fill" }));
+    [o.band[0], o.band[2]].forEach(v => svg.appendChild(svgEl("line",
+      { x1: pad.l, x2: W - pad.r, y1: Y(v), y2: Y(v), class: "band-edge" })));
+    const bl = svgEl("text", { x: pad.l + 5, y: Math.max(pad.t + 10, Y(o.band[2]) - 5), class: "rule-label" });
+    bl.textContent = "normal for us";
+    svg.appendChild(bl);
+  }
+
+  /* The two process discontinuities. A thin dated rule in the top margin, not
+     a callout. */
+  const ruleX = [];
+  (o.rules || []).forEach(r => {
+    const i = days.indexOf(r.day);
+    if (i < 0) return;
+    ruleX.push(X(i));
+    svg.appendChild(svgEl("line", { x1: X(i), x2: X(i), y1: pad.t - 6, y2: pad.t + ih, class: "rule" }));
+    const t = svgEl("text", { x: X(i) + 4, y: pad.t - 7, class: "rule-label" });
+    t.textContent = r.label;
+    svg.appendChild(t);
+  });
+
+  o.series.forEach(s => {
+    /* One path per run of comparable data, so a dashed stretch is a property of
+       the segment rather than of the whole series. */
+    const runs = [];
+    let cur = null;
+    s.values.forEach((v, i) => {
+      if (v == null) { cur = null; return; }
+      const dashed = s.dashUntil ? days[i] < s.dashUntil : (s.dashWhen ? s.dashWhen(i) : false);
+      if (!cur || cur.dashed !== dashed) {
+        if (cur) cur.to = i;                       // butt-join the runs
+        cur = { dashed: dashed, from: i, to: i }; runs.push(cur);
+      }
+      cur.to = i;
+    });
+    runs.forEach(r => {
+      const pts = pathFor(s, r.from, r.to);
+      if (pts.length < 2) return;
+      const d = pts.map((pt, i) => (i ? "L" : "M") + pt[0].toFixed(1) + "," + pt[1].toFixed(1)).join(" ");
+      svg.appendChild(svgEl("path", { d: d, fill: "none", stroke: "var(--series-" + s.slot + ")",
+        "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round",
+        "stroke-dasharray": r.dashed ? "4 4" : null, opacity: r.dashed ? 0.75 : null }));
+    });
+  });
+
+  /* First, last, and the peak of the leading series — never a label on every
+     point. The peak is dropped when it would land on a dated rule or on the end
+     marker, because a selective label that collides is worse than no label. */
+  const lead = o.series[0];
+  const vals = lead.values;
+  let peak = -1, hi = -Infinity, lo = Infinity, lastI = -1;
+  vals.forEach((v, i) => { if (v == null) return; lastI = i; if (v > hi) { hi = v; peak = i; } if (v < lo) lo = v; });
+  const clear = (i) => Math.abs(X(i) - X(lastI)) > 90 && X(i) - X(0) > 90 && ruleX.every(rx => Math.abs(X(i) - rx) > 80);
+  const showPeak = peak >= 0 && hi > lo && clear(peak);
+
+  const xl = [0, last];
+  if (showPeak) xl.push(peak);
+  xl.forEach(i => {
+    const t = svgEl("text", { x: X(i), y: H - 9, class: "axis",
+      "text-anchor": i === 0 ? "start" : i === last ? "end" : "middle" });
+    t.textContent = shortDay(days[i]);
+    svg.appendChild(t);
+  });
+
+  /* End markers and their direct labels — the thing that keeps every number
+     reachable without hovering. Two series ending close together would print
+     one label on top of the other, so the labels are pushed apart while the
+     markers stay on their values. */
+  const ends = [];
+  o.series.forEach(s => {
+    let li = -1; s.values.forEach((v, i) => { if (v != null) li = i; });
+    if (li < 0) return;
+    ends.push({ s: s, i: li, y: Y(s.values[li]) });
+  });
+  ends.sort((a, b) => a.y - b.y);
+  for (let k = 1; k < ends.length; k++)
+    if (ends[k].y - ends[k - 1].y < 17) ends[k].y = ends[k - 1].y + 17;
+  ends.forEach(e => {
+    svg.appendChild(svgEl("circle", { cx: X(e.i), cy: Y(e.s.values[e.i]), r: 4, fill: "var(--series-" + e.s.slot + ")", class: "marker" }));
+    const t = svgEl("text", { x: X(e.i) + 10, y: e.y + 4, class: "value" });
+    t.textContent = (o.fmt || fmtN)(e.s.values[e.i]);
+    svg.appendChild(t);
+  });
+  if (showPeak) {
+    svg.appendChild(svgEl("circle", { cx: X(peak), cy: Y(vals[peak]), r: 4, fill: "var(--series-" + lead.slot + ")", class: "marker" }));
+    const t = svgEl("text", { x: X(peak), y: Y(vals[peak]) - 11, class: "value", "text-anchor": "middle" });
+    t.textContent = (o.fmt || fmtN)(vals[peak]);
+    svg.appendChild(t);
+  }
+
+  const cross = svgEl("line", { class: "crosshair", opacity: 0 });
+  svg.appendChild(cross);
+  const dots = o.series.map(s => { const c = svgEl("circle", { r: 4, fill: "var(--series-" + s.slot + ")", class: "marker", opacity: 0 }); svg.appendChild(c); return c; });
+
+  const hit = svgEl("rect", { x: pad.l, y: pad.t, width: iw, height: ih, fill: "transparent",
+    tabindex: 0, class: "focusable", "aria-describedby": o.id + "-tip" });
+  svg.appendChild(hit);
+  holder.appendChild(svg);
+
+  const tip = el("div", "tip"); tip.id = o.id + "-tip"; tip.setAttribute("role", "status");
+  tip.style.display = "none"; holder.appendChild(tip);
+
+  function show(i) {
+    cross.setAttribute("x1", X(i)); cross.setAttribute("x2", X(i));
+    cross.setAttribute("y1", pad.t); cross.setAttribute("y2", pad.t + ih);
+    cross.setAttribute("opacity", 1);
+    let rows = '<div class="t-day">' + days[i] + "</div>", anchor = null;
+    o.series.forEach((s, k) => {
+      const v = s.values[i];
+      if (v == null) { dots[k].setAttribute("opacity", 0); return; }
+      dots[k].setAttribute("cx", X(i)); dots[k].setAttribute("cy", Y(v)); dots[k].setAttribute("opacity", 1);
+      if (anchor == null) anchor = Y(v);
+      rows += '<div class="t-row"><span class="t-key" style="background:var(--series-' + s.slot + ')"></span>'
+        + '<span class="t-val">' + (o.fmt || fmtN)(v) + '</span><span class="t-name">' + s.name + "</span></div>";
+    });
+    if (o.extra) rows += '<div class="t-row"><span class="t-name">' + o.extra(i) + "</span></div>";
+    tip.innerHTML = rows;
+    tip.style.display = "";
+    tip.style.left = (X(i) / W) * 100 + "%";
+    tip.style.top = ((anchor == null ? pad.t + ih / 2 : anchor) / H) * 100 + "%";
+  }
+  function hide() { cross.setAttribute("opacity", 0); dots.forEach(d => d.setAttribute("opacity", 0)); tip.style.display = "none"; }
+  function idx(clientX) {
+    const b = holder.getBoundingClientRect();
+    const sx = ((clientX - b.left) / b.width) * W;
+    const bandW = iw / Math.max(1, last);
+    return Math.max(0, Math.min(last, Math.round((sx - pad.l) / bandW)));
+  }
+  hit.addEventListener("pointermove", e => show(idx(e.clientX)));
+  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("focus", () => show(lastI < 0 ? last : lastI));
+  hit.addEventListener("blur", hide);
+  let kb = lastI < 0 ? last : lastI;
+  hit.addEventListener("keydown", e => {
+    if (e.key === "ArrowLeft") { kb = Math.max(0, kb - 1); show(kb); e.preventDefault(); }
+    if (e.key === "ArrowRight") { kb = Math.min(last, kb + 1); show(kb); e.preventDefault(); }
+  });
+
+  card.appendChild(holder);
+  return card;
+}
+
+/* ── the stat tile ────────────────────────────────────────────────────────── */
+/* Kpis.tsx's Tile, plus the three things #402 settled: a daily rolling
+   sparkline, the project's own 28-day baseline as text, and the IQR of all its
+   history shaded behind the line. */
+function sparkline(values, slot, band) {
+  const W = 108, H = 26;
+  const plot = values.filter(v => v != null);
+  if (plot.length < 2) return "";
+  let max = Math.max(1, ...plot);
+  if (band) max = Math.max(max, band[2]);
+  const n = values.length - 1;
+  const X = (i) => (i * W) / n, Y = (v) => H - 2 - (v / max) * (H - 6);
+  let d = "", first = true;
+  values.forEach((v, i) => { if (v == null) return; d += (first ? "M" : "L") + X(i).toFixed(1) + "," + Y(v).toFixed(1); first = false; });
+  const bandRect = band
+    ? '<rect x="0" y="' + Y(band[2]).toFixed(1) + '" width="' + W + '" height="'
+      + Math.max(1, Y(band[0]) - Y(band[2])).toFixed(1) + '" class="band-fill"/>'
+    : "";
+  const li = values.reduce((a, v, i) => v == null ? a : i, 0);
+  return '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + " " + H
+    + '" aria-hidden="true" class="spark">' + bandRect
+    + '<path d="' + d + '" fill="none" stroke="var(--series-' + slot + ')" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>'
+    + '<circle cx="' + X(li).toFixed(1) + '" cy="' + Y(values[li]).toFixed(1) + '" r="2.5" fill="var(--series-' + slot + ')"/>'
+    + "</svg>";
+}
+
+/* A sparse axis gets an event strip, not a sparkline: 14 weekly ticks with a
+   mark where a report landed. A rate over one event per 18 days would be a
+   number made up out of nothing. */
+function eventStrip(weeks) {
+  const W = 108, H = 26, n = weeks.length, max = Math.max(1, ...weeks);
+  const bw = (W - (n - 1) * 2) / n;
+  let out = '<svg width="' + W + '" height="' + H + '" viewBox="0 0 ' + W + " " + H + '" aria-hidden="true" class="spark">';
+  out += '<line x1="0" x2="' + W + '" y1="' + (H - 1) + '" y2="' + (H - 1) + '" class="strip-tick"/>';
+  weeks.forEach((c, i) => {
+    const x = i * (bw + 2);
+    const h = c === 0 ? 1.5 : 3 + ((H - 7) * c) / max;
+    out += '<rect x="' + x.toFixed(1) + '" y="' + (H - 2 - h).toFixed(1) + '" width="' + bw.toFixed(1)
+         + '" height="' + h.toFixed(1) + '" rx="1" ' + (c === 0 ? 'class="bar-rest"' : 'fill="var(--series-3)"') + "/>";
+  });
+  return out + "</svg>";
+}
+
+function tile(o) {
+  const t = el("div", "panel kpi" + (o.lead ? " kpi--lead" : ""));
+  t.innerHTML =
+    '<div class="k-label">' + o.label + (o.fn ? '<sup class="fn" title="' + o.fn.replace(/"/g, "&quot;") + '">' + o.mark + "</sup>" : "") + "</div>" +
+    '<div class="k-value">' + o.value + "</div>" +
+    '<div class="k-caption">' + o.caption + "</div>" +
+    (o.band ? '<div class="k-band">normal for us <b>' + o.band + "</b></div>" : "") +
+    (o.where ? '<div class="k-where">' + o.where + "</div>" : "") +
+    (o.spark || "");
+  return t;
+}
+
+/* ── rework by scope: a bullet bar per area of the codebase ───────────────── */
+/* The steer that made this chart: a blended 54% says something is wrong, a
+   per-scope split says where to change how the agents work. Scopes are taken
+   from the commits, not from CONTRIBUTING.md's list — the list names ten and
+   the commits use forty-four. */
+function scopeChart(rows, blended) {
+  const card = el("div", "panel chart-card");
+  card.innerHTML = '<header class="with-link"><div><h2>Rework by scope, last 28 days</h2>'
+    + '<p class="note">Each bar is <code>fix</code> as a share of <code>feat</code>+<code>fix</code> inside that scope. '
+    + 'Scopes with fewer than 10 commits in the window are folded into one row. '
+    + 'The notch is the same scope over all 15 weeks — right of the notch is getting worse.</p>'
+    + '<div class="legend"><span><i style="background:var(--series-3)"></i>fix</span>'
+    + '<span><i style="background:var(--text-muted);opacity:.5"></i>feat</span>'
+    + '<span><i style="background:var(--text-primary);height:8px;width:2px;vertical-align:-1px"></i>all 15 weeks</span></div></div>'
+    + '<a class="to-numbers" href="#t-scope">the numbers ↓</a></header>';
+  const holder = el("div", "chart");
+  const W = 1000, rowH = 28, padT = 8, labelW = 150, nW = 92;
+  const H = padT + rows.length * rowH + 26;
+  const barL = labelW, barW = W - labelW - nW;
+  let s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="Rework share by scope, last 28 days">';
+  /* The blended figure as a reference rule, so a scope is read against the page
+     headline rather than against nothing. */
+  const bx = barL + barW * blended;
+  s += '<line x1="' + bx.toFixed(1) + '" x2="' + bx.toFixed(1) + '" y1="' + padT + '" y2="' + (padT + rows.length * rowH) + '" class="rule"/>'
+     + '<text x="' + bx.toFixed(1) + '" y="' + (H - 8) + '" class="rule-label" text-anchor="middle">page total ' + Math.round(blended * 100) + '%</text>';
+  rows.forEach((r, i) => {
+    const y = padT + i * rowH + 5, h = 14;
+    const fw = Math.max(2, barW * r.rework);
+    s += '<text x="0" y="' + (y + 11) + '" class="axis" style="font-size:12px;fill:var(--text-secondary)">' + r.scope + "</text>";
+    /* 2px surface gap between the two segments, per the mark spec. */
+    s += '<rect x="' + barL + '" y="' + y + '" width="' + fw.toFixed(1) + '" height="' + h + '" rx="4" fill="var(--series-3)"/>';
+    s += '<rect x="' + (barL + fw + 2).toFixed(1) + '" y="' + y + '" width="' + Math.max(0, barW - fw - 2).toFixed(1) + '" height="' + h + '" rx="4" class="bar-rest"/>';
+    s += '<text x="' + (barL + fw + 8).toFixed(1) + '" y="' + (y + 11) + '" class="value">' + Math.round(r.rework * 100) + "%</text>";
+    if (r.all_rework != null) {
+      const ax = barL + barW * r.all_rework;
+      s += '<line x1="' + ax.toFixed(1) + '" x2="' + ax.toFixed(1) + '" y1="' + (y - 3) + '" y2="' + (y + h + 3) + '" class="bar-ref"/>';
+    }
+    s += '<text x="' + W + '" y="' + (y + 11) + '" class="axis" text-anchor="end">n = ' + r.n + "</text>";
+  });
+  s += "</svg>";
+  holder.innerHTML = s;
+  card.appendChild(holder);
+  return card;
+}
+
+/* ── tables ───────────────────────────────────────────────────────────────── */
+function tablePanel(id, title, note, cols, rows, failed, lt) {
+  const sec = el("section");
+  sec.id = id;
+  const p = el("div", "panel");
+  p.innerHTML = '<header><h2>' + title + "</h2>" + (note ? '<p class="note">' + note + "</p>" : "") + "</header>";
+  if (failed) {
+    p.insertAdjacentHTML("beforeend", '<p class="error">' + failed + "</p>");
+  } else if (!rows.length) {
+    p.insertAdjacentHTML("beforeend", '<p class="empty">Nothing yet.</p>');
+  } else {
+    const sc = el("div", "scroller");
+    const L = new Set(lt || []);
+    sc.innerHTML = "<table><thead><tr>" + cols.map((c, i) => "<th" + (L.has(i) ? ' class="lt"' : "") + ">" + c + "</th>").join("")
+      + "</tr></thead><tbody>" + rows.map(r => "<tr>" + r.map((c, i) => "<td" + (L.has(i) ? ' class="lt"' : "") + ">" + (c == null ? "—" : c) + "</td>").join("") + "</tr>").join("")
+      + "</tbody></table>";
+    p.appendChild(sc);
+  }
+  sec.appendChild(p);
+  return sec;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   The proposed page
+   ════════════════════════════════════════════════════════════════════════════ */
+const S = D.s, B = D.bands, F = D.facts, days = D.days;
+const lastOf = (a) => { for (let i = a.length - 1; i >= 0; i--) if (a[i] != null) return a[i]; return null; };
+const PR_DATE = F.pr_date, TY_DATE = F.types_date;
+/* A type-derived series is dashed wherever its own window is missing more than
+   5% of commit types. The rule is measured coverage, not a date — which matters,
+   because the gap is not where #399 assumed it was. */
+const thinType = (i) => S.coverage[i] != null && S.coverage[i] < 0.95;
+const RULES = [{ day: PR_DATE, label: "25 Sep · PRs" }, { day: TY_DATE, label: "9 Nov · types" }];
+
+/* 15 weekly buckets for the event strip. */
+const WEEK0 = new Date("2026-08-10T00:00:00Z");
+const strip = new Array(15).fill(0);
+D.reported.forEach(r => {
+  const w = Math.floor((new Date(r.filed + "T00:00:00Z") - WEEK0) / 6048e5);
+  if (w >= 0 && w < 15) strip[w]++;
+});
+
+function renderPage(opts) {
+  const body = document.getElementById("page-body");
+  body.innerHTML = "";
+  const stale = opts.stale, failed = opts.failed;
+
+  document.getElementById("page-meta").innerHTML =
+    "How much, and how well, the project ships. First commit 13 Aug 2026, 15 active weeks. "
+    + "Every figure is a rolling 28-day window, median not mean, and is compared against this "
+    + "project's own history — there are no industry bands on this page. "
+    + (stale
+      ? '<span class="stale">Last ingested 3 days ago — these numbers are stale.</span>'
+      : "Last ingested 18 Nov 06:00 UTC.");
+
+  /* ── headline row ─────────────────────────────────────────────────────── */
+  const gap = lastOf(S.gap_med), p90 = lastOf(S.gap_p90), rel = lastOf(S.releases),
+        rw = lastOf(S.rework), cov = lastOf(S.coverage);
+  const kpis = el("div", "kpis");
+  kpis.appendChild(tile({
+    lead: true, label: "Merge → release",
+    value: fmtH(gap),
+    caption: "median wait from merge to a release a user can install",
+    band: fmtH(B.gap_med[0]) + " – " + fmtH(B.gap_med[2]),
+    where: where(gap, B.gap_med) + " · p90 " + fmtH(p90)
+      + " · <b>" + F.unreleased + "</b> merged and unreleased now, oldest " + fmtH(F.unreleased_oldest_h),
+    spark: sparkline(S.gap_med, 2, B.gap_med),
+  }));
+  kpis.appendChild(tile({
+    label: "Releases", value: fmtWk(rel) + " <span style='font-size:15px;font-weight:500;color:var(--text-muted)'>/ wk</span>",
+    caption: "release events, not package tags",
+    band: fmtWk(B.releases[0]) + " – " + fmtWk(B.releases[2]) + " / wk",
+    where: where(rel, B.releases),
+    spark: sparkline(S.releases, 2, B.releases),
+  }));
+  kpis.appendChild(tile({
+    label: "Rework", mark: "†", fn: "fix ÷ (feat + fix) on commits reaching main. A process metric, not a failure rate: fixing a defect before it ships scores worse here than shipping it quietly.",
+    value: fmtPc(rw),
+    caption: "share of feature-and-fix work that is fix",
+    band: fmtPc(B.rework[0]) + " – " + fmtPc(B.rework[2]),
+    where: where(rw, B.rework) + " · " + fmtPc(cov) + " of this window's commits carry a type",
+    spark: sparkline(S.rework, 3, B.rework),
+  }));
+  kpis.appendChild(tile({
+    label: "Escaped to a user", mark: "‡", fn: "n = 6 in 15 weeks — about one every 18 days, and five of the six arrived inside four days. Too sparse for a rate; shown as a count, a time since the last one, and the six rows in full.",
+    value: lastOf(S.reported_28d) + " <span style='font-size:15px;font-weight:500;color:var(--text-muted)'>/ 28 d</span>",
+    caption: "bug reports filed by somebody who is not the owner",
+    band: null,
+    where: "last one 10 days ago · <b>2</b> still open, oldest 66 days",
+    spark: eventStrip(strip),
+  }));
+  body.appendChild(kpis);
+  body.insertAdjacentHTML("beforeend",
+    '<p class="footnotes">'
+    + "<span>† <b>Rework</b> is <code>fix</code> ÷ (<code>feat</code>+<code>fix</code>) — a process metric, not a failure rate. "
+    + "A project that fixes its own defects promptly scores worse than one that ships them quietly.</span>"
+    + "<span>‡ <b>Escaped to a user</b> rests on six reports in fifteen weeks, beside axes with hundreds. "
+    + "<b>" + F.external_unclassified + "</b> externally-filed issues are not yet classified — until they are, a falling count may be a falling labelling rate.</span>"
+    + "<span>Pull requests began " + String(+PR_DATE.slice(8)) + " Sep and commit types were enforced " + String(+TY_DATE.slice(8))
+    + " Nov; both are ruled on every axis. A series is dashed where its own input is incomplete.</span>"
+    + "</p>");
+
+  /* ── both loops ───────────────────────────────────────────────────────── */
+  body.insertAdjacentHTML("beforeend",
+    '<div class="group-head">Both loops<span>blue is the merge loop, orange the release loop, green quality — on every chart below</span></div>');
+
+  body.appendChild(timeChart({
+    id: "c-loops", title: "Merges and releases per week", link: "t-weeks",
+    note: "Both loops on one axis, because both are events per week. Work merges exclude release-please's 82 pull requests; releases count release events, not the 127 package tags.",
+    days: days, rules: RULES, fmt: fmtWk,
+    series: [
+      { name: "work merges / wk", slot: 1, values: S.merges, dashUntil: PR_DATE },
+      { name: "release events / wk", slot: 2, values: S.releases },
+    ],
+  }));
+
+  body.appendChild(timeChart({
+    id: "c-gap", title: "Merge → release, 28-day median", link: "t-weeks", tall: true,
+    note: "How long merged work waits before a user can install it. The shaded band is the middle half of this project's own history — the place an industry performance band would have gone.",
+    days: days, rules: RULES, fmt: fmtH, tick: (v) => v + " h", band: B.gap_med,
+    series: [{ name: "median hours", slot: 2, values: S.gap_med, dashUntil: PR_DATE }],
+    extra: (i) => "p90 " + fmtH(S.gap_p90[i]),
+  }));
+
+  body.appendChild(timeChart({
+    id: "c-lead", title: "First commit on the branch → merge, 28-day median", link: "t-weeks",
+    note: "Not pull-request lifetime: the median pull request here is open 40 minutes, because the work is finished before it opens. Measured from the first commit on the branch.",
+    days: days, rules: RULES, fmt: fmtH, tick: (v) => v + " h", band: B.lead_med,
+    series: [{ name: "median hours", slot: 1, values: S.lead_med, dashUntil: PR_DATE }],
+  }));
+
+  /* ── rework ───────────────────────────────────────────────────────────── */
+  body.insertAdjacentHTML("beforeend",
+    '<div class="group-head">Rework<span>the one number on this page with a decision attached to it</span></div>');
+
+  body.appendChild(timeChart({
+    id: "c-rework", title: "Rework share, 28-day rolling", link: "t-weeks", tall: true,
+    note: "fix as a share of feat+fix. The grey wash falling from the top is the share of commits in each window carrying no type at all — where it is thick, the denominator is incomplete and the line is dashed.",
+    days: days, rules: RULES, fmt: fmtPc, tick: (v) => Math.round(v * 100) + "%",
+    ticks: [0, 0.25, 0.5, 0.75, 1], band: B.rework, noArea: true,
+    topArea: S.coverage.map(c => c == null ? null : 1 - c),
+    series: [{ name: "fix share", slot: 3, values: S.rework, dashWhen: thinType }],
+    extra: (i) => "types on " + fmtPc(S.coverage[i]) + " of " + S.nm_count[i] + " commits",
+  }));
+
+  body.appendChild(scopeChart(D.scopes, D.scope_total[1] / (D.scope_total[0] + D.scope_total[1])));
+
+  /* ── escaped ──────────────────────────────────────────────────────────── */
+  body.insertAdjacentHTML("beforeend",
+    '<div class="group-head">Escaped<span>two axes, never averaged: what a user reported, and what the commits imply</span></div>');
+
+  body.appendChild(timeChart({
+    id: "c-rep", title: "Bug reports from somebody who is not the owner — cumulative", link: "t-rep",
+    note: "n = 6 in 15 weeks. A cumulative count, deliberately: a 28-day window holds about one event, and a rate over one event is a number made up out of nothing. Five of the six arrived in four days in September; the axis starts on 10 September, the first complete 28-day window, with three already filed.",
+    days: days, rules: RULES, fmt: fmtN, step: true,
+    series: [{ name: "reports filed, running total", slot: 3, values: S.reported_cum }],
+  }));
+
+  body.appendChild(timeChart({
+    id: "c-cfr", title: "Fixes to already-released code, per release event", link: "t-weeks",
+    note: "#403's change failure rate on the derived axis: " + F.derived_total + " of " + F.fixes + " fix commits touch a file that was already in a release, over 81 release events. It is a count per release, not a percentage — it has been above 1 since the first week, so it is never labelled a rate.",
+    days: days, rules: RULES, fmt: fmtR, band: B.cfr,
+    series: [{ name: "fixes per release event", slot: 2, values: S.cfr, dashWhen: thinType }],
+    extra: (i) => S.derived[i] + " fixes in window",
+  }));
+
+  /* ── the numbers ──────────────────────────────────────────────────────── */
+  body.insertAdjacentHTML("beforeend",
+    '<div class="group-head">The numbers<span>every plotted value is also a row here — which is what makes the low-contrast series legal</span></div>');
+
+  body.appendChild(tablePanel("t-weeks", "By week", "Merges and releases are counts; the gap is the median over commits merged that week.",
+    ["week", "merges", "releases", "gap median", "commits", "feat", "fix", "untyped", "rework"],
+    D.weeks.map(w => [w.week, w.merges, w.releases, w.gap_med == null ? null : fmtH(w.gap_med),
+      w.commits, w.feat, w.fix, w.untyped, w.rework == null ? null : fmtPc(w.rework)]),
+    failed ? "error: relation \"dora_release_events\" does not exist" : null));
+
+  body.appendChild(tablePanel("t-scope", "Rework by scope", "Last 28 days beside all 15 weeks. Scope is taken from the commit header, not from CONTRIBUTING.md's list — the list names ten scopes and the commits use forty-four.",
+    ["scope", "feat 28d", "fix 28d", "n 28d", "rework 28d", "n all", "rework all"],
+    D.scopes.map(r => [r.scope, r.feat, r.fix, r.n, fmtPc(r.rework), r.all_n, r.all_rework == null ? null : fmtPc(r.all_rework)])));
+
+  body.appendChild(tablePanel("t-rep", "Bug reports from outside", "All six, in full, because six rows is the honest form for six data points. Time to fix is measured only on this axis: no fix commit names a version, so the duration is not computable for the other 405.",
+    ["issue", "title", "filed", "closed", "hours to close", "still open"],
+    D.reported.map(r => ["#" + r.num, r.title, r.filed, r.closed, r.hours == null ? null : r.hours.toFixed(1) + " h",
+      r.open_days == null ? null : r.open_days + " days"]), null, [1]));
+
+  body.appendChild(tablePanel("t-rel", "Release events", "Most recent 14 of 81. One event, one or more package tags.",
+    ["published", "packages", "tags"],
+    D.releases_recent.map(e => [e.when.slice(0, 16).replace("T", " "), e.pkgs.length, e.pkgs.join(", ")])));
+
+  body.appendChild(tablePanel("t-ingest", "Ingest", "One marker row per run, as #404 settled. The page goes loud when the newest row is older than two scheduled runs.",
+    ["ran at", "window", "rows written", "result"],
+    stale ? [["2026-11-15 06:00 UTC", "incremental", "1,204", "ok"]]
+          : [["2026-11-18 06:00 UTC", "incremental", "612", "ok"],
+             ["2026-11-17 06:00 UTC", "incremental", "588", "ok"],
+             ["2026-11-16 06:00 UTC", "incremental", "143", "ok"],
+             ["2026-08-13 → 2026-11-15", "backfill", "3,391", "ok"]]));
+
+  body.appendChild(tablePanel("t-empty", "Unresolved reports older than 30 days", "Empty is the good state, and it still renders as a panel rather than disappearing.",
+    ["issue", "filed", "days open"], [["#104", "2026-09-13", "66"]]));
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   The specification. This is the half of the artifact an engineer builds from.
+   ════════════════════════════════════════════════════════════════════════════ */
+function renderSpec() {
+  document.getElementById("view-spec").innerHTML = `
+<h1>Firetower shipping — the page, specified</h1>
+<p class="lede">A second page on the private dashboard at <code>/shipping</code>, answering
+<em>how much, and how well, does the firetower project ship, and is that getting better or worse?</em>
+Every figure in the prototype is measured from <code>origin/main</code> and the GitHub REST API on 18 November 2026.
+It extends <code>app/globals.css</code>, <code>components/TrendChart.tsx</code> and <code>components/Kpis.tsx</code>
+rather than replacing them.</p>
+
+<div class="hr"></div>
+<h2>1 · The headline is the merge-to-release gap</h2>
+<p>#402 argued the gap should be the headline because it is fully controlled, fully measurable, unsaturated and not
+gameable in a harmful direction. <b>The real data confirms it, and the saturation claim is the one that was worth
+checking.</b> Measured per work merge, the 28-day rolling median gap moves between <b>0.26 h and 73.0 h</b> across the
+history — a 280-fold range. It is sitting at <b>2.0 h</b> now, inside its own middle half (0.5–3.0 h), having been at
+<b>73 h</b> three weeks ago when releases nearly stopped. Nothing else on the page carries that much information per pixel.</p>
+<p>What the alternatives looked like when tested against the same history:</p>
+<table><thead><tr><th>candidate</th><th>now, 28 d</th><th>normal for us</th><th>why it is not the headline</th></tr></thead><tbody>
+<tr><td>Merge → release gap</td><td>2.0 h</td><td>0.5 – 3.0 h</td><td><b>It is.</b> 280× range, in the owner's control, gaming it means releasing more often.</td></tr>
+<tr><td>Releases per week</td><td>3.3</td><td>2.3 – 10.5</td><td>Earns a tile. Gameable the wrong way: cutting fewer, bigger releases improves nothing and moves this number down, which reads as worse — the right direction, but it says nothing about whether work is waiting.</td></tr>
+<tr><td>Work merges per week</td><td>14.0</td><td>6.0 – 11.8</td><td>Above normal, and the most gameable number available — splitting work raises it. Leads the merge-loop chart instead of taking a tile.</td></tr>
+<tr><td>First commit → merge</td><td>3.8 h</td><td>0.4 – 0.9 h</td><td>4× above its own band, which is a real signal, but it measures the branch, not whether anything shipped. Gets a chart.</td></tr>
+<tr><td>Rework share</td><td>63%</td><td>44 – 55%</td><td>Earns a tile <em>and</em> the most page area, because it is the one number with a decision attached. Not the headline: it is gameable in the harmful direction, and its current denominator is 17% incomplete.</td></tr>
+<tr><td>Fixes per release event</td><td>13.1</td><td>1.8 – 6.1</td><td>#403's change failure rate on the derived axis. A ratio that has never been below 1, so it cannot wear the word "rate" — gets a chart with an honest title.</td></tr>
+<tr><td>Escaped — reported</td><td>1 / 28 d</td><td>—</td><td>Six events in fifteen weeks. Earns a tile because it is the only true user-impact signal, but in a different idiom. See decision 6.</td></tr>
+</tbody></table>
+<p><b>Four tiles, telemetry's grid untouched at <code>repeat(4, 1fr)</code>.</b> Merge → release · Releases · Rework ·
+Escaped to a user. The headline is marked by position and by one new rule — <code>.kpi--lead .k-value { font-size: 34px }</code>
+— not by spanning two columns, which would have broken the grid the telemetry page establishes.
+Note what the row is <em>not</em>: four green throughput tiles. Three of the four currently read worse than normal.</p>
+
+<div class="hr"></div>
+<h2>2 · The loops share the page by colour and by axis, not by column</h2>
+<p>Side-by-side columns were tried and discarded: they make two dashboards with a rule down the middle, and the
+page's own headline belongs to neither loop. What is on the page instead:</p>
+<ul>
+<li><b>The seam is first.</b> Merge → release is the headline, so the first thing read is the join between the loops rather than either loop.</li>
+<li><b>One chart puts both loops on one axis.</b> Work merges per week and release events per week are the same unit, so they are two series on one scale — 14.0 against 3.3, where the smaller series is still readable. This is the chart that makes the page one dashboard. <em>No second y-axis anywhere on this page.</em></li>
+<li><b>Colour is the loop, everywhere.</b> <span style="color:var(--text-primary)">series-1 blue = the merge loop</span> · series-2 orange = the release loop · series-3 green = quality. Fixed, never cycled, stated in the first group heading.</li>
+<li><b>Three group headings</b> — Both loops · Rework · Escaped · The numbers — in the existing <code>.k-label</code> type with a hairline under it. Sections, not columns.</li>
+</ul>
+
+<div class="hr"></div>
+<h2>3 · Better or worse: the project's own 28-day baseline</h2>
+<p>No industry bands, per #402: DORA retired elite/high/medium/low in 2025, and the band would be set by a
+definition this map took a position on only afterwards — the same fifteen weeks reads <em>High</em> at 81 release
+events and <em>Elite</em> at 127 package tags. What is drawn instead, on every tile and every chart:</p>
+<ul>
+<li><b>A 28-day trailing window, median not mean</b>, recomputed daily. Every tile value is a window statistic, not a point sample.</li>
+<li><b>A daily rolling sparkline</b> on each tile, 70 points, with the shaded band behind it.</li>
+<li><b>The IQR of the whole rolling history</b>, shaded in neutral ink, in the visual role a performance band would have taken, plus the same two numbers as text: <em>normal for us 0.5 – 3.0 h</em>. Neutral ink because it is a reference, not a series.</li>
+<li><b>A position line, never a colour.</b> <em>↑ above normal</em> / <em>↓ below normal</em> / <em>· within normal</em>. For half these series "above" is neither good nor bad — merges per week above normal is just more merges — so the page says where you are against your own history and never says <em>good</em>. The only coloured judgement on the page is <code>--danger</code> on a stale ingest.</li>
+</ul>
+<p><b>The band is the IQR of the rolling statistic, not of the raw events.</b> The tile shows a 28-day median, so its
+comparator has to be the distribution of 28-day medians; the IQR of 355 individual gaps would be a different and
+much wider thing wearing the same label.</p>
+
+<div class="hr"></div>
+<h2>4 · The honesty treatment is a footnote, because the reader wrote the footnote</h2>
+<p>The audience is one person who decided every caveat on this page himself, so the treatment is sized for
+information density, not for self-explanation. Three devices, no banners, no tiles spent on explanation:</p>
+<ul>
+<li><b>A superscript on the tile label</b> — <code>†</code> and <code>‡</code> — with the full sentence on the native <code>title</code>, and one 11.5px <code>.footnotes</code> line under the whole row carrying both in full. Always on screen, three lines, quiet.</li>
+<li><b>The label itself does the heavy lifting.</b> The tile is called <em>Rework</em>, never <em>failure rate</em>; the derived-escape chart is called <em>Fixes to already-released code, per release event</em>, never <em>change failure rate</em>. A label survives a screenshot; a tooltip does not.</li>
+<li><b>Caveats that are really measurements get plotted.</b> The incomplete type denominator is a grey wash on the rework chart, not a sentence. See decision 5.</li>
+</ul>
+<p>The three numbers that needed it: rework (<em>a process metric, not a failure rate</em>); the six-point reported
+axis (<em>n = 6 in 15 weeks</em>, beside the unclassified count, which is what polices the labelling habit); and the
+two discontinuities.</p>
+
+<div class="hr"></div>
+<h2>5 · The discontinuities: two dated rules, and a dashed line wherever the input is thin</h2>
+<p>#406 offered three options — start every series after 9 Nov, mark the dates, or state that earlier history is
+not comparable. <b>Starting after 9 Nov would have been a mistake, and the real data is what shows why.</b></p>
+<blockquote>#399 records 115 untyped commits as "8.8%, all before 2026-11-09", which reads as a slow adoption curve
+closed by enforcement. The commits say otherwise: <b>99 of the 115 fall in the two weeks from 26 October to 9
+November</b>, written as prose subjects — <em>"Profiles: start a workspace as one"</em>, <em>"New page: a page you type
+into, not a sheet"</em>. Before 26 October the untyped share runs at <b>2–4%</b>. Types were trustworthy for ten weeks,
+then there is a two-week hole, then enforcement.</blockquote>
+<p>So truncating at 9 November would throw away 93% of a usable history to avoid a hole that is two weeks wide and
+in the wrong place. Worse, it would leave the rework headline at the nine-day figure of <b>77%</b>, which is itself
+an artifact of one exceptional fix burst. What the page does instead:</p>
+<ul>
+<li><b>Two thin dated rules</b> on every time axis — <em>25 Sep · PRs</em> and <em>9 Nov · types</em> — hairline, dashed, neutral, with the date in 10px on the plot. A correctness mark, not a callout.</li>
+<li><b>A dashed line segment wherever a series' own input is incomplete</b>, which is a measured condition rather than a date: PR-derived series (merges, lead time, the gap) are dashed before 25 September, because 155 of 369 trunk commits — 42% — came through no pull request and a PR-based count reads near zero there. Type-derived series (rework, fixes per release) are dashed wherever the window's type coverage is below 95%.</li>
+<li><b>The missing input is plotted.</b> On the rework chart a grey wash falls from the top edge: the share of commits in each window with no type. It is thick from 30 October, and it is <b>17% today</b> — the 63% rework figure is computed over a window where 99 of 594 commits have no type, and that wash is the only honest way to say so without a paragraph. It clears on 7 December, when the burst leaves the 28-day window.</li>
+<li><b>One line in the footnotes</b> naming both dates and the dashing rule. That is the whole of the prose.</li>
+</ul>
+<p>The release loop is the only thing on the page neither discontinuity touches — release events are cut by
+release-please regardless of how a commit was worded or whether it came through a pull request. Its series is solid
+throughout, which is itself informative.</p>
+
+<div class="hr"></div>
+<h2>6 · A sparse signal gets a count, a time since, and a cumulative line</h2>
+<p>#403 left the treatment open; #399 ruled out a rate. The interval data rules out more than that: the six reports
+did not arrive one every 18 days. <b>Five of the six landed inside four days</b> (10–13 September, when the product
+first had users), then nothing for <b>56 days</b>, then one on 8 November. The mean interval is a number describing a
+distribution that does not exist.</p>
+<ul>
+<li><b>The tile shows a count over a named window</b> — <em>1 / 28 d</em> — never a rate, and never a denominator of release events.</li>
+<li><b>Instead of a sparkline, an event strip</b>: fifteen weekly ticks with a dot per report, stacked where a week holds several. The September cluster and the 56-day silence are both visible in 108×26 pixels. A sparkline through six events would have drawn a trend that is not there.</li>
+<li><b>Time since the last one</b> on the tile, which is the figure that moves every day without a new event, and <b>"2 still open, oldest 66 days"</b> beside it — #403's survivorship fix, permanent, not conditional. A closed-only median reads a healthy 14 h over a third of the sample.</li>
+<li><b>A cumulative step line</b> in its own panel, and <b>all six rows in a table</b>. At n = 6 the table is the primary form and the chart is the summary, which is the reverse of every other panel on this page.</li>
+<li><b>"19 externally-filed issues not yet classified"</b> sits in the footnote under the same tile. It is what stops a falling count reading as improvement when it is really a lapsed labelling habit. All six of the bug reports are still unlabelled today, so the figure starts at its worst.</li>
+</ul>
+
+<div class="hr"></div>
+<h2>Rework is the instrument, and the breakdown is what makes it actionable</h2>
+<p>A rising rework rate is the one number here with a decision attached: it changes how the agents are configured.
+A blended 63% says something is wrong without saying what to change, so the page breaks it down by
+<b>conventional-commit scope</b> — the work, not the author. <b>The scopes are strongly non-uniform, so the breakdown
+earns its place:</b></p>
+<table><thead><tr><th>scope</th><th>28 d</th><th>n</th><th>all 15 weeks</th><th>n</th></tr></thead><tbody>
+<tr><td>server</td><td><b>76%</b></td><td>50</td><td>77%</td><td>61</td></tr>
+<tr><td>mobile</td><td><b>72%</b></td><td>67</td><td>66%</td><td>92</td></tr>
+<tr><td>desktop</td><td>57%</td><td>108</td><td>55%</td><td>163</td></tr>
+<tr><td>artifacts</td><td>44%</td><td>18</td><td>44%</td><td>18</td></tr>
+<tr><td>(no scope)</td><td>36%</td><td>22</td><td>42%</td><td>212</td></tr>
+<tr><td colspan="5" style="color:var(--text-muted)">Over all history, at n ≥ 25: web 41% → island 85%. A 44-point spread.</td></tr>
+</tbody></table>
+<p>Two things the engineer needs to know about this chart:</p>
+<ul>
+<li><b>The scope vocabulary is not CONTRIBUTING.md's.</b> The document enumerates ten — <code>server</code>,
+<code>worker</code>, <code>desktop</code>, <code>mobile</code>, <code>web</code>, <code>design</code>,
+<code>access</code>, <code>artifacts</code>, <code>skills</code>, <code>api</code> — and the commits use
+<b>forty-four</b>, including <code>island</code> (n=27), <code>schedules</code> (n=12) and <code>profiles</code>,
+while <code>design</code> has one commit and <code>api</code> two. The chart must be driven by the data with a
+minimum-n floor and an "other" row, never by a hard-coded list, or it will show two empty bars and hide the signal.</li>
+<li><b>"No scope" is the largest bucket over all history</b> — 212 of 755 — so it is a visible row, not a silent
+exclusion. It also happens to be the lowest-rework row, which is a sampling artifact worth not over-reading.</li>
+<li><b>The notch is the same scope over all fifteen weeks</b>, so the bar says where rework is and the notch says
+whether it is getting worse. A bullet mark rather than a second series: one bar, one reference, no legend ambiguity.</li>
+</ul>
+
+<div class="hr"></div>
+<h2>How the page is reached</h2>
+<p>The app is one page with no navigation and no login. The whole of the answer is <b>two text links in
+<code>app/layout.tsx</code></b>, above the <code>h1</code>, rendered by a new <code>&lt;nav class="app-nav"&gt;</code>:
+<em>Telemetry</em> · <em>Shipping</em>. No state, no client component, no JS, no icons, no active colour — the current
+page is marked by weight plus an inset underline, so it survives greyscale and forced colours. It costs the
+telemetry page one element and nothing else, and it is reached through the same
+<code>gcloud run services proxy</code> and the same <code>roles/run.invoker</code> principals; nothing about the
+access model changes.</p>
+<p>Rejected: a link in the telemetry page's footer only (asymmetric, undiscoverable), and a tab bar with an active
+background (a control that implies more pages than exist).</p>
+
+<div class="hr"></div>
+<h2>The tables stay, and one thing is added</h2>
+<p><code>globals.css</code> permits the low-contrast third series only <em>"because every plotted value is also a
+direct label on the chart and a row in the table below it"</em>. This page inherits that obligation and keeps
+telemetry's order exactly — tiles, then charts, then a stack of table panels. <b>Every series on this page resolves
+to a row in <em>By week</em>, <em>Rework by scope</em>, <em>Bug reports from outside</em> or <em>Release events</em>.</b></p>
+<p>One addition: each chart header carries <b>"the numbers ↓"</b>, an in-page anchor to the table that holds its
+values. The promise was already true and was not usable on a page this long.</p>
+
+<div class="hr"></div>
+<h2>Component decomposition</h2>
+<table><thead><tr><th>component</th><th>status</th><th>what changes</th></tr></thead><tbody>
+<tr><td><code>app/layout.tsx</code></td><td>modify</td><td>Add <code>&lt;nav class="app-nav"&gt;</code> with two links. Keep <code>metadata.title</code> per route.</td></tr>
+<tr><td><code>app/shipping/page.tsx</code></td><td>new</td><td>Server component, <code>export const dynamic = "force-dynamic"</code>, the same per-panel try/catch <code>panel()</code> helper as <code>app/page.tsx</code>. No API layer, no client state above the charts.</td></tr>
+<tr><td><code>components/TrendChart.tsx</code></td><td>modify</td><td>Four additive props, all optional, single-series path byte-identical in behaviour: <code>series?: {name, slot, values, dashUntil?, dashWhen?}[]</code> (one or two, never three on one axis), <code>band?: [p25, p50, p75]</code>, <code>rules?: {day, label}[]</code>, <code>topArea?: number[]</code>, <code>fmt?</code>, <code>ticks?</code>, <code>link?</code>, <code>extra?</code>. Legend appears at two series.</td></tr>
+<tr><td><code>components/Kpis.tsx</code></td><td>modify</td><td><code>Sparkline</code> grows an optional <code>band</code> rect and an end dot. <code>Tile</code> grows <code>lead</code>, <code>footnote</code>, <code>band</code>, <code>where</code> and an optional <code>chart</code> slot so a tile can carry an event strip instead of a sparkline. The telemetry page passes none of them and renders unchanged.</td></tr>
+<tr><td><code>components/ScopeBars.tsx</code></td><td>new</td><td>The only genuinely new component. Horizontal proportion bars with an all-history notch, a page-total reference rule, an n label per row, and an n-floor with an "other (k scopes)" row. Server component; no hover state needed because every value is directly labelled.</td></tr>
+<tr><td><code>components/EventStrip.tsx</code></td><td>new</td><td>14–15 weekly ticks, a stacked dot per event. Tiny, and it exists so a six-point axis can sit in a tile without being drawn as a trend.</td></tr>
+<tr><td><code>Table</code> (in <code>app/page.tsx</code>)</td><td>reuse, lift</td><td>Lift the existing <code>Table</code> and <code>cell</code> to <code>components/Table.tsx</code> unchanged, and wrap it in <code>.scroller</code>. Both pages import it.</td></tr>
+<tr><td><code>lib/queries.ts</code></td><td>modify</td><td>A DORA section beside the telemetry section. Same rule: literal SQL, no interpolation, no user input.</td></tr>
+<tr><td><code>lib/series.ts</code></td><td>modify</td><td>A <code>Window</code> row type and a <code>num</code>-based mapper for it, for the same reason the file exists: Postgres returns <code>bigint</code> and <code>numeric</code> as strings.</td></tr>
+<tr><td><code>queries.sql</code></td><td>modify</td><td>The README promises this file holds the same queries the page runs. A second page either keeps that promise or breaks it.</td></tr>
+</tbody></table>
+
+<div class="hr"></div>
+<h2>Interaction specification</h2>
+<table><thead><tr><th>interaction</th><th>from</th><th>action</th><th>result</th></tr></thead><tbody>
+<tr><td>Chart hover</td><td>No crosshair</td><td>Pointer anywhere in the plot</td><td>Crosshair at the nearest day; a marker on each series; tooltip above the leading series' point with the date, one row per series with its 2px key, and for three charts an extra line — p90 on the gap chart, type coverage and window size on the rework chart, the raw fix count on the fixes-per-release chart. The hit area is the whole plot, so the target is a date, not a 2px line. Verbatim from <code>TrendChart.tsx</code>.</td></tr>
+<tr><td>Chart keyboard</td><td>Not focused</td><td><kbd>Tab</kbd></td><td>Focus ring on the plot rect, tooltip opens on the last day, <code>role="status"</code> announces it. <b>New:</b> <kbd>←</kbd>/<kbd>→</kbd> step one day and re-announce. <kbd>Tab</kbd> again closes it and moves on.</td></tr>
+<tr><td>"the numbers ↓"</td><td>Chart header</td><td>Click or <kbd>Enter</kbd></td><td>Jumps to the table panel holding that chart's values. A plain in-page anchor — no scroll animation, nothing to break under <code>prefers-reduced-motion</code>.</td></tr>
+<tr><td>Footnote marker</td><td>Tile label</td><td>Hover or focus</td><td>Native <code>title</code> with the full sentence. The same sentence is already on screen in the footnote line, so nothing is reachable only by hovering.</td></tr>
+<tr><td>Scope bar hover</td><td>—</td><td>None</td><td>Deliberately inert. Every bar carries its share and its n as text; a tooltip would add nothing and would make a server component a client one.</td></tr>
+<tr><td>Dashed segment</td><td>—</td><td>Hover</td><td>No special affordance. The dashing is explained once in the footnote line and once in the rework chart's note; a per-segment tooltip would be the explanation nobody opens.</td></tr>
+</tbody></table>
+<p>There are no filters, no date-range control and no dimension picker. The window is fixed at 28 days by #402 and
+the page has one reader; a control whose only setting is its default is a thing to maintain.</p>
+
+<div class="hr"></div>
+<h2>Responsive behaviour</h2>
+<table><thead><tr><th>width</th><th>behaviour</th></tr></thead><tbody>
+<tr><td><b>≥ 1080</b></td><td><code>main</code> at <code>max-width: 1080px</code>, centred — unchanged. Four tiles across.</td></tr>
+<tr><td><b>760 – 1080</b></td><td>Fluid. Charts hold their aspect through the <code>viewBox</code>; the 1000-unit coordinate space means label collisions cannot appear at a narrower render.</td></tr>
+<tr><td><b>≤ 760</b></td><td>Telemetry's existing rule: tiles go to two columns. The headline tile stays first and keeps its 34px value. Scope bar labels keep their 150-unit column, so no truncation.</td></tr>
+<tr><td><b>≤ 440</b> <span class="verdict">new</span></td><td>Tiles go to one column. Two 27px numbers side by side at 380px is legible but the captions wrap to three lines each, which is worse than scrolling. Tables scroll horizontally inside <code>.scroller</code> (<code>min-width: 560px</code>) rather than wrapping a figure onto two lines.</td></tr>
+</tbody></table>
+<p><b>One thing the existing page gets wrong and this one fixes.</b> Every chart is a 1000-unit
+<code>viewBox</code> scaled to the panel width, so at 390px its 11px axis text renders at about 4px — unreadable,
+on the telemetry page as much as on this one. The coordinate space is kept, because changing it means measuring the
+element, and the SVG type is re-sized in user space at the two breakpoints so it lands back at roughly 11px on
+glass. Two CSS rules, no JS, and they improve the telemetry page unchanged.</p>
+<p>The frame an artifact renders in starts at about 380px, which is why this is specified rather than assumed.
+Use the width presets in the bar above to see each breakpoint, or append <code>#w=420</code> to the URL.</p>
+
+<div class="hr"></div>
+<h2>States</h2>
+<table><thead><tr><th>state</th><th>treatment</th></tr></thead><tbody>
+<tr><td><b>Loading</b></td><td>None, and that is the existing decision: server components with <code>force-dynamic</code>, so the response is the rendered page. No skeletons, no spinners, nothing to design.</td></tr>
+<tr><td><b>One query fails</b></td><td>The existing per-panel <code>try/catch</code>. The panel renders its <code>.error</code> with the database message in monospace and the rest of the page is unaffected — <em>"a dashboard that renders five of six panels is more useful than a stack trace"</em>. Toggle <em>query fails</em> in the bar to see it on <em>By week</em>.</td></tr>
+<tr><td><b>A series has no data in a window</b></td><td>The line breaks rather than joining across the hole, the tooltip omits that series, and the tile reads <code>—</code>. Never a zero: zero releases and no data are different facts.</td></tr>
+<tr><td><b>The 28-day window is not full</b></td><td>Series start at 10 September, the first day with a complete window. The 28 days before it are in the tables, not on the charts, because a partial-window median next to full-window ones is a different statistic wearing the same label.</td></tr>
+<tr><td><b>Empty panel</b></td><td>The existing <code>.empty</code> — <em>"Nothing yet."</em> A panel with nothing in it still renders, so its absence can never be mistaken for zero.</td></tr>
+<tr><td><b>Stale ingest</b></td><td>#404 settled the behaviour and this is the shape: the <code>.meta</code> line goes <code>--danger</code> and names the age when the newest marker row is older than two scheduled runs. The only colour judgement on the page. Toggle <em>stale ingest</em> in the bar.</td></tr>
+<tr><td><b>Dark mode</b></td><td>The existing dark column, selected steps rather than flipped values, re-validated against <code>#222221</code>: all six checks pass. Toggle <em>dark</em> in the bar.</td></tr>
+</tbody></table>
+
+<div class="hr"></div>
+<h2>Design system references</h2>
+<h3>Reused unchanged</h3>
+<p><code>--surface-1</code> <code>--surface-2</code> <code>--line</code> <code>--grid</code>
+<code>--text-primary</code> <code>--text-secondary</code> <code>--text-muted</code>
+<code>--series-1..3</code> <code>--danger</code> · <code>.panel</code> <code>.panel &gt; header</code>
+<code>.note</code> <code>.kpis</code> <code>.kpi</code> <code>.k-label</code> <code>.k-value</code>
+<code>.k-caption</code> <code>.spark</code> <code>.chart-card</code> <code>.chart</code> <code>.grid</code>
+<code>.axis</code> <code>.value</code> <code>.marker</code> <code>.crosshair</code> <code>.tip</code>
+<code>.t-day</code> <code>.t-row</code> <code>.t-key</code> <code>.t-val</code> <code>.t-name</code>
+<code>table</code> <code>th</code> <code>td</code> <code>.empty</code> <code>.error</code>, the 1000×210 / 1000×110
+<code>viewBox</code>, <code>ticksFor</code>, the first/last/peak label rule, the 2px surface ring on markers, and
+<code>font-variant-numeric: tabular-nums</code> on the body.</p>
+<h3>New, and why each one exists</h3>
+<table><thead><tr><th>token</th><th>why</th></tr></thead><tbody>
+<tr><td><code>.app-nav</code>, <code>.app-nav a[aria-current]</code></td><td>There are two pages now. Nothing existed.</td></tr>
+<tr><td><code>.kpi--lead</code></td><td>The page has a headline; the grid should not have to change to show which tile it is.</td></tr>
+<tr><td><code>.k-band</code>, <code>.k-where</code></td><td>#402's comparator, as text beside the band that draws it.</td></tr>
+<tr><td><code>sup.fn</code>, <code>.footnotes</code></td><td>The honesty treatment, sized for one reader who wrote it.</td></tr>
+<tr><td><code>.group-head</code></td><td>Four sections on one page. Uses the existing <code>.k-label</code> type, so it is a new arrangement rather than a new style.</td></tr>
+<tr><td><code>.legend</code></td><td>Two series on one axis needs one. The 12×2px key matches <code>.t-key</code>.</td></tr>
+<tr><td><code>.to-numbers</code></td><td>Makes the table promise usable on a long page.</td></tr>
+<tr><td><code>.scroller</code></td><td>A nine-column table at 380px.</td></tr>
+<tr><td><code>.stale</code></td><td>#404's "goes loud".</td></tr>
+<tr><td><code>.band-fill</code>, <code>.band-edge</code>, <code>.cov-fill</code>, <code>.bar-rest</code>, <code>.bar-ref</code>, <code>.rule</code>, <code>.rule-label</code>, <code>.strip-tick</code></td><td>The new marks. All of them are neutral ink — grey, dashed or hairline — because none of them is data about shipping: they are references, missing-input shading and dated rules. No new hue is introduced anywhere on the page.</td></tr>
+<tr><td><code>.focusable:focus-visible</code></td><td>The existing chart rect is focusable and had no visible ring.</td></tr>
+<tr><td><code>@media (max-width: 440px)</code></td><td>The one new breakpoint.</td></tr>
+</tbody></table>
+<h3>Palette, re-validated rather than assumed</h3>
+<p><code>#2a78d6, #eb6834, #1baf7a</code> on <code>#f4f4f2</code> and <code>#3987e5, #d95926, #199e70</code> on
+<code>#222221</code>, through the dataviz validator: lightness band, chroma floor, CVD separation (worst adjacent
+ΔE 9.2 light / 9.4 dark, floor 8), normal-vision floor (27.6 / 26.5) and contrast all pass, with the documented
+contrast WARN on slots 2 and 3 in light mode. <b>That WARN is the obligation this page inherits</b>, and it is
+discharged the same way the telemetry page discharges it: a direct end label on every series and a table row for
+every plotted value. Two series on one axis is the maximum anywhere on the page, and that pair is blue + orange —
+not the worst-separated pair, which is orange + green.</p>
+
+<div class="hr"></div>
+<h2>Where the arithmetic goes</h2>
+<p>#399 lists this as unspecified. What this prototype needs, as a recommendation rather than a decision:</p>
+<ul>
+<li><b>Raw rows from the ingest</b> — commits with author date, type, scope and a release ordinal; release events; pull requests with their first-commit date; issues with a classification flag. One row per thing that happened, as the telemetry side keeps one row per install per day.</li>
+<li><b>One SQL view per rolling series</b>, because a 28-day median over a daily series is a window function and not something to do in TypeScript over a thousand rows. <code>lib/queries.ts</code> then stays what it is: the questions, in literal SQL, pasteable into psql.</li>
+<li><b>The IQR bands come from the same view</b>, over the whole rolling history. They move, slowly, and should not be constants in the page.</li>
+<li><b>The one thing the page should compute</b> is the position line (above / below / within), because it is presentation.</li>
+<li>Use <code>author.date</code>, not <code>committer.date</code> — they differ on 11.1% of commits — and derive the release ordinal by comparing first-parent positions, not by walking ancestry.</li>
+</ul>
+
+<div class="hr"></div>
+<h2>What the real numbers correct in #399 and #403</h2>
+<table><thead><tr><th>where</th><th>it says</th><th>the data says</th></tr></thead><tbody>
+<tr><td>#399 Notes, #403</td><td>115 untyped commits, 8.8%, "all before 2026-11-09" — read as an adoption curve</td><td><b>99 of the 115 are a two-week burst</b>, 26 Oct – 9 Nov, written as prose subjects. Before 26 Oct the untyped share is 2–4%. This is the single most consequential correction, because it is what decides decision 5 — and it means <b>17% of the current 28-day window has no type</b>, so today's rework figure has an incomplete denominator.</td></tr>
+<tr><td>#399 Notes</td><td>"129 package releases across ~81–85 release events", 57 single / 12 two / 16 three</td><td><b>127</b> versioned package releases across <b>exactly 81</b> release events: <b>52</b> single, <b>12</b> two, <b>17</b> three. The 129 includes two rolling non-version tags, <code>worker-latest</code> and <code>desktop-latest</code>, whose <code>target_commitish</code> is the literal string <code>main</code>. Any ingest grouping releases by target commit must exclude non-<code>-v*</code> tags or it will merge two days into one event. Per package: firetower 74, desktop 34, mobile 19.</td></tr>
+<tr><td>#403</td><td>Change failure rate = the escaped axes over release events</td><td>On the derived axis that is <b>13.1 fixes per release event</b> today and has never been below <b>1.16</b>. It is a defect-density ratio, not a rate in [0,1], and calling it a failure rate on the page would be wrong in the same way calling rework one would be. The page titles it <em>Fixes to already-released code, per release event</em> and says #403 calls it the change failure rate.</td></tr>
+<tr><td>#403</td><td>21 externally-filed issues, 6 of them bug reports</td><td><b>20</b> externally-filed issues today, 6 of them bug reports, <b>19 carrying no label at all</b> and none carrying <code>bug</code>. The habit is still entirely un-started, so the tile's companion figure begins at its worst — which is the right place for it to begin.</td></tr>
+<tr><td>#399 "Not yet specified"</td><td>The reported axis averages one event every 18 days</td><td>True as a mean and misleading as a description: <b>five of six arrived in four days</b>, then 56 days of silence. It is not a Poisson trickle, it is one burst when the product first had users. This is why the treatment is a strip and a cumulative line rather than any kind of per-period figure.</td></tr>
+<tr><td>#403</td><td>Rework is 54%</td><td>54.4% over all 755 feat+fix commits, and <b>63% over the last 28 days</b> against an all-history IQR of 44–55%. Over the 9 days since enforcement alone it is <b>77%</b>. All three are correct and they are three different statistics; the page shows the 28-day one, with its band and its coverage, and says which it is.</td></tr>
+<tr><td>#402 (confirmed, not corrected)</td><td>The merge-to-release gap is unsaturated and the most honest signal available</td><td><b>Confirmed emphatically.</b> 0.26 h to 73.0 h on the 28-day rolling median, and the 73-hour stall in late October is a real event — release events fell to 1.25/week for a fortnight — that no other series on the page shows as clearly.</td></tr>
+</tbody></table>
+
+<div class="hr"></div>
+<h2>Open, and not for a designer to close</h2>
+<ul>
+<li><b>Does <em>Releases per week</em> deserve a tile, or does <em>First commit → merge</em>?</b> Lead time is 4× above its own band right now, which is the louder signal; releases per week is the better answer to "how much do we ship". The page as drawn picks releases. One tile, one swap, and the owner is the right person to pick.</li>
+<li><b>Whether the fixes-per-release chart should be fixes per release or fixes per 1,000 lines changed.</b> Per release is what #403 defined; it moves when the release cadence moves, which is partly why it quadrupled in October. A denominator that does not move with the release loop would separate those two effects.</li>
+<li><b>CI health.</b> #399 leaves it open and notes the 90-day expiry. Nothing on this page assumes it; if it lands, it is a fifth group heading and not a redesign.</li>
+<li><b>The <code>Fixes-release:</code> footer</b> #403 deferred. If it ever exists, the reported axis stops being six points and the escaped section changes shape completely. Nothing here should make that harder.</li>
+<li><b>No author dimension anywhere</b>, confirmed and designed for: the scope breakdown is the only breakdown, and it comes from the work.</li>
+</ul>
+<p style="margin-top:22px;color:var(--text-muted);font-size:12px">Prototype for firetower-cloud/firetower#406 · figures measured 18 Nov 2026 from <code>origin/main</code> and the GitHub REST API · not approved, not built.</p>
+`;
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   The telemetry page as it is today, rebuilt from app/page.tsx, components/
+   Kpis.tsx and components/TrendChart.tsx so the two pages can be put side by
+   side. Its FIGURES ARE ILLUSTRATIVE — the telemetry database is not reachable
+   from an artifact. Shape, order, type and spacing are from the source.
+   ════════════════════════════════════════════════════════════════════════════ */
+function renderToday() {
+  const t = [];
+  for (let i = 0; i < 30; i++) {
+    const d = new Date(Date.UTC(2026, 9, 20) + i * 864e5).toISOString().slice(0, 10);
+    t.push({ day: d, installs: 1, seats: 4 + (i > 18 ? 1 : 0), people: i % 7 < 2 ? 1 : 2,
+             runs: [12, 31, 44, 9, 18, 52, 61, 27, 14, 38, 71, 66, 23, 8, 19, 48, 57, 40, 12, 29, 63, 88, 51, 17, 11, 35, 72, 69, 44, 26][i] });
+  }
+  const body = document.getElementById("today-body");
+  const kpis = el("div", "kpis");
+  const last = t[t.length - 1], week = t.slice(-7);
+  kpis.appendChild(tile({ label: "Installations", value: last.installs, caption: "reporting on " + last.day, spark: sparkline(t.map(d => d.installs), 2) }));
+  kpis.appendChild(tile({ label: "Seats", value: last.seats, caption: "accounts that exist", spark: sparkline(t.map(d => d.seats), 2) }));
+  kpis.appendChild(tile({ label: "Active people", value: last.people, caption: "on the last completed day", spark: sparkline(t.map(d => d.people), 3) }));
+  kpis.appendChild(tile({ label: "Agent runs", value: week.reduce((a, d) => a + d.runs, 0), caption: "last 7 days", spark: sparkline(week.map(d => d.runs), 1) }));
+  body.appendChild(kpis);
+  body.appendChild(timeChart({ id: "y1", title: "Agent runs per day", tall: true,
+    note: "Sessions an agent actually took a turn in.", days: t.map(d => d.day),
+    series: [{ name: "Agent runs", slot: 1, values: t.map(d => d.runs) }] }));
+  body.appendChild(timeChart({ id: "y2", title: "People active per day",
+    note: "Ran at least one agent turn. Reading a conversation does not count.", days: t.map(d => d.day),
+    series: [{ name: "People active", slot: 3, values: t.map(d => d.people) }] }));
+  body.appendChild(timeChart({ id: "y3", title: "Installations reporting",
+    note: "Flat while one install reports. This is the line that moves as Firetower is adopted.", days: t.map(d => d.day),
+    series: [{ name: "Installations", slot: 2, values: t.map(d => d.installs) }] }));
+  body.appendChild(tablePanel("y-t1", "Last 30 days", null,
+    ["day", "installs", "people active", "seats", "agent runs"],
+    t.slice().reverse().slice(0, 8).map(d => [d.day, d.installs, d.people, d.seats, d.runs])));
+  body.appendChild(tablePanel("y-t2", "Gone quiet",
+    "Silence can mean a quiet fortnight rather than an uninstall — a digest only arrives when somebody opens a desktop app.",
+    ["install", "last seen", "days quiet"], []));
+}
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Artifact chrome wiring. Thrown away on build.
+   ════════════════════════════════════════════════════════════════════════════ */
+const RIBBONS = {
+  page: 'Real figures, measured from <code>origin/main</code> and the GitHub REST API on 18 Nov 2026. '
+      + '1,546 commits in the DAG, 369 on the first-parent trunk, 81 release events, 215 merged pull requests, '
+      + '6 externally-reported bugs. Nothing on this page is invented.',
+  today: 'The telemetry page rebuilt from <code>app/page.tsx</code> so the two can be compared. Its shape, type and '
+       + 'spacing are from source; <b>its figures are illustrative</b> — the telemetry database is not reachable from an artifact.',
+  spec: 'What gets built: the six decisions, the component decomposition, the interaction and responsive specs, '
+      + 'and the four figures in #399 and #403 that the real data corrects.',
+};
+function setView(v) {
+  ["page", "today", "spec"].forEach(k => document.getElementById("view-" + k).classList.toggle("hidden", k !== v));
+  document.querySelectorAll("[data-view]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.view === v)));
+  document.getElementById("ribbon").innerHTML = RIBBONS[v];
+  window.scrollTo(0, 0);
+}
+document.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => setView(b.dataset.view)));
+document.querySelectorAll("[data-w]").forEach(b => b.addEventListener("click", () => {
+  if (!b.dataset.w) return;
+  document.getElementById("stage").dataset.w = b.dataset.w;
+  document.querySelectorAll(".chrome [data-w]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+}));
+const state = { stale: false, failed: false };
+document.getElementById("t-dark").addEventListener("change", e =>
+  document.documentElement.dataset.theme = e.target.checked ? "dark" : "light");
+document.getElementById("t-stale").addEventListener("change", e => { state.stale = e.target.checked; renderPage(state); });
+document.getElementById("t-fail").addEventListener("change", e => { state.failed = e.target.checked; renderPage(state); });
+
+document.documentElement.dataset.theme =
+  window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+document.getElementById("t-dark").checked = document.documentElement.dataset.theme === "dark";
+
+renderPage(state);
+renderToday();
+renderSpec();
+
+/* A deep link to a view, so a reviewer can point at one: #view=spec, #w=420,
+   #dark, #stale, #fail. Chrome, not application. */
+(function fromHash() {
+  const h = new URLSearchParams(location.hash.replace(/^#/, "").replace(/&/g, "&"));
+  const v = h.get("view"); if (v) setView(v);
+  const w = h.get("w");
+  if (w) { const b = document.querySelector('.chrome [data-w="' + w + '"]'); if (b) b.click(); }
+  [["dark", "t-dark"], ["stale", "t-stale"], ["fail", "t-fail"]].forEach(([k, id]) => {
+    if (h.has(k)) { const c = document.getElementById(id); c.checked = true; c.dispatchEvent(new Event("change")); }
+  });
+  document.body.dataset.scrollWidth = document.documentElement.scrollWidth;
+})();
+</script>
+</body>
+</html>
