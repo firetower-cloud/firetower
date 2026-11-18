@@ -846,6 +846,42 @@ const server = createServer(async (req, res) => {
         other({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", number: 4, name: "Token audit", title: "Token audit", status: "HandedBack", agent: "CursorAgent", createdAt: minutesAgo(62), spawnReason: "audit the token store" }),
       ];
     }
+    /* **A team whose children have checkouts of their own**, which is the
+       case no scene here could produce and the one a display bug shipped
+       in.
+
+       A subagent started in the manager's own workspace carries the
+       *workspace's* name, so the roster reads its `title` — and a title
+       never carries a prefix. A child given a workspace of its own is
+       named by the server: `delegate.rs` composes
+       `format!("{} / {what}", lead.name)`, so its row reads
+       `auth refactor / verifier` and under the manager's own row says the
+       manager twice, once per member. Every scene above puts every child
+       at `workspaceId: "w_1"`, so every row went through `title` and that
+       second kind of row had never been on screen, before its fix or
+       after it — see #465.
+
+       Both kinds together, because the panel has to be read with both in
+       it: one subagent in the manager's checkout and two children with
+       their own. The one that is asking is the in-checkout one on
+       purpose, so the home's waiting chip still opens the *manager's*
+       workspace and `e2e/team.yaml` reaches this panel by the same path
+       it reaches `team`'s. `branch` is composed the way the server
+       composes a child's, from the lead's and the slug of what it was
+       sent to do.
+
+       `name` on the in-checkout row is the workspace's, which is what the
+       server would really have given it — the `team` scene above gives
+       each of its three a name of its own, which is why nothing there can
+       tell a row reading `title` from a row reading `name`. */
+    if (scene === "team-delegated") {
+      return [
+        session(),
+        other({ id: "s_k1", workspaceId: "w_1", parentId: "s_1", number: 2, name: "auth refactor", title: "Quota band thresholds", status: "NeedsYou", createdAt: minutesAgo(4), spawnReason: "decide whether a plan with no soft limit shows the band", note: "Should a plan with no soft limit show the band at all?" }),
+        other({ id: "s_d1", workspaceId: "w_d1", parentId: "s_1", number: 3, name: "auth refactor / edge-cache", title: "One key fetch for the edge check", status: "Working", agent: "Codex", branch: `${BRANCH}-edge-cache`, createdAt: minutesAgo(26), spawnReason: "fold the edge config's copy of the key set into the app's fetch" }),
+        other({ id: "s_d2", workspaceId: "w_d2", parentId: "s_1", number: 4, name: "auth refactor / verifier", title: "Accept both key ids until the window closes", status: "HandedBack", repo: "acme/api", branch: `${BRANCH}-verifier`, createdAt: minutesAgo(71), spawnReason: "accept the retired key for as long as the refresh window" }),
+      ];
+    }
     /* **A child that failed**, which the drawing added with `S.teamfail`
        because the artifact could not draw the state at all. `OverviewTab`
        has always returned `failed` and drawn it; nothing could reach it
