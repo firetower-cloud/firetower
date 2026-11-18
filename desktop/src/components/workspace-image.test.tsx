@@ -60,9 +60,12 @@ describe("a picture in what the agent wrote", () => {
     expect(draw("![shot](docs/shot.png)", "s_01test")).toContain("looking for it");
   });
 
-  /* A URL was always fine and must stay fine — the override is for paths. */
-  it("leaves a real URL as an ordinary image", () => {
+  /* A URL is not read through the workspace — the override is for paths — and
+     is not fetched either: rendering it would send a request nobody chose to
+     make. It becomes a link. See `markdown-render.test.tsx`. */
+  it("turns a real URL into a link rather than fetching it", () => {
     const html = draw("![logo](https://example.com/logo.png)");
-    expect(html).toContain('src="https://example.com/logo.png"');
+    expect(html).not.toContain("<img");
+    expect(html).toContain('href="https://example.com/logo.png"');
   });
 });
