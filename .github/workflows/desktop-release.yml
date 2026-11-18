@@ -562,6 +562,7 @@ jobs:
           # downgrade of all of them.
           moved=""
           skipped=""
+          failed=""
           for address in $ROLLING $ALIASES; do
             held=""
             rolling=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$address" \
@@ -616,11 +617,32 @@ jobs:
               continue
             fi
 
-            gh release upload "$address" "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber
-            echo "published $VERSION to $address"
-            moved="$moved $address"
+            # **Not allowed to die inside the loop.** Under `set -e` an upload
+            # that failed used to end the step then and there, so neither the
+            # summary below nor the warning ever ran: `desktop-stable` moved,
+            # `desktop-latest` did not, and the log said so only by which
+            # `published` lines happened to be present. The skipped case was
+            # already announced; the failed case is the one where nobody is
+            # looking, so it deserves it more.
+            #
+            # Every address is attempted. Stopping after the first failure
+            # would *guarantee* the split that carrying on only risks.
+            if gh release upload "$address" "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber; then
+              echo "published $VERSION to $address"
+              moved="$moved $address"
+            else
+              echo "::error::Could not publish $VERSION to $address."
+              failed="$failed $address"
+            fi
           done
-          echo "moved:${moved:- nothing}${skipped:+ · left alone:$skipped}"
+
+          echo "moved:${moved:- nothing}${skipped:+ · left alone:$skipped}${failed:+ · failed:$failed}"
+          if [ -n "$failed" ]; then
+            echo "::error::$CHANNEL's addresses now disagree: moved$moved, failed$failed." \
+                 "The ones that failed are *behind*, so re-running this job moves them forward" \
+                 "— the no-backwards rule will leave the ones that already landed alone."
+            exit 1
+          fi
           if [ -n "$skipped" ] && [ -n "$moved" ]; then
             echo "::warning::$CHANNEL's addresses do not all hold the same version:" \
                  "moved$moved, left alone$skipped. That is the no-backwards rule doing its job," \
