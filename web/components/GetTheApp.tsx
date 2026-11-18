@@ -8,6 +8,11 @@
  * the phone. The download links come from the latest GitHub release, asked
  * for when the page opens, so the page never carries a version number that
  * goes stale.
+ *
+ * And, under the downloads, the one route onto the beta channel for a copy
+ * that cannot reach it any other way — see `BetaRoute`. Downloading the app is
+ * this surface's job (`docs/which-surface.md`), which is why that route lives
+ * here and not on the desktop client's Updates screen.
  */
 import { useEffect, useState } from "react";
 import { useMe } from "@/src/api/generated/auth/auth";
@@ -35,6 +40,16 @@ type Downloads = {
   windows?: string;
   linux?: string;
   version?: string;
+  /**
+   * The release page the beta bundle is on.
+   *
+   * The same lookup as `version`, and deliberately a second name for it: the
+   * newest desktop release *is* the beta build, because every released version
+   * reaches beta as it is cut and nothing holds one back. So this stays
+   * correct however far beta runs ahead of general access, which is the thing
+   * the number beside it will not do — see `downloadNote`.
+   */
+  betaRelease?: string;
   android?: string;
   androidVersion?: string;
   /**
@@ -53,6 +68,13 @@ type Downloads = {
 
 const LOOKING: Downloads = { settled: false, reached: true };
 
+/** As much of a GitHub release as this page reads. */
+type Release = {
+  tag_name: string;
+  html_url: string;
+  assets: { name: string; browser_download_url: string }[];
+};
+
 /** The latest release's installers, by file name. Nothing to show while it is unknown. */
 function useDownloads(): Downloads {
   const [found, setFound] = useState<Downloads>(LOOKING);
@@ -67,7 +89,7 @@ function useDownloads(): Downloads {
         if (!r.ok) throw new Error(`GitHub answered ${r.status}`);
         return r.json();
       })
-      .then((releases: { tag_name: string; assets: { name: string; browser_download_url: string }[] }[]) => {
+      .then((releases: Release[]) => {
         if (!live) return;
         const desktop = releases.find((r) => r.tag_name.startsWith("desktop-v"));
         const by = (of: typeof desktop, test: (n: string) => boolean) =>
@@ -91,6 +113,10 @@ function useDownloads(): Downloads {
           settled: true,
           reached: true,
           version: desktop?.tag_name.replace(/^desktop-v/, ""),
+          // The page GitHub already has for this release, rather than a tag
+          // URL assembled here: one less shape of ours to keep in step with
+          // theirs, and it is where the bundles are.
+          betaRelease: desktop?.html_url,
           mac: by(desktop, (n) => n.endsWith(".dmg")),
           windows: by(desktop, (n) => n.endsWith("-setup.exe")) ?? by(desktop, (n) => n.endsWith(".exe")),
           // One Linux download, and it is the one that can update itself.
@@ -136,7 +162,7 @@ export function GetTheApp() {
       </Card>
 
       <Card className="mt-4">
-        <CardHead note={<span className="text-meta text-mute">{downloads.version ? `Latest: ${downloads.version}` : "The latest release"}</span>}><span className="text-ui text-bone">Download</span></CardHead>
+        <CardHead note={<span className="text-meta text-mute">{downloadNote(downloads.version)}</span>}><span className="text-ui text-bone">Download</span></CardHead>
         <div className="flex flex-wrap gap-3 px-4 pt-4 pb-3">
           <Platform name="macOS" hint="Apple silicon and Intel" href={downloads.mac} glyph={<AppleGlyph />} settled={downloads.settled} reached={downloads.reached} />
           <Platform name="Windows" hint="64-bit, installs per user" href={downloads.windows} glyph={<WindowsGlyph />} settled={downloads.settled} reached={downloads.reached} />
@@ -153,6 +179,11 @@ export function GetTheApp() {
             not Linux's fault — said once, under the tiles, with the link to
             every release already below it. */}
         {!downloads.reached && <p className="px-4 pb-3 text-meta text-mute">Couldn&apos;t reach GitHub.</p>}
+
+        {/* Last in the card, under the tiles and the platform note that
+            belongs to one of them, and directly above the other line on this
+            card that points at GitHub. */}
+        <BetaRoute version={downloads.version} release={downloads.betaRelease} />
 
         <p className="px-4 pb-4 text-meta text-mute">
           Every release, with its notes, is on <a className="text-dim underline decoration-line underline-offset-2" href={RELEASES} target="_blank" rel="noreferrer">GitHub</a>.
@@ -182,6 +213,109 @@ export function GetTheApp() {
           />
         </div>
       </Card>
+    </div>
+  );
+}
+
+/**
+ * The version line under *Download*, which names a channel rather than a date.
+ *
+ * It says *general access* because the block below it opens by saying the
+ * downloads above are general access, and that sentence needs something above
+ * it to be about. The number is the one the tiles have always resolved — the
+ * newest desktop release.
+ *
+ * **Which is the general-access pin only while the two channels are level**,
+ * and they are: the release that introduces channels sets beta and general
+ * access to itself, so nothing diverges on the day this lands (#415). The
+ * first release deliberately left unpromoted is where they part, and from then
+ * on the tiles and this line want the channel manifest's `desktop.general`
+ * pin, which #448 publishes. That is one lookup in one place, and it is named
+ * here so nobody has to go hunting for it. It is deliberately *not* derived
+ * from the releases feed: general access can lag beta by more than a page of
+ * releases, and reading a pin by enumerating releases is the failure the
+ * manifest exists to prevent.
+ */
+export function downloadNote(version?: string): string {
+  return version ? `General access: ${version}` : "The general-access release";
+}
+
+/**
+ * The permanent route onto beta, which this page owns.
+ *
+ * Downloading the app is this surface's job (`docs/which-surface.md`), and
+ * this is the only way onto beta for a copy that predates release channels or
+ * stopped updating. So it is load-bearing documentation rather than a
+ * footnote, and it says *why* it exists rather than only offering a file.
+ *
+ * The why is the fact that makes the hand-install unavoidable: every installed
+ * copy has its updater address compiled into the bundle
+ * (`desktop/src-tauri/tauri.conf.json`), and the only way a copy ever reads a
+ * different address is by updating — which it can only do *through that
+ * address*. So such a copy cannot be moved onto beta remotely, by us or by
+ * anybody; it needs one manual install, once (#414, #415).
+ *
+ * Three more things are said, because leaving any of them out leaves a wrong
+ * impression that this page is the only place to correct:
+ *
+ * - **What happens after.** Normal automatic updates, on that channel, from
+ *   the next release on — so the hand-install is once and not a habit.
+ * - **What switching back does not do.** It stops new betas. It does not
+ *   reinstall the general-access build, and a copy is never moved back to an
+ *   older one: a copy that took a beta is ahead of general access and waits
+ *   there until general access overtakes it (#424).
+ * - **That the route is permanent.** It is the same answer to a copy that
+ *   stopped updating for any reason, so it is not scaffolding for this change
+ *   and must not read as a migration step anybody is waiting to withdraw
+ *   (#415). Nothing here is phrased as *for now*, *until*, or *while*.
+ *
+ * Drawn in every state of the lookup, including a failed one. Every sentence
+ * in it is true whatever the release turns out to hold, and the link has
+ * somewhere to go either way — the same argument `showsOnLinux` makes one
+ * block above.
+ */
+export function BetaRoute({ version, release }: { version?: string; release?: string }) {
+  return (
+    <div className="px-4 pt-0.5 pb-3.5">
+      {/* A rule and the card's own ground, not a shape of its own. This is the
+          last section of the Download card and it is not a warning: no tint,
+          no tone, nothing that answers *is something waiting on you*. It is
+          told apart by position and by the weight of its heading. */}
+      <div className="border-t border-line pt-3.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-ui text-bone">Beta builds</span>
+          {/* The version beta is at, which is the newest release by
+              construction — every released version reaches beta as it is cut.
+              Correct however far ahead of general access beta runs. */}
+          {version && <Badge>{version}</Badge>}
+        </div>
+        <p className="mt-2 text-ui text-dim">
+          The downloads above are general access: the releases a maintainer has promoted. Beta has
+          every release as soon as it is cut.
+        </p>
+        <p className="mt-2 text-ui text-dim">
+          Joining beta is one download from the release page, for the copy you are joining. Every
+          copy carries its update address inside the bundle, so installing by hand once is the only
+          way to reach a different one. From the next release on, that copy updates on beta by
+          itself, and its channel is a switch in the app under Updates.
+        </p>
+        <p className="mt-2 text-ui text-dim">
+          Switching back in the app stops new betas. It does not reinstall the general-access build,
+          and a copy is never moved back to an older one.
+        </p>
+        <p className="mt-3 text-meta text-mute">
+          The same download is how a copy that stopped updating is brought back, so it stays on the
+          release page rather than being a one-off for this change.{" "}
+          <a
+            className="text-dim underline decoration-line underline-offset-2"
+            href={release ?? RELEASES}
+            target="_blank"
+            rel="noreferrer"
+          >
+            Beta builds on GitHub
+          </a>
+        </p>
+      </div>
     </div>
   );
 }
