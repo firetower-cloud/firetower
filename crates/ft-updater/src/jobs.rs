@@ -546,10 +546,7 @@ impl Jobs {
     ) -> Result<String> {
         say.step("pull");
         if is_pinned(tag) {
-            let said = format!(
-                "{repo} is pinned to :{tag} in the compose file. Change it to :latest, or to :{version}, \
-                 and the updater can move it"
-            );
+            let said = pinned_tag_refusal(repo, tag);
             say.failed(said.clone());
             return Err(anyhow!(said));
         }
@@ -559,10 +556,7 @@ impl Jobs {
         let image = self.docker.inspect_image(&format!("{repo}:{tag}")).await?;
         let stamped = image.version().unwrap_or("unknown");
         if stamped != version {
-            let said = format!(
-                "{repo}:{tag} is {stamped}, not {version}. A newer release may have been \
-                 published since you looked — check again and choose it"
-            );
+            let said = version_mismatch(repo, tag, stamped, version);
             say.failed(said.clone());
             return Err(anyhow!(said));
         }
@@ -765,6 +759,78 @@ impl Jobs {
 }
 
 /// A full version is a pin; `latest`, `edge` and `major.minor` float.
+/// The tags that name a channel, and the only two an operator should pin.
+///
+/// `latest` is deliberately not here. It keeps its conventional meaning — the
+/// newest build published — and is not a channel, which is precisely why an
+/// installation pinned to it is the one that gets stuck: it is told general
+/// access is 0.55.0, pulls `latest`, gets 0.58.0, and refuses. See
+/// `docs/channels.md` for all four tags together.
+///
+/// `edge` is not here either: it is the tip of main, and not selectable.
+pub const CHANNEL_TAGS: [&str; 2] = ["beta", "stable"];
+
+/// Does this tag name a channel?
+pub fn is_channel_tag(tag: &str) -> bool {
+    CHANNEL_TAGS.contains(&tag)
+}
+
+/// What an operator is told when the image that came down is not the release
+/// they were offered.
+///
+/// **The condition is that the tag is not the tag of the channel being
+/// fetched** — which, since an installation's channel *is* the tag on the
+/// image it is running, reduces to "this tag does not name a channel at all".
+/// Stating it the other way round, as "the tag is a channel tag", would be the
+/// bug rather than the fix: the installation this message exists for is pinned
+/// to `latest`, which is not a channel, so that condition would never fire for
+/// the only case that needs it.
+///
+/// Two genuinely different situations, and the old text gave the second one's
+/// explanation to both:
+///
+/// * **On a channel tag.** The channel really did move between being offered a
+///   version and pulling it, which is a race and is what the original wording
+///   described.
+/// * **On anything else** — `latest`, `edge`, a two-part version. The compose
+///   file names a tag that is not the channel this installation is being served
+///   from, so the pull can never produce the version it was told to want, and
+///   it will not upgrade again until the file is changed. The old message sent
+///   this operator to look for a newer release, which is a dead end: there is
+///   nothing to find and nothing they could have done. This is the difference
+///   between a dead end and an instruction.
+pub fn version_mismatch(repo: &str, tag: &str, stamped: &str, version: &str) -> String {
+    if is_channel_tag(tag) {
+        return format!(
+            "{repo}:{tag} is {stamped}, not {version}. A newer release may have been \
+             published since you looked — check again and choose it"
+        );
+    }
+    format!(
+        "{repo}:{tag} is {stamped}, not {version}. :{tag} does not name a channel, so this \
+         deployment cannot be upgraded while it is pinned to it. Change the image line to \
+         :stable for general access, or :beta for the newest release, and this upgrade will \
+         go through"
+    )
+}
+
+/// What an operator is told when the compose file names an exact version.
+///
+/// A separate string from the one above and raised in a different situation —
+/// this one is the tag being a three-part version, which the updater will not
+/// move at all. It used to advise changing it to `latest`, which is the one tag
+/// this design says not to pin: an installation on `latest` is floated onto
+/// whatever was published most recently rather than onto a channel, so the
+/// advice would move an operator from one stuck state into the state that
+/// produces the message above.
+pub fn pinned_tag_refusal(repo: &str, tag: &str) -> String {
+    format!(
+        "{repo} is pinned to :{tag} in the compose file, and the updater does not move an \
+         exact version. Change it to :stable for general access, or :beta for the newest \
+         release, and the updater can move it"
+    )
+}
+
 pub fn is_pinned(tag: &str) -> bool {
     let parts: Vec<&str> = tag.split('.').collect();
     parts.len() == 3
@@ -1054,6 +1120,82 @@ mod tests {
         assert!(!is_pinned("edge"));
         assert!(!is_pinned("0.31"));
         assert!(!is_pinned("v0.31.0"));
+        // The two channel tags float, like everything that is not three
+        // numeric parts. Nothing in the updater needed changing for them.
+        assert!(!is_pinned("beta"));
+        assert!(!is_pinned("stable"));
+    }
+
+    #[test]
+    fn only_beta_and_stable_name_a_channel() {
+        assert!(is_channel_tag("beta"));
+        assert!(is_channel_tag("stable"));
+        // The one that matters. `latest` keeps its conventional meaning and
+        // is *not* a channel, which is what makes an installation pinned to it
+        // the one that gets stuck.
+        assert!(!is_channel_tag("latest"));
+        assert!(!is_channel_tag("edge"));
+        assert!(!is_channel_tag("0.31"));
+        assert!(!is_channel_tag("0.31.0"));
+    }
+
+    /// Worth a test rather than a careful edit, because the whole value of
+    /// these two strings is their wording and nothing else would catch a
+    /// regression to the old text.
+    #[test]
+    fn a_wrong_channel_pin_is_named_as_one() {
+        // The frozen installation: pinned to the tag that existed before
+        // channels, offered the general-access version, handed the newest
+        // build instead, and stuck until somebody edits the file.
+        let said = version_mismatch(
+            "ghcr.io/firetower-cloud/firetower",
+            "latest",
+            "0.58.0",
+            "0.55.0",
+        );
+        assert!(said.contains("does not name a channel"), "{said}");
+        assert!(said.contains(":stable"), "it names the tag to use: {said}");
+        assert!(said.contains(":beta"), "and the other one: {said}");
+        // The old text sent this operator to look for a newer release, which
+        // is a dead end — there is nothing to find.
+        assert!(!said.contains("A newer release may have been"), "{said}");
+        assert!(!said.contains("check again and choose it"), "{said}");
+
+        // And the same for every other tag that is not a channel.
+        for tag in ["edge", "0.55", "v0.55.0"] {
+            let said = version_mismatch("firetower", tag, "0.58.0", "0.55.0");
+            assert!(said.contains("does not name a channel"), "{tag}: {said}");
+        }
+    }
+
+    /// The other half of the same condition, and the reason it is written as
+    /// "not the tag of the channel being fetched" rather than "is a channel
+    /// tag": on a channel tag the mismatch really is a race, and the original
+    /// wording is the right one.
+    #[test]
+    fn a_mismatch_on_a_channel_tag_is_still_a_race() {
+        for tag in CHANNEL_TAGS {
+            let said = version_mismatch("firetower", tag, "0.58.0", "0.55.0");
+            assert!(
+                said.contains("A newer release may have been"),
+                "{tag}: {said}"
+            );
+            assert!(!said.contains("does not name a channel"), "{tag}: {said}");
+        }
+    }
+
+    #[test]
+    fn the_pinned_tag_refusal_no_longer_advises_pinning_latest() {
+        // A different string from the one above, raised in a different
+        // situation: this one is an exact version in the compose file. It used
+        // to advise `:latest`, which is the one tag this design says not to
+        // pin — the advice would have moved an operator straight into the
+        // frozen state the message above exists for.
+        let said = pinned_tag_refusal("ghcr.io/firetower-cloud/firetower", "0.55.0");
+        assert!(said.contains(":stable"), "{said}");
+        assert!(said.contains(":beta"), "{said}");
+        assert!(!said.contains(":latest"), "{said}");
+        assert!(said.contains("0.55.0"), "it names what is pinned: {said}");
     }
 
     #[test]
