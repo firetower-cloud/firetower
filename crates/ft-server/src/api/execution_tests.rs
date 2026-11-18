@@ -3428,6 +3428,147 @@ async fn an_open_engine_carries_neither_its_subscription_nor_its_run_settings() 
     state.fleet.stop_supervising(&host.id).await;
 }
 
+/// **`model: opus` imported from a `PROFILE.md` reaches the engine's command
+/// line** (#426).
+///
+/// The import refused this, on the premise that an unofferable value *"silently
+/// does nothing, since `Preferred::keeping_only` drops it at launch without a
+/// word"*. There was nothing to prevent: a profile's `pref_*` never reaches
+/// `keeping_only` — `fleet.rs` is its only caller, drawing the picker — so the
+/// value travels, and this test is the whole path rather than any one link of
+/// it, because every link was asserted correct while the chain was broken.
+///
+/// Four steps, in the order they happen:
+///
+/// 1. the file reads as `model: opus`, which the picker does not offer;
+/// 2. the plan says it is appliable, with nothing blocked and nothing warned;
+/// 3. the row an apply writes from it hands the worker
+///    `FIRETOWER_AGENT_SETTINGS={"model":"opus"}`;
+/// 4. and that is `--model opus` on the command line, `claude --help`'s own
+///    documented alias — *"an alias for the latest model (e.g. 'fable',
+///    'opus', or 'sonnet') or a model's full name"*.
+///
+/// Step 4 is `Agent::launch_headless`, the function that actually builds the
+/// argv, rather than a string this test wrote: the premise that was false was
+/// a claim about what happens at launch, so the launch is asked.
+#[tokio::test]
+async fn a_model_the_picker_does_not_offer_is_imported_and_reaches_the_launch() {
+    let (state, principal, host, ready, owner, launched) = watched_fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+
+    // 1 — what the file says, read by the codec rather than asserted about.
+    const FILE: &str = "---\nname: Reviewer\ndoes: Reads the diff and argues with it\nengine: \
+                        ClaudeCode\nplacement: here\nsettings:\n  model: opus\n---\n";
+    let read = crate::roles::profile_md::read(
+        std::path::Path::new("profiles/reviewer/PROFILE.md"),
+        "reviewer",
+        FILE,
+    )
+    .expect("a well-formed bundle");
+    assert_eq!(read.profile.settings.model.as_deref(), Some("opus"));
+    assert!(
+        !ft_core::controls::offers(
+            Agent::ClaudeCode,
+            ft_core::controls::ControlKind::Model,
+            "opus",
+        ),
+        "`opus` has to be outside the picker's list, or this proves nothing"
+    );
+
+    // 2 — and what the plan makes of it, through the endpoint the review
+    // screen calls rather than the function underneath it.
+    let Json(plan) = super::roles::plan_role_import(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Json(crate::roles::import::ProfileDrop {
+            files: vec![crate::roles::import::DroppedFile {
+                path: "reviewer/PROFILE.md".into(),
+                text: FILE.into(),
+            }],
+            answers: Default::default(),
+        }),
+    )
+    .await
+    .expect("a drop the endpoint takes");
+    assert!(plan.appliable, "{:#?}", plan.why_not);
+    let entry = &plan.entries[0];
+    assert!(
+        matches!(entry.outcome, crate::roles::import::PlanOutcome::New(_)),
+        "{:#?}",
+        entry.outcome
+    );
+    assert!(entry.warnings.is_empty(), "{:#?}", entry.warnings);
+
+    // 3 — the row an apply writes out of that reading, and the frame it
+    // produces. `settings` comes off the codec rather than being retyped, so
+    // the file's value is the one being followed.
+    let profile = saved_profile(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": read.profile.name,
+            "does": read.profile.does,
+            "placement": "here",
+            "agent": "ClaudeCode",
+            "settings": read.profile.settings,
+        }),
+    )
+    .await;
+    let stored: Option<String> = sqlx::query_scalar("SELECT pref_model FROM roles WHERE id=$1")
+        .bind(&profile)
+        .fetch_one(state.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        stored.as_deref(),
+        Some("opus"),
+        "the row has to hold what the file said for the rest of this to mean anything"
+    );
+
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "imported",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it" }),
+        ),
+    )
+    .await
+    .expect("a profile imported from a file can be delegated to");
+
+    let child = child_of(&state, &lead, "imported").await;
+    let told = settings_told_to(&launched, &child.id);
+    assert_eq!(
+        told, r#"{"model":"opus"}"#,
+        "the worker was handed something other than what the file said"
+    );
+
+    // 4 — and what the engine is launched with, off the argv builder itself.
+    let carried: ft_core::controls::Preferred = serde_json::from_str(&told).unwrap();
+    let argv = Agent::ClaudeCode
+        .launch_headless(
+            child.id.as_str(),
+            &ft_core::Asking::CannotAsk,
+            ft_core::Start::Fresh,
+            &carried,
+            None,
+        )
+        .expect("Claude Code is launched with an argv");
+    let at = argv
+        .iter()
+        .position(|a| a == "--model")
+        .expect("the model is asked for rather than inherited");
+    assert_eq!(
+        argv.get(at + 1).map(String::as_str),
+        Some("opus"),
+        "{argv:?}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
 /// Criterion 10: an agent can author a profile that leaves fields open, and
 /// the acknowledgement says so rather than describing it as `here`.
 #[tokio::test]

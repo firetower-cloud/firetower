@@ -284,6 +284,58 @@ fn written(e: sqlx::Error, new: &NewRole, doing: &'static str) -> anyhow::Error 
     }
 }
 
+/// What can be said about one settings value, for one profile's engine.
+///
+/// Four cases, read off `controls::has_control` and `controls::choices_for`
+/// rather than restating either. The pair already carries the distinction this
+/// depends on — "empty means the server cannot enumerate it, which is a third
+/// answer and not the same as the control being absent" — and the import used
+/// to keep a private copy that re-derived both from `controls::for_agent`. A
+/// second spelling of one question is how two readers come to disagree.
+///
+/// **[`Offer::Values`] is the picker's list, not the accepted set.** Which of
+/// the four a setting is in says what is *knowable* here, and nothing on its
+/// own about whether a value outside the list is a mistake — see
+/// [`ft_core::controls::can_widen`], which is the question that decides that.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Offer {
+    /// The values this engine's picker offers.
+    Values(Vec<String>),
+    /// The engine lists them itself once running, so nothing here can judge
+    /// the value. Codex's models and efforts, and only those.
+    WhenItStarts,
+    /// No engine is pinned, so which set applies is the lead's to decide.
+    WhenALeadPicks,
+    /// This engine has no such control, so the line would do nothing.
+    NotThisEngine,
+}
+
+/// Which of the four a setting is in, for this profile's engine.
+pub fn offered(engine: Option<ft_core::Agent>, kind: ft_core::controls::ControlKind) -> Offer {
+    let Some(engine) = engine else {
+        return Offer::WhenALeadPicks;
+    };
+    if !ft_core::controls::has_control(engine, kind) {
+        return Offer::NotThisEngine;
+    }
+    match ft_core::controls::choices_for(engine, kind) {
+        values if values.is_empty() => Offer::WhenItStarts,
+        values => Offer::Values(values),
+    }
+}
+
+/// What a control is called in a refusal, with its article, so the sentence
+/// reads as one.
+pub fn named(kind: ft_core::controls::ControlKind) -> &'static str {
+    use ft_core::controls::ControlKind;
+    match kind {
+        ControlKind::Model => "a model",
+        ControlKind::Effort => "an effort",
+        ControlKind::Mode => "a permission mode",
+        ControlKind::Sandbox => "a sandbox",
+    }
+}
+
 /// Everything a well-formed role must be.
 ///
 /// Shape only — everything answerable without the database. Two fields need it

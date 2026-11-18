@@ -370,6 +370,37 @@ pub fn never_asks_as(agent: crate::Agent) -> Option<&'static str> {
     }
 }
 
+/// Whether a value for this control can widen what an agent may do.
+///
+/// **The organising question behind every check on a settings value**, and the
+/// one place it is answered. `api::schedules::settled` ruled on it and
+/// `roles::import` reads the same ruling: *"a fence has to be one the
+/// catalogue names; a model does not"*.
+///
+/// `true` for the two that can: a permission mode decides what runs without
+/// anybody being asked, and a sandbox is the filesystem fence itself. A value
+/// outside [`choices_for`] is refused for those, because the list is the set
+/// somebody has reasoned about — [`claude_modes`] leaves `bypassPermissions`
+/// out *on purpose*, which is only a safe omission if being outside the list
+/// is a refusal.
+///
+/// `false` for the two that cannot. The picker offers aliases (`opus[1m]`) and
+/// an engine reports whatever they resolved to (`claude-opus-5[1m]`); the CLI
+/// also takes `opus`, `sonnet` and a full model name, none of which any list
+/// here names — see [`claude_choice_for`]. So the list is **presentation** for
+/// a model and an effort, and a value outside it goes to the engine rather
+/// than being refused on its behalf.
+///
+/// Asked here rather than restated at each call site, because two halves
+/// spelling one question twice is how they come to disagree — which is exactly
+/// what #426 was.
+pub fn can_widen(kind: ControlKind) -> bool {
+    match kind {
+        ControlKind::Mode | ControlKind::Sandbox => true,
+        ControlKind::Model | ControlKind::Effort => false,
+    }
+}
+
 /// The values this engine's picker would offer for a control.
 ///
 /// Empty means the server cannot enumerate it — which is a third answer and
@@ -566,6 +597,110 @@ pub fn put(agent: crate::Agent, kind: ControlKind, value: &str) -> Option<serde_
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every [`ControlKind`], so a fifth one cannot be added without the
+    /// tests below being short of it. Exhaustive by the match, not by the
+    /// list.
+    fn every_kind() -> Vec<ControlKind> {
+        let next = |kind: ControlKind| match kind {
+            ControlKind::Model => Some(ControlKind::Mode),
+            ControlKind::Mode => Some(ControlKind::Effort),
+            ControlKind::Effort => Some(ControlKind::Sandbox),
+            ControlKind::Sandbox => None,
+        };
+        let mut out = vec![ControlKind::Model];
+        while let Some(kind) = next(out[out.len() - 1]) {
+            out.push(kind);
+        }
+        out
+    }
+
+    /// **[`can_widen`] answers exactly what `api::schedules` asked before it
+    /// existed** — every engine against every control, Shell included.
+    ///
+    /// This is here because #426 is a *profiles* fix that moved a line of
+    /// *schedules* validation. `settled` used to decide the same thing with a
+    /// local `matches!(kind, Mode | Sandbox)`; it now asks this, so a schedule
+    /// accepts and refuses exactly what it did only if the two agree on every
+    /// pair. The old expression is written out below rather than referred to,
+    /// because a test that re-derives the thing it is checking proves nothing
+    /// — which is the mistake that produced #426 in the first place.
+    ///
+    /// The engine is in the loop even though [`can_widen`] does not take one.
+    /// That is the claim: *whether a value can widen what an agent may do is a
+    /// fact about the control, not about the engine*, which is what makes the
+    /// answer well defined for a profile that pins no engine at all — the case
+    /// `roles::import` has and `settled` does not.
+    #[test]
+    fn can_widen_is_what_schedules_asked_before_it_was_shared() {
+        let mut pairs = 0;
+        for agent in [
+            crate::Agent::ClaudeCode,
+            crate::Agent::Codex,
+            crate::Agent::KimiCode,
+            crate::Agent::CursorAgent,
+            crate::Agent::Shell,
+        ] {
+            for kind in every_kind() {
+                // `api/schedules.rs`, verbatim, as it read before this.
+                let was = matches!(kind, ControlKind::Mode | ControlKind::Sandbox);
+                assert_eq!(
+                    can_widen(kind),
+                    was,
+                    "{} × {kind:?}: a schedule's validation moved",
+                    agent.label()
+                );
+                pairs += 1;
+            }
+        }
+        assert_eq!(pairs, 20, "every engine against every control");
+
+        // And the answer a profile with no engine pinned gets, which is the
+        // same one, because there is no engine in the question.
+        for kind in every_kind() {
+            assert_eq!(
+                can_widen(kind),
+                matches!(kind, ControlKind::Mode | ControlKind::Sandbox)
+            );
+        }
+    }
+
+    /// The two halves of the split, named rather than derived.
+    ///
+    /// `can_widen` is read by `api::schedules::settled` and by
+    /// `roles::import::resolve`, and both are refusals — so this is the one
+    /// assertion that says which way round it goes without computing it.
+    #[test]
+    fn a_mode_and_a_sandbox_can_widen_and_a_model_and_an_effort_cannot() {
+        assert!(can_widen(ControlKind::Mode));
+        assert!(can_widen(ControlKind::Sandbox));
+        assert!(!can_widen(ControlKind::Model));
+        assert!(!can_widen(ControlKind::Effort));
+    }
+
+    /// **The picker's mode list is narrower than the CLI's on purpose**, which
+    /// is the whole argument for holding a mode to it.
+    ///
+    /// `claude --help` gives `--permission-mode` the choices `acceptEdits`,
+    /// `auto`, `bypassPermissions`, `manual`, `dontAsk` and `plan`, and
+    /// rejects anything else at parse — so the CLI validates modes itself and
+    /// a refusal here is not about validity. It is about which of the values
+    /// it takes a shared `PROFILE.md` may hand somebody, and
+    /// [`claude_modes`]'s own comment records the omission as deliberate.
+    ///
+    /// So this asserts the gap exists. If a build ever offered
+    /// `bypassPermissions` in the picker, the reason `can_widen` returns
+    /// `true` for a mode would have gone with it, and somebody should have to
+    /// come back here.
+    #[test]
+    fn the_mode_picker_leaves_out_a_mode_the_cli_takes() {
+        let offered = choices_for(crate::Agent::ClaudeCode, ControlKind::Mode);
+        assert!(
+            !offered.iter().any(|v| v == "bypassPermissions"),
+            "it is a flag for a sandbox somebody built on purpose, not a menu item: {offered:?}"
+        );
+        assert!(offered.iter().any(|v| v == "plan"));
+    }
 
     /// The bug this file exists for: a Codex session was offering Opus.
     #[test]
