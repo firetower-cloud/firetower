@@ -14,7 +14,7 @@
 #
 # Options, all optional:
 #   --authorize KEY   add Firetower's public key to ~/.ssh/authorized_keys
-#   --version X.Y.Z   this release rather than the newest
+#   --version X.Y.Z   this release rather than general access
 #   --from FILE       a worker tarball to install instead of downloading;
 #                     `-` reads it from stdin (the control plane uses this)
 #   --agent NAME      also fetch an agent: claude-code or codex
@@ -34,9 +34,16 @@ set -eu
 PATH="$PATH:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:$HOME/.local/bin"
 export PATH
 
-# Releases are tagged `firetower-v<version>`; `worker-latest` is a rolling
-# release the newest worker is copied onto, because GitHub's own "latest" is
-# whichever package released last and may hold no worker at all.
+# Releases are tagged `firetower-v<version>`. `worker-latest` is a rolling
+# release of its own, because GitHub's own "latest" is whichever package
+# released last and may hold no worker at all.
+#
+# **It holds the general-access worker**, and a promotion is the only thing
+# that moves it. So an unpinned run of this script installs general access —
+# which is what the install documentation's one-liner has to mean, because a
+# worker newer than its control plane is refused and the control plane running
+# general access is the common case. It was the newest build until #459, which
+# was the same thing only while there was one channel.
 RELEASES="${FIRETOWER_RELEASES:-https://github.com/firetower-cloud/firetower/releases}"
 ROOT="${FIRETOWER_WORKER_ROOT:-$HOME/.firetower/worker}"
 BIN="$ROOT/bin"
@@ -182,9 +189,15 @@ else
         which="$VERSION"
     else
         base="$RELEASES/download/worker-latest"
-        which="the newest release"
+        which="general access"
     fi
-    say "Fetching firetower-worker ($which) for $OS $ARCH…"
+    # `${ARCH}`, braced, because the ellipsis is multibyte and follows the
+    # variable with nothing in between. A shell whose locale it does not
+    # recognise — bash 3.2 on a Mac handed `LC_CTYPE=C.UTF-8`, which is what a
+    # Linux control plane forwards over ssh — reads the first byte of the
+    # ellipsis as part of the name, and `set -u` then kills the install with
+    # `ARCH?: unbound variable`. Found while testing the rolling release.
+    say "Fetching firetower-worker ($which) for $OS ${ARCH}…"
     if ! curl -fsSL --retry 3 -o "$TMP/$ASSET" "$base/$ASSET"; then
         die "could not fetch $base/$ASSET — is there a release for this version, and is this machine online?"
     fi
@@ -232,7 +245,7 @@ if [ -n "$AUTHORIZE" ]; then
 fi
 
 if [ -n "$AGENT" ]; then
-    say "Fetching $AGENT…"
+    say "Fetching ${AGENT}…"
     "$BIN/firetower-worker" agents add "$AGENT" || die "fetching $AGENT failed"
 fi
 

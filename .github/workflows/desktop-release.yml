@@ -27,12 +27,59 @@ on:
       tag: { required: true, type: string }
       version: { required: true, type: string }
       ref: { required: true, type: string }
+      # Which address the manifest is written to. See `publish` below for the
+      # three of them and why the legacy one can never be retired.
+      #
+      # `beta` is the default because a release is a beta deploy: every
+      # released version goes to beta and nothing else does. A promotion calls
+      # this workflow again with `general`, against a tag that is already
+      # built — which re-runs the one writer rather than copying a manifest
+      # across, because a second writer is exactly what this job was rewritten
+      # to eliminate.
+      channel:
+        required: false
+        type: string
+        default: beta
+      # Write the manifest from the bundles already on the release, and do not
+      # build or sign anything. This is what makes a promotion a pointer move:
+      # the bytes general access gets are the bytes beta was tested on, and no
+      # bundle is re-signed. The publish job still verifies every signature
+      # against the payload it will point at, so a release missing an asset is
+      # still refused rather than half-published.
+      publish_only:
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
     inputs:
       tag:
         description: "An existing desktop-v* tag to rebuild"
         required: true
         type: string
+      # **Beta only, and general access deliberately absent.**
+      #
+      # Dispatching this with `channel: general` published `desktop-stable` and
+      # `desktop-latest` — the two addresses every desktop copy on general
+      # access reads — with no typed confirmation, no check that the version is
+      # on beta, and no channel-manifest write. It was an unguarded second
+      # route to the thing `promote.yml` exists to guard, and it was
+      # reproduced: it published 0.60.0 to both addresses while the manifest
+      # still said beta 0.59.0, general 0.58.0.
+      #
+      # General access now reaches this job only through `workflow_call`, which
+      # means only through `promote.yml`. The step guarding it is below; this
+      # list is the half somebody sees before they press anything.
+      channel:
+        description: "Which channel's address to write (general access is promotion's, not this)"
+        required: false
+        type: choice
+        default: beta
+        options: [beta]
+      publish_only:
+        description: "Rewrite the manifest only — build and sign nothing"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -97,6 +144,7 @@ jobs:
   # written there.
   build:
     needs: release
+    if: ${{ !inputs.publish_only }}
     environment: release
     permissions:
       contents: write
@@ -245,6 +293,7 @@ jobs:
   # and WebKit but not its own libc.
   linux:
     needs: release
+    if: ${{ !inputs.publish_only }}
     environment: release
     permissions:
       contents: write
@@ -333,6 +382,15 @@ jobs:
   # rather than publishing one that is missing a platform.
   publish:
     needs: [release, build, linux]
+    # Both legs must have finished for a release — a manifest missing a
+    # platform is worse than no manifest at all. A promotion skips them both
+    # on purpose and reads the bundles off the release instead, which is what
+    # `publish_only` means; `!cancelled()` is what lets a skipped `needs`
+    # through, and the explicit results are what stops a *failed* one.
+    if: >-
+      ${{ !cancelled() && needs.release.result == 'success'
+          && (inputs.publish_only
+              || (needs.build.result == 'success' && needs.linux.result == 'success')) }}
     runs-on: depot-ubuntu-22.04
     permissions:
       contents: write
@@ -344,10 +402,40 @@ jobs:
         with:
           node-version: 22
 
+      # The list of dispatch options above is a courtesy; this is the rule.
+      # `workflow_dispatch` and `workflow_call` share one `inputs` context, so
+      # the only thing that distinguishes "a person pressed Run workflow" from
+      # "promotion called it" is the event name.
+      - name: general access comes from promotion and from nowhere else
+        env:
+          CHANNEL: ${{ inputs.channel || 'beta' }}
+          PUBLISH_ONLY: ${{ inputs.publish_only }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANNEL" != beta ] && [ "$CHANNEL" != general ]; then
+            echo "::error::channel must be beta or general, not '$CHANNEL'."; exit 1
+          fi
+          if [ "$CHANNEL" = general ] && [ "${{ github.event_name }}" != workflow_call ]; then
+            echo "::error::Writing the general-access address is promotion's job." \
+                 "Run the 'promote' workflow, which requires a typed confirmation, checks the" \
+                 "version is on beta and is not a downgrade, and writes the channel manifest." \
+                 "Nothing has been published."
+            exit 1
+          fi
+          # Signing and general access are never the same run. A promotion
+          # moves what is already built; anything that builds is a release.
+          if [ "$CHANNEL" = general ] && [ "$PUBLISH_ONLY" != true ]; then
+            echo "::error::channel=general requires publish_only=true." \
+                 "General access is reached by moving what was already built and signed," \
+                 "never by building again. Nothing has been published."
+            exit 1
+          fi
+
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag }}
           VERSION: ${{ needs.release.outputs.version }}
+          CHANNEL: ${{ inputs.channel || 'beta' }}
         run: |
           # The signatures are the evidence that a leg got to the end: one
           # per updater artifact, uploaded beside it. A leg that failed or
@@ -375,6 +463,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --tag "$TAG" \
             --version "$VERSION" \
+            --channel "$CHANNEL" \
             --assets "$RUNNER_TEMP/assets" \
             --out "$RUNNER_TEMP/latest.json"
 
@@ -385,6 +474,38 @@ jobs:
           # versioned release keeps its own copy so that a rebuild of an older
           # tag can be read back and compared.
           gh release upload "$TAG" "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber
+
+          # **Three addresses, and the third can never be retired.**
+          #
+          #   desktop-beta    the beta channel. Written by every release.
+          #   desktop-stable  general access. Written only by a promotion.
+          #   desktop-latest  the address that existed before channels, kept
+          #                   forever as an alias of general access.
+          #
+          # That last one is not scaffolding. Every installed copy has its
+          # updater address compiled into its bundle, and the only way a copy
+          # ever reads a different one is by updating — which it can only do
+          # through the address it already has. There is no migration, ever:
+          # whatever `desktop-latest` serves is what every copy predating
+          # channels gets, permanently. So it is written with exactly the
+          # bytes general access gets, and a copy that never takes the channel
+          # release stays on general access forever by construction, which is
+          # the answer to "why am I not getting betas".
+          #
+          # Deliberately not mirroring the image tags, where `latest` kept its
+          # conventional "newest build" meaning: that was a Docker convention,
+          # which does not apply to a Firetower-invented release name. And the
+          # control plane has a second opinion — the updater compares the
+          # image's stamped version against what it was told to fetch —
+          # whereas this manifest is the only source of truth. Tauri installs
+          # whatever it says, if the version is greater. Nothing would catch a
+          # mistake here.
+          case "$CHANNEL" in
+            beta) ROLLING=desktop-beta; ALIASES="" ;;
+            general) ROLLING=desktop-stable; ALIASES="desktop-latest" ;;
+            *) echo "::error::channel must be beta or general, not $CHANNEL" >&2; exit 1 ;;
+          esac
+          echo "writing the $CHANNEL address: $ROLLING${ALIASES:+ (and $ALIASES)}"
 
           # The rolling release only ever moves forward. Serialising runs above
           # stops two of them interleaving, but it does not order them by
@@ -416,39 +537,114 @@ jobs:
           # always the safe answer — it is the single address every installed
           # copy reads, `$TAG` already has its own copy of this manifest a few
           # lines up, and this job can be re-run once whatever failed is over.
-          held=""
-          rolling=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/desktop-latest" \
-            --jq '[.assets[] | select(.name == "latest.json")] | length' \
-            2>"$RUNNER_TEMP/rolling.err") || rolling=""
-          if [ -z "$rolling" ]; then
-            if ! grep -q '(HTTP 404)' "$RUNNER_TEMP/rolling.err"; then
-              cat "$RUNNER_TEMP/rolling.err" >&2
-              echo "Could not read what desktop-latest holds, so it is not being moved." >&2
-              echo "$TAG keeps its own copy of this manifest; re-run this job." >&2
-              exit 1
+          # **Every address is guarded, not just the first one.**
+          #
+          # This used to read what `$ROLLING` held, compare that, and then
+          # upload to `$ROLLING` *and* `$ALIASES` in a loop. `desktop-latest`
+          # was therefore clobbered having been compared against nothing — and
+          # it is the address every copy predating channels reads, forever.
+          # The loop had a second hole: a failure between its two iterations
+          # left `desktop-stable` moved and `desktop-latest` not, two
+          # general-access addresses disagreeing with nothing to notice.
+          #
+          # So each address answers for itself: read what it holds, refuse to
+          # move it backwards, write it. An address that is already ahead is
+          # skipped and said out loud rather than silently overwritten, and if
+          # a later address fails the earlier ones have already landed — which
+          # is the same "re-run it" position as before, now with the state
+          # printed.
+          #
+          # **Per channel, and it has to be.** Beta is legitimately and
+          # permanently ahead of general access, so a guard spanning both
+          # channels would read every promotion as a downgrade and refuse
+          # forever. Within one address the rule is unchanged: it is the single
+          # thing every copy reading it reads, and moving it back is a silent
+          # downgrade of all of them.
+          moved=""
+          skipped=""
+          failed=""
+          for address in $ROLLING $ALIASES; do
+            held=""
+            rolling=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$address" \
+              --jq '[.assets[] | select(.name == "latest.json")] | length' \
+              2>"$RUNNER_TEMP/rolling.err") || rolling=""
+            if [ -z "$rolling" ]; then
+              if ! grep -q '(HTTP 404)' "$RUNNER_TEMP/rolling.err"; then
+                cat "$RUNNER_TEMP/rolling.err" >&2
+                echo "Could not read what $address holds, so it is not being moved." >&2
+                echo "$TAG keeps its own copy of this manifest; re-run this job." >&2
+                exit 1
+              fi
+              echo "No $address release yet — this one creates it."
+              gh release create "$address" -R "$GITHUB_REPOSITORY" --prerelease \
+                --title "desktop: $CHANNEL" \
+                --notes "The desktop app's $CHANNEL address. Its \`latest.json\` is what an installed copy reading this address gets; the versioned releases hold the same manifest." \
+                >/dev/null
+              rolling=0
             fi
-            echo "No desktop-latest release yet — this one creates it."
-            rolling=0
-          fi
-          if [ "$rolling" != 0 ]; then
-            if ! gh release download desktop-latest -R "$GITHUB_REPOSITORY" \
-                -p latest.json -D "$RUNNER_TEMP/held" --clobber; then
-              echo "desktop-latest holds a manifest that would not download, so it is" >&2
-              echo "not being moved. $TAG keeps its own copy; re-run this job." >&2
-              exit 1
+            if [ "$rolling" != 0 ]; then
+              rm -rf "$RUNNER_TEMP/held"
+              if ! gh release download "$address" -R "$GITHUB_REPOSITORY" \
+                  -p latest.json -D "$RUNNER_TEMP/held" --clobber; then
+                echo "$address holds a manifest that would not download, so it is" >&2
+                echo "not being moved. $TAG keeps its own copy; re-run this job." >&2
+                exit 1
+              fi
+              held=$(jq -r '.version // empty' "$RUNNER_TEMP/held/latest.json" || true)
+              if [ -z "$held" ]; then
+                echo "$address holds a manifest with no version in it, so there is" >&2
+                echo "nothing to compare $VERSION against and it is not being moved." >&2
+                exit 1
+              fi
             fi
-            held=$(jq -r '.version // empty' "$RUNNER_TEMP/held/latest.json" || true)
-            if [ -z "$held" ]; then
-              echo "desktop-latest holds a manifest with no version in it, so there is" >&2
-              echo "nothing to compare $VERSION against and it is not being moved." >&2
-              exit 1
+
+            # Captured on its own line and checked, never inside the `if`: a
+            # command substitution *in* a condition is exempt from `set -e`, so
+            # a `sort` that failed used to read as "not newer" and let the
+            # write through. Third instance of that shape found in this effort.
+            newest=""
+            if [ -n "$held" ]; then
+              newest=$(printf '%s\n%s\n' "$held" "$VERSION" | sort -V | tail -1)
+              if [ -z "$newest" ]; then
+                echo "Could not compare $held against $VERSION, so $address is not" >&2
+                echo "being moved. $TAG keeps its own copy; re-run this job." >&2
+                exit 1
+              fi
             fi
+            if [ -n "$held" ] && [ "$held" != "$VERSION" ] && [ "$newest" = "$held" ]; then
+              echo "$address holds $held, which is newer than $VERSION. Leaving it alone."
+              skipped="$skipped $address($held)"
+              continue
+            fi
+
+            # **Not allowed to die inside the loop.** Under `set -e` an upload
+            # that failed used to end the step then and there, so neither the
+            # summary below nor the warning ever ran: `desktop-stable` moved,
+            # `desktop-latest` did not, and the log said so only by which
+            # `published` lines happened to be present. The skipped case was
+            # already announced; the failed case is the one where nobody is
+            # looking, so it deserves it more.
+            #
+            # Every address is attempted. Stopping after the first failure
+            # would *guarantee* the split that carrying on only risks.
+            if gh release upload "$address" "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber; then
+              echo "published $VERSION to $address"
+              moved="$moved $address"
+            else
+              echo "::error::Could not publish $VERSION to $address."
+              failed="$failed $address"
+            fi
+          done
+
+          echo "moved:${moved:- nothing}${skipped:+ · left alone:$skipped}${failed:+ · failed:$failed}"
+          if [ -n "$failed" ]; then
+            echo "::error::$CHANNEL's addresses now disagree: moved$moved, failed$failed." \
+                 "The ones that failed are *behind*, so re-running this job moves them forward" \
+                 "— the no-backwards rule will leave the ones that already landed alone."
+            exit 1
           fi
-          if [ -n "$held" ] && [ "$held" != "$VERSION" ] &&
-            [ "$(printf '%s\n%s\n' "$held" "$VERSION" | sort -V | tail -1)" = "$held" ]; then
-            echo "desktop-latest holds $held, which is newer than $VERSION."
-            echo "Leaving it alone: $TAG keeps its own copy of this manifest."
-            exit 0
+          if [ -n "$skipped" ] && [ -n "$moved" ]; then
+            echo "::warning::$CHANNEL's addresses do not all hold the same version:" \
+                 "moved$moved, left alone$skipped. That is the no-backwards rule doing its job," \
+                 "but two general-access addresses disagreeing is worth knowing about."
           fi
-          gh release upload desktop-latest "$RUNNER_TEMP/latest.json" -R "$GITHUB_REPOSITORY" --clobber
-          echo "published $VERSION"

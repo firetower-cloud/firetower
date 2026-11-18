@@ -78,11 +78,70 @@ jobs:
       version: ${{ needs.please.outputs.mobile_version }}
       ref: ${{ github.sha }}
 
+  # Every released version is on beta, and this is what says so.
+  #
+  # Beta is continuous: merging release-please's pull request *is* the beta
+  # deploy. There is no second gate and no way to hold a release back from it,
+  # which is why this job has no condition of its own beyond "something was
+  # released" — the `beta` image tag and the `desktop-beta` address are moved
+  # by the jobs above, and this records the same fact in the one document every
+  # installation reads.
+  #
+  # The `general` pins are not touched here and never are by a release.
+  # General access is a pin moved by `promote.yml`, by hand, and that
+  # separation is the whole of the design.
+  #
+  # After the jobs that publish the artifacts, and only for the packages whose
+  # job actually succeeded: a manifest saying 0.57.0 is on beta when the image
+  # never pushed would point every beta installation at something that is not
+  # there. `!cancelled()` rather than `always()` so a cancelled run does not
+  # publish half a release, and `result == 'success'` per package rather than
+  # one condition for both, because the two release independently.
+  channels:
+    needs: [please, image, desktop]
+    if: >-
+      ${{ !cancelled()
+          && (needs.please.outputs.released == 'true'
+              || needs.please.outputs.desktop_released == 'true') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          CONTROL_PLANE: ${{ needs.please.outputs.released == 'true' && needs.image.result == 'success' && needs.please.outputs.version || '' }}
+          DESKTOP: ${{ needs.please.outputs.desktop_released == 'true' && needs.desktop.result == 'success' && needs.please.outputs.desktop_version || '' }}
+        run: |
+          set -euo pipefail
+          pins=()
+          # `if` rather than `[ … ] && …`: under `set -e` a bare test that is
+          # false is the statement's exit status, so a desktop-only release
+          # would end this step successfully having published nothing.
+          if [ -n "$CONTROL_PLANE" ]; then pins+=("control_plane:beta=$CONTROL_PLANE"); fi
+          if [ -n "$DESKTOP" ]; then pins+=("desktop:beta=$DESKTOP"); fi
+          if [ ${#pins[@]} -eq 0 ]; then
+            echo "::warning::Nothing published, so nothing is going on beta." \
+                 "A package that released but whose artifacts did not build is" \
+                 "deliberately left off the manifest: pointing beta at a build" \
+                 "that is not in the registry is worse than lagging by one release."
+            exit 0
+          fi
+          .github/scripts/publish-channel-pin.sh "${pins[@]}"
+
   # The worker, as a binary a machine installs: one per shape it runs on, plus
   # the installer script and a checksum file, all on the release the job
-  # above cut. `usefiretower.com/worker.sh` redirects to the newest release's
-  # copy of the script, and the script downloads its binary from the same
-  # release — so the two can never disagree.
+  # above cut. The script on a release downloads its binary from that same
+  # release, so a script and a binary can never disagree about a version.
+  #
+  # **A release does not touch `worker-latest`**, the rolling release
+  # `usefiretower.com/worker.sh` redirects to. That release follows general
+  # access and is moved by `promote.yml` alone — see the `worker` job there,
+  # and #459 for why a pointer meaning "newest" became wrong the moment there
+  # were two channels.
   worker:
     needs: please
     if: needs.please.outputs.released == 'true'
@@ -157,7 +216,6 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.please.outputs.tag }}
-          VERSION: ${{ needs.please.outputs.version }}
         run: |
           cp install/worker.sh install/install.sh dist/
           cd dist
@@ -165,27 +223,31 @@ jobs:
           ls -la
           gh release upload "$TAG" firetower-worker-*.tar.gz worker.sh install.sh SHA256SUMS --clobber
 
-          # The same files onto the rolling release `usefiretower.com/worker.sh`
-          # redirects to. GitHub's own `latest` is the newest release of the
-          # whole repository, whichever package cut it — the desktop's, half
-          # the time — so the script's "newest" has to be a release of its own.
-          if ! gh release view worker-latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create worker-latest -R "$GITHUB_REPOSITORY" --prerelease \
-              --title "worker: latest" \
-              --notes "The newest worker, for \`curl -fsSL https://usefiretower.com/worker.sh | sh\`. Moved on every release; the versioned releases hold the same files."
-          fi
-          gh release upload worker-latest firetower-worker-*.tar.gz worker.sh install.sh SHA256SUMS -R "$GITHUB_REPOSITORY" --clobber
-          gh release edit worker-latest -R "$GITHUB_REPOSITORY" --notes "The newest worker ($VERSION), for \`curl -fsSL https://usefiretower.com/worker.sh | sh\`. Moved on every release; firetower-v$VERSION holds the same files."
-
       # The whole chain, before anybody is told the release exists: the
-      # rolling release, the script from it, the tarball it names, the
-      # checksum, and the binary answering. A failure here fails the release.
+      # published script, the tarball it names, the checksum, and the binary
+      # answering. A failure here fails the release.
+      #
+      # **Against this version's own release, because that is the path this
+      # workflow publishes.** It used to be against `worker-latest` — correct
+      # while a release moved that too, which it no longer does (#459): the
+      # rolling release follows general access and is moved by `promote.yml`,
+      # so asserting here that it holds this version would assert the opposite
+      # of the thing that was just fixed.
+      #
+      # Nothing is weakened by the move. It is still the published script from
+      # a published release, downloading the published tarball and checking it
+      # against the published checksum — and it is now the *pinned* path
+      # specifically, which is the one the control-plane-generated authorize
+      # command uses (`--version X.Y.Z`) and the one every worker upgrade runs.
+      # The unpinned one-liner is exercised by `promote.yml`, where the release
+      # it resolves to is written.
       - name: the published installer installs the published worker
         env:
+          TAG: ${{ needs.please.outputs.tag }}
           VERSION: ${{ needs.please.outputs.version }}
         run: |
           export FIRETOWER_WORKER_ROOT="$RUNNER_TEMP/worker-smoke"
-          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/worker-latest/worker.sh" \
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/worker.sh" \
             | sh -s -- --version "$VERSION" --skip-packages
           said="$("$FIRETOWER_WORKER_ROOT/bin/firetower-worker" --version)"
           case "$said" in *"$VERSION"*) echo "ok: $said" ;; *) echo "installed $said, expected $VERSION" >&2; exit 1 ;; esac
@@ -193,7 +255,9 @@ jobs:
       # machine. The runner has Docker and Node already, so this proves the
       # download, the script and the npm step — the rest is a real server's.
       - name: the published installer gets the CLI onto a machine
+        env:
+          TAG: ${{ needs.please.outputs.tag }}
         run: |
-          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/worker-latest/install.sh" \
+          curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG/install.sh" \
             | sh -s -- --yes --deps-only --skip-docker
           firetower --version

@@ -115,7 +115,21 @@ jobs:
       # publish `edge` for a release.
       #
       #   no version  → edge, the tip of main
-      #   0.2.0       → 0.2.0, 0.2, latest
+      #   0.2.0       → 0.2.0, 0.2, beta, latest
+      #
+      # `beta` is the channel. Every released version goes to beta — there is
+      # no gate between merging release-please's pull request and being on it —
+      # so this is the only thing that ever writes it, and it moves on every
+      # release. `stable` is the general-access channel and is **not** here on
+      # purpose: it is moved by `promote.yml` and by nothing else, which is
+      # what makes general access a deliberate act rather than a consequence
+      # of merging. See docs/channels.md for all four tags together.
+      #
+      # `beta` and `latest` therefore point at the same build, and always
+      # will. That redundancy is intended and is recorded here so nobody
+      # removes one as a simplification: `beta` is a channel an operator may
+      # pin, `latest` is the convention for whoever pulls by hand, and they
+      # would diverge the moment a release were ever held back from beta.
       - id: meta
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
@@ -124,6 +138,7 @@ jobs:
             type=raw,value=edge,enable=${{ inputs.version == '' }}
             type=semver,pattern={{version}},value=${{ inputs.version || '0.0.0' }},enable=${{ inputs.version != '' }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version || '0.0.0' }},enable=${{ inputs.version != '' }}
+            type=raw,value=beta,enable=${{ inputs.version != '' }}
             type=raw,value=latest,enable=${{ inputs.version != '' }}
 
       - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0

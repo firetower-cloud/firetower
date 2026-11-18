@@ -63,6 +63,26 @@ const replace = (assets, suffix, over) =>
   assets.map((a) => (a.name.endsWith(suffix) ? { ...a, ...over } : a));
 
 describe("the manifest every installed copy reads", () => {
+  it("says which channel it is, for the screen and for nothing else", () => {
+    // The plugin has no channel concept and ignores this. It is here so the
+    // Updates screen can answer "why do I have this build and my colleague
+    // does not" — no version string carries the channel, and the two channels
+    // are two addresses serving two of these documents.
+    expect(built(release()).channel).toBe("beta");
+    expect(built(release(), { channel: "general" }).channel).toBe("general");
+    // Defaulted rather than required, because a release is a beta deploy and
+    // the general-access write is the deliberate one.
+    expect(
+      manifest({
+        version: "0.29.1",
+        repo: "firetower-cloud/firetower",
+        tag: "desktop-v0.29.1",
+        assets: release(),
+        pubkey: fixtures.pubkey,
+      }).channel,
+    ).toBe("beta");
+  });
+
   it("carries the keys the CLI wrote, and Linux's two beside them", () => {
     // Not a subset: these are the keys on the published desktop-v0.29.1
     // manifest, which is what installed copies are already asking for. One

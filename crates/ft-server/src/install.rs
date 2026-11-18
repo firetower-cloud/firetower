@@ -45,13 +45,30 @@ const REMOTE_SCRIPT: &str = "$HOME/.firetower/worker/install.sh";
 /// With the key, it also authorises Firetower on the account, so the machine
 /// can be added the moment the script finishes. Without it — in a diagnosis,
 /// where the key is a screen away — it installs and says so.
+///
+/// **It pins this control plane's own version**, which is what makes a fresh
+/// machine arrive with the matching binary first time. The script downloads
+/// from `worker-latest` by default, and that rolling release serves general
+/// access — moved by a promotion and by nothing else, which is what #459
+/// fixed — so on a control plane running a beta, an unpinned install would
+/// land an older worker that the first connection then immediately replaces.
+/// Pinning removes that install-then-reinstall, and it is this build's own
+/// version rather than the channel's newest for a stronger reason: a worker
+/// newer than its control plane is the same protocol mismatch as one older,
+/// so nothing ever moves a worker ahead. [`install`] pins the same version
+/// when it runs the script over ssh; this is the copy a person types.
+///
+/// That the worker has no channel of its own is deliberate. Its version is a
+/// function of its control plane's, and a worker channel would have been a
+/// setting with no decision behind it — see docs/channels.md.
 pub fn one_liner(public_key: Option<&str>) -> String {
+    let version = env!("CARGO_PKG_VERSION");
     match public_key {
         Some(key) => format!(
-            "curl -fsSL {SCRIPT_URL} | sh -s -- --authorize '{}'",
+            "curl -fsSL {SCRIPT_URL} | sh -s -- --version {version} --authorize '{}'",
             key.trim().replace('\'', "'\\''")
         ),
-        None => format!("curl -fsSL {SCRIPT_URL} | sh"),
+        None => format!("curl -fsSL {SCRIPT_URL} | sh -s -- --version {version}"),
     }
 }
 
@@ -188,8 +205,11 @@ mod tests {
     #[test]
     fn the_one_liner_carries_the_key_safely() {
         let line = one_liner(Some("ssh-ed25519 AAAA firetower"));
-        assert!(line
-            .starts_with("curl -fsSL https://usefiretower.com/worker.sh | sh -s -- --authorize '"));
+        assert!(
+            line.starts_with("curl -fsSL https://usefiretower.com/worker.sh | sh -s -- --version "),
+            "{line}"
+        );
+        assert!(line.contains(" --authorize '"), "{line}");
         assert!(line.ends_with("'ssh-ed25519 AAAA firetower'"), "{line}");
 
         let odd = one_liner(Some("it's"));
@@ -197,8 +217,34 @@ mod tests {
 
         assert_eq!(
             one_liner(None),
-            "curl -fsSL https://usefiretower.com/worker.sh | sh"
+            format!(
+                "curl -fsSL https://usefiretower.com/worker.sh | sh -s -- --version {}",
+                env!("CARGO_PKG_VERSION")
+            )
         );
+    }
+
+    /// A fresh machine gets the binary that matches the control plane telling
+    /// it to install, on the first attempt, whatever channel that control
+    /// plane is on.
+    ///
+    /// Without the pin the script takes `worker-latest`, which serves general
+    /// access — so a beta control plane would hand out an older worker and
+    /// replace it on the first connection. The version has to be this build's
+    /// own, not the channel's newest: nothing ever moves a worker ahead of its
+    /// control plane.
+    #[test]
+    fn the_one_liner_pins_the_control_plane_s_own_version() {
+        let mine = env!("CARGO_PKG_VERSION");
+        for line in [
+            one_liner(Some("ssh-ed25519 AAAA firetower")),
+            one_liner(None),
+        ] {
+            assert!(line.contains(&format!("--version {mine}")), "{line}");
+        }
+        // The same version the control plane installs over its own ssh
+        // connection, so the typed line and the automatic one cannot disagree.
+        assert!(SCRIPT.contains("--version"));
     }
 
     /// The script is what runs on every machine, so it has to be here.

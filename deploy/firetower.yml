@@ -55,7 +55,18 @@ name: firetower
 
 services:
   firetower:
-    image: ghcr.io/firetower-cloud/firetower:latest
+    # `:stable` is general access — the version somebody has deliberately
+    # promoted. `:beta` is the newest release, and editing this line to it is
+    # how an installation opts in; there is no setting, because the tag *is*
+    # the channel. **Moving to beta is one-way**: the database migrates
+    # forward and the only route back is restoring a dump.
+    #
+    # Not `:latest`. It keeps its conventional meaning — the newest build
+    # published — and is not a channel, so an installation pinned to it is
+    # told general access is one version and handed another, and the updater
+    # refuses to upgrade it at all until this line is changed. All four tags
+    # are in docs/channels.md.
+    image: ghcr.io/firetower-cloud/firetower:stable
     restart: unless-stopped
     depends_on:
       postgres:
@@ -136,7 +147,11 @@ services:
   # Workers on other machines are not its business. The control plane
   # recreates those itself, over the ssh connection it already has.
   updater:
-    image: ghcr.io/firetower-cloud/firetower-updater:latest
+    # The same channel as the control plane, always. The two are built and
+    # published together and the control plane checks its API version against
+    # this one's on every call, so they cannot be on different channels —
+    # change both lines or neither.
+    image: ghcr.io/firetower-cloud/firetower-updater:stable
     restart: unless-stopped
     environment:
       # The same token the control plane carries. Refuses everything without

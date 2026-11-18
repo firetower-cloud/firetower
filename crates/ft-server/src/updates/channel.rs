@@ -187,12 +187,26 @@ pub struct Source {
 
 impl Source {
     pub const ENV: &'static str = "FIRETOWER_CHANNEL_MANIFEST";
+    /// What the writer leaves on the release before it replaces the
+    /// manifest. `docs/channels.md`: uploading an asset deletes the old one
+    /// before it writes the new, so a failed upload can leave the release
+    /// with no manifest — and **a release carrying this but no manifest is a
+    /// destroyed manifest**, not a repository that has never promoted.
+    pub const PREVIOUS: &'static str = "channels.previous.json";
     /// The release the promotion workflow uploads to, and the one asset on
     /// it. Named `channels` rather than `channels-latest`: the rolling
     /// releases beside it point at the newest of a *series*, and there is
     /// only ever one channel manifest.
     pub const DEFAULT: &'static str =
         "https://github.com/firetower-cloud/firetower/releases/download/channels/channels.json";
+
+    /// The sibling asset, beside whatever this source names.
+    pub fn previous(&self) -> String {
+        match self.url.rfind('/') {
+            Some(at) => format!("{}{}", &self.url[..=at], Self::PREVIOUS),
+            None => Self::PREVIOUS.to_string(),
+        }
+    }
 
     pub fn from_env() -> Self {
         Self {
@@ -396,22 +410,49 @@ pub fn read(body: &str) -> Read {
 
 /// Fetch it. A 404 is absence — the bootstrap case — and every other way a
 /// read can fail is a reason to change nothing.
-pub async fn fetch(http: &reqwest::Client, source: &Source) -> Read {
+pub async fn fetch(http: &reqwest::Client, source: &Source) -> Fetched {
     let response = match http.get(&source.url).timeout(PATIENCE).send().await {
         Ok(r) => r,
         Err(e) => {
-            return Read::Unreadable(format!("the channel manifest could not be fetched: {e}"))
+            return Fetched::nothing(Read::Unreadable(format!(
+                "the channel manifest could not be fetched: {e}"
+            )))
         }
     };
     if response.status() == reqwest::StatusCode::NOT_FOUND {
-        return Read::Absent;
+        // Nothing at the address — but the writer leaves the document it is
+        // replacing beside it, so a release carrying that and no manifest is
+        // one whose upload failed part-way rather than one that has never
+        // promoted. Server-side proof, which no local memory can supply to a
+        // control plane that has only just been installed.
+        return Fetched::nothing(match served(http, &source.previous()).await {
+            Some(true) => Read::Vanished(format!(
+                "the channel manifest has gone from {}, but {} is still on the release — so an \
+                 upload failed part-way and the document has been destroyed rather than never \
+                 published. Check {}, confirm it is what you expect, and re-upload it as the \
+                 manifest. Nothing is being moved until it is back.",
+                source.url,
+                Source::PREVIOUS,
+                Source::PREVIOUS,
+            )),
+            Some(false) => Read::Absent,
+            // Could not tell whether the previous document is there. Absence
+            // is the one answer that lets an installation move, so it is not
+            // the one to guess at.
+            None => Read::Unreadable(format!(
+                "the channel manifest is not at {}, and whether {} is beside it could not be \
+                 read — so whether this is a first start or a destroyed document is unknown",
+                source.url,
+                Source::PREVIOUS,
+            )),
+        });
     }
     if !response.status().is_success() {
-        return Read::Unreadable(format!(
+        return Fetched::nothing(Read::Unreadable(format!(
             "the channel manifest at {} answered {}",
             source.url,
             response.status()
-        ));
+        )));
     }
 
     // A chunk at a time with a ceiling, rather than `text()`, which allocates
@@ -425,24 +466,61 @@ pub async fn fetch(http: &reqwest::Client, source: &Source) -> Read {
         match response.chunk().await {
             Ok(Some(chunk)) => {
                 if body.len() + chunk.len() > MOST {
-                    return Read::Unreadable(format!(
+                    return Fetched::served(Read::Unreadable(format!(
                         "the channel manifest at {} is longer than {MOST} bytes, so it is not \
                          being read. Nothing that size is this document.",
                         source.url
-                    ));
+                    )));
                 }
                 body.extend_from_slice(&chunk);
             }
             Ok(None) => break,
             Err(e) => {
-                return Read::Unreadable(format!("the channel manifest could not be read: {e}"))
+                return Fetched::served(Read::Unreadable(format!(
+                    "the channel manifest could not be read: {e}"
+                )))
             }
         }
     }
-    match std::str::from_utf8(&body) {
+    Fetched::served(match std::str::from_utf8(&body) {
         Ok(text) => read(text),
         Err(_) => Read::Malformed("the channel manifest is not text".into()),
+    })
+}
+
+/// What one fetch produced, and whether the host served anything at all.
+///
+/// The second half is the part that matters: **a 200 is proof a document
+/// exists at that address, whatever this process made of it.** A manifest
+/// that answered and did not parse is still a manifest that exists, and an
+/// installation that forgets that will read the next 404 as a first start.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fetched {
+    pub read: Read,
+    pub served: bool,
+}
+
+impl Fetched {
+    fn served(read: Read) -> Self {
+        Self { read, served: true }
     }
+
+    fn nothing(read: Read) -> Self {
+        Self {
+            read,
+            served: false,
+        }
+    }
+}
+
+/// Whether something is at an address. `None` when it could not be told,
+/// which is never treated as "no".
+async fn served(http: &reqwest::Client, url: &str) -> Option<bool> {
+    let answered = http.get(url).timeout(PATIENCE).send().await.ok()?;
+    if answered.status() == reqwest::StatusCode::NOT_FOUND {
+        return Some(false);
+    }
+    answered.status().is_success().then_some(true)
 }
 
 /// What the last read said, and the last document that actually read.
@@ -462,6 +540,15 @@ struct Held {
     /// The last document that read, which a failed attempt does not disturb.
     held: Option<Manifest>,
     read_at: Option<DateTime<Utc>>,
+    /// Tickets handed out, and the highest one whose result has been stored.
+    ///
+    /// Two reads can be in flight at once — the six-hourly check and
+    /// somebody pressing the button — and they do not come back in the order
+    /// they left. A slow answer that lands after a newer one has been stored
+    /// is older news, and the dangerous shape of that is a first-start `404`
+    /// arriving after a document has already read.
+    given: u64,
+    stored: u64,
 }
 
 /// What the cache holds, for a screen.
@@ -473,32 +560,28 @@ pub struct Seen {
 }
 
 impl Manifests {
-    /// Ask again, and remember. Returns what this attempt said.
-    ///
-    /// `first_start` is whether this installation has ever read a manifest —
-    /// see [`EVER_READ`]. It decides what absence means, and nothing else.
-    pub async fn refresh(
-        &self,
-        http: &reqwest::Client,
-        source: &Source,
-        first_start: bool,
-    ) -> Read {
-        let read_one_before = !first_start || self.0.read().await.held.is_some();
-        let found = match fetch(http, source).await {
-            // **Absence is the bootstrap case only the first time.** A
-            // document that has been read before and is now a 404 has gone,
-            // which is a failure rather than a fresh start — and treating it
-            // as a fresh start is precisely how an installation comes to
-            // accept an older pin from a manifest somebody destroyed.
-            Read::Absent if read_one_before => Read::Vanished(format!(
-                "the channel manifest has gone from {}. This installation has read one before, \
-                 so the document has been destroyed rather than never published — it has to be \
-                 put back, and waiting will not bring it back",
-                source.url
-            )),
-            other => other,
-        };
+    /// Take a ticket for a read that is about to start.
+    async fn ticket(&self) -> u64 {
         let mut held = self.0.write().await;
+        held.given += 1;
+        held.given
+    }
+
+    /// Store what a read said, unless something newer has already landed.
+    ///
+    /// Returns what the cache holds afterwards, which for a discarded answer
+    /// is the newer one that beat it.
+    async fn store(&self, ticket: u64, found: Read) -> Read {
+        let mut held = self.0.write().await;
+        if ticket <= held.stored {
+            let newer = held.last.clone().unwrap_or(found);
+            tracing::info!(
+                "a channel manifest read came back after a newer one had landed; keeping the \
+                 newer answer"
+            );
+            return newer;
+        }
+        held.stored = ticket;
         if let Read::Found(manifest) = &found {
             held.held = Some(manifest.clone());
         }
@@ -508,6 +591,11 @@ impl Manifests {
         held.last = Some(found.clone());
         held.read_at = Some(Utc::now());
         found
+    }
+
+    /// Whether a document is held from an earlier read in this process.
+    async fn holds_one(&self) -> bool {
+        self.0.read().await.held.is_some()
     }
 
     pub async fn seen(&self) -> Seen {
@@ -525,19 +613,74 @@ impl Manifests {
     }
 }
 
-/// Ask the host again, remember what it said, and record that a document
-/// read if one did.
+/// Ask the host again, and remember what it said.
+///
+/// The order here is the whole of what makes a bad read unable to pass for a
+/// first start:
+///
+/// 1. take a ticket, then fetch;
+/// 2. decide what absence means **after** the fetch, from the marker as it is
+///    now — a `404` that overtook a successful read must not be classified
+///    against the world as it was when it set off;
+/// 3. record that a document read **before** acting on one, because a read
+///    this installation could not record is one a restart would call a first
+///    start;
+/// 4. store, unless something newer has already landed.
 pub async fn refresh(state: &AppState) -> Read {
     let updates = &state.updates;
-    let first_start = a_first_start(state).await;
-    let found = updates
-        .channel_manifest
-        .refresh(&updates.http, &updates.channel_source, first_start)
-        .await;
-    if matches!(found, Read::Found(_)) {
-        remember_a_read(state).await;
+    let ticket = updates.channel_manifest.ticket().await;
+    let Fetched { read, served } = fetch(&updates.http, &updates.channel_source).await;
+
+    let before = read_one_before(&state.accounts, updates.channel_manifest.holds_one().await).await;
+    let found = classify(read, before, &updates.channel_source.url);
+
+    // **Recorded on any 200, parsed or not.** The marker means "a manifest
+    // has existed at this address", not "a manifest once parsed" — a
+    // document that answered and would not parse is still proof it exists,
+    // and forgetting that is what lets the next 404 read as a first start.
+    let found = match served {
+        true => acted_on(found, remember_a_read(&state.accounts).await),
+        false => found,
+    };
+
+    updates.channel_manifest.store(ticket, found).await
+}
+
+/// What a fetch means, given whether this installation has read a manifest
+/// before.
+///
+/// **Absence is the bootstrap case only the first time.** A document that has
+/// been read before and is now a 404 has gone, which is a failure rather than
+/// a fresh start — and treating it as a fresh start is precisely how an
+/// installation comes to accept an older pin from a manifest somebody
+/// destroyed.
+fn classify(fetched: Read, read_one_before: bool, url: &str) -> Read {
+    match fetched {
+        Read::Absent if read_one_before => Read::Vanished(format!(
+            "the channel manifest has gone from {url}. This installation has read one before, \
+             so the document has been destroyed rather than never published — it has to be put \
+             back, and waiting will not bring it back"
+        )),
+        other => other,
     }
-    found
+}
+
+/// Whether a document that read may be acted on.
+///
+/// Only if this installation managed to write down that it read one. A
+/// document it could not record is one a restart would mistake for a first
+/// start, and the next absence after that would read as a bootstrap — which
+/// ends with a general-access installation being offered a beta. The cost of
+/// refusing is one cycle.
+fn acted_on(found: Read, recorded: Result<()>) -> Read {
+    match recorded {
+        Ok(()) => found,
+        Err(e) => Read::Unreadable(format!(
+            "the channel manifest read, but recording that it did failed: {e:#}. It is not \
+             being acted on — a read this installation cannot write down is one a restart would \
+             mistake for a first start"
+        )),
+    }
 }
 
 /// What is held, asking once if nothing in this process ever has. A control
@@ -550,30 +693,48 @@ pub async fn seen(state: &AppState) -> Seen {
     state.updates.channel_manifest.seen().await
 }
 
+/// Whether this installation has read a channel manifest before.
+///
+/// Two sources, and **both are needed**: a document already held in this
+/// process, and the durable marker for every process before it. The cache
+/// alone would forget across the recreate that an upgrade performs, which is
+/// the restart that makes a destroyed manifest look like a first start.
+async fn read_one_before(accounts: &crate::accounts::Accounts, holds_one: bool) -> bool {
+    holds_one || !a_first_start(accounts).await
+}
+
 /// Whether absence may still mean "nothing has been published yet".
 ///
 /// A database that will not answer counts as **has read one before**, which
 /// is the conservative direction: being wrong that way costs a switch that
 /// is not offered, and being wrong the other way costs an installation
 /// accepting an older pin from a manifest that vanished.
-async fn a_first_start(state: &AppState) -> bool {
-    match state.accounts.setting(EVER_READ).await {
+async fn a_first_start(accounts: &crate::accounts::Accounts) -> bool {
+    let marker = accounts.setting(EVER_READ).await;
+    if let Err(e) = &marker {
+        tracing::warn!("reading whether a channel manifest has ever been read: {e:#}");
+    }
+    never_read_one(&marker)
+}
+
+/// The decision on its own, so the answer to "the database would not say" is
+/// a test rather than a reading.
+fn never_read_one(marker: &Result<Option<String>>) -> bool {
+    match marker {
         Ok(seen) => seen.is_none(),
-        Err(e) => {
-            tracing::warn!("reading whether a channel manifest has ever been read: {e:#}");
-            false
-        }
+        // When you cannot tell, refuse. Being wrong this way costs a switch
+        // that is not offered; being wrong the other way costs an
+        // installation accepting an older pin.
+        Err(_) => false,
     }
 }
 
-async fn remember_a_read(state: &AppState) {
-    if let Err(e) = state
-        .accounts
+/// Write down that a document read. **The failure is returned, not logged
+/// and dropped** — see [`refresh`] for what is done about it.
+async fn remember_a_read(accounts: &crate::accounts::Accounts) -> Result<()> {
+    accounts
         .set_setting(EVER_READ, &Utc::now().to_rfc3339())
         .await
-    {
-        tracing::warn!("recording that the channel manifest read: {e:#}");
-    }
 }
 
 // ── what this installation is running ────────────────────────────────
@@ -961,8 +1122,9 @@ fn decide(
                             None,
                             Some(format!(
                                 "this Firetower is running {current}, which is newer than the \
-                                 {holds} {} holds. Nothing is ever moved backwards.",
-                                channel.name()
+                                 {holds} {name} holds. Nothing is ever moved backwards — this \
+                                 becomes an ordinary switch once {name} reaches {current}.",
+                                name = channel.name()
                             )),
                         ),
                         (true, true, _) => (
@@ -1274,7 +1436,7 @@ mod tests {
         let huge = "x".repeat(MOST + 1024);
         let answer = body("200 OK", &huge);
         let (source, serving) = host(Box::leak(answer.into_boxed_str())).await;
-        match fetch(&http, &source).await {
+        match fetch(&http, &source).await.read {
             Read::Unreadable(why) => {
                 assert!(why.contains("longer than"), "{why}");
                 assert!(
@@ -1292,7 +1454,7 @@ mod tests {
             r#"{"schema_version":1,"control_plane":{"beta":"0.56.0","general":"0.54.1"}}"#,
         );
         let (source, serving) = host(Box::leak(fine.into_boxed_str())).await;
-        assert!(matches!(fetch(&http, &source).await, Read::Found(_)));
+        assert!(matches!(fetch(&http, &source).await.read, Read::Found(_)));
         serving.abort();
     }
 
@@ -1300,27 +1462,17 @@ mod tests {
     /// after. A manifest that has gone must not read as a fresh start, which
     /// is how an installation comes to accept an older pin from a document
     /// somebody destroyed.
-    #[tokio::test]
-    async fn a_manifest_that_disappears_is_not_a_first_start() {
-        let http = reqwest::Client::new();
-        let gone = body("404 Not Found", "Not Found");
-        let (source, serving) = host(Box::leak(gone.into_boxed_str())).await;
+    #[test]
+    fn a_manifest_that_disappears_is_not_a_first_start() {
+        let url = "http://example.test/channels.json";
 
-        let fresh = Manifests::default();
         assert_eq!(
-            fresh.refresh(&http, &source, true).await,
+            classify(Read::Absent, false, url),
             Read::Absent,
             "nothing published yet, and nothing read before: a bootstrap"
         );
 
-        // The same 404, to a cache that has read one.
-        let held = Manifests::default();
-        {
-            let mut inner = held.0.write().await;
-            inner.held = Some(super::tests::held());
-            inner.last = Some(Read::Found(super::tests::held()));
-        }
-        match held.refresh(&http, &source, true).await {
+        match classify(Read::Absent, true, url) {
             Read::Vanished(why) => {
                 assert!(why.contains("has gone"), "{why}");
                 assert!(
@@ -1331,16 +1483,8 @@ mod tests {
             other => panic!("a manifest that vanished is not absence: {other:?}"),
         }
 
-        // And the durable answer alone is enough, for the process that comes
-        // up after an upgrade with an empty cache.
-        let restarted = Manifests::default();
-        match restarted.refresh(&http, &source, false).await {
-            Read::Vanished(why) => assert!(why.contains("destroyed"), "{why}"),
-            other => panic!("a restart does not make it a first start again: {other:?}"),
-        }
-
-        // And it is its own answer, not a kind of unreadable: a fetch that
-        // failed is worth retrying, and a document somebody destroyed is not.
+        // It is its own answer, not a kind of unreadable: a fetch that failed
+        // is worth retrying, and a document somebody destroyed is not.
         assert_eq!(
             Read::Vanished("x".into()).outcome(),
             ManifestOutcome::Vanished
@@ -1349,10 +1493,282 @@ mod tests {
             Read::Vanished("x".into()).outcome(),
             ManifestOutcome::Unreadable
         );
+
+        // Everything else passes through whatever this installation has read
+        // before — only absence changes meaning.
+        for other in [
+            Read::Unreadable("rate limited".into()),
+            Read::Malformed("not this document".into()),
+            Read::Incomplete("no version in it".into()),
+        ] {
+            assert_eq!(classify(other.clone(), true, url), other);
+            assert_eq!(classify(other.clone(), false, url), other);
+        }
+    }
+
+    /// A document that read and could not be written down is not acted on.
+    /// Acting on it is what makes the restart case possible: the next process
+    /// does not know a manifest was ever read, so the next 404 is a bootstrap.
+    #[test]
+    fn a_read_this_installation_cannot_record_is_not_acted_on() {
+        let manifest = held();
+        assert!(matches!(
+            acted_on(Read::Found(manifest.clone()), Ok(())),
+            Read::Found(_)
+        ));
+
+        match acted_on(
+            Read::Found(manifest),
+            Err(anyhow!("connection pool timed out")),
+        ) {
+            Read::Unreadable(why) => {
+                assert!(why.contains("connection pool timed out"), "{why}");
+                assert!(
+                    why.contains("first start"),
+                    "it says what it is avoiding: {why}"
+                );
+            }
+            other => panic!("a read that could not be recorded must not be acted on: {other:?}"),
+        }
+    }
+
+    /// Two reads can be in flight at once, and they do not come back in the
+    /// order they left. A first-start `404` that lands after a document has
+    /// already read is older news and classifies nothing.
+    #[tokio::test]
+    async fn a_read_that_lands_after_a_newer_one_is_discarded() {
+        let manifests = Manifests::default();
+        let slow = manifests.ticket().await;
+        let quick = manifests.ticket().await;
+        assert!(slow < quick, "tickets order by when a read set off");
+
+        let manifest = held();
+        manifests.store(quick, Read::Found(manifest.clone())).await;
+
+        // The slow one comes back now, with the answer the world gave it
+        // before the quick one landed.
+        let kept = manifests.store(slow, Read::Absent).await;
+        assert!(
+            matches!(kept, Read::Found(_)),
+            "the newer answer is what is kept: {kept:?}"
+        );
+        let seen = manifests.seen().await;
+        assert!(
+            matches!(seen.outcome, Some(Read::Found(_))),
+            "and the cache is not disturbed by it: {:?}",
+            seen.outcome
+        );
+        assert!(seen.held.is_some());
+
+        // A read that set off later still lands, in either direction.
+        let later = manifests.ticket().await;
+        let gone = manifests
+            .store(later, Read::Vanished("it has gone".into()))
+            .await;
+        assert!(matches!(gone, Read::Vanished(_)));
+    }
+
+    /// The database would not say. Refuse rather than bootstrap: being wrong
+    /// this way costs a switch that is not offered.
+    #[test]
+    fn a_marker_that_cannot_be_read_counts_as_having_read_one() {
+        assert!(never_read_one(&Ok(None)), "a fresh installation");
+        assert!(!never_read_one(&Ok(Some("2026-11-18T00:00:00Z".into()))));
+        assert!(
+            !never_read_one(&Err(anyhow!("connection refused"))),
+            "when you cannot tell, you have read one"
+        );
+    }
+
+    /// **The persistence itself**, against a real database rather than a flag
+    /// handed in. The process is replaced by the very upgrades this governs,
+    /// so an answer that does not survive a restart is no answer: this is the
+    /// test that fails if the write is ever removed.
+    #[tokio::test]
+    async fn that_a_manifest_read_survives_the_process() {
+        let (db, _owner) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+
+        assert!(
+            a_first_start(&accounts).await,
+            "a database nothing has written to is a first start"
+        );
+
+        assert!(
+            !read_one_before(&accounts, false).await,
+            "nothing held and nothing recorded"
+        );
+        assert!(
+            read_one_before(&accounts, true).await,
+            "a document held in this process counts on its own"
+        );
+
+        remember_a_read(&accounts).await.expect("the marker writes");
+
+        // A second `Accounts` over the same database is what the control
+        // plane has after it has been recreated: no memory, same rows.
+        let restarted = crate::accounts::Accounts::new(db.pool().clone());
+        assert!(
+            !a_first_start(&restarted).await,
+            "a manifest read before this process started, and the next absence is not a bootstrap"
+        );
+        // The live path's own question, with an empty cache — this is what a
+        // recreated control plane asks, and the durable answer is the only
+        // one it has.
+        assert!(
+            read_one_before(&restarted, false).await,
+            "the marker is what survives the recreate, so it has to be consulted"
+        );
+        assert_eq!(
+            classify(Read::Absent, read_one_before(&restarted, false).await, "u").outcome(),
+            ManifestOutcome::Vanished,
+            "and a 404 after a restart is a destroyed document, not a first start"
+        );
+    }
+
+    /// `docs/channels.md`, binding on anything that reads this document: the
+    /// writer leaves the copy it is replacing on the release, so a release
+    /// carrying that and no manifest is an upload that failed part-way
+    /// rather than a repository that has never promoted.
+    ///
+    /// Server-side proof, which is the only kind a control plane installed
+    /// five minutes ago can have.
+    #[tokio::test]
+    async fn a_release_holding_the_previous_document_and_no_manifest_is_a_destroyed_one() {
+        let http = reqwest::Client::new();
+        let gone = Box::leak(body("404 Not Found", "Not Found").into_boxed_str());
+        let kept = Box::leak(body("200 OK", r#"{"schema_version":1}"#).into_boxed_str());
+
+        // The manifest is gone and the document it replaced is still there.
+        let (source, serving) = host_pair(gone, kept).await;
+        match fetch(&http, &source).await.read {
+            Read::Vanished(why) => {
+                assert!(why.contains(Source::PREVIOUS), "{why}");
+                assert!(why.contains("re-upload"), "it says how to recover: {why}");
+            }
+            other => panic!("an upload that failed part-way is not absence: {other:?}"),
+        }
+        serving.abort();
+
+        // Neither is there: nothing has ever been published here.
+        let (source, serving) = host_pair(gone, gone).await;
+        assert_eq!(
+            fetch(&http, &source).await.read,
+            Read::Absent,
+            "a release with neither document is a first start"
+        );
+        serving.abort();
+
+        // And whether it is beside it could not be told. Absence is the one
+        // answer that lets an installation move, so it is not guessed at.
+        let refused = Box::leak(body("500 Internal Server Error", "nope").into_boxed_str());
+        let (source, serving) = host_pair(gone, refused).await;
+        assert!(matches!(
+            fetch(&http, &source).await.read,
+            Read::Unreadable(_)
+        ));
+        serving.abort();
+
+        assert_eq!(
+            Source {
+                url: "https://host/releases/download/channels/channels.json".into()
+            }
+            .previous(),
+            "https://host/releases/download/channels/channels.previous.json"
+        );
+    }
+
+    /// **A 200 is proof a document exists, whatever this process made of
+    /// it.** A manifest that answered and would not parse, followed by a
+    /// delete, is two ordinary checks — no race, no restart, no write
+    /// failure — and it is the most reachable way to the bootstrap arm,
+    /// because the writer replaces by deleting first.
+    #[tokio::test]
+    async fn a_document_that_will_not_parse_is_still_proof_one_exists() {
+        let http = reqwest::Client::new();
+
+        for (what, answer) in [
+            ("malformed", body("200 OK", "<html>maintenance</html>")),
+            (
+                "incomplete",
+                body("200 OK", r#"{"schema_version":1,"control_plane":{}}"#),
+            ),
+            ("oversized", body("200 OK", &"x".repeat(MOST + 16))),
+        ] {
+            let (source, serving) = host_pair(Box::leak(answer.into_boxed_str()), "").await;
+            let fetched = fetch(&http, &source).await;
+            assert!(
+                fetched.served,
+                "{what}: the host served a document, so one exists at that address"
+            );
+            assert!(
+                !fetched.read.is_usable(),
+                "{what}: and it is still not usable"
+            );
+            serving.abort();
+        }
+
+        // What is *not* proof: a 404, and a host that refused.
+        let gone = Box::leak(body("404 Not Found", "x").into_boxed_str());
+        let (source, serving) = host_pair(gone, gone).await;
+        assert!(!fetch(&http, &source).await.served);
+        serving.abort();
+
+        let refused = Box::leak(body("503 Service Unavailable", "x").into_boxed_str());
+        let (source, serving) = host_pair(refused, refused).await;
+        assert!(
+            !fetch(&http, &source).await.served,
+            "a host that refused has not shown this installation a document"
+        );
         serving.abort();
     }
 
-    /// The one address this reader and the workflow that publishes have to
+    /// The sequence QA reproduced, end to end through the real pieces: a
+    /// document that answered and would not parse, then a delete. Two
+    /// ordinary checks, and the second one must not be a first start.
+    #[tokio::test]
+    async fn a_malformed_document_then_a_delete_is_not_a_first_start() {
+        let (db, _owner) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let accounts = crate::accounts::Accounts::new(db.pool().clone());
+        let http = reqwest::Client::new();
+
+        // Check one: 200, and it does not parse.
+        let junk = Box::leak(body("200 OK", "<html>half a document</html>").into_boxed_str());
+        let (source, serving) = host_pair(junk, "").await;
+        let first = fetch(&http, &source).await;
+        assert!(matches!(first.read, Read::Malformed(_)));
+        assert!(first.served);
+        if first.served {
+            remember_a_read(&accounts).await.unwrap();
+        }
+        serving.abort();
+
+        // Check two: it has been deleted, and the previous document is not
+        // there either — so the address alone says nothing.
+        let gone = Box::leak(body("404 Not Found", "x").into_boxed_str());
+        let (source, serving) = host_pair(gone, gone).await;
+        let second = fetch(&http, &source).await;
+        assert_eq!(
+            second.read,
+            Read::Absent,
+            "the address says only that it is gone"
+        );
+
+        // What this installation remembers is what makes it a destruction.
+        let before = read_one_before(&accounts, false).await;
+        assert!(
+            before,
+            "a document answered here once, and that was written down"
+        );
+        assert_eq!(
+            classify(second.read, before, &source.url).outcome(),
+            ManifestOutcome::Vanished,
+            "the document got worse and the trust must not go up"
+        );
+        serving.abort();
+    }
+
+    /// The one address this reader and the workflow that publishes have to    /// The one address this reader and the workflow that publishes have to
     /// agree on, written out so a change to either has to change a test that
     /// says why.
     ///
@@ -1398,6 +1814,37 @@ mod tests {
         )
     }
 
+    /// A host that answers the manifest and the document beside it
+    /// differently, which is the pair the writer leaves on a release.
+    async fn host_pair(
+        manifest: &'static str,
+        previous: &'static str,
+    ) -> (Source, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let serving = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let mut scratch = [0u8; 1024];
+                let read = socket.read(&mut scratch).await.unwrap_or(0);
+                let asked = String::from_utf8_lossy(&scratch[..read]).to_string();
+                let answer = if asked.contains(Source::PREVIOUS) {
+                    previous
+                } else {
+                    manifest
+                };
+                let _ = socket.write_all(answer.as_bytes()).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (
+            Source {
+                url: format!("http://127.0.0.1:{port}/channels.json"),
+            },
+            serving,
+        )
+    }
+
     fn body(status: &str, body: &str) -> String {
         format!(
             "HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
@@ -1415,15 +1862,15 @@ mod tests {
         let absent = body("404 Not Found", "Not Found");
         let (source, serving) = host(Box::leak(absent.into_boxed_str())).await;
         assert_eq!(
-            fetch(&http, &source).await,
+            fetch(&http, &source).await.read,
             Read::Absent,
-            "a 404 is the bootstrap case and nothing else is"
+            "a 404 with nothing beside it is the bootstrap case and nothing else is"
         );
         serving.abort();
 
         let limited = body("429 Too Many Requests", "rate limited");
         let (source, serving) = host(Box::leak(limited.into_boxed_str())).await;
-        match fetch(&http, &source).await {
+        match fetch(&http, &source).await.read {
             Read::Unreadable(why) => assert!(why.contains("429"), "{why}"),
             other => panic!("a rate limit is not {other:?}"),
         }
@@ -1431,7 +1878,10 @@ mod tests {
 
         let junk = body("200 OK", "<html>maintenance</html>");
         let (source, serving) = host(Box::leak(junk.into_boxed_str())).await;
-        assert!(matches!(fetch(&http, &source).await, Read::Malformed(_)));
+        assert!(matches!(
+            fetch(&http, &source).await.read,
+            Read::Malformed(_)
+        ));
         serving.abort();
 
         let good = body(
@@ -1439,7 +1889,7 @@ mod tests {
             r#"{"schema_version":1,"control_plane":{"beta":"0.56.0","general":"0.54.1"}}"#,
         );
         let (source, serving) = host(Box::leak(good.into_boxed_str())).await;
-        let Read::Found(manifest) = fetch(&http, &source).await else {
+        let Read::Found(manifest) = fetch(&http, &source).await.read else {
             panic!("a document that reads is the answer");
         };
         assert_eq!(
@@ -1453,7 +1903,10 @@ mod tests {
         let nowhere = Source {
             url: "http://127.0.0.1:1/channels.json".into(),
         };
-        assert!(matches!(fetch(&http, &nowhere).await, Read::Unreadable(_)));
+        assert!(matches!(
+            fetch(&http, &nowhere).await.read,
+            Read::Unreadable(_)
+        ));
     }
 
     fn document() -> String {
@@ -2073,11 +2526,13 @@ mod tests {
         assert!(reason.is_none(), "the installation itself is fine");
         let beta = row(&offers, Channel::Beta);
         assert!(beta.action.is_none());
+        let why = beta.reason.unwrap();
+        assert!(why.contains("Nothing is ever moved backwards"), "{why}");
+        // And when it stops being refused. A refusal with no end to it reads
+        // as a permanent membership, which is the thing this is not.
         assert!(
-            beta.reason
-                .unwrap()
-                .contains("Nothing is ever moved backwards"),
-            "and it says why"
+            why.contains("once beta reaches") && why.contains(&version::current().to_string()),
+            "it has to say what lifts it: {why}"
         );
     }
 
