@@ -21,6 +21,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+/** `expect(cond).toBe(true)` with the output in the message when it is not. */
+const assert_ok = (cond, output) => expect(cond ? "ok" : output).toBe("ok");
+
 /* Line endings normalised, because this suite runs on the Windows leg too and
    that runner's git checks text files out with CRLF — which would leave every
    line here ending in a `\r`, and `job()` below looking for a heading it could
@@ -273,13 +276,22 @@ describe.skipIf(process.platform === "win32")("the rolling release only moves fo
   }
 
   /* A `gh` that logs what it was asked to do and answers as the case needs. */
+  /* Answers for every address, not just the first: the gate reads each one it
+     is about to write, which is the whole of the fix being tested. */
   const GH = `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$GH_LOG"
 case "$*" in
-  *"releases/tags/$ROLLING"*)
+  *"releases/tags/desktop-latest"*)
+    if [ -n "\${LEGACY_ERROR:-}" ]; then printf '%s\\n' "$LEGACY_ERROR" >&2; exit 1; fi
+    printf '%s\\n' "\${LEGACY_ASSETS:-1}" ;;
+  *"releases/tags/"*)
     if [ -n "\${API_ERROR:-}" ]; then printf '%s\\n' "$API_ERROR" >&2; exit 1; fi
     printf '%s\\n' "\${API_ASSETS:-1}" ;;
-  *"release download $ROLLING"*)
+  *"release download desktop-latest"*)
+    if [ -n "\${DOWNLOAD_FAILS:-}" ]; then echo "HTTP 500" >&2; exit 1; fi
+    mkdir -p "$RUNNER_TEMP/held"
+    printf '%s' "\${HELD_LEGACY:-\${HELD_JSON:-}}" > "$RUNNER_TEMP/held/latest.json" ;;
+  *"release download "*)
     if [ -n "\${DOWNLOAD_FAILS:-}" ]; then echo "HTTP 500" >&2; exit 1; fi
     mkdir -p "$RUNNER_TEMP/held"
     printf '%s' "\${HELD_JSON:-}" > "$RUNNER_TEMP/held/latest.json" ;;
@@ -329,6 +341,9 @@ exit 0
       // The legacy address is written with general access's bytes and with
       // nothing else's. A copy predating channels reads it forever.
       alias: /release upload desktop-latest/.test(asked),
+      // Which addresses were *read* before being written. `desktop-latest`
+      // used to be clobbered having been compared against nothing.
+      read: [...asked.matchAll(/releases\/tags\/(desktop-\S+)/g)].map((m) => m[1]),
       output: `${result.stdout}${result.stderr}`,
     };
   }
@@ -407,6 +422,38 @@ exit 0
     // put every such copy on beta with nothing opting them in.
     expect(run({ CHANNEL: "beta", HELD_JSON: '{"version":"0.29.0"}' }).alias).toBe(false);
     expect(run({ CHANNEL: "general", HELD_JSON: '{"version":"0.29.0"}' }).alias).toBe(true);
+  });
+
+  /**
+   * Found by QA against the branch: the legacy address was written without
+   * ever being read. It is the address every copy predating channels reads,
+   * and it is the one with no second opinion — the control plane's updater
+   * compares an image's stamped version against what it was told to fetch,
+   * whereas Tauri installs whatever the manifest says if the version is
+   * greater.
+   */
+  it("reads every address it is about to write, including the legacy one", () => {
+    const r = run({ CHANNEL: "general", HELD_JSON: '{"version":"0.29.0"}' });
+    assert_ok(r.status === 0, r.output);
+    expect(r.read).toContain("desktop-stable");
+    expect(r.read).toContain("desktop-latest");
+  });
+
+  it("will not move the legacy address backwards even when the channel address may move", () => {
+    // The two can disagree — a direct dispatch used to be able to move one of
+    // them — and the no-backwards rule has to hold for each on its own
+    // account, or the address with no second opinion is the one that loses.
+    const r = run({
+      CHANNEL: "general",
+      HELD_JSON: '{"version":"0.29.0"}', // desktop-stable is behind: may move
+      HELD_LEGACY: '{"version":"0.30.0"}', // desktop-latest is ahead: must not
+    });
+    expect(r.status).toBe(0);
+    expect(r.moved).toBe(true);
+    expect(r.alias).toBe(false);
+    expect(r.output).toMatch(/desktop-latest holds 0\.30\.0/);
+    // And it is not silent about the two now disagreeing.
+    expect(r.output).toMatch(/do not all hold the same version/);
   });
 
   it("refuses a channel it does not recognise, before reading anything", () => {
