@@ -496,7 +496,6 @@ function RoleRow({
   );
 }
 
-
 /**
  * What Export says once it has run.
  *
@@ -553,8 +552,14 @@ function Export({ id, stale = false }: { id: string; stale?: boolean }) {
 
   return (
     <span className="inline-flex items-center gap-2">
+      {/* #360's decision about this footer, which landed beside this: a
+          sentence that failed is brick, and a neutral one is `dim` rather than
+          the faintest tier — "a standing note" is what `mute` reads as, and
+          this is an answer to something somebody just pressed. Not `.msg`
+          itself, which is scoped to `.formfoot` and so would be unstyled in
+          the other place this button sits. */}
       {said && (
-        <span className={`text-meta ${said.bad ? "text-brick" : "text-mute"}`} role="status">
+        <span className={`text-meta ${said.bad ? "text-brick" : "text-dim"}`} role="status">
           {said.text}
         </span>
       )}

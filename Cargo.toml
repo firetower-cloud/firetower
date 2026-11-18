@@ -151,3 +151,21 @@ futures = "0.3"
 lto = "thin"
 codegen-units = 1
 strip = true
+
+# A Firetower session clones a worktree, builds once or twice, and the worktree
+# is deleted at session end — so incremental compilation here pays to serialise
+# a dependency graph for a second build that usually never comes, and Cargo
+# never collects the old session trees, so the cost compounds. Measured on one
+# worktree building `-p ft-server`: off is both smaller and *faster* cold,
+# 3029 MiB/71s -> 2262 MiB/45s, and a one-line edit stops adding ~370 MiB.
+#
+# `line-tables-only` keeps the file and line in panics and backtraces, which is
+# what anyone actually reads, and drops the type and variable DWARF nobody
+# steps through here: another 767 MiB.
+#
+# `just dev` is the one place that rebuilds in a loop and wants incremental on;
+# it sets `CARGO_INCREMENTAL=1`, which outranks this. The desktop shell is its
+# own workspace and keeps its own `[profile.dev]`.
+[profile.dev]
+incremental = false
+debug = "line-tables-only"

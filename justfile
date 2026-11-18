@@ -28,11 +28,22 @@ _default:
 doctor:
     #!/usr/bin/env bash
     missing=0
+    # A tool that is on PATH but cannot say what version it is counts as not
+    # ready, rather than as `ok` with the version column left blank. That
+    # blank is how #348 got past here: `doctor` passed and `setup` failed one
+    # command later. The probe goes through `bash -c` so it can be more than
+    # one word, which pnpm's below needs.
     check() {
-        if command -v "$1" >/dev/null 2>&1; then
-            printf '  ok       %-12s %s\n' "$1" "$(${2:-true} 2>/dev/null | head -1)"
-        else
+        local version
+        if ! command -v "$1" >/dev/null 2>&1; then
             printf '  MISSING  %-12s %s\n' "$1" "$3"; missing=1
+            return
+        fi
+        version=$(bash -c "${2:-true}" 2>/dev/null | head -1)
+        if [ -n "$version" ]; then
+            printf '  ok       %-12s %s\n' "$1" "$version"
+        else
+            printf '  BROKEN   %-12s %s\n' "$1" "$3"; missing=1
         fi
     }
     echo
@@ -40,7 +51,14 @@ doctor:
     check git         "git --version"         "install git"
     check tmux        "tmux -V"               "brew install tmux"
     check node        "node --version"        "brew install node"
-    check pnpm        "pnpm --version"        "brew install pnpm"
+    # pnpm is asked in `web/` rather than here. Its version is pinned in
+    # web/package.json, and a pnpm that came from corepack — which is what
+    # `brew install node` leaves on a machine — resolves that pin from the
+    # working directory. At the repository root, which has no package.json,
+    # it answers with corepack's own newest instead: a version number that is
+    # not the one anything in this file installs with. In `web/` it answers
+    # with the pinned version or it fails, and either is worth knowing.
+    check pnpm        "cd web && pnpm --version" "brew install pnpm"
     check cargo-watch "cargo-watch --version" "cargo install cargo-watch"
     check docker      "docker --version"      "https://docs.docker.com/get-docker"
     echo
@@ -56,8 +74,13 @@ doctor:
 setup:
     #!/usr/bin/env bash
     set -euo pipefail
-    pnpm --dir web install
-    pnpm --dir mobile install
+    # `cd` rather than `--dir`, for the reason written out above `_dev`: a
+    # pnpm that came from corepack reads the pinned version out of the
+    # working directory, and the repository root has no package.json to read
+    # it from — so from here it fetches its own newest pnpm and then refuses
+    # to install `web/` with it.
+    (cd web && pnpm install)
+    (cd mobile && pnpm install)
     cargo fetch
     # Never clobbers an existing one — this is the only place your client id lives.
     if [ ! -f .env ]; then
@@ -140,7 +163,12 @@ _dev:
 
     # A worker built here is what "Install the worker" sends to a machine of
     # this shape, so a checkout can be tried on a real host without a release.
-    FIRETOWER_WORKER_ARTIFACTS=target/artifacts cargo watch -x 'run -p ft-cli -- serve --dev' & pids+=($!)
+    #
+    # `CARGO_INCREMENTAL=1` because this is the one build that rebuilds in a
+    # loop: `[profile.dev]` turns incremental off for the many throwaway trees
+    # that build once and are deleted, and the environment variable outranks
+    # the profile, so the interactive loop here keeps its fast rebuild.
+    CARGO_INCREMENTAL=1 FIRETOWER_WORKER_ARTIFACTS=target/artifacts cargo watch -x 'run -p ft-cli -- serve --dev' & pids+=($!)
     # The API's address lives in web/.env.development, committed, so that one
     # file answers it wherever the interface runs — and so that an environment
     # variable can override it, which is what the compose stack needs: there
@@ -180,8 +208,10 @@ gen-check: gen
     .github/scripts/unchanged.sh api/ web/src/api/generated desktop/src/api/generated mobile/src/api/generated mobile/src/design
 
 # The release artifact. Web first: the Rust build embeds its output.
+#
+# `cd`, for the same reason `setup` and `_dev` do it.
 build:
-    pnpm --dir web build
+    cd web && pnpm build
     cargo build --release
 
 # The worker, packed the way a release publishes it, for this machine's shape.
