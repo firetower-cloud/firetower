@@ -71,9 +71,6 @@ concurrency:
   group: promote
   cancel-in-progress: false
 
-env:
-  OWNER: ${{ github.repository_owner }}
-
 jobs:
   # Everything that can refuse, before anything has moved. Each refusal here
   # leaves every pointer exactly where it was, which is the half of the
@@ -338,6 +335,15 @@ jobs:
     with:
       tag: ${{ needs.check.outputs.tag }}
       version: ${{ inputs.version }}
+      # **The current commit, not the tag being promoted, and that is not an
+      # oversight.** The checkout supplies two things: `latest-json.mjs`, and
+      # the signing public key it verifies against. The bundles come off the
+      # release named by `tag` either way, so the only question is which copy
+      # of the script runs — and it has to be this one, because the script at
+      # an older `desktop-v*` tag knows nothing about channels and would reject
+      # `--channel`. The key is safe to take from here for the reason the
+      # specification gives: it is per configuration rather than per endpoint,
+      # so every channel's bundles are signed with the one already in use.
       ref: ${{ github.sha }}
       channel: general
       publish_only: true
