@@ -43,6 +43,7 @@ import {
   ShieldAlert,
   TriangleAlert,
 } from "lucide-react";
+import { FileDiff } from "~/components/ui";
 import type { CandidateDecision, FieldDiff, ImportPlan, PlanEntry, PlanProblem } from "~/api/generated/model";
 import {
   FILTER_AT,
@@ -781,7 +782,7 @@ function Diff({
                     </button>
                   )}
                 </span>
-                {row.body && row.body.changedLines > 0 && bodyOpen && <Body unified={row.body.unified} />}
+                {row.body && row.body.changedLines > 0 && bodyOpen && <FileDiff unified={row.body.unified} />}
               </div>
             ),
           )}
@@ -842,37 +843,6 @@ function Value({ text, against, side }: { text: string; against: string; side: "
         );
       })}
     </span>
-  );
-}
-
-/** The instructions, as the unified diff the Inspector already draws. */
-function Body({ unified }: { unified: string }) {
-  const lines = unified.split("\n").map((text) => {
-    const kind = text.startsWith("@@") ? "hunk" : text.startsWith("+") ? "add" : text.startsWith("-") ? "del" : "ctx";
-    return { kind, text: kind === "add" || kind === "del" ? text.slice(1) : text };
-  });
-  return (
-    <div className="prose-diff">
-      {lines.map(({ kind, text }, i) => (
-        <div
-          key={i}
-          className={`ln ${
-            kind === "add"
-              ? "bg-sage-tint text-sage"
-              : kind === "del"
-                ? "bg-brick-tint text-brick"
-                : kind === "hunk"
-                  ? "text-slate"
-                  : "text-dim"
-          }`}
-        >
-          <span className="w-3 shrink-0 select-none opacity-60" aria-hidden>
-            {kind === "add" ? "+" : kind === "del" ? "−" : " "}
-          </span>
-          <span className="flex-1 whitespace-pre">{text}</span>
-        </div>
-      ))}
-    </div>
   );
 }
 

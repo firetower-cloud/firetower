@@ -20,11 +20,12 @@
  * seconds while it is active and it can be cancelled or continued when it
  * stops to ask. `back_up_now` is the thing to press first.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowUp, Building2, Check, CircleDot, Download, Loader2, Monitor, Play, RefreshCw, Save, Server, Square, X } from "lucide-react";
+import { AlertTriangle, ArrowUp, Building2, Check, CircleDot, Download, Info, Loader2, Play, RefreshCw, Save, Server, Square, X } from "lucide-react";
 import { Icon } from "~/components/ui";
-import type { FilePlan, HostTarget, UpdateRun, UpdateStatus } from "~/api/generated/model";
+import type { ChannelStatus, FilePlan, HostTarget, UpdateRun, UpdateStatus } from "~/api/generated/model";
+import { Act, Channel, Package } from "~/api/generated/model";
 import {
   getGetUpdatesQueryKey,
   getListRunsQueryKey,
@@ -36,15 +37,40 @@ import {
   useGetRun,
   useGetUpdates,
   useListRuns,
+  usePlanChannel,
   usePlanUpdate,
+  useSwitchChannel,
 } from "~/api/generated/updates/updates";
 import type { Chosen } from "~/api/updates";
-import { ACTIVE, canStart, countEnded, needsChoice, willWrite, wouldEnd } from "~/api/updates";
+import {
+  ACTIVE,
+  canStart,
+  channelBlock,
+  countEnded,
+  mismatch,
+  needsChoice,
+  pinsFor,
+  servesChannels,
+  saysChannel,
+  willWrite,
+  wouldEnd,
+} from "~/api/updates";
 import { useBackendKey } from "~/backend";
 import { bridge } from "~/bridge";
+import type { AppChannel } from "~/channel";
+import { installedFrom, setAppChannel, useAppChannel } from "~/channel";
+import type { Span } from "~/releases";
+import { span as readSpan } from "~/releases";
 import { look, takeUpdate, useBuild, whyUpdateFailed } from "~/update";
+import type { ChannelAct } from "./updates/Channel";
+import { ChannelSection, SwitchPanel } from "./updates/Channel";
+import { ChangelogSpan } from "./updates/Span";
+import { ThisApp } from "./updates/ThisApp";
 
 import { why } from "~/data";
+
+/** Where a copy that predates channels is sent to join beta by hand. */
+const RELEASES = "https://github.com/firetower-cloud/firetower/releases";
 
 export function Updates() {
   const cache = useQueryClient();
@@ -61,6 +87,8 @@ export function Updates() {
      click away either direction. */
   const [ticked, setTicked] = useState<string[]>([]);
   const [primed, setPrimed] = useState(false);
+  /** The channel act somebody has asked to see the consequences of. */
+  const [switching, setSwitching] = useState<ChannelAct | null>(null);
   const refresh = () => Promise.all([cache.invalidateQueries({ queryKey: getGetUpdatesQueryKey() }), cache.invalidateQueries({ queryKey: getListRunsQueryKey() })]);
 
   /* The app's own section is drawn before the server is heard from, and still
@@ -68,17 +96,35 @@ export function Updates() {
      any Firetower anything, so a deployment that is down is not a reason to
      hide the one button on this screen that still works — and the rail sends
      people here for that button. */
-  if (status.isPending) return <Page><ThisApp /><p className="mt-7 flex items-center gap-2 text-read text-mute"><Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />Asking what is running…</p></Page>;
-  if (status.error) return <Page><ThisApp /><p className="mt-7 text-read text-brick">{why(status.error)}</p></Page>;
+  if (status.isPending) return <Page><Copy status={undefined} /><p className="mt-7 flex items-center gap-2 text-read text-mute"><Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />Asking what is running…</p></Page>;
+  if (status.error) return <Page><Copy status={undefined} /><p className="mt-7 text-read text-brick">{why(status.error)}</p></Page>;
 
   const s = status.data as UpdateStatus;
+  /* **What the server can serve, read from the answer rather than from a
+     version.** A control plane that predates channels returns no `channel`,
+     and a screen that then drew a switch would be offering a path that is not
+     there. The API is additive-only, so the field's presence *is* the
+     capability. */
+  const channel: ChannelStatus | null = servesChannels(s) ? s.channel : null;
+  const inTheWay = channel ? channelBlock(channel) : null;
   const active = ((runs.data ?? []) as UpdateRun[]).find((r) => ACTIVE.includes(r.state));
   const mayMoveEverything = s.controlPlane.mayUpgrade ?? false;
   if (!primed) {
     setPrimed(true);
     setTicked(s.hosts.filter((h) => h.mayUpgrade).map((h) => h.hostId));
   }
-  const movable = mayMoveEverything && s.controlPlane.upgradable && !active && s.updateAvailable && s.latest?.version !== s.current;
+  /* **No upgrade button where the upgrade would refuse.** A tag that names no
+     channel fetches a version the updater was not told to fetch, exactly as an
+     exact-version pin does, so the way forward is the block above the channel
+     rows and not this button. Only when the server can say — an older control
+     plane keeps the behaviour it has. */
+  const movable =
+    mayMoveEverything &&
+    s.controlPlane.upgradable &&
+    !active &&
+    s.updateAvailable &&
+    s.latest?.version !== s.current &&
+    !inTheWay;
   const behind = s.hosts.filter((h) => h.mayUpgrade);
   const level = build.newer ? `${build.newer} is out for this app.` : "Up to date.";
 
@@ -92,7 +138,9 @@ export function Updates() {
      this app's, and never "Up to date." over a section offering a new build.
      The rail sends people here in slate for either one; a screen that then
      said there was nothing to take would be the bug. */
-  const headline = mayMoveEverything
+  const headline = inTheWay && inTheWay.tone === "amber"
+    ? "This Firetower cannot upgrade until its image line changes."
+    : mayMoveEverything
     ? !s.updateAvailable
       ? level
       : s.latest?.version === s.current
@@ -135,6 +183,14 @@ export function Updates() {
 
       {active ? (
         <Run id={active.id} onChange={refresh} />
+      ) : switching ? (
+        <Switching
+          asked={switching}
+          onClose={() => {
+            setSwitching(null);
+            void refresh();
+          }}
+        />
       ) : planning ? (
         <Plan
           status={s}
@@ -150,9 +206,17 @@ export function Updates() {
             <span className="g"><Icon of={Building2} size={20} /></span>
             <span className="tx">
               <b>This Firetower</b>
-              <s>The control plane and everything it serves</s>
+              {/* **The tag goes in the cell that already says what is
+                  running**, a step quieter, because the channel *is* that
+                  tag. It costs no colour, which a channel is not allowed to. */}
+              <s>{saysChannel(channel)}</s>
             </span>
-            <span className="ver">{s.controlPlane.version}</span>
+            <span className="ver">
+              {s.controlPlane.version}
+              {channel && (channel.tag
+                ? <i data-unknown={!channel.recognised || undefined}>:{channel.tag}</i>
+                : <i data-unknown>tag unknown</i>)}
+            </span>
             <span className="acts">
               {movable && (
                 <button onClick={() => setPlanning({ controlPlane: true, hostIds: [] })} className="btn primary">
@@ -178,7 +242,19 @@ export function Updates() {
             </p>
           )}
 
-          <ThisApp />
+          {channel ? (
+            <ChannelSection channel={channel} blocked={!!active} onAct={setSwitching} />
+          ) : (
+            /* **A newer client against an older control plane.** Not a control
+               it cannot serve, and not silence either: the mismatch is real
+               and is explained in terms naming both versions. */
+            <div className="note2">
+              <span className="g"><Icon of={Info} size={14} /></span>
+              <p>{mismatch(s.current, build.version)}</p>
+            </div>
+          )}
+
+          <Copy status={s} />
 
           {s.hosts.length > 0 && (
             <section className="upd-sec">
@@ -245,66 +321,136 @@ export function Updates() {
 }
 
 /**
- * This app's own build, which is not the deployment's.
+ * This copy of the app, wired to its stores.
  *
- * Two release trains that happen to share a screen. The Mac app updates itself
- * from its own GitHub release and anybody may update their own copy; the
- * deployment below is moved by a run and mostly by an administrator. Different
- * version numbers, different permissions — so a section of its own rather than
- * a fourth row in a list that would then have to explain which is which.
+ * The section itself is `updates/ThisApp.tsx` and is pure, so a harness can
+ * walk every one of its states. This is the half that reads the preference,
+ * the build, the installation's manifest and the releases feed.
  *
- * First on the screen because it is the one thing here that is always the
- * reader's own to do.
+ * **Its own channel is read and written here and nowhere else.** The
+ * preference is local to this machine, the address it names is chosen per
+ * check in the shell, and a change takes effect at the next check without a
+ * restart — which is why pressing the control asks for one straight away
+ * rather than waiting up to ten minutes to be believed.
  *
  * Nothing in a browser tab: a tab has no build of its own to move.
  */
-function ThisApp() {
+function Copy({ status }: { status: UpdateStatus | undefined }) {
   const build = useBuild();
-  const [taking, setTaking] = useState(false);
+  const channel = useAppChannel();
   const [trouble, setTrouble] = useState<string | null>(null);
+  const [spanOpen, setSpanOpen] = useState(false);
+  const [span, setSpan] = useState<Span | null>(null);
+  const [spanPending, setSpanPending] = useState(false);
+
+  /* What general access holds for *the app*, from the installation's own
+     manifest read. It is the only way a copy can know it is ahead: its own
+     check against the general address correctly returns nothing, and
+     "nothing" is not "ahead". A server too old to say leaves it unknown, and
+     the block is not drawn rather than guessed at. */
+  const generalPin = pinsFor(status?.channel, Package.desktop)?.general ?? null;
+
+  useEffect(() => {
+    if (!spanOpen || !build.version || !build.newer) return;
+    let live = true;
+    setSpanPending(true);
+    void readSpan("desktop", build.version, build.newer)
+      .then((found) => live && setSpan(found))
+      .finally(() => live && setSpanPending(false));
+    return () => {
+      live = false;
+    };
+  }, [spanOpen, build.version, build.newer]);
+
   if (!bridge.native) return null;
 
   /* No confirmation. Nothing is lost — the servers and their tokens stay, and
      what it ends is this window, which is the thing the button says. */
   const go = () => {
     setTrouble(null);
-    setTaking(true);
     takeUpdate().catch((e) => {
       /* `whyUpdateFailed` rather than `why`, because this one failure carries
          its own next step: an update that could not write over the running
          copy is not one to try again in a few minutes. */
       setTrouble(whyUpdateFailed(e));
-      setTaking(false);
     });
   };
 
+  const pick = (next: AppChannel) => {
+    setAppChannel(next);
+    setSpanOpen(false);
+    setSpan(null);
+    /* The address is chosen per check, so this is the whole of "takes effect
+       at the next check". No restart, and nothing is installed by it. */
+    void look();
+  };
+
   return (
-    <>
-      <div className="upd-row">
-        <span className="g"><Icon of={Monitor} size={20} /></span>
-        <span className="tx">
-          <b>This app</b>
-          <s>Updates itself from GitHub — it does not ask the deployment</s>
-        </span>
-        <span className="ver">{build.version ?? "—"}</span>
-        <span className="acts">
-          {build.newer ? (
-            <button disabled={taking} onClick={go} className="btn primary">
-              <Icon of={taking ? Loader2 : Download} size={14} className={taking ? "animate-spin" : undefined} />
-              {taking ? "Downloading…" : `Update to ${build.newer} and relaunch`}
-            </button>
-          ) : (
-            <span className="text-ui text-dim">Up to date</span>
-          )}
-        </span>
-      </div>
-      {trouble && (
-        <p className="mt-2 flex items-start gap-2 rounded-lg bg-raise px-3 py-2 text-micro leading-relaxed text-brick">
-          <Icon of={AlertTriangle} size={12} />
-          <span className="min-w-0 flex-1">{trouble}</span>
-        </p>
-      )}
-    </>
+    <ThisApp
+      build={build}
+      channel={channel}
+      onChannel={pick}
+      from={installedFrom(build.version)}
+      generalPin={generalPin}
+      installationChannel={status && servesChannels(status) ? status.channel.channel : null}
+      trouble={trouble}
+      onTake={go}
+      span={span}
+      spanOpen={spanOpen}
+      spanPending={spanPending}
+      onSpan={() => setSpanOpen(!spanOpen)}
+      releasePage={RELEASES}
+    />
+  );
+}
+
+/**
+ * The switch, from the press to the run.
+ *
+ * The plan is asked for as soon as the panel opens, because the thing being
+ * decided *is* what it would write — a panel that made you press again to find
+ * that out would be asking you to agree first.
+ */
+function Switching({ asked, onClose }: { asked: ChannelAct; onClose: () => void }) {
+  const plan = usePlanChannel();
+  const go = useSwitchChannel();
+  const backUp = useBackUpNow();
+  const [requested, setRequested] = useState(false);
+
+  if (!requested) {
+    setRequested(true);
+    plan.mutate({ data: { channel: asked.channel, files: [] } });
+  }
+
+  return (
+    <SwitchPanel
+      plan={plan.data}
+      pending={plan.isPending}
+      /* The server's own sentence, which is the one it published when it
+         refused. Nothing here rewrites it. */
+      trouble={plan.error ? why(plan.error) : go.error ? why(go.error) : null}
+      lastBackup={null}
+      backingUp={backUp.isPending}
+      backedUp={backUp.isSuccess}
+      onBackUp={() => backUp.mutate(undefined as never)}
+      starting={go.isPending}
+      onGo={(files) =>
+        go.mutate(
+          {
+            data: {
+              channel: asked.channel,
+              /* Required for beta, and taken as read only because the block
+                 above has already said what it means. A pin is not a move and
+                 does not ask for it. */
+              acknowledgeOneWay: asked.act === Act.switch,
+              files,
+            },
+          },
+          { onSuccess: onClose },
+        )
+      }
+      onClose={onClose}
+    />
   );
 }
 
@@ -436,11 +582,30 @@ function Plan({ status, chosen, onClose }: { status: UpdateStatus; chosen: Chose
   const [replace, setReplace] = useState<Record<string, boolean>>({});
   const [whenIdle, setWhenIdle] = useState(true);
   const [asked, setAsked] = useState(false);
+  const [span, setSpan] = useState<Span | null>(null);
+  const [spanPending, setSpanPending] = useState(false);
 
   if (!asked) {
     setAsked(true);
     plan.mutate({ data: { version, controlPlane: chosen.controlPlane } });
   }
+
+  /* **The whole jump, not the newest release.** General access is a pin a
+     maintainer moves deliberately, so an upgrade routinely skips versions and
+     the newest release's notes would be the wrong answer on most of them.
+     Read once per panel, on the press that opened it. */
+  const from = status.current;
+  useEffect(() => {
+    if (!chosen.controlPlane || !version || version === from) return;
+    let live = true;
+    setSpanPending(true);
+    void readSpan("controlPlane", from, version)
+      .then((found) => live && setSpan(found))
+      .finally(() => live && setSpanPending(false));
+    return () => {
+      live = false;
+    };
+  }, [chosen.controlPlane, version, from]);
 
   const p = plan.data;
   const files = (p?.files ?? []) as FilePlan[];
@@ -526,6 +691,18 @@ function Plan({ status, chosen, onClose }: { status: UpdateStatus; chosen: Chose
               )}
             </div>
           )}
+        </>
+      )}
+
+      {chosen.controlPlane && version !== from && (
+        <>
+          <h4 className="mt-6 text-read font-medium text-bone">What changed</h4>
+          <p className="why">
+            General access skips versions as a matter of course, so this is every version in the jump
+            rather than the newest one. Assembled per package; the app's own releases are in its own
+            section.
+          </p>
+          <ChangelogSpan span={span} pending={spanPending} />
         </>
       )}
 

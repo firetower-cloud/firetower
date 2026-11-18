@@ -1565,6 +1565,15 @@
     font-size: var(--text-ui);
     line-height: 1.6;
     color: var(--color-text);
+    /* **A sentence from the server can carry an address.** The channel
+       blocks draw the control plane's own words, and those name the manifest
+       URL and whole image references — unbreakable runs that painted eighty
+       pixels outside this paragraph at the narrow end. `break-word` only
+       acts on a word that would otherwise overflow, so nothing that already
+       fits moves. Found by the painted-text assertion in
+       `shoot-channels.mjs`, which is the check the box-geometry one could
+       not be. */
+    overflow-wrap: break-word;
   }
 
   /* Dropping a folder on the page. */
@@ -2568,6 +2577,8 @@ html:not([data-platform="macos"]) {
     font-size: var(--text-ui);
     line-height: 1.45;
     color: var(--color-dim);
+    /* As `.review p`: these carry the server's sentences too. */
+    overflow-wrap: break-word;
   }
   .note2 .btn.quiet {
     height: 28px;
@@ -5255,6 +5266,266 @@ html:not([data-platform="macos"]) {
      this screen, and it is the only thing on it you have to decide. */
   .diffrow .n.inway {
     color: var(--color-amber-soft);
+  }
+
+  /* ── Channels ───────────────────────────────────────────────────────
+     **The tag, in the cell that already says what is running.** The channel
+     *is* that tag, so it is the honest place for it — a step quieter than
+     the version, in the same cell, and it costs no colour. A channel is not
+     a hue: ember answers one question and the rest is spent, so a channel is
+     identified by position, shape and weight and by nothing else. */
+  .upd-row .ver i {
+    font-style: normal;
+    margin-left: 7px;
+    font-size: var(--text-micro);
+    color: var(--color-dim);
+  }
+  /* A tag that names no channel, and the absence of one. Quieter again,
+     because it is an assumption rather than a reading. */
+  .upd-row .ver i[data-unknown] {
+    color: var(--color-mute);
+  }
+
+  /* One channel, and what it offers. `.mach`'s row with a mark cell instead
+     of a checkbox: a channel is not a thing you tick, and the row in force
+     takes the raised ground and a tick rather than a colour. */
+  .chan {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    padding: 13px 16px;
+    border-radius: 13px;
+    margin-top: 2px;
+    width: 100%;
+    text-align: left;
+  }
+  .chan[data-on="true"] {
+    background: var(--color-raise);
+  }
+  .chan .mk {
+    width: 17px;
+    flex: none;
+    display: grid;
+    place-items: center;
+    color: var(--color-dim);
+  }
+  .chan .tx {
+    min-width: 0;
+    flex: 1;
+  }
+  .chan .tx b {
+    display: block;
+    font-size: 0.96875rem; /* 15.5px */
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .chan .tx s {
+    display: block;
+    text-decoration: none;
+    margin-top: 1px;
+    font-size: var(--text-body);
+    color: var(--color-dim);
+  }
+  /* **`.verdict`, because `.st` was taken.** `.st` is an unscoped 7x7 dot with
+     four meanings, a few thousand lines up, and `.chan .st` inherited its
+     width and height without ever resetting them — so every verdict on a
+     channel row was a seven-pixel box with its sentence painted outside it,
+     at every width a window can be. `.outcome` renamed around the same class
+     for the same reason rather than overriding it; overriding leaves the
+     collision there for the next person. */
+  .chan .verdict {
+    flex: none;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+  }
+  .chan .acts {
+    flex: none;
+    display: flex;
+    gap: 7px;
+  }
+  .chan[data-off="true"] .tx b {
+    color: var(--color-text);
+  }
+  .chan[data-off="true"] .mk {
+    color: var(--color-mute);
+  }
+
+  /* ── A changelog span ───────────────────────────────────────────────
+     One version, its date, and its section. A row that opens, on the plan
+     panel's recessed ground. */
+  .span {
+    margin-top: 12px;
+    border-radius: 12px;
+    background: var(--color-panel);
+    padding: 6px;
+  }
+  [data-theme="dark"] .span {
+    background: var(--color-overlay);
+  }
+  .span .pkg {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 10px 11px 2px;
+  }
+  .span .pkg b {
+    font-size: var(--text-ui);
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .span .pkg span {
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .span .vrow {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 8px 11px;
+    border-radius: 9px;
+    min-height: 36px;
+    width: 100%;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .span .vrow:hover {
+    background: var(--color-raise);
+  }
+  .span .vrow .cv {
+    width: 17px;
+    flex: none;
+    color: var(--color-mute);
+    display: grid;
+    place-items: center;
+  }
+  .span .vrow .vn {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: 0.84375rem; /* 13.5px */
+    color: var(--color-bone);
+    width: 4.6rem;
+  }
+  .span .vrow .sm {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .span .vrow .dt {
+    flex: none;
+    font-size: 0.8125rem; /* 13px */
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .span .body {
+    padding: 2px 11px 12px 50px;
+  }
+  .span .body ul {
+    margin: 0;
+    padding-left: 16px;
+    list-style: disc;
+  }
+  .span .body li {
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-text);
+    margin-top: 3px;
+  }
+  /* **The list scrolls; the shortfall does not.** A panel taller than a short
+     window may not rely on being seen whole, so past eight rows the rows take
+     their own scroll rather than pushing the primary action off the page —
+     and the count of what is missing sits below it, because a count somebody
+     has to scroll to is a count they do not see. */
+  .span.tall .rows {
+    max-height: 19rem;
+    overflow-y: auto;
+  }
+  .span .short {
+    display: flex;
+    align-items: baseline;
+    gap: 11px;
+    padding: 12px 11px 9px;
+    margin-top: 4px;
+    border-top: 1px solid var(--color-line-soft);
+  }
+  .span .short .vn {
+    width: 4.6rem;
+    flex: none;
+  }
+  .span .short p {
+    min-width: 0;
+    font-size: var(--text-ui);
+    line-height: 1.5;
+    color: var(--color-dim);
+  }
+
+  /* ── As the window narrows ──────────────────────────────────────────
+     The app's own minimum is 880, where the page column is width-bound rather
+     than max-bound and every row has to hold at about 770px of content box.
+     Two rules do that and **neither is a query**, so they hold at any width
+     the page is ever drawn at — including a browser tab narrower than a
+     window can be. Keyed on `flex-wrap` rather than on a container, because
+     `container-type` here would make this the containing block for anything
+     `position: fixed` inside it, which is the trap the narrow-desk rules
+     above already record. */
+  .upd-row,
+  .chan {
+    flex-wrap: wrap;
+  }
+  .upd-row .tx,
+  .chan .tx {
+    flex: 1 1 14rem;
+  }
+  /* Under about a phone's width the row's glyph goes and the actions take
+     their own line, left-aligned under the text rather than centred. The
+     window cannot be this narrow — this is the page in a tab. */
+  @media (max-width: 560px) {
+    .upd-row {
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .upd-row .g,
+    .mach .g {
+      display: none;
+    }
+    .upd-row .acts {
+      width: 100%;
+      margin-top: 6px;
+      flex-wrap: wrap;
+    }
+    .chan .acts,
+    .chan .verdict {
+      width: 100%;
+      margin-top: 4px;
+      padding-left: 30px;
+    }
+    .upd-hero h1 {
+      font-size: 1.75rem;
+    }
+    .run {
+      padding: 15px;
+    }
+    .span .vrow .dt {
+      display: none;
+    }
+    .span .body {
+      padding-left: 30px;
+    }
+    /* A verdict cell that is a sentence rather than a word — the channel
+       table's "an exact version, so nothing can move it" — takes its own
+       line under the path instead of pushing the row past the column. The
+       indent is the `k` column plus the row's gap, so it still reads as that
+       row's. */
+    .diffrow {
+      flex-wrap: wrap;
+    }
+    .diffrow .n {
+      flex: 1 1 100%;
+      padding-left: 63px;
+    }
   }
 
   /* ── A picker says what the choice costs ───────────────────────

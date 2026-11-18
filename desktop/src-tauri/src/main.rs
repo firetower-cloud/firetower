@@ -15,6 +15,7 @@ use tauri::{Manager, Runtime, WebviewWindow};
 
 mod capture;
 mod tray;
+mod updater;
 
 #[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial, NSVisualEffectState};
@@ -361,6 +362,12 @@ fn main() {
             // about this launch matters. See `capture::self_test`.
             capture::self_test(app.handle());
 
+            // What the last update check found, held for the install. The
+            // renderer no longer owns an update handle — choosing a channel's
+            // manifest address is only possible here, so the whole sequence
+            // is. See `updater.rs`.
+            updater::hold(app.handle());
+
             let window = app.get_webview_window("main").expect("main window");
 
             // A macOS sidebar is translucent, and a flat panel is the clearest
@@ -400,6 +407,8 @@ fn main() {
             secret_set,
             secret_delete,
             load_artifact,
+            updater::update_check,
+            updater::update_install,
         ])
         .run(tauri::generate_context!())
         .expect("firetower failed to start");
