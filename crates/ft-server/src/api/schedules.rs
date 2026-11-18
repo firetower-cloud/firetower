@@ -508,12 +508,15 @@ async fn pins_for(
         // And where the server cannot enumerate at all — Codex lists its
         // models and efforts over its own protocol — an empty list means
         // "unknown to me" rather than "no such value".
-        let fence = matches!(
-            kind,
-            ft_core::controls::ControlKind::Mode | ft_core::controls::ControlKind::Sandbox
-        );
+        //
+        // That split is `controls::can_widen` now rather than a `matches!`
+        // here, because `roles::import` reads the same ruling and had re-derived
+        // it the other way round (#426). One question, asked in one place.
         let known = ft_core::controls::choices_for(agent, kind);
-        if fence && !known.is_empty() && !known.iter().any(|k| k == value) {
+        if ft_core::controls::can_widen(kind)
+            && !known.is_empty()
+            && !known.iter().any(|k| k == value)
+        {
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
                 format!(

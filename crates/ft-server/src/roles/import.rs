@@ -116,7 +116,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::profile_md::{self, Field, Reading, Setting, Spelled, Spot};
-use super::{Refused, Role};
+use super::{named, offered, Offer, Refused, Role};
 
 // ── what the endpoint takes ─────────────────────────────────────────────
 
@@ -1672,15 +1672,55 @@ fn resolve(
         ));
     }
 
-    // The four agent settings.
+    // The four agent settings, and **only the two a value could widen** are
+    // held to the engine's list.
     //
-    // **Checked against the engine's own offered set, and only when that set is
-    // knowable.** Parity with `POST /roles` would be no check at all, and that
-    // is not sufficient here for two reasons: the error table says an invalid
-    // enum value blocks and lists what is accepted, and a typo'd value does
-    // not fail at launch either — `Preferred::keeping_only` drops a value the
-    // agent no longer offers, so `effort: maximum` silently does nothing,
-    // which is the failure this whole format exists to remove.
+    // The ruling is `api::schedules::settled`'s, written out there in full and
+    // not re-derived here: *"a fence has to be one the catalogue names; a model
+    // does not … Neither can widen what an agent may do, so an unrecognised one
+    // goes to the engine rather than being refused on its behalf."*
+    // `controls::can_widen` is that split, asked rather than restated.
+    //
+    // This blocked all four until #426, on a premise that was false: that an
+    // unofferable value "silently does nothing, since `Preferred::keeping_only`
+    // drops it at launch". A profile's `pref_*` never reaches `keeping_only` —
+    // the only caller is `fleet.rs`, drawing the picker — so a row holding
+    // `pref_model='opus'` hands the worker `FIRETOWER_AGENT_SETTINGS=
+    // {"model":"opus"}` and launches `claude --model opus`, which works. There
+    // was no silent failure to prevent, and `opus`, `sonnet` and
+    // `claude-opus-5` were refused for being absent from a *picker*.
+    //
+    // That the list is presentation rather than validity is settled by
+    // construction: `controls::claude_modes` records that it omits
+    // `bypassPermissions` "on purpose", so the list is known to be narrower
+    // than what the CLI takes.
+    //
+    // **Which is why a mode still blocks, and the reason is policy rather than
+    // validity.** Asked of the binary, `--permission-mode` carries its own
+    // choices — `acceptEdits`, `auto`, `bypassPermissions`, `manual`, `dontAsk`,
+    // `plan` — and rejects anything else at parse, so the engine validates
+    // modes perfectly well without help. What it will not do is decline
+    // `bypassPermissions`. A `PROFILE.md` travels: it is dropped into a
+    // directory other people import from, and every child a profile spawns
+    // inherits its settings. So the thing being refused here is not a typo, it
+    // is a shared file handing somebody a profile whose sessions skip the
+    // permission prompt — and the picker is the set somebody has reasoned about
+    // and can be warned about on screen. A sandbox is the same argument with
+    // the fence itself, which is the `schedules.rs` case verbatim: a value
+    // nobody here can evaluate.
+    //
+    // The cost is named rather than hidden: `mode: manual` is a working CLI
+    // choice and is refused too. A list narrow enough to exclude
+    // `bypassPermissions` cannot also be a list of everything that works.
+    //
+    // A model or an effort outside the list is neither blocked nor warned
+    // about. A warning is for an honest unknown — see `said_about_settings`,
+    // which keeps all three of those — and this is not one: being absent from
+    // a picker is not a fact about the value. And where Firetower is wrong
+    // about one, the engine degrades rather than fails: `--effort maximum`
+    // answers *"Unknown --effort value 'maximum' — ignoring it and using the
+    // default effort"* and starts. Passing an unrecognised one on costs a
+    // warning on the engine's own stderr; refusing it costs an import.
     //
     // The asymmetry is the one a reset already has: with no engine pinned
     // there is no valid set until a lead picks one, so the value is taken as
@@ -1689,18 +1729,25 @@ fn resolve(
         let Some(wrote) = written(setting, &said.profile.settings) else {
             continue;
         };
+        let kind = kind_of(setting);
+        if !ft_core::controls::can_widen(kind) {
+            continue;
+        }
         let line = line_of(&said.spelled, Spot::Setting(setting));
         let key = Some(Spot::Setting(setting).spelling());
-        match offered(profile.engine, setting) {
+        match offered(profile.engine, kind) {
             Offer::Values(values) if !values.iter().any(|v| v == wrote) => {
                 out.push(PlanProblem::at(
                     p,
                     line,
                     key,
                     format!(
-                        "`{wrote}` is not {} {:?} offers. Write one of {}.",
-                        article(setting),
-                        profile.engine.expect("an offered set needs an engine"),
+                        "`{wrote}` is not {} {} offers. Write one of {}.",
+                        named(kind),
+                        profile
+                            .engine
+                            .expect("an offered set needs an engine")
+                            .label(),
                         values
                             .iter()
                             .map(|v| format!("`{v}`"))
@@ -2081,36 +2128,45 @@ fn kind_of(setting: Setting) -> ft_core::controls::ControlKind {
 
 /// What cannot be checked about the settings, said rather than left silent.
 ///
-/// The other half of the ruling in `resolve`: a value is **refused** when the
-/// engine's set is knowable and **accepted** when it is not, and accepting it
-/// quietly would leave somebody believing it was checked. So the two honest
-/// unknowns come back as warnings — a plan stays appliable, and the review can
-/// say which lines nobody has vouched for.
+/// The other half of the ruling in `resolve`, and the three cases there that
+/// are **honest unknowns**: no engine pinned, an engine that lists its own at
+/// launch, and a control that engine does not have. Nothing here can vouch for
+/// the value in any of them, and accepting one quietly would leave somebody
+/// believing it was checked — so each comes back as a warning, the plan stays
+/// appliable, and the review can say which lines nobody vouched for.
+///
+/// **A model or an effort outside the picker's list is not one of them**, which
+/// is the correction #426 made: there the list is knowable and simply is not
+/// the accepted set, so there is no unknown to report. See `resolve`.
 fn said_about_settings(bundle: &Bundle, said: &Reading) -> Vec<PlanProblem> {
     let mut out = Vec::new();
     for setting in Setting::all() {
         let Some(wrote) = written(setting, &said.profile.settings) else {
             continue;
         };
-        let says = match offered(said.profile.engine, setting) {
+        let says = match offered(said.profile.engine, kind_of(setting)) {
             Offer::WhenALeadPicks => format!(
                 "`{}: {wrote}` is taken as written. Which values are on offer depends on the \
                  engine, and this profile leaves that to whichever lead delegates to it.",
                 setting.spelling()
             ),
             Offer::WhenItStarts => format!(
-                "`{}: {wrote}` is taken as written. {:?} lists its own {}s when it starts, so \
+                "`{}: {wrote}` is taken as written. {} lists its own {}s when it starts, so \
                  nothing here can say whether that is one of them.",
                 setting.spelling(),
                 said.profile
                     .engine
-                    .expect("only a named engine lists its own"),
+                    .expect("only a named engine lists its own")
+                    .label(),
                 setting.spelling()
             ),
             Offer::NotThisEngine => format!(
-                "`{}: {wrote}` would do nothing: {:?} has no {} setting. Remove the line.",
+                "`{}: {wrote}` would do nothing: {} has no {} setting. Remove the line.",
                 setting.spelling(),
-                said.profile.engine.expect("a named engine has a named gap"),
+                said.profile
+                    .engine
+                    .expect("a named engine has a named gap")
+                    .label(),
                 setting.spelling()
             ),
             Offer::Values(_) => continue,
@@ -2135,59 +2191,6 @@ fn written(setting: Setting, settings: &ft_core::controls::Preferred) -> Option<
     }
 }
 
-/// What can be said about one setting's value, for one engine.
-enum Offer {
-    /// These are the values that engine offers. Anything else is a mistake.
-    Values(Vec<String>),
-    /// The engine lists them itself, once it is running, so nothing here can
-    /// check the value. Codex's models and efforts, and only those.
-    WhenItStarts,
-    /// No engine is pinned, so which set applies is the lead's to decide.
-    WhenALeadPicks,
-    /// That engine has no such control, so the line would do nothing.
-    NotThisEngine,
-}
-
-/// Which of the four [`Offer`]s a setting is in.
-///
-/// Read off `controls::for_agent`, which is the one statement of what an engine
-/// can be asked to change — so a control added there is checked here without
-/// anybody remembering to come back. Its own doc carries the distinction this
-/// depends on: `models` and `efforts` are **passed in** "because one agent
-/// knows its own and the other does not", which is why an empty list for
-/// Codex's model is "not yet" and an absent sandbox for Claude Code is "never".
-fn offered(engine: Option<ft_core::Agent>, setting: Setting) -> Offer {
-    let Some(engine) = engine else {
-        return Offer::WhenALeadPicks;
-    };
-    let kind = kind_of(setting);
-    let values: Vec<String> = ft_core::controls::for_agent(engine, Vec::new(), Vec::new())
-        .into_iter()
-        .filter(|c| c.kind == kind)
-        .flat_map(|c| c.choices)
-        .map(|choice| choice.value)
-        .collect();
-    if !values.is_empty() {
-        return Offer::Values(values);
-    }
-    match (engine, kind) {
-        (
-            ft_core::Agent::Codex,
-            ft_core::controls::ControlKind::Model | ft_core::controls::ControlKind::Effort,
-        ) => Offer::WhenItStarts,
-        _ => Offer::NotThisEngine,
-    }
-}
-
-/// `a model`, `an effort` — so a refusal reads as a sentence.
-fn article(setting: Setting) -> String {
-    let word = setting.spelling();
-    match word.starts_with(['a', 'e', 'i', 'o', 'u']) {
-        true => format!("an {word}"),
-        false => format!("a {word}"),
-    }
-}
-
 /// What a setting resolves to: the value written, or the value an unset one
 /// takes for the engine this profile pins.
 fn resulting(
@@ -2204,8 +2207,10 @@ fn resulting(
     match ft_core::controls::default_value(engine, kind) {
         Some(default) => format!("{} (the default)", label(Some(engine), kind, default)),
         // Codex's model list arrives from the agent, so there is no value here
-        // to name. Said rather than guessed.
-        None => format!("{engine:?} decides when it starts"),
+        // to name. Said rather than guessed, and under the name a person reads
+        // — `Agent::label()` rather than `{engine:?}`, which spells it
+        // `ClaudeCode`.
+        None => format!("{} decides when it starts", engine.label()),
     }
 }
 
@@ -4339,45 +4344,202 @@ mod tests {
         assert!(says.contains("Write `directory: Fstack`"), "{says}");
     }
 
-    /// **An invalid value under `settings` blocks, listing what is accepted.**
+    /// **A model the picker does not list imports, because the engine takes
+    /// it** (#426).
     ///
-    /// Parity with `POST /roles` would be no check at all, and that is not
-    /// enough: the error table says an invalid enum value blocks, and a typo'd
-    /// value does not fail at launch either, because `Preferred::keeping_only`
-    /// drops one the agent no longer offers. `effort: maximum` silently does
-    /// nothing, which is the failure the format exists to remove.
+    /// *Built from values Claude Code accepts and no list here names*, which
+    /// is the whole of the defect and the whole of why the closed attempt's
+    /// test was worthless: that one enumerated what the engine *offers*, so it
+    /// passed with the check it guarded removed. These three come off
+    /// `claude --help`, which documents `--model` as "an alias for the latest
+    /// model (e.g. 'fable', 'opus', or 'sonnet') or a model's full name (e.g.
+    /// 'claude-fable-5')" — and the picker offers `opus[1m]`, `fable[1m]`,
+    /// `sonnet[1m]`, `haiku` and `opusplan`, none of which is any of them.
+    ///
+    /// The ruling is `api::schedules::settled`'s: a model cannot widen what an
+    /// agent may do, so an unrecognised one goes to the engine rather than
+    /// being refused on its behalf. Silently — no block *and no warning*: a
+    /// warning is for an honest unknown, and being absent from a picker is not
+    /// a fact about the value.
     #[test]
-    fn an_invalid_setting_blocks_and_lists_what_the_engine_offers() {
+    fn a_model_the_picker_does_not_list_imports() {
+        for wrote in ["opus", "sonnet", "claude-opus-5"] {
+            assert!(
+                !ft_core::controls::offers(
+                    ft_core::Agent::ClaudeCode,
+                    ft_core::controls::ControlKind::Model,
+                    wrote,
+                ),
+                "`{wrote}` is in the picker, so it proves nothing about this check"
+            );
+            let plan = plan(
+                &dropped(vec![at(
+                    "designer/PROFILE.md",
+                    &format!(
+                        "name: Designer\ndoes: does the thing\nengine: ClaudeCode\nsettings:\n  \
+                         model: {wrote}\n"
+                    ),
+                    "",
+                )]),
+                &here(vec![]),
+            )
+            .unwrap();
+            let entry = only(&plan);
+            assert!(
+                matches!(entry.outcome, PlanOutcome::New(_)),
+                "`model: {wrote}` was refused: {:#?}",
+                entry.outcome
+            );
+            assert!(plan.appliable, "`model: {wrote}` left the plan unappliable");
+            assert!(
+                entry.warnings.is_empty(),
+                "`model: {wrote}` is a working alias, not an unknown: {:#?}",
+                entry.warnings
+            );
+        }
+    }
+
+    /// And an **effort** outside the list imports for the same reason.
+    ///
+    /// No alias case here — `--effort`'s own choices are the picker's five
+    /// exactly — so what this pins is the rule rather than a known spelling:
+    /// an effort cannot widen anything, so a value Firetower does not
+    /// recognise is the engine's to answer for. Asked of the binary, it warns
+    /// and uses its default (*"Unknown --effort value 'maximum' — ignoring it
+    /// and using the default effort"*) rather than refusing to start, which is
+    /// the engine doing exactly what the ruling leaves to it.
+    #[test]
+    fn an_effort_the_picker_does_not_list_imports() {
         let plan = plan(
             &dropped(vec![at(
                 "designer/PROFILE.md",
                 "name: Designer\ndoes: does the thing\nengine: ClaudeCode\nsettings:\n  \
-                 model: not-a-model\n  effort: maximum\n",
+                 effort: maximum\n",
                 "",
             )]),
             &here(vec![]),
         )
         .unwrap();
-        let problems = blocked(only(&plan));
-        assert_eq!(problems.len(), 2, "{problems:#?}");
+        let entry = only(&plan);
+        assert!(
+            matches!(entry.outcome, PlanOutcome::New(_)),
+            "{:#?}",
+            entry.outcome
+        );
+        assert!(entry.warnings.is_empty(), "{:#?}", entry.warnings);
+        assert!(plan.appliable);
+    }
 
-        let model = problems
-            .iter()
-            .find(|p| p.key.as_deref() == Some("settings.model"))
-            .expect("a problem about the model");
-        assert!(model.says.contains("`not-a-model`"), "{}", model.says);
-        assert!(model.says.contains("ClaudeCode offers"), "{}", model.says);
-        // The values a file writes, so the list can be copied into one.
-        assert!(model.says.contains("`opus[1m]`"), "{}", model.says);
+    /// **A permission mode and a sandbox outside the list still block**, with
+    /// the accepted list and something to do about it.
+    ///
+    /// The other side of `controls::can_widen`, and the reason the split is
+    /// about widening rather than about typos. `claude_modes` leaves
+    /// `bypassPermissions` out *on purpose* — "a flag for a sandbox somebody
+    /// built on purpose rather than an item in a menu" — and that omission is
+    /// only safe if a mode outside the list is a refusal. The CLI does accept
+    /// it: `--permission-mode`'s own choices are `acceptEdits`, `auto`,
+    /// `bypassPermissions`, `manual`, `dontAsk` and `plan`. So this knowingly
+    /// refuses `manual` too, which is the price of refusing the other one, and
+    /// the picker is the set somebody has reasoned about.
+    ///
+    /// A sandbox is the `schedules.rs` case verbatim — a fence nobody here can
+    /// evaluate — so Codex's is held to its list the same way.
+    #[test]
+    fn a_mode_or_sandbox_outside_the_list_still_blocks() {
+        for (engine, setting, wrote, in_the_list, called) in [
+            (
+                "ClaudeCode",
+                "mode",
+                "bypassPermissions",
+                "`auto`",
+                "a permission mode",
+            ),
+            (
+                "Codex",
+                "sandbox",
+                "none-at-all",
+                "`workspace`",
+                "a sandbox",
+            ),
+        ] {
+            let plan = plan(
+                &dropped(vec![at(
+                    "designer/PROFILE.md",
+                    &format!(
+                        "name: Designer\ndoes: does the thing\nengine: {engine}\nsettings:\n  \
+                         {setting}: {wrote}\n"
+                    ),
+                    "",
+                )]),
+                &here(vec![]),
+            )
+            .unwrap();
+            let problems = blocked(only(&plan));
+            assert_eq!(problems.len(), 1, "{problems:#?}");
+            let says = &problems[0].says;
+            assert_eq!(
+                problems[0].key.as_deref(),
+                Some(format!("settings.{setting}").as_str())
+            );
+            // The value, what it is not, whose set it is, the set, and the
+            // action — the last of which is what the twin of this sentence on
+            // `POST /roles` was missing when QA read it.
+            assert!(says.contains(&format!("`{wrote}`")), "{says}");
+            assert!(says.contains(called), "{says}");
+            assert!(says.contains(in_the_list), "{says}");
+            assert!(says.contains("Write one of"), "{says}");
+            // Under the name a person reads. `{engine:?}` spells it
+            // `ClaudeCode`.
+            let label = ft_core::Agent::from_name(engine).unwrap().label();
+            assert!(says.contains(&format!("{label} offers")), "{says}");
+            // And it points at the line the value is on, not at `settings:`.
+            assert_eq!(problems[0].line, 6, "{:#?}", problems[0]);
+            assert!(!plan.appliable);
+        }
+    }
 
-        let effort = problems
-            .iter()
-            .find(|p| p.key.as_deref() == Some("settings.effort"))
-            .expect("a problem about the effort");
-        assert!(effort.says.contains("`maximum`"), "{}", effort.says);
-        assert!(effort.says.contains("an effort"), "{}", effort.says);
-        // And it points at the line the value is on, not at `settings:`.
-        assert_eq!(effort.line, 7, "{effort:#?}");
+    /// **`mode: plan` imports**, and was once reported as a defect that it did
+    /// not.
+    ///
+    /// It is one of Claude Code's permission modes (`controls::claude_modes`)
+    /// and one of `--permission-mode`'s own choices, so it was never refused.
+    /// Here so that the mode half of the split above cannot be tightened into
+    /// refusing it, and so the report stays answered rather than re-opened.
+    #[test]
+    fn a_permission_mode_the_picker_does_list_imports() {
+        for wrote in ft_core::controls::choices_for(
+            ft_core::Agent::ClaudeCode,
+            ft_core::controls::ControlKind::Mode,
+        ) {
+            let plan = plan(
+                &dropped(vec![at(
+                    "designer/PROFILE.md",
+                    &format!(
+                        "name: Designer\ndoes: does the thing\nengine: ClaudeCode\nsettings:\n  \
+                         mode: {wrote}\n"
+                    ),
+                    "",
+                )]),
+                &here(vec![]),
+            )
+            .unwrap();
+            let entry = only(&plan);
+            assert!(
+                matches!(entry.outcome, PlanOutcome::New(_)),
+                "`mode: {wrote}` was refused: {:#?}",
+                entry.outcome
+            );
+            assert!(plan.appliable, "`mode: {wrote}`");
+        }
+        assert!(
+            ft_core::controls::choices_for(
+                ft_core::Agent::ClaudeCode,
+                ft_core::controls::ControlKind::Mode,
+            )
+            .contains(&"plan".to_string()),
+            "the case that was reported has to be one of the values walked above"
+        );
     }
 
     /// A setting the engine has no picker for is **said and not refused**.
@@ -4405,7 +4567,10 @@ mod tests {
             entry.outcome
         );
         let says = &entry.warnings[0].says;
-        assert!(says.contains("ClaudeCode has no sandbox setting"), "{says}");
+        assert!(
+            says.contains("Claude Code has no sandbox setting"),
+            "{says}"
+        );
         assert!(says.contains("would do nothing"), "{says}");
         assert!(says.contains("Remove the line"), "{says}");
         assert!(plan.appliable);
@@ -4671,7 +4836,7 @@ mod tests {
             "name: Fourteen\ndoes: x\ndelegates_to:\n  - Nobody\n",
             "name: Fifteen\ndoes: x\ndelegates_to:\n  - QA\n",
             "name: Sixteen\ndoes: x\ndelegates_to:\n  - Sixteen\n",
-            "name: Seventeen\ndoes: x\nengine: ClaudeCode\nsettings:\n  effort: maximum\n",
+            "name: Seventeen\ndoes: x\nengine: ClaudeCode\nsettings:\n  mode: yolo\n",
             // A profile that is already here, moved by a file that cannot
             // move it.
             "name: Designer\ndoes: x\ndirectory: Fstack\n",
@@ -5006,21 +5171,33 @@ mod tests {
             )
         }
 
-        /// An invalid value under `settings`, both ways it can go.
+        /// A value under `settings` outside the engine's list, **all three
+        /// ways it can go**.
         ///
-        /// With an engine pinned it is checked against that engine's own set
-        /// and blocks with the list. With none there is nothing to check it
-        /// against, so it is taken as written and **warned** about rather than
-        /// passed over in silence — which makes this the first warning in the
-        /// product that is not about a duplicate name, and so the first real
-        /// test of the rule that amber is not spent on "a warning".
+        /// * A **mode** is held to the list and blocks with it, because a
+        ///   permission mode can widen what runs unasked —
+        ///   `controls::can_widen`.
+        /// * A **model** is not, and imports clean: `opus` is an alias
+        ///   `claude --help` documents and the picker spells `opus[1m]`. This
+        ///   is #426, and the screen draws it as the ordinary import it is.
+        /// * With **no engine** pinned there is nothing to check anything
+        ///   against, so the value is taken as written and **warned** about
+        ///   rather than passed over in silence — which makes this the first
+        ///   warning in the product that is not about a duplicate name, and so
+        ///   the first real test of the rule that amber is not spent on "a
+        ///   warning".
         fn bad_setting() -> ImportPlan {
             made(
                 dropped(vec![
                     file(
                         "engineer",
                         "name: Engineer\ndoes: turns a ticket into code\nengine: ClaudeCode\n\
-                         settings:\n  effort: maximum\n",
+                         settings:\n  mode: yolo\n",
+                    ),
+                    file(
+                        "designer",
+                        "name: Designer\ndoes: draws the screens\nengine: ClaudeCode\n\
+                         settings:\n  model: opus\n",
                     ),
                     file(
                         "qa",
@@ -5424,7 +5601,15 @@ mod tests {
                 ("ambiguous skill", "skills you can see are called"),
                 ("unknown frontmatter key", "placment"),
                 ("invalid enum", "sideways"),
-                ("invalid setting", "maximum"),
+                // Blocking, which for a settings value is now the two that
+                // can widen what an agent may do (#426) — `mode` here.
+                ("invalid setting", "is not a permission mode"),
+                // And the one that is taken as written instead, which is a
+                // warning rather than a block.
+                (
+                    "unknowable setting",
+                    "`effort: maximum` is taken as written",
+                ),
                 ("nothing to import", "PROFILE.md"),
                 ("missing does", "does"),
                 ("read-only directory", "but not file anything there"),
