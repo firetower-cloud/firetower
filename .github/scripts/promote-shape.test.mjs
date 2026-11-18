@@ -20,7 +20,8 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, existsSync, symlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -52,6 +53,72 @@ function job(workflow, name) {
   const to = lines.findIndex((line, i) => i > from && /^ {2}\S/.test(line));
   return lines.slice(from, to === -1 ? undefined : to).join("\n");
 }
+
+/**
+ * A `gh` standing in for the repository: releases are directories, assets
+ * are files in them. Real enough that `read-channel-manifest.sh` and
+ * `publish-channel-pin.sh` run unmodified against it, which is the point —
+ * the scripts under test are the ones the workflow calls.
+ */
+const GH = `#!/usr/bin/env bash
+set -u
+printf '%s\\n' "$*" >> "$GH_LOG"
+case "$1 $2" in
+"api repos/"*)
+  # releases/tags/<tag> — answers with the asset names on it, which is what
+  # the reader asks for: it has to tell "no manifest was ever here" from
+  # "the manifest that was here is gone".
+  tag="\${2##*/}"
+  if [ -n "\${API_ERROR:-}" ]; then printf '%s\\n' "$API_ERROR" >&2; exit 1; fi
+  if [ ! -d "$REGISTRY/$tag" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
+  ls -1 "$REGISTRY/$tag" 2>/dev/null || true
+  exit 0 ;;
+"release view")
+  [ -d "$REGISTRY/$3" ] || { echo "release not found (HTTP 404)" >&2; exit 1; }
+  exit 0 ;;
+"release create")
+  mkdir -p "$REGISTRY/$3"; exit 0 ;;
+"release download")
+  tag="$3"
+  if [ -n "\${DOWNLOAD_FAILS:-}" ]; then echo "HTTP 500" >&2; exit 1; fi
+  out=""; pat=""
+  shift 3
+  while [ "$#" -gt 0 ]; do
+    case "$1" in -D) out="$2"; shift 2 ;; -p) pat="$2"; shift 2 ;; *) shift ;; esac
+  done
+  [ -f "$REGISTRY/$tag/$pat" ] || { echo "no such asset" >&2; exit 1; }
+  mkdir -p "$out"; cp "$REGISTRY/$tag/$pat" "$out/$pat"; exit 0 ;;
+"release edit")
+  # The notes are what a person reads on the release page to find out what
+  # the one-liner is about to install, so they are part of the behaviour and
+  # not decoration. Recorded as a dotfile, so the asset listing above keeps
+  # seeing only assets.
+  tag="$3"
+  mkdir -p "$REGISTRY/$tag"
+  shift 3
+  while [ "$#" -gt 0 ]; do
+    case "$1" in --notes) printf '%s' "$2" > "$REGISTRY/$tag/.notes"; shift 2 ;; *) shift ;; esac
+  done
+  exit 0 ;;
+"release upload")
+  mkdir -p "$REGISTRY/$3"
+  # --clobber deletes before it uploads. The real one does, so this does
+  # too: the window between the two is a finding.
+  rm -f "$REGISTRY/$3/$(basename "$4")"
+  if [ -n "\${FAIL_UPLOAD:-}" ] && [ "$(basename "$4")" = "$FAIL_UPLOAD" ]; then
+    echo 'injected upload failure, after the delete' >&2; exit 1
+  fi
+  cp "$4" "$REGISTRY/$3/"
+  # An upload that exits 0 having stored something other than what it was
+  # given. Nothing goes red at the call site, which is what makes reading the
+  # published copy back the only way to find out.
+  if [ -n "\${CORRUPT_UPLOAD:-}" ] && [ "$(basename "$4")" = "$CORRUPT_UPLOAD" ]; then
+    printf 'x' >> "$REGISTRY/$3/$(basename "$4")"
+  fi
+  exit 0 ;;
+esac
+exit 0
+`;
 
 describe("the tags a release writes", () => {
   it("moves beta on every release and never writes stable", () => {
@@ -147,10 +214,93 @@ describe("the promotion workflow", () => {
     assert.match(job(PROMOTE, "pin_last"), /if: inputs\.package == 'control_plane'/);
   });
 
+  /**
+   * **The rolling worker release, which is the hand-run install's pointer.**
+   *
+   * `usefiretower.com/worker.sh` redirects to `worker-latest`, so that release
+   * decides what `curl -fsSL … | sh` installs — the recommended line in the
+   * install documentation. It was moved by every release, which meant "the
+   * newest build": true while there was one channel, and false from the moment
+   * the channels diverged, when it would start handing a *beta* worker to
+   * somebody on a general-access control plane, which refuses it. #459, and the
+   * same defect as #454 in a second place.
+   *
+   * So it follows general access and only a promotion moves it. The two things
+   * that have to stay true are that a release does not touch it, and that it is
+   * written after the pin rather than before — ahead of the pin it hands out a
+   * worker the control plane refuses; behind it, one the control plane replaces
+   * over the connection it already holds.
+   */
+  it("moves the rolling worker release, which a release no longer does", () => {
+    const worker = job(PROMOTE, "worker");
+    assert.match(worker, /inputs\.package == 'control_plane'/);
+    assert.match(worker, /publish-worker-rolling\.sh "\$VERSION"/);
+    // And a release has nothing to say about it any more. Scoped to the job
+    // that used to write it, so the test names the thing it is about.
+    const published = code(job(RELEASE, "worker-release"));
+    assert.doesNotMatch(published, /worker-latest/, "a release must not move the rolling release");
+    assert.equal([...code(RELEASE).matchAll(/worker-latest/g)].length, 0);
+  });
+
+  it("writes the rolling worker release after the pin, never before it", () => {
+    // Not tidiness, and worth asserting for that reason: the two orderings look
+    // equally arbitrary to a reader who has not thought about which way the
+    // window fails. After the pin, an interruption leaves the rolling release
+    // *behind* general access — a hand-run install gets an older worker and the
+    // control plane upgrades it on the first connection. Before the pin, the
+    // window inverts into the refusal this whole change exists to prevent.
+    const worker = job(PROMOTE, "worker");
+    assert.match(worker, /needs: \[check, pin_last\]/);
+    // And the script refuses on its own account if the pin is not already
+    // there, so a rerun of this job alone cannot get ahead either.
+    const script = read(".github/scripts/publish-worker-rolling.sh");
+    assert.match(script, /read-channel-manifest\.sh/);
+    assert.match(script, /channel-manifest\.mjs" preflight/);
+  });
+
+  it("ends by running the published one-liner, unpinned", () => {
+    // `release.yml` has ended this way since before channels existed — the
+    // whole chain, before anybody is told the release exists. It moved here
+    // with the release it resolves to, because a check that passes
+    // `--version` would prove the versioned release works and say nothing
+    // about what the unpinned line gets, which is the entire defect. #388's
+    // pattern: a check that passes without exercising what it claims.
+    const worker = job(PROMOTE, "worker");
+    const at = worker.indexOf("the published one-liner installs the promoted worker");
+    assert.ok(at > 0, "promotion installs from the published script");
+    const step = code(worker.slice(at));
+    assert.match(step, /releases\/download\/worker-latest\/worker\.sh/);
+    assert.match(step, /\| sh -s -- --skip-packages/);
+    assert.doesNotMatch(step, /--version "?\$VERSION/, "pinning it would test the wrong path");
+    // It is an assertion and not a smoke run: the binary has to report the
+    // version that was just promoted.
+    assert.match(step, /firetower-worker" --version/);
+    assert.match(step, /\*"\$VERSION"\*/);
+    // And after the release it is asserting about, or it would be asserting
+    // about the previous one.
+    assert.ok(at > worker.indexOf("publish-worker-rolling.sh"));
+  });
+
+  it("keeps a release proving its own published install path", () => {
+    // Moving the rolling release's check here must not leave a release with
+    // no end-to-end check at all. It still installs from a published script on
+    // a published release and runs the binary — the pinned path now, which is
+    // the one the control plane's authorize command uses.
+    const published = code(job(RELEASE, "worker-release"));
+    assert.match(published, /releases\/download\/\$TAG\/worker\.sh/);
+    assert.match(published, /--version "\$VERSION" --skip-packages/);
+    assert.match(published, /firetower-worker" --version/);
+    assert.match(published, /releases\/download\/\$TAG\/install\.sh/);
+    assert.match(published, /firetower --version/);
+  });
+
   it("reports success only when this package's whole order finished", () => {
     const done = job(PROMOTE, "promoted");
     assert.match(done, /needs\.check\.result == 'success'/);
     assert.match(done, /needs\.images\.result == 'success' && needs\.pin_last\.result == 'success'/);
+    // Including the rolling worker release: a promotion whose one-liner is
+    // stale is not one to report as finished.
+    assert.match(done, /needs\.worker\.result == 'success'/);
     assert.match(done, /needs\.pin_first\.result == 'success' && needs\.desktop\.result == 'success'/);
     // Hyphens in a job id would be read as subtraction in these expressions.
     assert.doesNotMatch(code(PROMOTE), /needs\.[a-z_]+-[a-z]/);
@@ -326,53 +476,6 @@ describe("promotion refuses, and moves nothing when it does", { skip: process.pl
     const to = body.indexOf("\n      - name:");
     return body.slice(from, to === -1 ? undefined : to);
   }
-
-  /**
-   * A `gh` standing in for the repository: releases are directories, assets
-   * are files in them. Real enough that `read-channel-manifest.sh` and
-   * `publish-channel-pin.sh` run unmodified against it, which is the point —
-   * the scripts under test are the ones the workflow calls.
-   */
-  const GH = `#!/usr/bin/env bash
-set -u
-printf '%s\\n' "$*" >> "$GH_LOG"
-case "$1 $2" in
-  "api repos/"*)
-    # releases/tags/<tag> — answers with the asset names on it, which is what
-    # the reader asks for: it has to tell "no manifest was ever here" from
-    # "the manifest that was here is gone".
-    tag="\${2##*/}"
-    if [ -n "\${API_ERROR:-}" ]; then printf '%s\\n' "$API_ERROR" >&2; exit 1; fi
-    if [ ! -d "$REGISTRY/$tag" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
-    ls -1 "$REGISTRY/$tag" 2>/dev/null || true
-    exit 0 ;;
-  "release view")
-    [ -d "$REGISTRY/$3" ] || { echo "release not found (HTTP 404)" >&2; exit 1; }
-    exit 0 ;;
-  "release create")
-    mkdir -p "$REGISTRY/$3"; exit 0 ;;
-  "release download")
-    tag="$3"
-    if [ -n "\${DOWNLOAD_FAILS:-}" ]; then echo "HTTP 500" >&2; exit 1; fi
-    out=""; pat=""
-    shift 3
-    while [ "$#" -gt 0 ]; do
-      case "$1" in -D) out="$2"; shift 2 ;; -p) pat="$2"; shift 2 ;; *) shift ;; esac
-    done
-    [ -f "$REGISTRY/$tag/$pat" ] || { echo "no such asset" >&2; exit 1; }
-    mkdir -p "$out"; cp "$REGISTRY/$tag/$pat" "$out/$pat"; exit 0 ;;
-  "release upload")
-    mkdir -p "$REGISTRY/$3"
-    # --clobber deletes before it uploads. The real one does, so this does
-    # too: the window between the two is a finding.
-    rm -f "$REGISTRY/$3/$(basename "$4")"
-    if [ -n "\${FAIL_UPLOAD:-}" ] && [ "$(basename "$4")" = "$FAIL_UPLOAD" ]; then
-      echo 'injected upload failure, after the delete' >&2; exit 1
-    fi
-    cp "$4" "$REGISTRY/$3/"; exit 0 ;;
-esac
-exit 0
-`;
 
   /**
    * A repository with `firetower-v*` releases and a published manifest, the
@@ -815,5 +918,329 @@ exit 0
     assert.equal(commit(repo, "control_plane:general=0.57.0").status, 0);
     assert.equal(reader(repo).schema_version, 1);
     assert.equal(reader(repo).control_plane.general, "0.57.0");
+  });
+});
+
+/**
+ * **The rolling worker release, and what a person hand-running the one-liner
+ * actually gets.**
+ *
+ * `usefiretower.com/worker.sh` redirects to `worker-latest`, so that release is
+ * what `curl -fsSL … | sh` installs — the recommended line in the install
+ * documentation. It used to be moved by every release, which meant "the newest
+ * build": correct while there was one channel, and from the moment the channels
+ * diverged it would hand a **beta** worker to somebody on a general-access
+ * control plane, which refuses one newer than itself. #459.
+ *
+ * Shape tests above say the workflow calls the right script in the right order.
+ * These run that script against the fake `gh` and then ask the only question
+ * that matters: afterwards, what does the installer get? The last one runs the
+ * **published** `worker.sh` — the copy that landed on the rolling release, not
+ * the one in the working tree — against a `file://` view of it, so the whole
+ * hand-run chain is exercised: the script, the asset it names, the checksum it
+ * verifies, and the binary answering.
+ *
+ * Not on Windows: `bash`, `tar` and a POSIX `sh` script.
+ */
+describe("the rolling worker release follows general access", { skip: process.platform === "win32" }, () => {
+  const SHAPES = [
+    "firetower-worker-darwin-arm64.tar.gz",
+    "firetower-worker-darwin-x86_64.tar.gz",
+    "firetower-worker-linux-arm64.tar.gz",
+    "firetower-worker-linux-x86_64.tar.gz",
+  ];
+
+  /** `sha256sum`'s own format: the digest, two spaces, the name. */
+  const sums = (dir, names) =>
+    `${names.map((n) => `${createHash("sha256").update(readFileSync(join(dir, n))).digest("hex")}  ${n}`).join("\n")}\n`;
+
+  /**
+   * A versioned release carrying what `release.yml` puts on one: a worker
+   * tarball per shape, the two scripts, and the checksum file over all of them.
+   *
+   * The tarballs are real, and the binary inside is a script that reports the
+   * version — which is what the hand-run test reads back at the far end of the
+   * chain. The scripts are the repository's own, because the published
+   * `worker.sh` being the thing that works is half the claim.
+   */
+  function versioned(registry, version, { shapes = SHAPES } = {}) {
+    const tag = `firetower-v${version}`;
+    const dir = join(registry, tag);
+    // Beside the registry, not in it: a directory inside it would answer to
+    // `gh release view` as a release nobody created.
+    const staging = join(registry, "..", `build-${version}`);
+    mkdirSync(dir, { recursive: true });
+    mkdirSync(staging, { recursive: true });
+
+    writeFileSync(
+      join(staging, "firetower-worker"),
+      `#!/bin/sh\ncase "$1" in\n  --version) echo "firetower-worker ${version}" ;;\n  doctor) echo "doctor: nothing to report" ;;\nesac\nexit 0\n`,
+    );
+    chmodSync(join(staging, "firetower-worker"), 0o755);
+    for (const asset of shapes) {
+      const r = spawnSync("tar", ["-czf", join(dir, asset), "-C", staging, "firetower-worker"], { encoding: "utf8" });
+      assert.equal(r.status, 0, `packing ${asset}: ${r.stderr}`);
+    }
+    cpSync(join(ROOT, "install/worker.sh"), join(dir, "worker.sh"));
+    cpSync(join(ROOT, "install/install.sh"), join(dir, "install.sh"));
+
+    writeFileSync(join(dir, "SHA256SUMS"), sums(dir, [...shapes, "worker.sh", "install.sh"]));
+    return dir;
+  }
+
+  const MANIFEST = (general, beta = "0.58.0") => ({
+    schema_version: 1,
+    control_plane: { beta, general, general_promoted_at: "2026-11-01T00:00:00Z" },
+    desktop: { beta: "0.21.0", general: "0.20.0", general_promoted_at: "2026-10-01T00:00:00Z" },
+  });
+
+  /** A repository whose `channels` manifest and releases are what they say. */
+  function repository({ general = "0.57.0", versions = ["0.57.0"], rolling, ...options } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), "rolling-"));
+    const registry = join(dir, "registry");
+    mkdirSync(registry, { recursive: true });
+    for (const v of versions) versioned(registry, v, options);
+    if (general !== null) {
+      mkdirSync(join(registry, "channels"), { recursive: true });
+      writeFileSync(join(registry, "channels", "channels.json"), `${JSON.stringify(MANIFEST(general), null, 2)}\n`);
+    }
+    // A rolling release already holding something, when the case needs one.
+    if (rolling) cpSync(join(registry, `firetower-v${rolling}`), join(registry, "worker-latest"), { recursive: true });
+
+    const gh = join(dir, "gh");
+    writeFileSync(gh, GH);
+    chmodSync(gh, 0o755);
+    writeFileSync(join(dir, "gh.log"), "");
+    return { dir, registry };
+  }
+
+  /** The promotion step: move the rolling release onto a version. */
+  function move(repo, version, env = {}) {
+    const r = spawnSync("bash", [join(ROOT, ".github/scripts/publish-worker-rolling.sh"), version], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${repo.dir}:${process.env.PATH}`,
+        GH_LOG: join(repo.dir, "gh.log"),
+        REGISTRY: repo.registry,
+        RUNNER_TEMP: join(repo.dir, "run"),
+        GITHUB_REPOSITORY: "firetower-cloud/firetower",
+        GITHUB_STEP_SUMMARY: "",
+        ...env,
+      },
+    });
+    return { status: r.status, output: `${r.stdout}${r.stderr}` };
+  }
+
+  /** What is on the rolling release right now, as a reader would find it. */
+  const rolling = ({ registry }, name) => {
+    const at = join(registry, "worker-latest", name);
+    return existsSync(at) ? readFileSync(at) : null;
+  };
+  const notes = ({ registry }) => {
+    const at = join(registry, "worker-latest", ".notes");
+    return existsSync(at) ? readFileSync(at, "utf8") : null;
+  };
+
+  /**
+   * The hand-run install, as a person runs it.
+   *
+   * The **published** script — the copy that landed on the rolling release —
+   * fetched over `file://` from a tree laid out the way the release host lays
+   * one out, with no `--version`. So this is the real resolution: unpinned, the
+   * script takes `worker-latest`, and whatever that holds is what ends up in
+   * `bin/firetower-worker`.
+   */
+  function handRun(repo) {
+    const host = join(repo.dir, "host");
+    mkdirSync(join(host, "download"), { recursive: true });
+    const link = join(host, "download", "worker-latest");
+    if (!existsSync(link)) symlinkSync(join(repo.registry, "worker-latest"), link);
+    const root = mkdtempSync(join(tmpdir(), "worker-root-"));
+    const r = spawnSync("sh", [join(repo.registry, "worker-latest", "worker.sh"), "--skip-packages"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        FIRETOWER_RELEASES: `file://${host}`,
+        FIRETOWER_WORKER_ROOT: root,
+        // **The locale a Linux control plane forwards over ssh.** `ssh` sends
+        // `LC_*` and a Linux control plane sends `C.UTF-8`, which bash 3.2 on
+        // a Mac does not recognise — and in that state it read the first byte
+        // of a multibyte character following `$ARCH` as part of the variable
+        // name, so `set -u` killed the install with `ARCH?: unbound
+        // variable`. Found exactly here, by this test, before the rest of it
+        // could run. Set rather than inherited so the run does not depend on
+        // whose terminal it is: it only bites on bash 3.2, so a Linux runner
+        // passes it either way and the Mac in front of somebody is what
+        // catches a regression.
+        LC_CTYPE: "C.UTF-8",
+      },
+    });
+    const binary = join(root, "bin", "firetower-worker");
+    const said = existsSync(binary) ? spawnSync(binary, ["--version"], { encoding: "utf8" }).stdout.trim() : null;
+    // The script's own error, not an opaque `null` three assertions later.
+    assert.equal(r.status, 0, `the published installer failed:\n${r.stdout}${r.stderr}`);
+    assert.ok(said, `nothing was installed:\n${r.stdout}${r.stderr}`);
+    return { status: r.status, output: `${r.stdout}${r.stderr}`, said };
+  }
+
+  it("copies the promoted version's own files onto the rolling release", () => {
+    // The positive control, and the invariant: the two releases hold the same
+    // bytes, so the script on one can never name a tarball the other does not
+    // have. Without this every refusal below could pass on a script that
+    // refuses everything.
+    const repo = repository({ general: "0.57.0" });
+    const r = move(repo, "0.57.0");
+    assert.equal(r.status, 0, r.output);
+    for (const name of [...SHAPES, "worker.sh", "install.sh", "SHA256SUMS"]) {
+      assert.deepEqual(
+        rolling(repo, name),
+        readFileSync(join(repo.registry, "firetower-v0.57.0", name)),
+        `${name} on the rolling release is not the one on the versioned release`,
+      );
+    }
+  });
+
+  it("gives a hand-run install the general-access worker, first time", () => {
+    // The acceptance criterion, run rather than reasoned about: published
+    // script, published asset, published checksum, and the binary answering.
+    const repo = repository({ general: "0.57.0", versions: ["0.57.0", "0.58.0"] });
+    assert.equal(move(repo, "0.57.0").status, 0);
+
+    const install = handRun(repo);
+    assert.equal(install.status, 0, install.output);
+    assert.match(install.said, /0\.57\.0/, "an unpinned install must get general access");
+    // And it says which, rather than "the newest release" — the wording was
+    // part of the false claim.
+    assert.match(install.output, /general access/);
+    // The checksum file was found and used: an install that silently skipped
+    // verification would pass the version assertion just the same.
+    assert.doesNotMatch(install.output, /without verifying/);
+
+    // 0.58.0 is published and on beta. Nothing moved the rolling release to
+    // it, and that is the whole fix: before #459 a release did exactly that.
+    assert.doesNotMatch(install.said, /0\.58\.0/);
+  });
+
+  it("follows a later promotion, and only a promotion", () => {
+    const repo = repository({ general: "0.57.0", versions: ["0.57.0", "0.58.0"] });
+    assert.equal(move(repo, "0.57.0").status, 0);
+    assert.match(handRun(repo).said, /0\.57\.0/);
+
+    // 0.58.0 is promoted: the pin moves first, then this.
+    writeFileSync(join(repo.registry, "channels", "channels.json"), `${JSON.stringify(MANIFEST("0.58.0"), null, 2)}\n`);
+    assert.equal(move(repo, "0.58.0").status, 0);
+    assert.match(handRun(repo).said, /0\.58\.0/);
+  });
+
+  it("refuses to drag the rolling release back behind a newer promotion", () => {
+    // `needs:` does not re-run a job, so rerunning this one from an older
+    // promotion would otherwise move the rolling release backwards with
+    // nothing to notice. The manifest is read again here for that reason, and
+    // the refusal is the manifest writer's own — one copy of the rule.
+    const repo = repository({ general: "0.58.0", versions: ["0.57.0", "0.58.0"], rolling: "0.58.0" });
+    const r = move(repo, "0.57.0");
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /never moved backwards/);
+    assert.match(handRun(repo).said, /0\.58\.0/, "the reader is still on what was promoted");
+  });
+
+  it("refuses a version general access has not reached yet", () => {
+    // The other direction, which the backwards guard is silent on: the pin was
+    // never written, or a run reached here with the manifest write skipped. The
+    // rolling release is a general-access pointer, so pointing it at a version
+    // nothing has been told to want is exactly the failure #459 is about — it
+    // would be *ahead* of every installation.
+    const repo = repository({ general: "0.55.0", versions: ["0.55.0", "0.57.0"], rolling: "0.55.0" });
+    const r = move(repo, "0.57.0");
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /general access is '0\.55\.0', not 0\.57\.0/);
+    assert.match(r.output, /has NOT been touched/);
+    assert.match(handRun(repo).said, /0\.55\.0/, "the reader is still on general access");
+  });
+
+  it("refuses when there is no channel manifest at all", () => {
+    // Absence is the bootstrap case for the *manifest*, and it is not one
+    // here: this release is a general-access pointer, so with nothing saying
+    // what general access is there is nothing to point it at.
+    const repo = repository({ general: null });
+    const r = move(repo, "0.57.0");
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /no published channel manifest/);
+    assert.equal(rolling(repo, "SHA256SUMS"), null);
+  });
+
+  it("refuses when the manifest cannot be read, which is not the same as there not being one", () => {
+    for (const API_ERROR of ["gh: API rate limit exceeded (HTTP 403)", "gh: Server Error (HTTP 500)"]) {
+      const repo = repository({ general: "0.57.0", rolling: "0.57.0" });
+      const r = move(repo, "0.58.0", { API_ERROR });
+      assert.notEqual(r.status, 0, `${API_ERROR} must stop it`);
+      assert.match(r.output, /Could not read the published channel manifest/);
+    }
+  });
+
+  it("refuses a release whose checksum file does not list every shape", () => {
+    // The floor, by name. The set is taken from `SHA256SUMS` so the two
+    // releases cannot disagree — but a checksum file listing only the macOS
+    // tarballs is self-consistent and would publish a rolling release that
+    // silently cannot serve Linux. Counting would not catch it either.
+    for (const missing of SHAPES) {
+      const repo = repository({ general: "0.57.0", shapes: SHAPES.filter((s) => s !== missing) });
+      const r = move(repo, "0.57.0");
+      assert.notEqual(r.status, 0, `a release with no ${missing} must be refused`);
+      assert.match(r.output, new RegExp(`does not list ${missing.replace(/\./g, "\\.")}`));
+      assert.equal(rolling(repo, "SHA256SUMS"), null, "and nothing published");
+    }
+  });
+
+  it("refuses a release whose files do not match its own checksum file", () => {
+    // The installer verifies against this document on somebody's machine. A
+    // set that fails it here is a set that would fail there instead.
+    const repo = repository({ general: "0.57.0" });
+    writeFileSync(join(repo.registry, "firetower-v0.57.0", "worker.sh"), "#!/bin/sh\n# tampered\n");
+    const r = move(repo, "0.57.0");
+    assert.notEqual(r.status, 0);
+    assert.equal(rolling(repo, "SHA256SUMS"), null);
+  });
+
+  it("refuses when what landed is not what it uploaded", () => {
+    // The uploads are not one transaction, so the only statement worth making
+    // is about what is published afterwards. An upload that exits 0 having
+    // stored something else is silent everywhere except here.
+    const repo = repository({ general: "0.57.0" });
+    const r = move(repo, "0.57.0", { CORRUPT_UPLOAD: "worker.sh" });
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /worker\.sh is not the worker\.sh on firetower-v0\.57\.0/);
+  });
+
+  it("creates the rolling release on a repository that has never had one", () => {
+    const repo = repository({ general: "0.57.0" });
+    assert.equal(existsSync(join(repo.registry, "worker-latest")), false);
+    assert.equal(move(repo, "0.57.0").status, 0);
+    assert.match(handRun(repo).said, /0\.57\.0/);
+  });
+
+  it("is idempotent, so an interrupted promotion is finished by re-running it", () => {
+    const repo = repository({ general: "0.57.0" });
+    assert.equal(move(repo, "0.57.0").status, 0);
+    const first = rolling(repo, "SHA256SUMS");
+    assert.equal(move(repo, "0.57.0").status, 0);
+    assert.deepEqual(rolling(repo, "SHA256SUMS"), first);
+  });
+
+  it("says on the release what it holds and what moves it", () => {
+    // The published notes are the documentation somebody actually reads before
+    // running the line, and "Moved on every release" is the claim #459 was
+    // opened for. The behaviour and the words have to agree.
+    const repo = repository({ general: "0.57.0" });
+    assert.equal(move(repo, "0.57.0").status, 0);
+    const said = notes(repo);
+    assert.match(said, /general-access worker \(0\.57\.0\)/);
+    assert.match(said, /promote\.yml/);
+    assert.doesNotMatch(said, /Moved on every release/);
+    assert.doesNotMatch(said, /newest/);
+    // And it names the versioned release holding the same files, which is what
+    // somebody checks when the two are suspected of disagreeing.
+    assert.match(said, /firetower-v0\.57\.0 holds the same files/);
   });
 });

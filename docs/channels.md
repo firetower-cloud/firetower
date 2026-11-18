@@ -104,13 +104,45 @@ connection the control plane already holds, pinned to the version being moved
 to, and nothing ever moves a worker ahead — a worker newer than its control
 plane is the same protocol mismatch as one older.
 
-A fresh machine gets the matching binary first time because the control plane
-pins its own version into the authorize command it hands out
-(`… | sh -s -- --version 0.57.0 --authorize '…'`). The `worker-latest` rolling
-release keeps serving **general access** for a hand-run
-`curl -fsSL https://usefiretower.com/worker.sh | sh`, so a hand-run install onto
-a beta control plane needs that control plane's next upgrade to bring the two
-into step.
+Two paths put a worker on a fresh machine, and they are pinned differently
+because only one of them has a control plane to ask.
+
+| Path | What it installs | Pinned by |
+| --- | --- | --- |
+| **Added through Firetower** — the authorize command, and every later upgrade | The control plane's **own** version | The control plane, which writes `--version X.Y.Z` into the line it hands you |
+| **By hand** — `curl -fsSL https://usefiretower.com/worker.sh \| sh` | **General access** | The `worker-latest` release, which is a general-access pointer |
+
+The first is exact whatever channel the installation is on, which is why a
+machine added through the interface arrives with the matching binary first time.
+
+The second has nothing to ask, so it takes the pointer — and the pointer has to
+be general access. It used to be the newest build, moved by every release, which
+was the same thing only while there was one channel. Under a continuous beta it
+would hold a **beta** worker from the moment the channels diverged, so somebody
+following the install guide onto a general-access control plane would install a
+worker newer than it and be refused, having done exactly what they were told.
+That is #459, and it is the same defect as #454: a pointer meaning *newest* is
+correct only while the channels are equal, and silently wrong afterwards.
+
+So `worker-latest` is moved by `promote.yml` and by nothing else, from the
+promoted version's own release — the same files, so the two can never disagree.
+A release does not touch it.
+
+**What this does not fix, stated plainly.** The pointer follows the general
+access *pin*, and an installation follows it when its operator upgrades. An
+installation that has not yet taken a promotion is behind the pin, and a hand-run
+install on that machine gets a worker newer than it — which is refused if the
+protocol version moved in between. Nothing a pointer can do closes that: the
+hand-run path has no control plane to ask. What closes it is the pinned line,
+which is what Firetower hands you when you add a machine, and what the refusal
+itself prints as the remedy. Following general access makes the window as small
+as a pointer can make it, rather than permanent.
+
+> `worker-latest` is named "latest" for the same reason `desktop-latest` is: it
+> is the address that existed before channels, every published one-liner and the
+> `usefiretower.com/worker.sh` redirect point at it, and renaming it would
+> strand all of them. Like `desktop-latest`, it is **a permanent alias of
+> general access**. Pass `--version X.Y.Z` for anything else.
 
 ---
 
@@ -186,8 +218,17 @@ last write is the one that package's own readers consult.
 
 | Package | Order | Why |
 | --- | --- | --- |
-| Control plane | re-tag the images onto `stable` → **write the channel manifest** | Nothing acts on a moved tag until something tells it to want that version, and the updater refuses an image whose stamped version is not the one it was asked for. An installation that pulls in the window is frozen, not moved. |
+| Control plane | re-tag the images onto `stable` → **write the channel manifest** → copy the worker onto `worker-latest` | Nothing acts on a moved tag until something tells it to want that version, and the updater refuses an image whose stamped version is not the one it was asked for. An installation that pulls in the window is frozen, not moved. |
 | Desktop | **write the channel manifest** → rewrite `desktop-stable` and `desktop-latest` | Those addresses are what copies actually fetch, and the app installs whatever is there if the version is greater. There is no second opinion. |
+
+`worker-latest` comes after the manifest for a different reason — it is not a
+commit point and general access has already moved by the time it is written.
+The question there is which way the window fails. Behind the pin, a hand-run
+install gets a worker older than its control plane and the control plane
+replaces it over the connection it already holds; ahead of the pin, it gets one
+the control plane refuses. An interruption therefore has to leave it behind, and
+the re-run finishes the job. A failure writing it means the promotion is done
+and the one-liner is stale: the run goes red, says so, and is re-run.
 
 The desktop order is that way round because the other way was a real defect: an
 interruption between the addresses and the document left every general-access
@@ -212,6 +253,13 @@ an index that has already passed every check. The staging tag,
 `promote-<run>-<attempt>`, is left behind: it is not a channel, nothing reads
 it, and GHCR has no delete-a-tag call — deleting the "version" would delete the
 index `stable` now points at.
+
+A promotion then installs the worker from the published one-liner — unpinned,
+exactly as a person runs it — and asserts the binary reports the version just
+promoted. `release.yml` has ended that way since before channels existed; it
+moved here along with the release it resolves to, because a check that pins the
+version would prove the versioned release works and say nothing about what the
+unpinned line gets, which is the whole of #459.
 
 It refuses, and moves nothing, on:
 

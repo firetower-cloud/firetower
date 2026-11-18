@@ -43,6 +43,11 @@ under the button for whoever would rather watch it happen:
 curl -fsSL https://usefiretower.com/worker.sh | sh
 ```
 
+Unpinned, that installs the **general-access** worker — see
+[channels](channels.md). The line the panel hands you when you add a machine
+pins the control plane's own version instead, which is exact whatever channel
+the installation is on.
+
 Run as the account agents should run as. The script:
 
 1. Works out what the machine is — macOS or Linux, arm64 or x86_64 — and
@@ -61,7 +66,7 @@ Run as the account agents should run as. The script:
 6. Prints what `firetower-worker doctor` sees: the same checks Firetower runs
    over ssh, with the same PATH.
 
-Options: `--version X.Y.Z` installs that release rather than the newest;
+Options: `--version X.Y.Z` installs that release rather than general access;
 `--agent claude-code` or `--agent codex` fetches the agent too; `--from FILE`
 installs a tarball you already have.
 
