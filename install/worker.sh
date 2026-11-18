@@ -184,7 +184,13 @@ else
         base="$RELEASES/download/worker-latest"
         which="the newest release"
     fi
-    say "Fetching firetower-worker ($which) for $OS $ARCH…"
+    # `${ARCH}`, braced, because the ellipsis is multibyte and follows the
+    # variable with nothing in between. A shell whose locale it does not
+    # recognise — bash 3.2 on a Mac handed `LC_CTYPE=C.UTF-8`, which is what a
+    # Linux control plane forwards over ssh — reads the first byte of the
+    # ellipsis as part of the name, and `set -u` then kills the install with
+    # `ARCH?: unbound variable`. Found while testing the rolling release.
+    say "Fetching firetower-worker ($which) for $OS ${ARCH}…"
     if ! curl -fsSL --retry 3 -o "$TMP/$ASSET" "$base/$ASSET"; then
         die "could not fetch $base/$ASSET — is there a release for this version, and is this machine online?"
     fi
@@ -232,7 +238,7 @@ if [ -n "$AUTHORIZE" ]; then
 fi
 
 if [ -n "$AGENT" ]; then
-    say "Fetching $AGENT…"
+    say "Fetching ${AGENT}…"
     "$BIN/firetower-worker" agents add "$AGENT" || die "fetching $AGENT failed"
 fi
 
