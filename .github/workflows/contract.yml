@@ -48,6 +48,7 @@ on:
       - "mobile/scripts/tokens.mjs"
       - "mobile/src/design/**"
       - ".github/workflows/contract.yml"
+      - ".github/scripts/additive-only.mjs"
 
 permissions:
   contents: read
@@ -80,6 +81,59 @@ jobs:
 
       - name: the contract is what the handlers say it is
         run: $GITHUB_WORKSPACE/.github/scripts/unchanged.sh api
+
+  # Is the contract still a superset of the one it is replacing?
+  #
+  # Here rather than in a workflow of its own, because it is the same question
+  # one step on. `spec` above asks whether the committed contract is what the
+  # handlers say; this asks whether what the handlers say still honours what
+  # the last one promised. Same trigger, same file, same person reading the
+  # failure.
+  #
+  # **Why the API is additive-only at all.** Channels let a desktop copy and a
+  # control plane drift arbitrarily far apart — beta runs ahead of general
+  # access by however many releases nobody has promoted — and a copy is never
+  # downgraded, so no declared version window survives. A promise is what makes
+  # that skew safe instead, and the promise is machine-checkable here only
+  # because the contract is generated and committed at every version. That is
+  # the difference between a rule and an aspiration, and it is why this check
+  # exists rather than a paragraph in the contributing guide.
+  additive:
+    if: ${{ !startsWith(github.head_ref, 'release-please--') }}
+    runs-on: depot-ubuntu-22.04
+    steps:
+      # The whole history: the question is "what did this contract say before
+      # this branch touched it", and a shallow clone cannot answer that.
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+
+      - name: the API only gained things
+        env:
+          BASE: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          # The merge base, not the tip of the base branch: another branch's
+          # removal landing on main while this one was open is not this pull
+          # request's to answer for, and blaming it for one would teach
+          # everybody to ignore this job.
+          base=$(git merge-base "origin/$BASE" HEAD)
+          echo "comparing against $base"
+          for contract in api/openapi.json api/updater.json; do
+            echo "::group::$contract"
+            # A contract that did not exist at the merge base is a new one, and
+            # everything in it is additive by definition.
+            if git cat-file -e "$base:$contract" 2>/dev/null; then
+              git show "$base:$contract" > "$RUNNER_TEMP/was.json"
+              node .github/scripts/additive-only.mjs "$RUNNER_TEMP/was.json" "$contract"
+            else
+              echo "$contract did not exist at $base — all of it is new."
+            fi
+            echo "::endgroup::"
+          done
 
   # And is each client still what the contract says it is? Independent of the
   # job above — these regenerate from the *committed* document, so both

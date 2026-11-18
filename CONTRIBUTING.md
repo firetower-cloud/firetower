@@ -121,6 +121,16 @@ fails if the result differs — so forgetting `just gen` is caught rather than
 merged. Running `just gen-check` before you push turns that into a local
 failure instead of a red job.
 
+**The API is additive-only.** No removing a path, no removing a field a client
+may read, no narrowing a type — including dropping a variant from an enum — and
+no making an optional request field required. The same `contract` workflow
+compares the contract your branch produces against the one at its merge base and
+fails on any of those. This is not a style preference: channels let a desktop
+copy and its control plane drift arbitrarily far apart in either direction, and
+a copy is never downgraded, so nothing a client may already be reading can be
+taken away. Add beside the old thing and leave it in place. See
+[docs/channels.md](docs/channels.md).
+
 While developing, the interface and the control plane are two processes on two
 ports, so the interface has to be told where the API is. That lives in
 `web/.env.development`, which is committed. If every request 404s from Next
