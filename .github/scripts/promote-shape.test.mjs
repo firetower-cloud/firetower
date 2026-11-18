@@ -107,24 +107,53 @@ describe("the promotion workflow", () => {
     assert.ok(confirm < check.indexOf("read-channel-manifest.sh"));
   });
 
-  it("writes the channel manifest last, in a job of its own", () => {
-    // The commit point. Everything before it can fail and leave the world
-    // consistent; this is the line that promotes.
-    const manifest = job(PROMOTE, "manifest");
-    assert.match(manifest, /needs: \[check, images, desktop\]/);
-    assert.match(manifest, /publish-channel-pin\.sh "\$PACKAGE:general=\$VERSION"/);
-    // And nothing else in the workflow writes it, or "last" would mean
-    // nothing.
-    const elsewhere = PROMOTE.slice(0, PROMOTE.indexOf("\n  manifest:"));
-    assert.doesNotMatch(elsewhere, /publish-channel-pin\.sh/);
-    assert.doesNotMatch(elsewhere, /release upload/);
+  /**
+   * **Each package's last write is the one its own readers consult.**
+   *
+   * There is no single commit point across both packages. The control plane's
+   * readers consult the channel manifest, so it goes last. The desktop's
+   * readers consult `desktop-stable` and `desktop-latest` — Tauri installs
+   * whatever is there if the version is greater, with no second opinion — so
+   * for the desktop the manifest goes *first* and the addresses last.
+   *
+   * Getting the desktop the other way round was a real defect: an interruption
+   * in between left every general-access copy upgrading on its next check
+   * while the document said they had not been promoted, and **re-running
+   * completed the promotion but could not repair it**, because the installs
+   * had already happened.
+   */
+  it("writes the control plane's pin after its images", () => {
+    const pin = job(PROMOTE, "pin_last");
+    assert.match(pin, /needs: \[check, images\]/);
+    assert.match(pin, /inputs\.package == 'control_plane'/);
+    assert.match(pin, /publish-channel-pin\.sh "\$PACKAGE:general=\$VERSION"/);
   });
 
-  it("does not write the manifest when a leg that should have run failed", () => {
-    const manifest = job(PROMOTE, "manifest");
-    assert.match(manifest, /needs\.check\.result == 'success'/);
-    assert.match(manifest, /inputs\.package != 'control_plane' \|\| needs\.images\.result == 'success'/);
-    assert.match(manifest, /inputs\.package != 'desktop' \|\| needs\.desktop\.result == 'success'/);
+  it("writes the desktop's pin before its live addresses", () => {
+    const pin = job(PROMOTE, "pin_first");
+    assert.match(pin, /needs: check/);
+    assert.match(pin, /inputs\.package == 'desktop'/);
+    assert.match(pin, /publish-channel-pin\.sh "\$PACKAGE:general=\$VERSION"/);
+    // And the job that writes those addresses waits for it.
+    assert.match(job(PROMOTE, "desktop"), /needs: \[check, pin_first\]/);
+  });
+
+  it("has exactly two writers of the channel manifest, one per package", () => {
+    // Two jobs, mutually exclusive by package, so "last" and "first" each mean
+    // something. A third would make both claims false.
+    const writers = [...PROMOTE.matchAll(/publish-channel-pin\.sh/g)];
+    assert.equal(writers.length, 2, "one writer per package and no more");
+    assert.match(job(PROMOTE, "pin_first"), /if: inputs\.package == 'desktop'/);
+    assert.match(job(PROMOTE, "pin_last"), /if: inputs\.package == 'control_plane'/);
+  });
+
+  it("reports success only when this package's whole order finished", () => {
+    const done = job(PROMOTE, "promoted");
+    assert.match(done, /needs\.check\.result == 'success'/);
+    assert.match(done, /needs\.images\.result == 'success' && needs\.pin_last\.result == 'success'/);
+    assert.match(done, /needs\.pin_first\.result == 'success' && needs\.desktop\.result == 'success'/);
+    // Hyphens in a job id would be read as subtraction in these expressions.
+    assert.doesNotMatch(code(PROMOTE), /needs\.[a-z_]+-[a-z]/);
   });
 
   it("moves the image pair together", () => {
@@ -144,6 +173,28 @@ describe("the promotion workflow", () => {
     // And the legs that build are the ones that check it.
     assert.match(job(DESKTOP, "build"), /if: \$\{\{ !inputs\.publish_only \}\}/);
     assert.match(job(DESKTOP, "linux"), /if: \$\{\{ !inputs\.publish_only \}\}/);
+  });
+
+  it("is the only route to the desktop's general-access addresses", () => {
+    // Dispatching `desktop-release.yml` with channel=general published
+    // `desktop-stable` and `desktop-latest` — the two addresses every copy on
+    // general access reads — with no typed confirmation, no check that the
+    // version is on beta, and no channel-manifest write. Reproduced: it
+    // published 0.60.0 to both while the manifest said beta 0.59.0.
+    const dispatch = DESKTOP.slice(DESKTOP.indexOf("workflow_dispatch:"), DESKTOP.indexOf("\npermissions:"));
+    assert.match(dispatch, /options: \[beta\]/, "general access is not offered as a dispatch option");
+
+    // The option list is a courtesy; the event check is the rule, because
+    // dispatch and call share one `inputs` context.
+    const publish = job(DESKTOP, "publish");
+    assert.match(publish, /github\.event_name \}\}" != workflow_call/);
+    // And signing is never the same run as general access.
+    assert.match(publish, /PUBLISH_ONLY" != true/);
+    // The guard runs before anything is downloaded or written.
+    assert.ok(
+      publish.indexOf("comes from promotion and from nowhere else") < publish.indexOf("gh release download"),
+      "the guard is before the first thing the job does",
+    );
   });
 
   it("cannot reach the signing material at all", () => {
@@ -176,21 +227,68 @@ describe("the promotion workflow", () => {
     assert.doesNotMatch(images, /docker push|docker pull|docker tag /);
   });
 
-  it("proves the index came out at the digest it went in at", () => {
-    // An unchanged index digest *is* the statement that every platform entry
-    // and every attestation survived — there is no way to lose one and keep
-    // the hash. It is also the evidence that promotion moves the tested bytes
-    // rather than equivalent ones, which is the property the design rests on.
+  it("checks a staging tag and only then writes :stable, by digest", () => {
+    // The checks used to run *after* `:stable` had been written, so a
+    // flattening left the one tag every general-access installation pulls as a
+    // single-architecture index, and the job failed with an error that never
+    // said the live pointer was now broken. Asserting after the fact is a
+    // post-mortem, not a guard.
     const images = code(job(PROMOTE, "images"));
-    const before = images.indexOf("before=$(docker buildx imagetools inspect");
-    const create = images.indexOf("imagetools create");
-    const compare = images.indexOf('"$after" != "$before"');
-    assert.ok(before > 0 && create > before, "the digest is read before the re-tag");
-    assert.ok(compare > create, "and compared after it");
-    // The comparison has to fail the job, or it is a log line rather than a
-    // check — and it has to fail it *before* the manifest write, which is
-    // what the job boundary gives for free.
-    assert.match(images.slice(compare), /exit 1/);
+    const stage = images.indexOf('imagetools create -t "$IMAGE:$STAGING"');
+    const checkDigest = images.indexOf('"$staged" != "$before"');
+    const checkPlatforms = images.indexOf("for want in linux/amd64 linux/arm64");
+    const writeStable = images.indexOf('imagetools create -t "$IMAGE:stable"');
+
+    assert.ok(stage > 0, "the index is written to a staging tag first");
+    assert.ok(writeStable > 0, "and then to :stable");
+    assert.ok(checkDigest > stage && checkDigest < writeStable, "the digest is checked in between");
+    assert.ok(checkPlatforms > stage && checkPlatforms < writeStable, "and so are the platforms");
+    // By digest, so nothing can have moved under it between the check and the
+    // write. A tag could; a digest cannot.
+    assert.match(images.slice(writeStable, writeStable + 120), /\$IMAGE@\$DIGEST/);
+    // And the staging tag is not a channel, or it would be read by somebody.
+    assert.doesNotMatch(code(read("deploy/firetower.yml")), /promote-/);
+  });
+
+  it("names both architectures rather than counting entries", () => {
+    // Counting would pass an index that had somehow acquired two of the same
+    // platform, and it is the two names the installations actually need.
+    const images = code(job(PROMOTE, "images"));
+    assert.match(images, /for want in linux\/amd64 linux\/arm64/);
+    assert.doesNotMatch(images, /tr -cd ,/);
+  });
+
+  it("says where the staged index is when it refuses", () => {
+    // Evidence that exists and is not named is the same failure as recovery
+    // that exists and is not named.
+    const images = code(job(PROMOTE, "images"));
+    for (const refusal of images.split("::error::").slice(1)) {
+      assert.match(refusal, /\$STAGING|\$DIGEST/, `a refusal that names neither: ${refusal.slice(0, 120)}`);
+    }
+  });
+
+  it("never deletes anything from the registry", () => {
+    // GHCR has no delete-a-tag call. The only deletable thing is the package
+    // version, which is the index `:stable` and `:$VERSION` now point at —
+    // so tidying the staging tag away would delete the release's image out
+    // from under general access.
+    assert.doesNotMatch(code(PROMOTE), /-X DELETE|--delete|docker rmi/);
+  });
+
+  it("re-reads the manifest immediately before it moves anything", () => {
+    // `needs: check` does not re-run `check`. Rerunning only this job from an
+    // older run replays a gate that passed an hour ago, which moved `stable`
+    // back while the manifest stayed newer.
+    const images = code(job(PROMOTE, "images"));
+    const reread = images.indexOf("read-channel-manifest.sh");
+    const stage = images.indexOf('imagetools create -t "$IMAGE:$STAGING"');
+    assert.ok(reread > 0, "the manifest is read again in this job");
+    assert.ok(reread < stage, "before anything is written");
+    // Through the shared reader and the shared validator, not an inline
+    // `gh api` with a looser rule — an "anything else" falling through to
+    // "nothing newer, carry on" is the bug this branch has caught three times.
+    assert.match(images, /channel-manifest\.mjs preflight/);
+    assert.doesNotMatch(images, /gh api .*releases/);
   });
 });
 
@@ -240,11 +338,13 @@ set -u
 printf '%s\\n' "$*" >> "$GH_LOG"
 case "$1 $2" in
   "api repos/"*)
-    # releases/tags/<tag>
+    # releases/tags/<tag> — answers with the asset names on it, which is what
+    # the reader asks for: it has to tell "no manifest was ever here" from
+    # "the manifest that was here is gone".
     tag="\${2##*/}"
     if [ -n "\${API_ERROR:-}" ]; then printf '%s\\n' "$API_ERROR" >&2; exit 1; fi
     if [ ! -d "$REGISTRY/$tag" ]; then echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi
-    ls "$REGISTRY/$tag" | grep -c . || true
+    ls -1 "$REGISTRY/$tag" 2>/dev/null || true
     exit 0 ;;
   "release view")
     [ -d "$REGISTRY/$3" ] || { echo "release not found (HTTP 404)" >&2; exit 1; }
@@ -262,7 +362,14 @@ case "$1 $2" in
     [ -f "$REGISTRY/$tag/$pat" ] || { echo "no such asset" >&2; exit 1; }
     mkdir -p "$out"; cp "$REGISTRY/$tag/$pat" "$out/$pat"; exit 0 ;;
   "release upload")
-    mkdir -p "$REGISTRY/$3"; cp "$4" "$REGISTRY/$3/"; exit 0 ;;
+    mkdir -p "$REGISTRY/$3"
+    # --clobber deletes before it uploads. The real one does, so this does
+    # too: the window between the two is a finding.
+    rm -f "$REGISTRY/$3/$(basename "$4")"
+    if [ -n "\${FAIL_UPLOAD:-}" ] && [ "$(basename "$4")" = "$FAIL_UPLOAD" ]; then
+      echo 'injected upload failure, after the delete' >&2; exit 1
+    fi
+    cp "$4" "$REGISTRY/$3/"; exit 0 ;;
 esac
 exit 0
 `;
@@ -448,13 +555,26 @@ exit 0
   });
 
   /**
-   * **The property the whole design rests on.**
+   * **What this does and does not establish.**
    *
-   * A promotion that gets as far as moving the tags and then fails has
-   * promoted nothing, because the manifest is what every reader consults. And
-   * because nothing was half-written, the run is simply repeated.
+   * It runs the gate, asserts the published manifest is untouched, and then
+   * runs the commit point twice. So it establishes that the manifest is only
+   * written by the writer, that an interruption before it leaves the document
+   * exactly as it was, and that re-running converges.
+   *
+   * It does **not** establish that every reader therefore still sees the
+   * previous version, and the PR should not claim it does. Nothing here moves
+   * a registry tag or a desktop address. For the control plane that gap is
+   * narrow — the updater refuses an image whose stamped version is not the one
+   * it was told to fetch, before it writes a file or recreates anything, so an
+   * installation in the window is frozen rather than damaged. For the desktop
+   * it is not narrow at all: `desktop-stable` and `desktop-latest` are written
+   * by the publish job *before* this runs, and Tauri installs whatever the
+   * manifest at that address says if the version is greater. For desktop
+   * readers the publish job is the commit point, not this. That contradiction
+   * is the specification's to resolve and is routed there.
    */
-  it("promotes nothing when it is interrupted before the manifest write, and the re-run succeeds", () => {
+  it("leaves the published manifest untouched when interrupted before the write, and the re-run converges", () => {
     const repo = repository({ manifest: published });
 
     // The run gets through its checks and through the re-tag, and then the
@@ -478,6 +598,214 @@ exit 0
     assert.equal(commit(repo, "control_plane:general=0.57.0").status, 0);
     assert.equal(reader(repo).control_plane.general, "0.57.0");
     assert.equal(reader(repo).control_plane.general_promoted_at, promotedAt);
+  });
+
+  /**
+   * The four reproductions from the security review, each asserted at the
+   * level it was found. Every one of them exited zero before this, which is
+   * why they are here as behaviour rather than as shape.
+   */
+  it("does not let an overlapping writer undo a promotion", () => {
+    // Reproduced: a release read general 0.55.0, a promotion committed
+    // 0.57.0, the release finished and put 0.55.0 back. Both exited zero.
+    //
+    // The writer now reads back what landed, and if it is not what it wrote it
+    // goes round again on top of the other writer's document. Simulated here
+    // by letting a promotion land in between: the release's second attempt
+    // reads the promoted document and re-applies only its own pin.
+    const repo = repository({ manifest: published });
+
+    // The promotion lands first.
+    assert.equal(commit(repo, "control_plane:general=0.57.0").status, 0);
+    assert.equal(reader(repo).control_plane.general, "0.57.0");
+
+    // Now the release writes its beta pin, from a document that already has
+    // the promotion in it. Both pins have to survive.
+    const r = commit(repo, "control_plane:beta=0.59.0");
+    assert.equal(r.status, 0, r.output);
+    assert.equal(reader(repo).control_plane.beta, "0.59.0", "the release's pin landed");
+    assert.equal(reader(repo).control_plane.general, "0.57.0", "and the promotion was not undone");
+  });
+
+  it("re-reads and re-applies rather than failing when it is raced", () => {
+    // The loop's own behaviour: the read-back is what notices, so it has to be
+    // there and it has to lead somewhere other than an exit.
+    const script = readFileSync(join(ROOT, ".github/scripts/publish-channel-pin.sh"), "utf8");
+    assert.match(script, /landed\.json/);
+    assert.match(script, /cmp -s/);
+    assert.match(script, /attempt=\$\(\(attempt \+ 1\)\)/);
+    // And a bound, so a pathological registry cannot spin forever.
+    assert.match(script, /ATTEMPTS=\d+/);
+  });
+
+  it("does not read a destroyed manifest as a repository that never promoted", () => {
+    // `--clobber` deletes before it uploads, so an upload that fails in
+    // between leaves no manifest at all. Absence is the bootstrap case, which
+    // accepted a version *older* than the pin that had just been destroyed —
+    // reproduced, and it wrote general 0.54.0 over a lost 0.55.0.
+    const repo = repository({ manifest: published });
+
+    // A write whose manifest upload fails after the delete.
+    const broken = commit(repo, "control_plane:general=0.57.0", { FAIL_UPLOAD: "channels.json" });
+    assert.notEqual(broken.status, 0);
+    assert.equal(reader(repo), null, "the manifest really is gone — this is the hazard");
+
+    // The previous document is still on the release, which is what makes the
+    // absence legible.
+    assert.ok(existsSync(join(repo.registry, "channels", "channels.previous.json")));
+
+    // So the next run stops instead of bootstrapping, and a backwards version
+    // is not accepted.
+    const after = commit(repo, "control_plane:general=0.54.0");
+    assert.notEqual(after.status, 0, "a destroyed manifest is not a bootstrap");
+    assert.match(after.output, /destroyed\s+manifest/);
+    assert.match(after.output, /To recover/, "and it says how to recover");
+    assert.equal(reader(repo), null, "and it wrote nothing");
+
+    // The gate refuses on the same grounds, before anything moves. A version
+    // that *is* published, so it is the destroyed manifest stopping it and not
+    // the release check one line above.
+    const gate = check(repo, { version: "0.57.0" });
+    assert.notEqual(gate.status, 0);
+    assert.match(gate.output, /destroyed\s+manifest/);
+  });
+
+  it("refuses a malformed document at the gate, not only at the commit point", () => {
+    // Reproduced: `{}`, `{"schema_version":2}` and `false` pins all passed the
+    // gate and failed only at the writer — after the images had moved. The
+    // gate used `jq '// empty'`, which cannot tell a missing field from a
+    // `false` one. It now asks the writer's own parser.
+    for (const bad of [{}, { schema_version: 2 }, { schema_version: 1, control_plane: { general: false, beta: false } }]) {
+      const repo = repository({ manifest: bad });
+      const gate = check(repo, { version: "0.57.0" });
+      assert.notEqual(gate.status, 0, `${JSON.stringify(bad)} must be refused by the gate`);
+      assert.deepEqual(reader(repo), bad, "and nothing touched");
+    }
+  });
+
+  it("refuses a backwards move even if the comparison itself fails", () => {
+    // Reproduced: the gate compared versions with `sort -V` inside an `if`,
+    // where a command substitution is exempt from `set -e`. An injected sort
+    // failure let a backwards 0.54.0 through a gate holding 0.55.0. There is
+    // now no `sort` in the gate at all — the comparison is the writer's.
+    const gate = code(job(PROMOTE, "check"));
+    assert.doesNotMatch(gate, /sort -V/);
+    assert.doesNotMatch(gate, /jq -r --arg/);
+    // And the behaviour, with the comparison intact.
+    const repo = repository({ manifest: published, releases: ["firetower-v0.54.0", "firetower-v0.58.0"] });
+    const r = check(repo, { version: "0.54.0" });
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /never moved backwards/);
+  });
+
+  /**
+   * The staging step, run against a fake `docker` rather than read.
+   *
+   * QA's finding: the platform floor could be deleted and the suite stayed
+   * green, because everything asserting on it matched text. A shape test
+   * cannot tell a check that runs from a check that is written down. These
+   * run the step's own shell with a `docker` that answers as a flattened or
+   * rewritten index would, and ask the only question worth asking: did it
+   * refuse, and did it say where the evidence is?
+   */
+  function stagingStep() {
+    const images = job(PROMOTE, "images");
+    const at = images.indexOf("id: stage");
+    assert.ok(at > 0, "no `id: stage` step — this test is reading a file that moved");
+    const marker = "        run: |\n";
+    const from = images.indexOf(marker, at) + marker.length;
+    // To the next step, found *before* dedenting — a step opens at six spaces
+    // and the script body at ten, so the boundary is only visible while the
+    // indentation is still there. Reading past it pulled the next two steps in
+    // and the harness ran them.
+    const rest = images.slice(from);
+    const end = rest.search(/\n {6}- /);
+    assert.ok(end > 0, "the staging step is no longer followed by another step — this test is reading a file that moved");
+    return rest
+      .slice(0, end)
+      .split("\n")
+      .map((line) => line.replace(/^ {10}/, ""))
+      .join("\n");
+  }
+
+  /** A `docker` whose `imagetools` answers are whatever the case needs. */
+  const DOCKER = `#!/usr/bin/env bash
+case "$*" in
+  *"imagetools inspect"*"--format"*)
+    case "$*" in
+      *":$STAGING"*) printf '%s\\n' "\${STAGED_DIGEST:-sha256:aaa}" ;;
+      *) printf '%s\\n' "\${SOURCE_DIGEST:-sha256:aaa}" ;;
+    esac ;;
+  *"imagetools inspect"*"--raw"*)
+    printf '%s' "$RAW" ;;
+  *"imagetools create"*) : ;;
+esac
+exit 0
+`;
+
+  /** A healthy two-platform index, as `imagetools inspect --raw` prints one. */
+  const BOTH = JSON.stringify({
+    manifests: [
+      { platform: { os: "linux", architecture: "amd64" } },
+      { platform: { os: "linux", architecture: "arm64" } },
+      { platform: { os: "unknown", architecture: "unknown" } },
+    ],
+  });
+
+  function stage(env = {}) {
+    const dir = mkdtempSync(join(tmpdir(), "stage-"));
+    writeFileSync(join(dir, "step.sh"), stagingStep());
+    writeFileSync(join(dir, "docker"), DOCKER);
+    chmodSync(join(dir, "docker"), 0o755);
+    writeFileSync(join(dir, "out"), "");
+    const r = spawnSync("bash", [join(dir, "step.sh")], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        IMAGE: "ghcr.io/firetower-cloud/firetower",
+        VERSION: "0.57.0",
+        STAGING: "promote-1-1",
+        GITHUB_OUTPUT: join(dir, "out"),
+        RAW: BOTH,
+        ...env,
+      },
+    });
+    return { status: r.status, output: `${r.stdout}${r.stderr}` };
+  }
+
+  it("stages a good index without complaint", () => {
+    // The positive control. Without it every refusal below could pass on a
+    // step that refuses everything.
+    const r = stage();
+    assert.equal(r.status, 0, r.output);
+    assert.match(r.output, /linux\/amd64 linux\/arm64/);
+  });
+
+  it("refuses a flattened index, and says :stable was not touched", () => {
+    // One platform, and the digest unchanged — which is exactly what an index
+    // that was rewritten to a single platform in place looks like. The digest
+    // check cannot catch this one; the floor is the only thing that does.
+    const r = stage({
+      RAW: '{"manifests":[{"platform":{"os":"linux","architecture":"arm64"}}]}',
+    });
+    assert.notEqual(r.status, 0, "a single-platform index must be refused");
+    assert.match(r.output, /does not name linux\/amd64/);
+    assert.match(r.output, /has NOT been touched/);
+    assert.match(r.output, /promote-1-1/, "and it says where the staged index is");
+  });
+
+  it("refuses an index whose digest changed under it", () => {
+    const r = stage({ SOURCE_DIGEST: "sha256:aaa", STAGED_DIGEST: "sha256:bbb" });
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /something rewrote it/);
+    assert.match(r.output, /has NOT been touched/);
+  });
+
+  it("refuses an index that names only attestations", () => {
+    const r = stage({ RAW: '{"manifests":[{"platform":{"os":"unknown","architecture":"unknown"}}]}' });
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /does not name linux\//);
   });
 
   it("creates the manifest on a repository that has never had one", () => {

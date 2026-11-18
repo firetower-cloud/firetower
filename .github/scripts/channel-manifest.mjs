@@ -15,6 +15,15 @@
  *        --set control_plane:beta=0.57.0 [--set desktop:general=0.21.0] \
  *        [--now 2026-11-18T12:00:00Z]
  *
+ *   node channel-manifest.mjs preflight [--held <file>] --set control_plane:general=0.57.0
+ *
+ * `preflight` is `pin` without the write: same parser, same refusals, same
+ * messages, no document produced. It exists so that a caller can ask "would
+ * this be refused?" *before* it moves anything, and get the same answer the
+ * commit point will give — rather than a second, looser copy of the rule in
+ * shell. A gate that validated differently from the writer would be a gate
+ * that passes things the writer then refuses, after the tags have moved.
+ *
  * `--held` absent means *there is no document yet* — the bootstrap case, and
  * the only absence that is allowed to be one. A caller that could not tell
  * absence from a failed read must not call this at all.
@@ -205,7 +214,10 @@ function parseSet(text) {
 }
 
 function main(argv) {
-  if (argv[0] !== "pin") throw new Refused(64, "the only command is `pin`");
+  const command = argv[0];
+  if (command !== "pin" && command !== "preflight") {
+    throw new Refused(64, "the commands are `pin` and `preflight`");
+  }
   const args = argv.slice(1);
   const pins = [];
   let out;
@@ -235,11 +247,29 @@ function main(argv) {
         throw new Refused(64, `unknown argument ${args[i]}`);
     }
   }
-  if (!out) throw new Refused(64, "--out is required");
+  if (command === "pin" && !out) throw new Refused(64, "--out is required");
   if (pins.length === 0) throw new Refused(64, "at least one --set is required");
 
   const held = parseHeld(heldPath === undefined ? undefined : readFileSync(heldPath, "utf8"));
   const { manifest, moved } = pin(held, pins, now);
+
+  if (command === "preflight") {
+    // What is published, as the shared parser read it — not as `jq` guessed
+    // it. `jq '// empty'` cannot tell a missing pin from a `false` one, and a
+    // gate that cannot tell those apart treats a document it does not
+    // understand as "nothing is pinned yet".
+    for (const pkg of PACKAGES) {
+      const entry = held[pkg];
+      if (!entry) continue;
+      for (const channel of CHANNELS) {
+        console.log(`held ${pkg}.${channel}=${entry[channel] ?? ""}`);
+      }
+    }
+    for (const line of moved) console.log(`would move ${line}`);
+    if (moved.length === 0) console.log("would move nothing; it is already where it was asked to be");
+    return;
+  }
+
   // A trailing newline, so the asset is a well-formed text file and a diff of
   // two downloaded copies reads cleanly.
   writeFileSync(out, `${JSON.stringify(manifest, null, 2)}\n`);
