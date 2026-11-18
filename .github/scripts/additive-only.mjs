@@ -54,27 +54,38 @@ function resolve(doc, node, seen = new Set()) {
  * just as thoroughly as one at the top. A cycle stops at the node that closes
  * it — the contract has several, and a reader does not read forever either.
  */
-export function fields(doc, schema, prefix = "", seen = new Set(), out = new Map()) {
+export function fields(doc, schema, prefix = "", seen = new Set(), out = new Map(), always = true) {
   const at = resolve(doc, schema);
   if (!at || typeof at !== "object") return out;
   if (seen.has(at)) return out;
   seen.add(at);
 
   for (const key of ["allOf", "oneOf", "anyOf"]) {
-    for (const part of at[key] ?? []) fields(doc, part, prefix, seen, out);
+    for (const part of at[key] ?? []) fields(doc, part, prefix, seen, out, always);
   }
   if (at.properties) {
     const required = new Set(at.required ?? []);
     for (const [name, value] of Object.entries(at.properties)) {
       const where = prefix ? `${prefix}.${name}` : name;
       const target = resolve(doc, value) ?? {};
-      out.set(where, { type: typeOf(target), required: required.has(name), nullable: !!target.nullable });
-      fields(doc, value, where, seen, out);
+      const isRequired = required.has(name);
+      out.set(where, {
+        type: typeOf(target),
+        required: isRequired,
+        nullable: !!target.nullable,
+        // Is this field in *every* valid document of this shape? Only if it is
+        // required and everything containing it is too. See `breaches` for why
+        // that distinction decides whether a new required field is a breach.
+        always: always && isRequired,
+      });
+      fields(doc, value, where, seen, out, always && isRequired);
     }
   }
-  if (at.items) fields(doc, at.items, `${prefix}[]`, seen, out);
+  // Inside an array element or a free-form map, nothing is "always" present:
+  // the array can be empty and the map can have no keys.
+  if (at.items) fields(doc, at.items, `${prefix}[]`, seen, out, false);
   if (at.additionalProperties && typeof at.additionalProperties === "object") {
-    fields(doc, at.additionalProperties, `${prefix}{}`, seen, out);
+    fields(doc, at.additionalProperties, `${prefix}{}`, seen, out, false);
   }
   return out;
 }
@@ -175,8 +186,18 @@ export function breaches(was, now) {
         if (has.required && had && !had.required) {
           found.push(breach(`${name} ← ${field}`, "the request field was optional and is now required."));
         }
-        if (has.required && !had) {
-          found.push(breach(`${name} ← ${field}`, "a new request field is required, so every existing client's call fails."));
+        // **A new required field is only a breach if it lands somewhere every
+        // caller already sends.** Adding a wholly new optional block with
+        // required fields inside it — `opts?: { mode }` — is the commonest
+        // additive shape there is, and no existing client sends `opts` at all,
+        // so nothing of theirs becomes invalid. Flagging it was a false
+        // positive, and a check that fires on safe changes is one people learn
+        // to ignore, which costs more than the case it catches.
+        //
+        // `always` is what tells the two apart: required, inside something
+        // required, all the way up.
+        if (has.required && has.always && !had) {
+          found.push(breach(`${name} ← ${field}`, "a new required request field, in a place every caller already sends. Every existing call fails."));
         }
       }
       for (const [field, had] of old) {

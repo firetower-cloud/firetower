@@ -102,12 +102,22 @@ describe("what is no longer promised", () => {
     assert.match(found[0].what, /was optional and is now required/);
   });
 
-  it("catches a new request field that is required", () => {
+  it("catches a new required request field where every caller already sends", () => {
     const was = doc({ post: object({ name: str }, ["name"]) });
     const now = doc({ post: object({ name: str, scope: str }, ["name", "scope"]) });
     const found = breaches(was, now);
     assert.equal(found.length, 1);
-    assert.match(found[0].what, /every existing client's call fails/);
+    assert.match(found[0].what, /Every existing call fails/);
+  });
+
+  it("still catches a required field added inside something required", () => {
+    // Nested, but on a path every caller already sends, so every caller
+    // breaks. The narrowing below must not swallow this one.
+    const was = doc({ post: object({ opts: object({ x: str }, ["x"]) }, ["opts"]) });
+    const now = doc({ post: object({ opts: object({ x: str, y: str }, ["x", "y"]) }, ["opts"]) });
+    const found = breaches(was, now);
+    assert.equal(found.length, 1);
+    assert.match(found[0].where, /opts\.y/);
   });
 });
 
@@ -125,6 +135,26 @@ describe("what is still allowed, because the whole point is to add", () => {
     const was = doc({ get: object({ name: str }) });
     const now = doc({ get: object({ name: str, channel: str, host: object({ tag: str }) }) });
     assert.deepEqual(breaches(was, now), []);
+  });
+
+  it("passes a wholly new optional block with required fields inside it", () => {
+    // Reported by QA as a false positive, and it is the commonest additive
+    // shape there is: `opts?: { mode }`. No existing caller sends `opts` at
+    // all, so nothing of theirs becomes invalid. The old rule flagged it as
+    // "every existing client's call fails", which is both wrong and alarming —
+    // and a check that fires on safe changes is one people learn to ignore,
+    // which costs more than the case it catches.
+    const was = doc({ post: object({ name: str }, ["name"]) });
+    const now = doc({ post: object({ name: str, opts: object({ mode: str }, ["mode"]) }, ["name"]) });
+    assert.deepEqual(breaches(was, now), []);
+  });
+
+  it("passes a required field added inside an array element or a map", () => {
+    // An array can be empty and a map can have no keys, so neither is a place
+    // every caller already sends.
+    const wasArr = doc({ post: object({ items: { type: "array", items: object({ a: str }, ["a"]) } }, ["items"]) });
+    const nowArr = doc({ post: object({ items: { type: "array", items: object({ a: str, b: str }, ["a", "b"]) } }, ["items"]) });
+    assert.deepEqual(breaches(wasArr, nowArr), []);
   });
 
   it("passes a new optional request field", () => {
