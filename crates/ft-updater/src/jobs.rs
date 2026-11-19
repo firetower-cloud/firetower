@@ -398,6 +398,15 @@ impl Jobs {
         // upgrade the step that rewrites the file runs *after* it, so the two
         // answers are different and both are needed.
         //
+        // Read once, and both answers come out of it: two reads with a
+        // registry pull between them are two things that can disagree, which
+        // is the shape of the bug this whole rule exists for.
+        // `compose_after(&[])` because this step writes no file — the control
+        // plane's own question, with nothing to write.
+        let in_the_file = self
+            .compose_after(&[])
+            .and_then(|compose| image_tag(&compose, &repo));
+
         // Where the release is: the tag the caller named, which is read off
         // the file this run is going to write. Then the file as it is, for a
         // caller that named none — a release from before channels existed
@@ -405,10 +414,7 @@ impl Jobs {
         // replaced. Then this container's own tag.
         let from = fetch_tag
             .map(str::to_string)
-            .or_else(|| {
-                self.compose_on_disk()
-                    .and_then(|compose| image_tag(&compose, &repo))
-            })
+            .or_else(|| in_the_file.clone())
             .unwrap_or_else(|| was_on.clone());
         if from != was_on {
             say.say(format!(
@@ -422,9 +428,8 @@ impl Jobs {
             job.image = Some(pulled.clone());
         });
 
-        // And what Compose will ask this machine for. `compose_after(&[])`
-        // because this step writes no file: what the file says now is what it
-        // will say when the helper reads it.
+        // And what Compose will ask this machine for: the same reading, used
+        // for the other half of the rule.
         //
         // `--pull never` makes that name the only thing that decides which
         // image comes up, and on an ordinary upgrade it is not the name the
@@ -435,10 +440,7 @@ impl Jobs {
         // timeout for a version that was never going to arrive. So the
         // release is made to answer to the name the file uses, which is the
         // same thing a rollback does for the image it puts back.
-        let wanted = self
-            .compose_after(&[])
-            .and_then(|compose| image_tag(&compose, &repo))
-            .unwrap_or_else(|| from.clone());
+        let wanted = in_the_file.unwrap_or_else(|| from.clone());
         if wanted != from {
             say.say(format!(
                 "naming it {repo}:{wanted} as well — {} names that, and with `--pull never` it \
