@@ -14,6 +14,7 @@
     "shoot:shell": "node scripts/shoot-shell.mjs",
     "shoot:dashboard": "node scripts/shoot-dashboard.mjs",
     "shoot:proto": "node scripts/shoot-proto.mjs",
+    "shoot:prose": "node scripts/shoot-prose.mjs",
     "shoot:app": "node scripts/shoot-app.mjs",
     "shoot:profile-skills": "node scripts/shoot-profile-skills.mjs",
     "shoot:formfoot": "node scripts/shoot-formfoot.mjs",
