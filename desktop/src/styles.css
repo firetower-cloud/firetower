@@ -1781,7 +1781,7 @@
     /* A long unbreakable run — a URL, a hash, an inline path — wraps rather
        than pushing the whole conversation wider. Code blocks keep their own
        horizontal scroll (`pre` above); this is for running text and inline
-       code only. */
+       code only — and because it is inherited, a table takes it back below. */
     overflow-wrap: anywhere;
   }
   .prose-desk .ft-md h1 { font-size: var(--text-lede); line-height: 1.4; color: var(--color-bone); font-weight: 530; margin: 1.25rem 0 0.5rem; }
@@ -1807,7 +1807,20 @@
     border-radius: 4px;
   }
   .prose-desk .ft-md table { border-collapse: collapse; margin: 0.75rem 0; font-size: var(--text-ui); }
-  .prose-desk .ft-md th, .prose-desk .ft-md td { border: 1px solid var(--color-line); padding: 0.3rem 0.6rem; text-align: left; }
+  /* **A cell breaks at its spaces, and never inside a word.**
+     `anywhere` above is not only a wrapping rule: it is the one value that
+     also counts the breaks it introduces when a box's *min-content* width is
+     measured. Inherited into a cell, that put every column's minimum at about
+     one character — and the auto table algorithm, free to make a column that
+     narrow, spent the width on the columns holding sentences instead. A
+     three-column table of roles came out with "Engineering Manager" stacked
+     as `Enginee / ring / Manager`, in a pane with room to spare.
+     `break-word` still wraps a URL dropped into a cell; it just does not
+     tell the layout that a column can be one character wide. So a column is
+     as wide as its longest word again — and the one table that genuinely
+     cannot be made to fit, a row of commit hashes, scrolls in `Wide`
+     (`Markdown.tsx`) rather than being crushed into the pane. */
+  .prose-desk .ft-md th, .prose-desk .ft-md td { border: 1px solid var(--color-line); padding: 0.3rem 0.6rem; text-align: left; overflow-wrap: break-word; }
   .prose-desk .ft-md th { color: var(--color-bone); background: var(--color-panel); }
   .prose-desk .ft-md blockquote { border-left: 2px solid var(--color-line); padding-left: 0.85rem; color: var(--color-dim); margin: 0.75rem 0; }
   .prose-desk .ft-md hr { border: 0; border-top: 1px solid var(--color-line); margin: 1rem 0; }

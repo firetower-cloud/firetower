@@ -141,11 +141,13 @@ export const Markdown = memo(function Markdown({ children }: { children: string 
             ),
 
           // Tables come from the GitHub extension, and an agent reaching for
-          // one usually has something worth lining up.
+          // one usually has something worth lining up. A table whose columns
+          // cannot be made narrow enough — a cell holding a commit hash —
+          // scrolls, and `Wide` is what says so.
           table: ({ children }) => (
-            <div className="mb-3.5 overflow-x-auto last:mb-0">
+            <Wide>
               <table className="w-full border-collapse text-ui">{children}</table>
-            </div>
+            </Wide>
           ),
           th: ({ children }) => (
             <th className="border-b border-line px-2.5 py-1.5 text-left font-medium text-dim">
@@ -183,9 +185,9 @@ function Code({ className, children }: { className?: string; children: React.Rea
 }
 
 /**
- * A fenced block, and the news that there is more of it off to the right.
+ * Whether there is more off to the right, and the element to ask.
  *
- * A drawing too wide for the column scrolls, which is the right answer — it
+ * Something too wide for the column scrolls, which is the right answer — it
  * stays sharp and nothing is resized underneath you. The problem is that you
  * cannot tell: this platform draws overlay scrollbars that stay invisible until
  * something touches them, so a diagram cut off at the edge and a diagram that
@@ -193,9 +195,12 @@ function Code({ className, children }: { className?: string; children: React.Rea
  *
  * So the edge says so, and only while it is true. Scrolled to the end, or never
  * over-wide to begin with, and there is nothing to see.
+ *
+ * Shared by the two things in a reply that can be wider than the column: a
+ * fenced block, and a table whose cells cannot be made any narrower.
  */
-function Block({ children }: { children: React.ReactNode }) {
-  const ref = useRef<HTMLPreElement>(null);
+function useMoreRight<T extends HTMLElement>(children: React.ReactNode) {
+  const ref = useRef<T>(null);
   const [more, setMore] = useState(false);
 
   const measure = useCallback(() => {
@@ -216,6 +221,40 @@ function Block({ children }: { children: React.ReactNode }) {
     observer.observe(el);
     return () => observer.disconnect();
   }, [measure, children]);
+
+  return { ref, more, measure };
+}
+
+/**
+ * A table too wide for the column, and the news that there is more of it.
+ *
+ * **Narrower is not always available.** A cell wraps at its spaces now rather
+ * than mid-word (`styles.css`, `.prose-desk .ft-md th, td`), so a row of
+ * commit hashes has a width below which it cannot go. The honest answer to
+ * that is the one the phone already gives — `Prose.tsx` on mobile: tables
+ * scroll rather than wrap — and the fade is what keeps the far edge from
+ * reading as a table that is simply broken.
+ */
+function Wide({ children }: { children: React.ReactNode }) {
+  const { ref, more, measure } = useMoreRight<HTMLDivElement>(children);
+  return (
+    <div className="relative mb-3.5 last:mb-0">
+      <div ref={ref} onScroll={measure} className="overflow-x-auto">
+        {children}
+      </div>
+      {more && (
+        <span
+          aria-hidden
+          className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-panel to-transparent"
+        />
+      )}
+    </div>
+  );
+}
+
+/** A fenced block, and the same news at the same edge. */
+function Block({ children }: { children: React.ReactNode }) {
+  const { ref, more, measure } = useMoreRight<HTMLPreElement>(children);
 
   return (
     <div className="group relative mb-4 last:mb-0">
