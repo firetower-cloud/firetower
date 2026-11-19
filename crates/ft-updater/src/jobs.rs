@@ -1936,14 +1936,19 @@ mod tests {
         let _ = std::process::Command::new("docker").args(args).output();
     }
 
-    /// A port nothing on this machine is listening on. Bound and released, so
-    /// it is a port the kernel just handed out rather than a guess.
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("a loopback port")
-            .local_addr()
-            .unwrap()
-            .port()
+    /// `n` ports nothing on this machine is listening on. Bound and released,
+    /// so they are ports the kernel just handed out rather than guesses — and
+    /// all bound at once, because a port released and asked for again can be
+    /// handed back, and two of these in the same deployment have to differ.
+    fn free_ports<const N: usize>() -> [u16; N] {
+        let held: Vec<std::net::TcpListener> = (0..N)
+            .map(|_| std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port"))
+            .collect();
+        let mut ports = [0u16; N];
+        for (port, listener) in ports.iter_mut().zip(&held) {
+            *port = listener.local_addr().unwrap().port();
+        }
+        ports
     }
 
     /// The deployment this test upgrades, and everything made for it.
@@ -1960,9 +1965,10 @@ mod tests {
         /// tag, which is not the tag the file on the machine names.
         release_compose: String,
         site: crate::site::Site,
-        /// The version stamped on the image the machine starts out running.
-        #[allow(dead_code)]
-        was: &'static str,
+        /// Where the control plane answers on this machine. Normally the
+        /// updater reaches it over the compose network, and a test running
+        /// beside the daemon rather than in a container on it cannot.
+        published: u16,
     }
 
     const WAS: &str = "0.55.0";
@@ -1975,8 +1981,33 @@ mod tests {
             let id = ulid::Ulid::new().to_string().to_lowercase();
             let project = format!("ft-updater-test-{id}");
             let dir = tempfile::tempdir().expect("a directory for the deployment");
-            let port = free_port();
+            let [port, published] = free_ports::<2>();
             let registry = format!("127.0.0.1:{port}");
+            let compose = dir
+                .path()
+                .join(crate::site::COMPOSE_FILE)
+                .display()
+                .to_string();
+
+            // Built before the first thing that can leave something behind,
+            // so that a setup which panics half way still tears down what it
+            // had got to: this is a local, and unwinding drops it.
+            let mut deployment = Self {
+                site: crate::site::Site {
+                    project: project.clone(),
+                    service: "updater".into(),
+                    deploy_dir: dir.path().display().to_string(),
+                    config_files: vec![compose.clone()],
+                    mount: dir.path().to_path_buf(),
+                },
+                project,
+                registry,
+                dir,
+                release_compose: String::new(),
+                published,
+            };
+            let project = deployment.project.clone();
+            let registry = deployment.registry.clone();
 
             // A registry on loopback. Docker treats 127.0.0.1 as insecure
             // without being told to, so this needs no daemon configuration.
@@ -1992,7 +2023,7 @@ mod tests {
 
             // Two images that differ only in the version the build stamped on
             // them, which is the one thing `pull_release` checks.
-            let build = dir.path().join("image");
+            let build = deployment.dir.path().join("image");
             std::fs::create_dir_all(&build).unwrap();
             std::fs::write(
                 build.join("Dockerfile"),
@@ -2067,34 +2098,21 @@ mod tests {
             assert_eq!(from.as_deref(), Some(ft_updater_api::tags::LATEST));
             assert_eq!(to.as_deref(), Some(ft_updater_api::tags::STABLE));
 
-            std::fs::write(dir.path().join("firetower.yml"), &on_the_machine).unwrap();
+            let dir = deployment.dir.path();
+            std::fs::write(dir.join(crate::site::COMPOSE_FILE), &on_the_machine).unwrap();
             std::fs::write(
-                dir.path().join(".env"),
+                dir.join(".env"),
                 format!(
-                    "POSTGRES_PASSWORD=updater-test\nHTTP_PORT={}\nFIRETOWER_UPDATER_TOKEN=updater-test\n",
-                    free_port()
+                    "POSTGRES_PASSWORD=updater-test\nHTTP_PORT={published}\n\
+                     FIRETOWER_UPDATER_TOKEN=updater-test\n"
                 ),
             )
             .unwrap();
 
-            let compose = dir.path().join("firetower.yml").display().to_string();
             cli(&["compose", "-p", &project, "-f", &compose, "up", "-d"]);
 
-            let site = crate::site::Site {
-                project: project.clone(),
-                service: "updater".into(),
-                deploy_dir: dir.path().display().to_string(),
-                config_files: vec![compose],
-                mount: dir.path().to_path_buf(),
-            };
-            Self {
-                project,
-                registry,
-                dir,
-                release_compose,
-                site,
-                was: WAS,
-            }
+            deployment.release_compose = release_compose;
+            deployment
         }
 
         fn jobs(&self) -> (Jobs, Reporter) {
@@ -2154,14 +2172,9 @@ mod tests {
         // in a container on it, so it goes in by the published port.
         // Process-global, and nothing else in this binary reads it.
         let deployment = Deployment::made().await;
-        let published = std::fs::read_to_string(deployment.dir.path().join(".env"))
-            .unwrap()
-            .lines()
-            .find_map(|l| l.strip_prefix("HTTP_PORT=").map(str::to_string))
-            .unwrap();
         std::env::set_var(
             "FIRETOWER_UPDATER_CP_URL",
-            format!("http://127.0.0.1:{published}"),
+            format!("http://127.0.0.1:{}", deployment.published),
         );
 
         let (jobs, say) = deployment.jobs();
