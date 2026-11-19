@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.18.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.17.0...mobile-v0.18.0) (2026-11-19)
+
+
+### Features
+
+* drop a folder of profiles and import it end to end ([e366feb](https://github.com/firetower-cloud/firetower/commit/e366feb9e1aae7fd046503c8800668a2c44e53aa))
+* **mobile:** agent profiles, and the two sheets a start resolves in ([9fc02ee](https://github.com/firetower-cloud/firetower/commit/9fc02eee5a9779c82327d2e68d3fba7430847433))
+* **mobile:** skills in the conversation composer, a chip and a sheet ([d9005fb](https://github.com/firetower-cloud/firetower/commit/d9005fb912e7045542b5b4b638ea8ebaf900b890))
+* **profiles:** a PROFILE.md codec, and export ([98e40ff](https://github.com/firetower-cloud/firetower/commit/98e40ff28a10c87a7fc89db797b5656ac38c727e))
+* **profiles:** export a profile as a PROFILE.md ([db05a7c](https://github.com/firetower-cloud/firetower/commit/db05a7c9aaaed3c5f222c713500c66ae0d556485))
+* **server:** a channel manifest that was read and is now gone says so ([7f4dbbe](https://github.com/firetower-cloud/firetower/commit/7f4dbbe0640d11f681c287286a00af4eef2ac7be))
+* **server:** a profile carries the key its author gave it ([a2f4c5d](https://github.com/firetower-cloud/firetower/commit/a2f4c5dc01af785fd4b57f86257102127dd3c3fd))
+* **server:** an installation knows which channel it is on, serves it, and can be switched ([8a70b9b](https://github.com/firetower-cloud/firetower/commit/8a70b9b0f53b5ec742d9643bdc040829b4fdabda))
+* **server:** apply a reviewed drop of profiles, whole or not at all ([d7be6b5](https://github.com/firetower-cloud/firetower/commit/d7be6b52eb667db86dd1c9c51a591ad4cf1df151))
+* **server:** the import plan — classify a dropped folder without writing anything ([3c20de9](https://github.com/firetower-cloud/firetower/commit/3c20de93b3fd85e660670da3f9c1a154c2b6fa45))
+* **server:** the import plan — what a dropped folder of profiles would do ([5640a23](https://github.com/firetower-cloud/firetower/commit/5640a230cd67a46e44b6b9ae467b143351fef7d3))
+
+
+### Bug Fixes
+
+* **mobile:** a Team row says the agent's name, not its lead's as well ([b900490](https://github.com/firetower-cloud/firetower/commit/b900490f9c64cfbf1f10e57b52b3073db9daddc0))
+* **mobile:** a Team row says the agent's name, not its lead's as well ([0f567ec](https://github.com/firetower-cloud/firetower/commit/0f567ec0cd9a4b1123825c25f10bc3ad64b4ab53))
+* **mobile:** the home's profile pick changes the profile, rather than opening /new ([00b86f7](https://github.com/firetower-cloud/firetower/commit/00b86f70e5899814ee67061e8a7326f83a3bf784))
+* **server:** a backgrounded shell is not a subagent, and never holds a hand-back ([8d32dd1](https://github.com/firetower-cloud/firetower/commit/8d32dd1f3d82979dbdf5755b58d4ec8b808e1ba8))
+* **server:** a backgrounded shell is not a subagent, and never holds a hand-back ([522901b](https://github.com/firetower-cloud/firetower/commit/522901b9bcdb3dbf29f5cdeff9eb6932c519e0ff))
+* **server:** the channel manifest is published at `channels`, not `channels-latest` ([2e546d7](https://github.com/firetower-cloud/firetower/commit/2e546d7fae8443d218088808e1cd0f08dd1a4b86))
+
 ## [0.17.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.16.0...mobile-v0.17.0) (2026-11-15)
 
 
