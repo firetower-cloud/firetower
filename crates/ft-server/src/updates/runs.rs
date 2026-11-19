@@ -19,7 +19,7 @@ use super::store::{Run, Step, Store};
 use super::{version, RunState, StepState};
 use crate::AppState;
 use anyhow::{anyhow, Context, Result};
-use ft_updater_api::{JobKind, JobState};
+use ft_updater_api::{ImageRole, JobKind, JobState, Status as UpdaterStatus};
 use std::time::Duration;
 
 /// The step targets, as written in the database.
@@ -110,6 +110,70 @@ pub fn steps_for(
 /// take.
 fn needs_a_tagged_fetch(targets: &super::store::Targets) -> bool {
     targets.channel.is_some()
+}
+
+/// The tag one of the deployment's containers was created from.
+fn tag_of(status: &UpdaterStatus, role: ImageRole) -> Option<String> {
+    status
+        .images
+        .iter()
+        .find(|i| i.role == role)
+        .map(|i| ft_updater_api::split_reference(&i.reference).1)
+}
+
+/// Whether the updater step has nothing left to do.
+///
+/// **The version and the tag, not the version alone.** The channel is the tag
+/// the container was created from and nothing stores it, so two channels can
+/// hold one version — the ordinary state between a release and its promotion
+/// — and an updater already on that version can still be on the channel being
+/// left. Answering from the version was what had this step report "already"
+/// and move nothing while the control-plane step moved the control plane:
+/// #478, silent because the two tags were one image.
+///
+/// A run that names no tag moves none, so there is nothing to be off it. Nor
+/// is there for an updater too old to report its images — it cannot be told a
+/// tag either, and `preflight` refuses a switch to one long before this.
+fn the_updater_is_already_there(
+    before: &UpdaterStatus,
+    to_version: &str,
+    tag: Option<&str>,
+) -> bool {
+    if version::parse(&before.version).as_ref() != version::parse(to_version).as_ref() {
+        return false;
+    }
+    match (tag, tag_of(before, ImageRole::Updater)) {
+        (Some(wanted), Some(on)) => on == wanted,
+        _ => true,
+    }
+}
+
+/// Both of the deployment's containers on one channel, or an error saying
+/// which is where.
+///
+/// Checked after a switch because a switch is the thing that moves them, and
+/// nothing compared them afterwards — which is why #478 was silent for as
+/// long as the two channels held one build. Deliberately not checked after an
+/// ordinary upgrade: an installation that is *already* drifted has an upgrade
+/// as its way out, and refusing to upgrade it would strand it there.
+fn both_on_one_channel(status: &UpdaterStatus) -> Result<()> {
+    let (Some(control_plane), Some(updater)) = (
+        tag_of(status, ImageRole::ControlPlane),
+        tag_of(status, ImageRole::Updater),
+    ) else {
+        // An updater that does not report both. It cannot have carried out a
+        // switch — `preflight` refuses one that old — so there is nothing
+        // here to compare.
+        return Ok(());
+    };
+    anyhow::ensure!(
+        control_plane == updater,
+        "the control plane is on :{control_plane} and the updater beside it on :{updater}. The \
+         two images are published together and the control plane checks its API version against \
+         the updater's on every call, so they cannot be left on different channels. Put both \
+         `image:` lines in firetower.yml on one tag and recreate both containers."
+    );
+    Ok(())
 }
 
 /// Drive a run on a task of its own. Idempotent: a run already being driven
@@ -453,7 +517,10 @@ async fn upgrade_updater(state: &AppState, run: &Run, log: &Log) -> Result<Strin
             }
         }
     };
-    if version::parse(&before.version).as_ref() == version::parse(&run.to_version).as_ref() {
+    if the_updater_is_already_there(&before, &run.to_version, run.plan.tag.as_deref()) {
+        if needs_a_tagged_fetch(&run.targets) {
+            both_on_one_channel(&before)?;
+        }
         return Ok(format!("already {}", before.version));
     }
 
@@ -491,6 +558,13 @@ async fn upgrade_updater(state: &AppState, run: &Run, log: &Log) -> Result<Strin
                 if version::parse(&status.version).as_ref()
                     == version::parse(&run.to_version).as_ref() =>
             {
+                // The last step of a switch, and the first thing that has
+                // ever compared the two. Loud rather than silent: a run that
+                // moved one container and not the other has not done what it
+                // said, and saying so is the whole of #478's third criterion.
+                if needs_a_tagged_fetch(&run.targets) {
+                    both_on_one_channel(&status)?;
+                }
                 return Ok(format!("{} → {}", before.version, status.version));
             }
             Ok(_) => {
@@ -1093,6 +1167,87 @@ mod tests {
             host_ids: vec![],
             channel: Some(super::super::channel::Channel::Beta),
         }));
+    }
+
+    /// An updater reporting the two containers it has.
+    fn status_with(control_plane: Option<&str>, updater: Option<&str>) -> UpdaterStatus {
+        let image = |role, reference: &str| ft_updater_api::ServiceImage {
+            role,
+            service: match role {
+                ImageRole::ControlPlane => "firetower".into(),
+                ImageRole::Updater => "updater".into(),
+            },
+            reference: reference.into(),
+        };
+        UpdaterStatus {
+            version: "0.56.0".into(),
+            api_version: 2,
+            project: "firetower".into(),
+            deploy_dir: "/opt/firetower".into(),
+            config_files: vec!["/opt/firetower/firetower.yml".into()],
+            docker_version: "27.0.0".into(),
+            busy: None,
+            images: control_plane
+                .map(|r| image(ImageRole::ControlPlane, r))
+                .into_iter()
+                .chain(updater.map(|r| image(ImageRole::Updater, r)))
+                .collect(),
+        }
+    }
+
+    /// The trap #478 was in: a switch between two channels that hold one
+    /// version has nothing to change but the tag, so an updater step that
+    /// asked about the version alone answered "already" and moved nothing.
+    #[test]
+    fn an_updater_on_the_channel_being_left_is_not_already_there() {
+        let on_stable = status_with(
+            Some("ghcr.io/firetower-cloud/firetower:stable"),
+            Some("ghcr.io/firetower-cloud/firetower-updater:stable"),
+        );
+        // The switch this was silent in: both channels hold 0.56.0, so there
+        // is no version to move and the tag is the whole of the operation.
+        assert!(
+            !the_updater_is_already_there(&on_stable, "0.56.0", Some("beta")),
+            "on :stable, moving to :beta — there is a recreate to do"
+        );
+        assert!(
+            the_updater_is_already_there(&on_stable, "0.56.0", Some("stable")),
+            "already on the tag and the version: the step is resumable"
+        );
+        assert!(
+            the_updater_is_already_there(&on_stable, "0.56.0", None),
+            "a run that moves no tag has nothing to be off"
+        );
+        assert!(
+            !the_updater_is_already_there(&on_stable, "0.57.0", Some("stable")),
+            "a version to move is still a version to move"
+        );
+        assert!(
+            the_updater_is_already_there(&status_with(None, None), "0.56.0", Some("beta")),
+            "an updater too old to report its images is refused earlier, by preflight"
+        );
+    }
+
+    /// And after a switch the two are compared, which nothing did before.
+    #[test]
+    fn a_switch_that_moved_only_one_of_the_two_says_so() {
+        let drifted = status_with(
+            Some("ghcr.io/firetower-cloud/firetower:beta"),
+            Some("ghcr.io/firetower-cloud/firetower-updater:stable"),
+        );
+        let said = format!("{:#}", both_on_one_channel(&drifted).unwrap_err());
+        assert!(said.contains(":beta"), "{said}");
+        assert!(said.contains(":stable"), "{said}");
+
+        assert!(both_on_one_channel(&status_with(
+            Some("ghcr.io/firetower-cloud/firetower:beta"),
+            Some("ghcr.io/firetower-cloud/firetower-updater:beta"),
+        ))
+        .is_ok());
+        assert!(
+            both_on_one_channel(&status_with(None, None)).is_ok(),
+            "an updater that reports neither has nothing to compare"
+        );
     }
 
     #[test]
