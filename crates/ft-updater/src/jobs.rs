@@ -10,16 +10,20 @@
 //!
 //! ## What a control-plane upgrade actually does
 //!
-//! 1. Pull the next image. Check the version the build stamped on it is the
-//!    one that was asked for — `latest` may have moved on since the person
-//!    looked at the screen, and this is the moment to notice rather than
-//!    after.
+//! 1. Pull the next image, **from the tag the deployment file will name once
+//!    step 2 has run** — which is not always the tag the container was
+//!    created from, and a release that moves that line is the whole of the
+//!    difference. Check the version the build stamped on it is the one that
+//!    was asked for — `latest` may have moved on since the person looked at
+//!    the screen, and this is the moment to notice rather than after.
 //! 2. Rewrite the deployment files the release changed, keeping `.backup`s.
 //! 3. Have Compose recreate the service. **Compose, not us:** a helper
 //!    container runs `docker compose up -d --no-deps firetower` against the
 //!    deployment's own files, so what comes up is exactly what `firetower
 //!    upgrade` would have brought up — same labels, same network, same `.env`.
-//!    The updater never reimplements how a container is made.
+//!    The updater never reimplements how a container is made. It is run with
+//!    `--pull never`, so the file decides what has to be on the machine and
+//!    step 1 is the only chance to put it there.
 //! 4. Wait for `/readyz`. If it does not answer, put the previous image back
 //!    under the same tag, restore the files, and have Compose recreate it
 //!    again. That needs nothing from a registry: the old image is still here.
@@ -28,7 +32,9 @@ use crate::docker::{split_reference, Docker};
 use crate::redact::redact;
 use crate::site::Site;
 use anyhow::{anyhow, Context, Result};
-use ft_updater_api::{FileWrite, ImageRole, Job, JobId, JobKind, JobState, JobStep, ServiceImage};
+use ft_updater_api::{
+    image_tag, FileWrite, ImageRole, Job, JobId, JobKind, JobState, JobStep, ServiceImage,
+};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -380,8 +386,32 @@ impl Jobs {
             .context("the updater cannot find its own container")?;
         say.done(me.name.clone());
 
-        let (repo, tag) = split_reference(&me.image_ref);
-        let tag = fetch_tag.unwrap_or(&tag).to_string();
+        let (repo, was_on) = split_reference(&me.image_ref);
+        // The caller's tag first here, which is the other way round from the
+        // control plane's — and for a reason that is only true of this step.
+        // A channel switch rewrites both image lines in the *control-plane*
+        // step, which runs after this one, so while this job runs the file
+        // still names the channel being left and the caller is the only thing
+        // that knows otherwise.
+        //
+        // The file next, for the opposite case: the release that moved both
+        // lines onto the general-access tag left this container as the one
+        // Compose created from the floating one, so the file and the
+        // container disagree until the next recreate — and it is the file
+        // Compose reads. Same rule as the control plane's, same reason.
+        let tag = fetch_tag
+            .map(str::to_string)
+            .or_else(|| {
+                self.compose_on_disk()
+                    .and_then(|compose| image_tag(&compose, &repo))
+            })
+            .unwrap_or_else(|| was_on.clone());
+        if tag != was_on {
+            say.say(format!(
+                "fetching :{tag} rather than :{was_on}, which is what this container was made \
+                 from"
+            ));
+        }
         let pulled = self.pull_release(say, &repo, &tag, version).await?;
         say.edit(|job| {
             job.previous_image = Some(me.image_id.clone());
@@ -452,16 +482,43 @@ impl Jobs {
         say.done(format!("{} on {}", current.name, short(&current.image_id)));
         say.edit(|job| job.previous_image = Some(current.image_id.clone()));
 
-        // Two tags, and the difference is the whole of a channel switch: the
-        // one to fetch from is what the compose file will say once this job
-        // has written it, and the one to go back to is the one the container
-        // was created from. They are the same for every ordinary upgrade.
+        // Two tags, and the difference is the whole of a release that moves an
+        // image line: the one to fetch from is what the compose file will name
+        // once this job has written it, and the one to go back to is the one
+        // the container was created from. They are the same for every ordinary
+        // upgrade.
+        //
+        // **The file decides, not the container.** Compose is run with
+        // `--pull never`, so the image that has to be on this machine before
+        // the recreate is the one the rewritten file names, and this is the
+        // only chance to put it there. Fetching the container's tag instead
+        // brings the right image down under a name the file does not mention,
+        // and Compose refuses an image it cannot find — after it has already
+        // taken the old container away. That is #407: every installation on
+        // the floating tag rolled back cleanly and none of them could upgrade.
+        //
+        // The order of the three answers, each because the one before it can
+        // be absent or wrong:
+        //
+        // * **The file, as this job will leave it.** What Compose will read.
+        // * **The tag the caller named**, for a compose file with no line to
+        //   read at all. It is intent, and intent is what `--pull never` does
+        //   not honour, so it does not come first — and the caller may not
+        //   have named one: the control plane asking for this upgrade is the
+        //   one being replaced, and a release from before channels existed
+        //   does not know to.
+        // * **The container's own tag**, which is what this always used.
         let (repo, was_on) = split_reference(&current.image_ref);
-        let fetch = fetch_tag.unwrap_or(&was_on).to_string();
+        let fetch = self
+            .compose_after(files)
+            .and_then(|compose| image_tag(&compose, &repo))
+            .or_else(|| fetch_tag.map(str::to_string))
+            .unwrap_or_else(|| was_on.clone());
         if fetch != was_on {
             say.say(format!(
-                "fetching :{fetch} rather than :{was_on} — the deployment file this job writes \
-                 moves {repo} to :{fetch}"
+                "fetching :{fetch} rather than :{was_on} — {} names {repo}:{fetch}, and that is \
+                 what Compose will ask this machine for",
+                crate::site::COMPOSE_FILE
             ));
         }
         let pulled = self.pull_release(say, &repo, &fetch, version).await?;
@@ -562,6 +619,30 @@ impl Jobs {
     }
 
     // ── shared pieces ──────────────────────────────────────────────────
+
+    /// The compose file as this job will leave it: the content it is about to
+    /// write, or what is on the machine when the release does not change that
+    /// file.
+    ///
+    /// This is the document Compose will be run against, and with
+    /// `--pull never` it is the only thing that decides which image has to be
+    /// here. `None` when there is nothing to read.
+    fn compose_after(&self, files: &[FileWrite]) -> Option<String> {
+        match files.iter().find(|f| f.name == crate::site::COMPOSE_FILE) {
+            Some(write) => Some(write.content.clone()),
+            None => self.compose_on_disk(),
+        }
+    }
+
+    /// The compose file as it is on the machine now.
+    ///
+    /// Unreadable is `None` rather than an error: it is one input to a
+    /// decision that has two more answers behind it, and a deployment whose
+    /// compose file this process cannot read is one Compose will refuse on
+    /// its own, with a better message than this could manage.
+    fn compose_on_disk(&self) -> Option<String> {
+        std::fs::read_to_string(self.site.mount.join(crate::site::COMPOSE_FILE)).ok()
+    }
 
     /// Pull `repo:tag` and check it is the release that was asked for.
     /// Returns the image id.
@@ -1386,9 +1467,23 @@ mod tests {
         helper_pull_fails: bool,
     }
 
+    /// What the one container the fake daemon has reports as its image, when
+    /// a test does not say otherwise: the updater's own.
+    const UPDATER_REF: &str = "ghcr.io/firetower-cloud/firetower-updater:latest";
+
     async fn fake_daemon(
         seen: Seen,
         awkward: Awkward,
+    ) -> (crate::docker::Docker, tempfile::TempDir) {
+        fake_daemon_running(seen, awkward, UPDATER_REF).await
+    }
+
+    /// The same, for a test that needs the container to be on some other
+    /// image — a control plane, or one created from a different tag.
+    async fn fake_daemon_running(
+        seen: Seen,
+        awkward: Awkward,
+        image_ref: &'static str,
     ) -> (crate::docker::Docker, tempfile::TempDir) {
         use http_body_util::Full;
         use hyper::body::Bytes;
@@ -1421,7 +1516,8 @@ mod tests {
                                     .unwrap()
                                     .push(format!("{} {}", req.method(), path));
 
-                                let (status, body) = answer(req.method(), &path, awkward);
+                                let (status, body) =
+                                    answer(req.method(), &path, awkward, image_ref);
                                 Ok::<_, std::convert::Infallible>(
                                     Response::builder()
                                         .status(status)
@@ -1441,14 +1537,19 @@ mod tests {
         (crate::docker::Docker::at(socket), dir)
     }
 
-    fn answer(method: &hyper::Method, path: &str, awkward: Awkward) -> (u16, String) {
-        // The updater's own container, as Compose labelled it.
+    fn answer(
+        method: &hyper::Method,
+        path: &str,
+        awkward: Awkward,
+        image_ref: &str,
+    ) -> (u16, String) {
+        // The one container the fake daemon has, as Compose labelled it.
         let me = serde_json::json!({
             "Id": "updater-container",
             "Name": "/firetower-updater-1",
             "Image": "sha256:old",
             "Config": {
-                "Image": "ghcr.io/firetower-cloud/firetower-updater:latest",
+                "Image": image_ref,
                 "Labels": {
                     "com.docker.compose.project": "firetower",
                     "com.docker.compose.service": "updater",
@@ -1508,13 +1609,31 @@ mod tests {
     }
 
     fn jobs_for(docker: crate::docker::Docker) -> (Jobs, Reporter) {
-        let site = crate::site::Site {
+        jobs_with(
+            docker,
+            crate::site::Site {
+                project: "firetower".into(),
+                service: "updater".into(),
+                deploy_dir: "/opt/firetower".into(),
+                config_files: vec!["/opt/firetower/firetower.yml".into()],
+                mount: std::path::PathBuf::from("/deploy"),
+            },
+        )
+    }
+
+    /// A site whose deployment directory is a real one, for a test that reads
+    /// or writes the compose file.
+    fn site_at(dir: &std::path::Path) -> crate::site::Site {
+        crate::site::Site {
             project: "firetower".into(),
             service: "updater".into(),
-            deploy_dir: "/opt/firetower".into(),
-            config_files: vec!["/opt/firetower/firetower.yml".into()],
-            mount: std::path::PathBuf::from("/deploy"),
-        };
+            deploy_dir: dir.display().to_string(),
+            config_files: vec![dir.join(crate::site::COMPOSE_FILE).display().to_string()],
+            mount: dir.to_path_buf(),
+        }
+    }
+
+    fn jobs_with(docker: crate::docker::Docker, site: crate::site::Site) -> (Jobs, Reporter) {
         let jobs = Jobs::new(docker, site);
         let reporter = Reporter {
             id: JobId("test".into()),
@@ -1648,6 +1767,470 @@ mod tests {
         assert!(
             asked.iter().any(|r| r.contains("POST /containers/create")),
             "it should still have made the helper: {asked:#?}"
+        );
+    }
+
+    /// A compose file naming a tag the container was not created from is what
+    /// the release that moves an image line leaves behind: Compose rewrote
+    /// nothing under the running container, so the file is ahead of it until
+    /// the next recreate. The file is the one Compose reads.
+    ///
+    /// Without this the updater fetches the tag its own container came from,
+    /// Compose is run with `--pull never` against a file naming another, and
+    /// the recreate fails on an image that was never asked for. #407.
+    #[tokio::test]
+    async fn the_updater_follows_its_compose_file_when_nobody_names_a_tag() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon(seen.clone(), Awkward::default()).await;
+        let deploy = tempfile::tempdir().unwrap();
+        std::fs::write(
+            deploy.path().join(crate::site::COMPOSE_FILE),
+            "services:\n  firetower:\n    image: ghcr.io/firetower-cloud/firetower:stable\n  \
+             updater:\n    image: ghcr.io/firetower-cloud/firetower-updater:stable\n",
+        )
+        .unwrap();
+        let (jobs, say) = jobs_with(docker, site_at(deploy.path()));
+
+        jobs.upgrade_self(&say, "0.39.0", None).await.unwrap();
+
+        let asked = seen.lock().unwrap().clone();
+        assert!(
+            asked.iter().any(|r| r.contains(
+                "/images/create?fromImage=ghcr.io%2Ffiretower-cloud%2Ffiretower-updater&tag=stable"
+            )),
+            "it should have pulled the file's :stable, not the container's :latest: {asked:#?}"
+        );
+    }
+
+    /// And the tag the caller named still wins over the file, because a
+    /// channel switch rewrites the image lines in the step *after* this one:
+    /// while the updater is being replaced the file still names the channel
+    /// being left, and the caller is the only thing that knows otherwise.
+    #[tokio::test]
+    async fn a_named_tag_still_wins_over_the_file_it_has_not_rewritten_yet() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon(seen.clone(), Awkward::default()).await;
+        let deploy = tempfile::tempdir().unwrap();
+        std::fs::write(
+            deploy.path().join(crate::site::COMPOSE_FILE),
+            "services:\n  updater:\n    image: ghcr.io/firetower-cloud/firetower-updater:stable\n",
+        )
+        .unwrap();
+        let (jobs, say) = jobs_with(docker, site_at(deploy.path()));
+
+        jobs.upgrade_self(&say, "0.39.0", Some("beta"))
+            .await
+            .unwrap();
+
+        let asked = seen.lock().unwrap().clone();
+        assert!(
+            asked.iter().any(|r| r.contains(
+                "/images/create?fromImage=ghcr.io%2Ffiretower-cloud%2Ffiretower-updater&tag=beta"
+            )),
+            "the switch's own tag should still be the one fetched: {asked:#?}"
+        );
+    }
+
+    /// The pin is read from the compose file, which is where an operator put
+    /// it — so it is refused even when the container the updater can see was
+    /// created from something that floats. Nothing is written and nothing is
+    /// recreated: a refusal has to leave the deployment exactly as it was.
+    #[tokio::test]
+    async fn an_exact_version_in_the_compose_file_is_refused() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon_running(
+            seen.clone(),
+            Awkward::default(),
+            "ghcr.io/firetower-cloud/firetower:latest",
+        )
+        .await;
+        let deploy = tempfile::tempdir().unwrap();
+        let was = "services:\n  firetower:\n    image: ghcr.io/firetower-cloud/firetower:latest\n";
+        std::fs::write(deploy.path().join(crate::site::COMPOSE_FILE), was).unwrap();
+        let (jobs, say) = jobs_with(docker, site_at(deploy.path()));
+
+        let pins = "services:\n  firetower:\n    image: ghcr.io/firetower-cloud/firetower:0.39.0\n";
+        let outcome = jobs
+            .upgrade_control_plane(
+                &say,
+                "0.39.0",
+                &[FileWrite {
+                    name: crate::site::COMPOSE_FILE.into(),
+                    content: pins.into(),
+                }],
+                None,
+            )
+            .await;
+
+        let said = format!("{:#}", outcome.unwrap_err());
+        assert!(said.contains("pinned to :0.39.0"), "{said}");
+        assert_eq!(
+            std::fs::read_to_string(deploy.path().join(crate::site::COMPOSE_FILE)).unwrap(),
+            was,
+            "a refusal must not have rewritten the file"
+        );
+        let asked = seen.lock().unwrap().clone();
+        assert!(
+            !asked.iter().any(|r| r.contains("/images/create")),
+            "and nothing should have been pulled: {asked:#?}"
+        );
+    }
+
+    // ── a real deployment, across a tag change ─────────────────────────
+    //
+    // Everything above runs against a fake daemon, and every one of those
+    // tests passed while an upgrade that moves the image line from one tag to
+    // another could not complete at all. The defect was in neither half: it
+    // was in the join between a file being rewritten and Compose being run
+    // against that file, and only a real daemon, a real registry and a real
+    // `docker compose` have that join in them. See #407.
+    //
+    // So this builds a deployment. Two images with a version stamped on them
+    // and a `/readyz` to answer, a registry on loopback to pull from, the
+    // repository's own `deploy/firetower.yml` as the release's copy, and the
+    // same file with the general-access tag put back to the floating one as
+    // the copy already on the machine — which is exactly the shape of 0.55.0
+    // beside 0.56.0.
+    //
+    // It needs the Docker socket, the way the database tests need Postgres.
+
+    /// Where the daemon is, for a test running on the machine rather than in
+    /// a container beside it.
+    fn socket_path() -> std::path::PathBuf {
+        match std::env::var("DOCKER_HOST") {
+            Ok(host) => match host.strip_prefix("unix://") {
+                Some(path) => std::path::PathBuf::from(path),
+                None => std::path::PathBuf::from(crate::docker::SOCKET),
+            },
+            Err(_) => std::path::PathBuf::from(crate::docker::SOCKET),
+        }
+    }
+
+    /// `docker …`, for building the deployment. Never for the thing under
+    /// test: that goes through the updater's own client, over the socket.
+    fn cli(args: &[&str]) -> String {
+        let out = std::process::Command::new("docker")
+            .args(args)
+            .output()
+            .unwrap_or_else(|e| {
+                panic!(
+                    "this test needs Docker, the way the database tests need Postgres. \
+                     `docker {}` could not be run: {e}",
+                    args.join(" ")
+                )
+            });
+        assert!(
+            out.status.success(),
+            "docker {} exited {:?}\n{}{}",
+            args.join(" "),
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// Best effort, for tearing down: a container that is already gone is not
+    /// a failure.
+    fn cli_quietly(args: &[&str]) {
+        let _ = std::process::Command::new("docker").args(args).output();
+    }
+
+    /// `n` ports nothing on this machine is listening on. Bound and released,
+    /// so they are ports the kernel just handed out rather than guesses — and
+    /// all bound at once, because a port released and asked for again can be
+    /// handed back, and two of these in the same deployment have to differ.
+    fn free_ports<const N: usize>() -> [u16; N] {
+        let held: Vec<std::net::TcpListener> = (0..N)
+            .map(|_| std::net::TcpListener::bind("127.0.0.1:0").expect("a loopback port"))
+            .collect();
+        let mut ports = [0u16; N];
+        for (port, listener) in ports.iter_mut().zip(&held) {
+            *port = listener.local_addr().unwrap().port();
+        }
+        ports
+    }
+
+    /// The deployment this test upgrades, and everything made for it.
+    ///
+    /// Torn down on the way out, including when a panic is what is on the way
+    /// out — nothing here is shared with anything else on the machine, and a
+    /// run that leaves a registry and three volumes behind is a run nobody
+    /// does twice.
+    struct Deployment {
+        project: String,
+        registry: String,
+        dir: tempfile::TempDir,
+        /// `deploy/firetower.yml` as the release ships it: the general-access
+        /// tag, which is not the tag the file on the machine names.
+        release_compose: String,
+        site: crate::site::Site,
+        /// Where the control plane answers on this machine. Normally the
+        /// updater reaches it over the compose network, and a test running
+        /// beside the daemon rather than in a container on it cannot.
+        published: u16,
+    }
+
+    const WAS: &str = "0.55.0";
+    const NOW: &str = "0.56.0";
+
+    impl Deployment {
+        /// Build it: two images, a registry holding the newer one under both
+        /// tags, and Compose having created the containers from the older one.
+        async fn made() -> Self {
+            let id = ulid::Ulid::new().to_string().to_lowercase();
+            let project = format!("ft-updater-test-{id}");
+            let dir = tempfile::tempdir().expect("a directory for the deployment");
+            let [port, published] = free_ports::<2>();
+            let registry = format!("127.0.0.1:{port}");
+            let compose = dir
+                .path()
+                .join(crate::site::COMPOSE_FILE)
+                .display()
+                .to_string();
+
+            // Built before the first thing that can leave something behind,
+            // so that a setup which panics half way still tears down what it
+            // had got to: this is a local, and unwinding drops it.
+            let mut deployment = Self {
+                site: crate::site::Site {
+                    project: project.clone(),
+                    service: "updater".into(),
+                    deploy_dir: dir.path().display().to_string(),
+                    config_files: vec![compose.clone()],
+                    mount: dir.path().to_path_buf(),
+                },
+                project,
+                registry,
+                dir,
+                release_compose: String::new(),
+                published,
+            };
+            let project = deployment.project.clone();
+            let registry = deployment.registry.clone();
+
+            // A registry on loopback. Docker treats 127.0.0.1 as insecure
+            // without being told to, so this needs no daemon configuration.
+            cli(&[
+                "run",
+                "-d",
+                "--name",
+                &format!("{project}-registry"),
+                "-p",
+                &format!("127.0.0.1:{port}:5000"),
+                "registry:2",
+            ]);
+
+            // Two images that differ only in the version the build stamped on
+            // them, which is the one thing `pull_release` checks.
+            let build = deployment.dir.path().join("image");
+            std::fs::create_dir_all(&build).unwrap();
+            std::fs::write(
+                build.join("Dockerfile"),
+                "FROM nginx:alpine\n\
+                 ARG V\n\
+                 LABEL org.opencontainers.image.version=$V\n\
+                 RUN printf 'server {\\n listen 4400;\\n location /readyz { return 200 \"ok\"; }\\n}\\n' \
+                 > /etc/nginx/conf.d/default.conf\n",
+            )
+            .unwrap();
+            let at = build.display().to_string();
+            let old = format!("{project}-old");
+            let new = format!("{project}-new");
+            cli(&[
+                "build",
+                "-q",
+                "--build-arg",
+                &format!("V={WAS}"),
+                "-t",
+                &old,
+                &at,
+            ]);
+            cli(&[
+                "build",
+                "-q",
+                "--build-arg",
+                &format!("V={NOW}"),
+                "-t",
+                &new,
+                &at,
+            ]);
+
+            // The registry holds the new build under both tags, which is what
+            // the day of a channel release looks like: `:latest` and
+            // `:stable` are the same image.
+            for repo in ["firetower", "firetower-updater"] {
+                for tag in [ft_updater_api::tags::LATEST, ft_updater_api::tags::STABLE] {
+                    let reference = format!("{registry}/{repo}:{tag}");
+                    cli(&["tag", &new, &reference]);
+                    cli(&["push", "-q", &reference]);
+                    // Off the machine again: a deployment that has not
+                    // upgraded yet does not have the new image, and a pull
+                    // that found it already here would prove nothing.
+                    cli(&["rmi", &reference]);
+                }
+                // What it does have is the old build, under the floating tag
+                // its own compose file names.
+                cli(&["tag", &old, &format!("{registry}/{repo}:latest")]);
+            }
+            cli(&["rmi", &new]);
+
+            // The deployment's own files: the repository's `firetower.yml`
+            // with this registry in place of ghcr.io, and the image lines put
+            // back to the tag the previous release named.
+            let release_compose = std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../deploy/firetower.yml"),
+            )
+            .expect("the repository's own deploy/firetower.yml")
+            .replace("ghcr.io/firetower-cloud/", &format!("{registry}/"));
+            let on_the_machine = release_compose.replace(
+                &format!(":{}", ft_updater_api::tags::STABLE),
+                &format!(":{}", ft_updater_api::tags::LATEST),
+            );
+
+            // The whole point of this test, so it is asserted rather than
+            // assumed: a release that moves no image line would exercise
+            // nothing, and this test would go on passing while saying it
+            // covered a tag change.
+            let repository = format!("{registry}/firetower");
+            let from = ft_updater_api::image_tag(&on_the_machine, &repository);
+            let to = ft_updater_api::image_tag(&release_compose, &repository);
+            assert_eq!(from.as_deref(), Some(ft_updater_api::tags::LATEST));
+            assert_eq!(to.as_deref(), Some(ft_updater_api::tags::STABLE));
+
+            let dir = deployment.dir.path();
+            std::fs::write(dir.join(crate::site::COMPOSE_FILE), &on_the_machine).unwrap();
+            std::fs::write(
+                dir.join(".env"),
+                format!(
+                    "POSTGRES_PASSWORD=updater-test\nHTTP_PORT={published}\n\
+                     FIRETOWER_UPDATER_TOKEN=updater-test\n"
+                ),
+            )
+            .unwrap();
+
+            cli(&["compose", "-p", &project, "-f", &compose, "up", "-d"]);
+
+            deployment.release_compose = release_compose;
+            deployment
+        }
+
+        fn jobs(&self) -> (Jobs, Reporter) {
+            jobs_with(crate::docker::Docker::at(socket_path()), self.site.clone())
+        }
+
+        /// What the release asks the updater to write.
+        fn writes(&self) -> Vec<FileWrite> {
+            vec![FileWrite {
+                name: "firetower.yml".into(),
+                content: self.release_compose.clone(),
+            }]
+        }
+
+        fn compose_file(&self) -> String {
+            std::fs::read_to_string(self.dir.path().join("firetower.yml")).unwrap()
+        }
+    }
+
+    impl Drop for Deployment {
+        fn drop(&mut self) {
+            let compose = self.dir.path().join("firetower.yml").display().to_string();
+            cli_quietly(&[
+                "compose",
+                "-p",
+                &self.project,
+                "-f",
+                &compose,
+                "down",
+                "-v",
+                "-t",
+                "1",
+            ]);
+            cli_quietly(&["rm", "-f", &format!("{}-registry", self.project)]);
+            for repo in ["firetower", "firetower-updater"] {
+                for tag in ["latest", "stable"] {
+                    cli_quietly(&["rmi", "-f", &format!("{}/{repo}:{tag}", self.registry)]);
+                }
+            }
+            cli_quietly(&["rmi", "-f", &format!("{}-old", self.project)]);
+        }
+    }
+
+    /// The release that moves both image lines from the floating tag to the
+    /// general-access one, performed against a deployment that is on the
+    /// floating tag — which is every installation there was.
+    ///
+    /// The pull has to be of the tag the file names *after* the rewrite.
+    /// Pulling the one the container was created from puts the new image on
+    /// the machine under a name the rewritten file does not mention, and
+    /// `--pull never` then has Compose refuse an image it cannot find. Four
+    /// real deployments rolled back cleanly and none of them could upgrade.
+    #[tokio::test]
+    async fn an_upgrade_that_moves_the_image_line_to_another_tag_goes_through() {
+        // Read by `wait_healthy`, which normally reaches the control plane
+        // over the compose network. This test is on the machine rather than
+        // in a container on it, so it goes in by the published port.
+        // Process-global, and nothing else in this binary reads it.
+        let deployment = Deployment::made().await;
+        std::env::set_var(
+            "FIRETOWER_UPDATER_CP_URL",
+            format!("http://127.0.0.1:{}", deployment.published),
+        );
+
+        let (jobs, say) = deployment.jobs();
+        // `None`: the control plane that asks for this upgrade is the one
+        // being replaced, and the release before channels existed does not
+        // name a tag. The updater has to work it out from the file it is
+        // being asked to write.
+        let outcome = jobs
+            .upgrade_control_plane(&say, NOW, &deployment.writes(), None)
+            .await;
+        let log = jobs
+            .get("test")
+            .map(|j| j.log.join("\n"))
+            .unwrap_or_default();
+
+        assert_eq!(
+            outcome.as_ref().ok(),
+            Some(&JobState::Done),
+            "the upgrade did not go through:\n{log}"
+        );
+
+        // And what is running is the release, under the tag the file now
+        // names — not the old image, and not the new one under the old name.
+        let now = jobs
+            .service_container("firetower")
+            .await
+            .unwrap()
+            .expect("a control-plane container");
+        assert_eq!(
+            now.image_ref,
+            format!(
+                "{}/firetower:{}",
+                deployment.registry,
+                ft_updater_api::tags::STABLE
+            ),
+            "it should have come up from the tag the rewritten file names:\n{log}"
+        );
+        let stamped = jobs
+            .docker
+            .inspect_image(&now.image_id)
+            .await
+            .unwrap()
+            .version()
+            .map(str::to_string);
+        assert_eq!(
+            stamped.as_deref(),
+            Some(NOW),
+            "and it should be the release"
+        );
+        assert!(
+            deployment.compose_file().contains(&format!(
+                "{}/firetower:{}",
+                deployment.registry,
+                ft_updater_api::tags::STABLE
+            )),
+            "the file should have been rewritten"
         );
     }
 }

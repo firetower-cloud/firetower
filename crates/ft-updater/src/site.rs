@@ -14,11 +14,15 @@ use std::path::{Path, PathBuf};
 /// Where the compose file mounts the deployment directory inside this container.
 pub const DEPLOY_MOUNT: &str = "/deploy";
 
+/// The deployment's compose file: the one Compose is run against, and the one
+/// the image lines a release moves live in.
+pub const COMPOSE_FILE: &str = "firetower.yml";
+
 /// The files an upgrade is allowed to rewrite, and no others.
 ///
 /// `.env` is deliberately not here: it holds every value somebody chose, and
 /// the one file the updater must never write is the one with the password in.
-pub const WRITABLE: [&str; 3] = ["firetower.yml", "Caddyfile", "Caddyfile.dockerfile"];
+pub const WRITABLE: [&str; 3] = [COMPOSE_FILE, "Caddyfile", "Caddyfile.dockerfile"];
 
 /// What the updater learned about its own deployment.
 #[derive(Debug, Clone)]
