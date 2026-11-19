@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.31.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.31.0...desktop-v0.31.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **desktop:** a table in the conversation keeps its columns ([e079ae2](https://github.com/firetower-cloud/firetower/commit/e079ae21e87c2591d9bf2f30ea2be153341c91f6))
+* **desktop:** a table in the conversation keeps its columns ([c8276d8](https://github.com/firetower-cloud/firetower/commit/c8276d8f7c4a1ed7c9bba7afc5ed271c81939ed9))
+* **desktop:** no Export on the profile screens, and a footer that reads ([46f539d](https://github.com/firetower-cloud/firetower/commit/46f539dbf0ecf1ffb4115955e006fa75db64c13d))
+* **desktop:** no Export on the profile screens, and a footer that reads ([2a926ba](https://github.com/firetower-cloud/firetower/commit/2a926bac5c3a11ee3e2541db9d42e1f6103070ad))
+
 ## [0.31.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.30.0...desktop-v0.31.0) (2026-11-19)
 
 
