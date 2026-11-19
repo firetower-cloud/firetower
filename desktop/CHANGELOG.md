@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.31.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.30.0...desktop-v0.31.0) (2026-11-19)
+
+
+### Features
+
+* **desktop:** a channel for this copy, stored on the machine ([150a94b](https://github.com/firetower-cloud/firetower/commit/150a94bb0e3970e661f97e3dee49d23e203bfcd9))
+* **desktop:** a way back to the end of a long transcript ([2ece645](https://github.com/firetower-cloud/firetower/commit/2ece645d60652bd0785d92f74d3171834808f58b))
+* **desktop:** drop a folder of profiles on the Profiles screen ([cf75ef1](https://github.com/firetower-cloud/firetower/commit/cf75ef1ac969d94f0756d3b55ad9b3010ba96e42))
+* **desktop:** Export, on a profile you can read ([e34b987](https://github.com/firetower-cloud/firetower/commit/e34b987dd7cf4c2815ec669dc6a7993da7ac69c0))
+* **desktop:** the changelog for every version a jump skips ([3c94cfb](https://github.com/firetower-cloud/firetower/commit/3c94cfb0fcf886e801f4f85fe15e55ffe57700ec))
+* **desktop:** the installation's channel, its switch, and what stands in its way ([872581c](https://github.com/firetower-cloud/firetower/commit/872581c78a41f92a029f66c5f62cc2025de62a36))
+* **desktop:** the profile import review, rendering a plan ([cd21ec3](https://github.com/firetower-cloud/firetower/commit/cd21ec3a2bd16d12ce555661610e07d75f2fd8aa))
+* **desktop:** the profile import review, rendering a plan ([af7fd89](https://github.com/firetower-cloud/firetower/commit/af7fd89aaa734702ae4c528d350f526be8f11c11))
+* **desktop:** the update path moves behind Firetower's own commands ([23cb416](https://github.com/firetower-cloud/firetower/commit/23cb4168b9dd21c8f196ef3acb924b74aab62008))
+* **desktop:** this copy's channel beside the installation's, on one screen ([5fa3725](https://github.com/firetower-cloud/firetower/commit/5fa3725f7e2a931397af10f5567a70e1cdc5d028))
+* drop a folder of profiles and import it end to end ([e366feb](https://github.com/firetower-cloud/firetower/commit/e366feb9e1aae7fd046503c8800668a2c44e53aa))
+* **profiles:** a PROFILE.md codec, and export ([98e40ff](https://github.com/firetower-cloud/firetower/commit/98e40ff28a10c87a7fc89db797b5656ac38c727e))
+* **profiles:** export a profile as a PROFILE.md ([db05a7c](https://github.com/firetower-cloud/firetower/commit/db05a7c9aaaed3c5f222c713500c66ae0d556485))
+* **release:** a version reaches beta on release, and a dispatched workflow promotes it ([e4c445e](https://github.com/firetower-cloud/firetower/commit/e4c445e09aacd57a15ce194bdbd615754dca308f))
+* **server:** a channel manifest that was read and is now gone says so ([7f4dbbe](https://github.com/firetower-cloud/firetower/commit/7f4dbbe0640d11f681c287286a00af4eef2ac7be))
+* **server:** a profile carries the key its author gave it ([a2f4c5d](https://github.com/firetower-cloud/firetower/commit/a2f4c5dc01af785fd4b57f86257102127dd3c3fd))
+* **server:** an installation knows which channel it is on, serves it, and can be switched ([8a70b9b](https://github.com/firetower-cloud/firetower/commit/8a70b9b0f53b5ec742d9643bdc040829b4fdabda))
+* **server:** apply a reviewed drop of profiles, whole or not at all ([d7be6b5](https://github.com/firetower-cloud/firetower/commit/d7be6b52eb667db86dd1c9c51a591ad4cf1df151))
+* **server:** the import plan — classify a dropped folder without writing anything ([3c20de9](https://github.com/firetower-cloud/firetower/commit/3c20de93b3fd85e660670da3f9c1a154c2b6fa45))
+* **server:** the import plan — what a dropped folder of profiles would do ([5640a23](https://github.com/firetower-cloud/firetower/commit/5640a230cd67a46e44b6b9ae467b143351fef7d3))
+
+
+### Bug Fixes
+
+* **desktop:** a channel row's verdict is a sentence, not a seven-pixel dot ([c846ae8](https://github.com/firetower-cloud/firetower/commit/c846ae8b8f2c337b26bbb918d1bea175aeb6510b))
+* **desktop:** a pixel short of the end is not the end ([203826a](https://github.com/firetower-cloud/firetower/commit/203826a6bd1d730f352e5ffb8c23bed868cc95c4))
+* **desktop:** a skill defaulted in a repository is on in a new workspace ([234d4ce](https://github.com/firetower-cloud/firetower/commit/234d4ce5f893dee38b08f0899188400a31fdec2d))
+* **desktop:** read the picked folder before the input is cleared ([03c96c0](https://github.com/firetower-cloud/firetower/commit/03c96c0dccc7d8f60ea2813212b9c24f92267b99))
+* **desktop:** repository-default skills, and the Overview crash guard ([e65f921](https://github.com/firetower-cloud/firetower/commit/e65f9217d270c0a0450d9454307d0be8f9ec12ad))
+* **desktop:** the import review's fixtures are the planner's own output ([a69348c](https://github.com/firetower-cloud/firetower/commit/a69348c9d86b2e1a3be6eab3ac43d6d14a80784e))
+* **desktop:** the Linux check container carries the session label the sweep matches ([a4fd03d](https://github.com/firetower-cloud/firetower/commit/a4fd03da25ced102519461d01392e24e1e7caf48))
+* **desktop:** the Linux check container carries the session label the sweep matches ([bdf4e2a](https://github.com/firetower-cloud/firetower/commit/bdf4e2a20f8490a556d1eb2f543da3655eebd6ed)), closes [#342](https://github.com/firetower-cloud/firetower/issues/342)
+* **desktop:** the live Cursor script gets through a fresh server's two gates ([f761dc6](https://github.com/firetower-cloud/firetower/commit/f761dc6a7d5b0f612869417e360b786d66df4bc3))
+* **desktop:** the live Cursor script gets through a fresh server's two gates ([4bf4f4c](https://github.com/firetower-cloud/firetower/commit/4bf4f4cd6d5b01c8b2cb9e2273408eba5e1e356a))
+* **desktop:** the live Cursor script is told which server it may write to ([3ca0114](https://github.com/firetower-cloud/firetower/commit/3ca01149d7d009132fa230d47833c77c9d2ac651))
+* **desktop:** the profile editor's form foot can say no ([215f74d](https://github.com/firetower-cloud/firetower/commit/215f74ddf69075a2c88ac3e8bc9832874861ee3d))
+* **desktop:** the profile editor's refusal and warning are coloured, not the standing note's grey ([19fddf7](https://github.com/firetower-cloud/firetower/commit/19fddf7009b6cc8dcfb3101f70df2ad713b786aa)), closes [#351](https://github.com/firetower-cloud/firetower/issues/351)
+* **desktop:** the Team panel reads the manager's status instead of asserting it ([5b62de1](https://github.com/firetower-cloud/firetower/commit/5b62de1ca9f492b72232edb5d41d690cea2629ce))
+* **desktop:** the Team panel survives a name that is not a string ([04a1801](https://github.com/firetower-cloud/firetower/commit/04a1801b83f6ae9f17b5e0b24d8e001cdea41440))
+* **desktop:** the transcript lets go the moment you scroll up ([c7202f7](https://github.com/firetower-cloud/firetower/commit/c7202f71ddd1e6672fe55a405f6ca8f5fef76f73))
+* **server:** a backgrounded shell is not a subagent, and never holds a hand-back ([8d32dd1](https://github.com/firetower-cloud/firetower/commit/8d32dd1f3d82979dbdf5755b58d4ec8b808e1ba8))
+* **server:** a backgrounded shell is not a subagent, and never holds a hand-back ([522901b](https://github.com/firetower-cloud/firetower/commit/522901b9bcdb3dbf29f5cdeff9eb6932c519e0ff))
+* **server:** an import no longer refuses a model the engine accepts ([31c5109](https://github.com/firetower-cloud/firetower/commit/31c51094db47a090a4570b90f2f28eb2409460a5))
+* **server:** the channel manifest is published at `channels`, not `channels-latest` ([2e546d7](https://github.com/firetower-cloud/firetower/commit/2e546d7fae8443d218088808e1cd0f08dd1a4b86))
+* transcript lets go when you scroll up, with a way back and the Team panel stops asserting the manager is working ([3fdc6de](https://github.com/firetower-cloud/firetower/commit/3fdc6de207ff59cefea21678e5ac5e803f345b75))
+
 ## [0.30.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.29.1...desktop-v0.30.0) (2026-11-15)
 
 
