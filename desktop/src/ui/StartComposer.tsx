@@ -70,6 +70,31 @@ import type { Agent, Control, ControlKind, Role } from "~/api/generated/model";
 
 type Checkout = { id: string; slug: string };
 
+/**
+ * The skills a new workspace starts with: the always-on ones, plus the ones
+ * this person has set as a default in a repository it checks out.
+ *
+ * **`defaultIn` is slugs.** The server builds it as `array_agg(r.slug)` over
+ * `skill_defaults` joined to `repos` — a row stores `repo_id` and the read
+ * translates it — so what arrives is `acme/web` and never `r_web`. Both
+ * callers matched it against `checkout.id`, which can never be equal to a
+ * slug, so a skill marked "use by default in this repository" was dropped
+ * from every workspace started here and nothing said so.
+ *
+ * Exported for its own test, and shared with the schedule sheet rather than
+ * written twice: the two copies of this line were wrong in the same way. It
+ * hands back the skills and leaves the caller to take the ids, which is what
+ * both of them already did.
+ */
+export function defaultSkills<S extends { alwaysOn: boolean; defaultIn: string[] }>(
+  skills: S[],
+  checkouts: { slug: string }[],
+): S[] {
+  return skills.filter(
+    (s) => s.alwaysOn || s.defaultIn.some((r) => checkouts.some((c) => c.slug === r)),
+  );
+}
+
 /* The engine and account last started with, kept on this machine so the New
    page opens on them. Model, effort and permissions already come back through
    the agent's remembered controls, so only these two need a home here. */
@@ -352,8 +377,7 @@ export function StartComposer({
   // repository you've added — unless you change the set.
   const defaultSkillIds = useMemo(
     () =>
-      allSkills
-        .filter((s) => s.alwaysOn || s.defaultIn.some((r) => checkouts.some((c) => c.id === r)))
+      defaultSkills(allSkills, checkouts)
         .map((s) => s.id),
     [allSkills, checkouts],
   );

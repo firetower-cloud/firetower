@@ -43,7 +43,7 @@ import { Icon, IconButton } from "~/components/ui";
 import { AgentMark } from "~/components/AgentMark";
 import { Pop } from "~/ui/Pop";
 import { RunPicker } from "~/ui/RunPicker";
-import { ProfileMenu, RepoMenu } from "~/ui/StartComposer";
+import { defaultSkills, ProfileMenu, RepoMenu } from "~/ui/StartComposer";
 import { Head, Menu, Opt, PickOne } from "~/ui/menus";
 import { canRun, NoMachine, resolve, type Where } from "~/components/WhereItRuns";
 import { Readout } from "~/components/HostReadiness";
@@ -233,8 +233,7 @@ export function NewSchedule({
   // repository this checks out — unless the person picks their own.
   const defaultSkillIds = useMemo(
     () =>
-      allSkills
-        .filter((s) => s.alwaysOn || s.defaultIn.some((r) => checkouts.some((c) => c.id === r)))
+      defaultSkills(allSkills, checkouts)
         .map((s) => s.id),
     [allSkills, checkouts],
   );
