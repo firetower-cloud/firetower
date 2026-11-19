@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.56.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.0...firetower-v0.56.1) (2026-11-19)
+
+
+### Bug Fixes
+
+* **release:** a dispatch cannot name general access, so promotion can ([fd0c102](https://github.com/firetower-cloud/firetower/commit/fd0c1023ee2b9617bdc65e837d581bb95773e092))
+* **release:** a dispatch cannot name general access, so promotion can ([46e4ddf](https://github.com/firetower-cloud/firetower/commit/46e4ddf62fa61f733e930ed9d73da76c4387ee3d))
+* **updater:** pull the tag the rewritten compose file names, not the container's ([5cd78c7](https://github.com/firetower-cloud/firetower/commit/5cd78c747ec6de3ecbab68ed26673f509adab57b))
+* **updater:** pull the tag the rewritten compose file names, not the container's ([5f7cbaa](https://github.com/firetower-cloud/firetower/commit/5f7cbaaac55ae7045abfc2a328d89e3ee8696e75)), closes [#407](https://github.com/firetower-cloud/firetower/issues/407)
+
 ## [0.56.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.55.0...firetower-v0.56.0) (2026-11-19)
 
 
