@@ -56,7 +56,8 @@ on:
         description: "An existing desktop-v* tag to rebuild"
         required: true
         type: string
-      # **Beta only, and general access deliberately absent.**
+      # **`channel` and `publish_only` are not here, and their absence is the
+      # guard.** There is no second input on this trigger, deliberately.
       #
       # Dispatching this with `channel: general` published `desktop-stable` and
       # `desktop-latest` — the two addresses every desktop copy on general
@@ -66,20 +67,31 @@ on:
       # reproduced: it published 0.60.0 to both addresses while the manifest
       # still said beta 0.59.0, general 0.58.0.
       #
-      # General access now reaches this job only through `workflow_call`, which
-      # means only through `promote.yml`. The step guarding it is below; this
-      # list is the half somebody sees before they press anything.
-      channel:
-        description: "Which channel's address to write (general access is promotion's, not this)"
-        required: false
-        type: choice
-        default: beta
-        options: [beta]
-      publish_only:
-        description: "Rewrite the manifest only — build and sign nothing"
-        required: false
-        type: boolean
-        default: false
+      # That was first closed by *detecting* the dispatch in the publish job,
+      # with `github.event_name != workflow_call` — and it refused **promotion
+      # itself**, because in a reusable workflow `github.event_name` is the
+      # triggering event of the whole run, not `workflow_call`. A promotion is
+      # dispatched, so the called workflow saw `workflow_dispatch`. The one
+      # route to general access was the only thing that check ever blocked.
+      # It is the same trap `images.yml` documents one field over: a called
+      # workflow sees the caller's event and the caller's ref, so neither can
+      # tell you which side of the call you are on.
+      #
+      # So the field is simply not offered. The form has no such choice, and
+      # `gh workflow run -f channel=general` is refused by the API with
+      # `Unexpected inputs provided` before a job starts — a bypass that
+      # cannot be attempted rather than one that has to be caught. A
+      # dispatched run always reaches `publish` with both unset, which
+      # `inputs.channel || 'beta'` reads as beta and `!inputs.publish_only`
+      # reads as "build everything": the same shape `version` and `ref` above
+      # already depend on, both of them `workflow_call`-only and both resolved
+      # by an `||` on this path.
+      #
+      # What that costs, stated so nobody restores it by reflex: rewriting the
+      # manifest with nothing rebuilt is no longer dispatchable. Re-running
+      # the `publish` job of the run that built the tag does the same thing
+      # with the same inputs against the same release, and a dispatch of a tag
+      # rebuilds it, which is what this trigger says it does.
 
 permissions:
   contents: read
@@ -402,10 +414,21 @@ jobs:
         with:
           node-version: 22
 
-      # The list of dispatch options above is a courtesy; this is the rule.
-      # `workflow_dispatch` and `workflow_call` share one `inputs` context, so
-      # the only thing that distinguishes "a person pressed Run workflow" from
-      # "promotion called it" is the event name.
+      # **An assertion, and no longer the mechanism.** What keeps general
+      # access to promotion is that `channel` is not a `workflow_dispatch`
+      # input at all — the reasoning is on the trigger above. By the time this
+      # runs, the only thing that can have said `general` is a
+      # `workflow_call`, so what is left for this step is the narrower job of
+      # refusing a *call* that asks for something incoherent.
+      #
+      # **Nothing in here may read `github.*` again.** This step used to ask
+      # `github.event_name != workflow_call`, which in a reusable workflow is
+      # the triggering event of the whole run — so it refused every promotion
+      # and permitted nothing, which is the defect the trigger above now
+      # describes. Keeping the step to its own inputs is also what lets
+      # `promote-shape.test.mjs` run this body verbatim under the environment
+      # each caller really produces, so that the permitted path is proved to
+      # pass rather than only the forbidden one proved to fail.
       - name: general access comes from promotion and from nowhere else
         env:
           CHANNEL: ${{ inputs.channel || 'beta' }}
@@ -413,13 +436,10 @@ jobs:
         run: |
           set -euo pipefail
           if [ "$CHANNEL" != beta ] && [ "$CHANNEL" != general ]; then
-            echo "::error::channel must be beta or general, not '$CHANNEL'."; exit 1
-          fi
-          if [ "$CHANNEL" = general ] && [ "${{ github.event_name }}" != workflow_call ]; then
-            echo "::error::Writing the general-access address is promotion's job." \
-                 "Run the 'promote' workflow, which requires a typed confirmation, checks the" \
-                 "version is on beta and is not a downgrade, and writes the channel manifest." \
-                 "Nothing has been published."
+            echo "::error::channel must be beta or general, not '$CHANNEL'." \
+                 "Only a workflow_call can ask for general access — the 'promote' workflow," \
+                 "which requires a typed confirmation, checks the version is on beta and is" \
+                 "not a downgrade, and writes the channel manifest. Nothing has been published."
             exit 1
           fi
           # Signing and general access are never the same run. A promotion

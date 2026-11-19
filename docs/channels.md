@@ -242,9 +242,16 @@ Either way a half-finished run leaves every reader where it was, and every step
 is idempotent, so re-running is always the answer.
 
 `promote.yml` is the only route to general access. Dispatching the desktop
-release workflow with a general-access channel is refused — it would publish to
-both general-access addresses with no confirmation, no check that the version is
-on beta, and no update to this document.
+release workflow with a general-access channel cannot be asked for: `channel`
+is declared on that workflow's `workflow_call` trigger and not on its
+`workflow_dispatch` one, so the form offers no such choice and the API refuses
+a dispatch that names it before a job starts. It would otherwise publish to
+both general-access addresses with no confirmation, no check that the version
+is on beta, and no update to this document.
+
+It was a check inside the workflow before, asking whether the event was a
+`workflow_call` — which refused every promotion, because a called workflow
+sees the event that started the whole run and a promotion is dispatched.
 
 Images are re-tagged to a staging tag first, checked there for an unchanged
 index digest and for both `linux/amd64` and `linux/arm64` by name, and only then
