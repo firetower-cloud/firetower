@@ -16,6 +16,11 @@ The order in a run is fixed: back up, the updater, the control plane, then each
 worker one at a time. A worker newer than the control plane is the same protocol
 mismatch as one older, so nothing moves a worker ahead.
 
+**A channel switch runs the middle two the other way round** — the control
+plane, then the updater. The switch's new image lines are written by the
+control-plane step, and recreating the updater before that write would bring it
+back from the tag the installation is leaving.
+
 ## Now, or when idle
 
 **Upgrade now…** lists every session that would end, by name, and asks you to
@@ -70,7 +75,11 @@ remembered across restarts.
 
 Switching rewrites the image line for both services — the control plane's and
 the updater's, which are published together and may never be on different
-channels — and **then performs the upgrade**, as one run. It has to be one act:
+channels — and **then performs the upgrade**, as one run. Both containers are
+recreated, because the channel is the tag each was created from: moving onto a
+channel that holds the build already running changes no bytes and still has to
+move both tags. The two are compared once the run is done, and a run that moved
+one and not the other fails saying which is where. It has to be one act:
 the channel is read back from the container that is running, so writing the
 file alone would leave the installation reporting general access while its file
 said `beta`, which is a switch that appears not to have worked. The change is

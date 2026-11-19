@@ -387,40 +387,93 @@ impl Jobs {
         say.done(me.name.clone());
 
         let (repo, was_on) = split_reference(&me.image_ref);
-        // The caller's tag first here, which is the other way round from the
-        // control plane's — and for a reason that is only true of this step.
-        // A channel switch rewrites both image lines in the *control-plane*
-        // step, which runs after this one, so while this job runs the file
-        // still names the channel being left and the caller is the only thing
-        // that knows otherwise.
+
+        // **Two tags, and this step is the one where they come apart.** The
+        // rule is the control plane's, and the whole of it: pull the release
+        // from a tag that has it, and bring it up under the name the
+        // deployment file gives it *when Compose runs*. For the control plane
+        // those are one tag — that step rewrites the file before Compose
+        // reads it, so the file both names where the release is and says what
+        // Compose will ask for. This step writes nothing, and for an ordinary
+        // upgrade the step that rewrites the file runs *after* it, so the two
+        // answers are different and both are needed.
         //
-        // The file next, for the opposite case: the release that moved both
-        // lines onto the general-access tag left this container as the one
-        // Compose created from the floating one, so the file and the
-        // container disagree until the next recreate — and it is the file
-        // Compose reads. Same rule as the control plane's, same reason.
-        let tag = fetch_tag
+        // Read once, and both answers come out of it: two reads with a
+        // registry pull between them are two things that can disagree, which
+        // is the shape of the bug this whole rule exists for.
+        // `compose_after(&[])` because this step writes no file — the control
+        // plane's own question, with nothing to write.
+        let in_the_file = self
+            .compose_after(&[])
+            .and_then(|compose| image_tag(&compose, &repo));
+
+        // Where the release is: the tag the caller named, which is read off
+        // the file this run is going to write. Then the file as it is, for a
+        // caller that named none — a release from before channels existed
+        // does not know to, and the control plane asking is the one being
+        // replaced. Then this container's own tag.
+        let from = fetch_tag
             .map(str::to_string)
-            .or_else(|| {
-                self.compose_on_disk()
-                    .and_then(|compose| image_tag(&compose, &repo))
-            })
+            .or_else(|| in_the_file.clone())
             .unwrap_or_else(|| was_on.clone());
-        if tag != was_on {
+        if from != was_on {
             say.say(format!(
-                "fetching :{tag} rather than :{was_on}, which is what this container was made \
+                "fetching :{from} rather than :{was_on}, which is what this container was made \
                  from"
             ));
         }
-        let pulled = self.pull_release(say, &repo, &tag, version).await?;
+        let pulled = self.pull_release(say, &repo, &from, version).await?;
         say.edit(|job| {
             job.previous_image = Some(me.image_id.clone());
             job.image = Some(pulled.clone());
         });
 
-        if pulled == me.image_id {
+        // And what Compose will ask this machine for: the same reading, used
+        // for the other half of the rule.
+        //
+        // `--pull never` makes that name the only thing that decides which
+        // image comes up, and on an ordinary upgrade it is not the name the
+        // release arrived under — the line still says the tag this
+        // installation is on. The name resolved to the image already running,
+        // Compose had nothing to change, and the updater came back as the
+        // release it was already on. The control plane then waited out its
+        // timeout for a version that was never going to arrive. So the
+        // release is made to answer to the name the file uses, which is the
+        // same thing a rollback does for the image it puts back.
+        let wanted = in_the_file.unwrap_or_else(|| from.clone());
+        if wanted != from {
+            say.say(format!(
+                "naming it {repo}:{wanted} as well — {} names that, and with `--pull never` it \
+                 is what Compose will ask this machine for",
+                crate::site::COMPOSE_FILE
+            ));
+            self.docker
+                .tag(&pulled, &repo, &wanted)
+                .await
+                .with_context(|| {
+                    format!(
+                        "naming the release {repo}:{wanted}, which is what {} names",
+                        crate::site::COMPOSE_FILE
+                    )
+                })?;
+        }
+
+        // Skipped only when the recreate would change nothing — asked of
+        // what Compose will do, which is bring up `wanted` and get `pulled`.
+        //
+        // **The tag as well as the image.** The channel *is* the tag the
+        // running container was created from, and nothing stores it, so an
+        // updater left on the tag of the channel being left is on the old
+        // channel however identical the bytes it is running are. Two channels
+        // holding one build is the ordinary state between a release and its
+        // promotion, and on that day a matching image id is not a reason to
+        // skip: it is the whole reason #478 was silent, with the control
+        // plane moved onto the channel and the updater not.
+        if pulled == me.image_id && wanted == was_on {
             say.step("recreate");
-            say.done("already on that image; nothing to recreate");
+            say.done(format!(
+                "already on that image and on :{wanted}; nothing to recreate"
+            ));
             return Ok(JobState::Done);
         }
 
@@ -1802,10 +1855,12 @@ mod tests {
         );
     }
 
-    /// And the tag the caller named still wins over the file, because a
-    /// channel switch rewrites the image lines in the step *after* this one:
-    /// while the updater is being replaced the file still names the channel
-    /// being left, and the caller is the only thing that knows otherwise.
+    /// And the tag the caller named still wins over the file for the
+    /// *pull* — it is read off the file this run is going to write, so it is
+    /// where the release is published, and the line on the machine may name a
+    /// tag that no longer holds the version being asked for. Which name the
+    /// release then has to answer to is a separate question, and the file
+    /// answers that one.
     #[tokio::test]
     async fn a_named_tag_still_wins_over_the_file_it_has_not_rewritten_yet() {
         let seen: Seen = Default::default();
@@ -1951,6 +2006,34 @@ mod tests {
         ports
     }
 
+    /// `deploy/firetower.yml` with both Firetower image lines on `tag`.
+    ///
+    /// The repository's own file names `:stable`, and only the two Firetower
+    /// lines do — the database's `postgres:17-alpine` is left alone, which is
+    /// the same thing the control plane's `retag` guarantees by only touching
+    /// repositories the updater reported.
+    fn retagged(compose: &str, tag: &str) -> String {
+        compose.replace(
+            &format!(":{}", ft_updater_api::tags::STABLE),
+            &format!(":{tag}"),
+        )
+    }
+
+    /// One real deployment at a time, process-wide.
+    ///
+    /// `wait_healthy` reads the control plane's address from a process-global
+    /// environment variable. Normally it reaches it over the compose network;
+    /// a test running beside the daemon rather than in a container on it has
+    /// to go in by the published port, and two deployments at once would each
+    /// publish on a port of its own and overwrite the other's answer. Taken
+    /// by `made_on` and held until the deployment is torn down, so a test
+    /// cannot forget it — the first version of this was two tests setting the
+    /// variable themselves, which passed one at a time and failed in CI.
+    fn one_at_a_time() -> &'static tokio::sync::Mutex<()> {
+        static LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(Default::default)
+    }
+
     /// The deployment this test upgrades, and everything made for it.
     ///
     /// Torn down on the way out, including when a panic is what is on the way
@@ -1968,16 +2051,37 @@ mod tests {
         /// Where the control plane answers on this machine. Normally the
         /// updater reaches it over the compose network, and a test running
         /// beside the daemon rather than in a container on it cannot.
+        #[allow(dead_code)]
         published: u16,
+        /// See [`one_at_a_time`]. Dropped after everything else, because a
+        /// `Drop` impl runs before the fields it is dropping.
+        _only_one: tokio::sync::MutexGuard<'static, ()>,
     }
 
     const WAS: &str = "0.55.0";
     const NOW: &str = "0.56.0";
 
     impl Deployment {
-        /// Build it: two images, a registry holding the newer one under both
-        /// tags, and Compose having created the containers from the older one.
+        /// Build it: two images, a registry holding the newer one under every
+        /// channel tag, and Compose having created the containers from the
+        /// older one on the floating tag — every installation before channels
+        /// existed.
         async fn made() -> Self {
+            Self::made_on(ft_updater_api::tags::LATEST, WAS).await
+        }
+
+        /// The same deployment, started from a given tag and a given release.
+        ///
+        /// `(:latest, WAS)` is the installation an upgrade moves onto a
+        /// channel. `(:stable, NOW)` is one already on general access, which
+        /// is what a channel switch is performed on — and because the
+        /// registry holds one build under every channel tag, the switch's
+        /// destination is the same image the containers are already running.
+        /// **That is the shape this was silent in:** nothing to recreate, as
+        /// far as an image id can tell, and the tag is the whole of what a
+        /// switch changes.
+        async fn made_on(start: &'static str, running: &'static str) -> Self {
+            let _only_one = one_at_a_time().lock().await;
             let id = ulid::Ulid::new().to_string().to_lowercase();
             let project = format!("ft-updater-test-{id}");
             let dir = tempfile::tempdir().expect("a directory for the deployment");
@@ -1993,6 +2097,7 @@ mod tests {
             // so that a setup which panics half way still tears down what it
             // had got to: this is a local, and unwinding drops it.
             let mut deployment = Self {
+                _only_one,
                 site: crate::site::Site {
                     project: project.clone(),
                     service: "updater".into(),
@@ -2056,11 +2161,15 @@ mod tests {
                 &at,
             ]);
 
-            // The registry holds the new build under both tags, which is what
-            // the day of a channel release looks like: `:latest` and
-            // `:stable` are the same image.
+            // The registry holds the new build under every channel tag,
+            // which is what this installation is today: `:stable` and
+            // `:beta` are one image, and so is `:latest`.
             for repo in ["firetower", "firetower-updater"] {
-                for tag in [ft_updater_api::tags::LATEST, ft_updater_api::tags::STABLE] {
+                for tag in [
+                    ft_updater_api::tags::LATEST,
+                    ft_updater_api::tags::STABLE,
+                    ft_updater_api::tags::BETA,
+                ] {
                     let reference = format!("{registry}/{repo}:{tag}");
                     cli(&["tag", &new, &reference]);
                     cli(&["push", "-q", &reference]);
@@ -2069,9 +2178,11 @@ mod tests {
                     // that found it already here would prove nothing.
                     cli(&["rmi", &reference]);
                 }
-                // What it does have is the old build, under the floating tag
-                // its own compose file names.
-                cli(&["tag", &old, &format!("{registry}/{repo}:latest")]);
+                // What it does have is the build it is running, under the one
+                // tag its own compose file names. Every other tag has to be
+                // fetched.
+                let here = if running == WAS { &old } else { &new };
+                cli(&["tag", here, &format!("{registry}/{repo}:{start}")]);
             }
             cli(&["rmi", &new]);
 
@@ -2083,19 +2194,20 @@ mod tests {
             )
             .expect("the repository's own deploy/firetower.yml")
             .replace("ghcr.io/firetower-cloud/", &format!("{registry}/"));
-            let on_the_machine = release_compose.replace(
-                &format!(":{}", ft_updater_api::tags::STABLE),
-                &format!(":{}", ft_updater_api::tags::LATEST),
-            );
+            let on_the_machine = retagged(&release_compose, start);
 
-            // The whole point of this test, so it is asserted rather than
-            // assumed: a release that moves no image line would exercise
-            // nothing, and this test would go on passing while saying it
-            // covered a tag change.
+            // Asserted rather than assumed: an operation that moves no image
+            // line would exercise nothing, and a test of a tag change that
+            // changes no tag is the check #388 is about. Each test asserts
+            // the move it performs; this is the floor both stand on.
             let repository = format!("{registry}/firetower");
             let from = ft_updater_api::image_tag(&on_the_machine, &repository);
             let to = ft_updater_api::image_tag(&release_compose, &repository);
-            assert_eq!(from.as_deref(), Some(ft_updater_api::tags::LATEST));
+            assert_eq!(
+                from.as_deref(),
+                Some(start),
+                "the file on the machine has to name the tag it was started on"
+            );
             assert_eq!(to.as_deref(), Some(ft_updater_api::tags::STABLE));
 
             let dir = deployment.dir.path();
@@ -2111,6 +2223,15 @@ mod tests {
 
             cli(&["compose", "-p", &project, "-f", &compose, "up", "-d"]);
 
+            // Read by `wait_healthy`. Process-global, which is what
+            // `one_at_a_time` is for, and set here rather than by each test
+            // so that the guard and the value it goes with are taken
+            // together.
+            std::env::set_var(
+                "FIRETOWER_UPDATER_CP_URL",
+                format!("http://127.0.0.1:{published}"),
+            );
+
             deployment.release_compose = release_compose;
             deployment
         }
@@ -2121,10 +2242,83 @@ mod tests {
 
         /// What the release asks the updater to write.
         fn writes(&self) -> Vec<FileWrite> {
+            self.writes_onto(ft_updater_api::tags::STABLE)
+        }
+
+        /// What a switch onto `tag` asks the updater to write: the release's
+        /// own copy of the file with **both** image lines moved, which is
+        /// what the control plane's `retag` produces.
+        fn writes_onto(&self, tag: &str) -> Vec<FileWrite> {
             vec![FileWrite {
-                name: "firetower.yml".into(),
-                content: self.release_compose.clone(),
+                name: crate::site::COMPOSE_FILE.into(),
+                content: retagged(&self.release_compose, tag),
             }]
+        }
+
+        /// The tag a container of this deployment was created from, as
+        /// Compose recorded it — which is what the channel is read off.
+        ///
+        /// `None` while it cannot be read. A recreate is two containers for a
+        /// moment, and the daemon lists them before it is asked about each
+        /// one, so a container that was listed can be gone by the time it is
+        /// inspected. That is "not yet", not an answer.
+        async fn tag_of(&self, jobs: &Jobs, service: &str) -> Option<String> {
+            let container = jobs.service_container(service).await.ok()??;
+            Some(split_reference(&container.image_ref).1)
+        }
+
+        /// The same, waited for: the tag `service` is on once it has stopped
+        /// moving, or whatever it is on when the wait runs out.
+        async fn tag_settled(&self, jobs: &Jobs, service: &str, wanted: &str) -> Option<String> {
+            self.settled(jobs, service, wanted, Self::tag_of).await
+        }
+
+        /// The version the build stamped on the image `service`'s container
+        /// is running — the one thing that says *which release* came up, as
+        /// against which name it came up under. `None` as `tag_of`.
+        async fn version_of(&self, jobs: &Jobs, service: &str) -> Option<String> {
+            let container = jobs.service_container(service).await.ok()??;
+            jobs.docker
+                .inspect_image(&container.image_id)
+                .await
+                .ok()?
+                .version()
+                .map(str::to_string)
+        }
+
+        /// The same, waited for.
+        async fn version_settled(
+            &self,
+            jobs: &Jobs,
+            service: &str,
+            wanted: &str,
+        ) -> Option<String> {
+            self.settled(jobs, service, wanted, Self::version_of).await
+        }
+
+        /// Read `service` until the reading is `wanted`, or until the wait
+        /// runs out and whatever it reads then is the answer.
+        async fn settled<'a, F, Fut>(
+            &'a self,
+            jobs: &'a Jobs,
+            service: &'a str,
+            wanted: &str,
+            read: F,
+        ) -> Option<String>
+        where
+            F: Fn(&'a Self, &'a Jobs, &'a str) -> Fut,
+            Fut: std::future::Future<Output = Option<String>>,
+        {
+            // Generous for a Compose recreate of one container, and short
+            // enough that a run which is going to be red is red quickly.
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
+            loop {
+                let seen = read(self, jobs, service).await;
+                if seen.as_deref() == Some(wanted) || std::time::Instant::now() >= until {
+                    return seen;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
         }
 
         fn compose_file(&self) -> String {
@@ -2147,8 +2341,15 @@ mod tests {
                 "1",
             ]);
             cli_quietly(&["rm", "-f", &format!("{}-registry", self.project)]);
+            // The helper that recreates the *updater* is the one nothing
+            // removes: the new updater sweeps it when it starts, and in this
+            // test there is no new updater process to do it. Removed by the
+            // same name `compose_up` already removes before reusing.
+            for n in 0..4 {
+                cli_quietly(&["rm", "-f", &format!("firetower-updater-helper-test-{n}")]);
+            }
             for repo in ["firetower", "firetower-updater"] {
-                for tag in ["latest", "stable"] {
+                for tag in ["latest", "stable", "beta"] {
                     cli_quietly(&["rmi", "-f", &format!("{}/{repo}:{tag}", self.registry)]);
                 }
             }
@@ -2167,16 +2368,7 @@ mod tests {
     /// real deployments rolled back cleanly and none of them could upgrade.
     #[tokio::test]
     async fn an_upgrade_that_moves_the_image_line_to_another_tag_goes_through() {
-        // Read by `wait_healthy`, which normally reaches the control plane
-        // over the compose network. This test is on the machine rather than
-        // in a container on it, so it goes in by the published port.
-        // Process-global, and nothing else in this binary reads it.
         let deployment = Deployment::made().await;
-        std::env::set_var(
-            "FIRETOWER_UPDATER_CP_URL",
-            format!("http://127.0.0.1:{}", deployment.published),
-        );
-
         let (jobs, say) = deployment.jobs();
         // `None`: the control plane that asks for this upgrade is the one
         // being replaced, and the release before channels existed does not
@@ -2231,6 +2423,178 @@ mod tests {
                 ft_updater_api::tags::STABLE
             )),
             "the file should have been rewritten"
+        );
+    }
+    /// A channel switch has to move the updater as well as the control plane.
+    ///
+    /// The two images are published together, always, and the control plane
+    /// checks its API version against the updater's on every call — the
+    /// deployment file says so on the updater's own image line: *change both
+    /// lines or neither*. **The channel is the tag**, so a container left on
+    /// the tag of the channel being left is on the old channel, whatever
+    /// bytes it is running.
+    ///
+    /// Which is why this is performed in the shape the defect was silent in:
+    /// both channels holding one build, so the destination tag resolves to
+    /// the image the containers are already running. The control plane still
+    /// moves — its step rewrites files, and a rewrite is a reason to recreate
+    /// — and the updater's own step, which has nothing to write, decided from
+    /// the image id alone that there was nothing to do and left itself on the
+    /// channel being left. Nothing afterwards compared the two, so it was
+    /// silent. #478.
+    #[tokio::test]
+    async fn a_channel_switch_moves_the_updater_as_well_as_the_control_plane() {
+        use ft_updater_api::tags::{BETA, STABLE};
+
+        let deployment = Deployment::made_on(STABLE, NOW).await;
+        let (jobs, say) = deployment.jobs();
+        let writes = deployment.writes_onto(BETA);
+        let switched = writes[0].content.clone();
+
+        // The premise, asserted: this switch moves *both* image lines, and it
+        // moves them to a tag that is the same image as the one already
+        // running. A test of a switch that moved no line, or that moved onto
+        // a different build, would not be a test of #478.
+        for repo in ["firetower", "firetower-updater"] {
+            let repository = format!("{}/{repo}", deployment.registry);
+            assert_eq!(
+                ft_updater_api::image_tag(&deployment.compose_file(), &repository).as_deref(),
+                Some(STABLE),
+                "{repo} should start on the channel being left"
+            );
+            assert_eq!(
+                ft_updater_api::image_tag(&switched, &repository).as_deref(),
+                Some(BETA),
+                "{repo}'s line should be moved by this switch"
+            );
+        }
+        assert_eq!(
+            deployment.tag_of(&jobs, "updater").await.as_deref(),
+            Some(STABLE),
+            "the updater's container should start on the channel being left"
+        );
+
+        // A switch is this, in this order: the control-plane step, which is
+        // what rewrites the image lines, and then the updater's own, which
+        // runs second so that the file it is recreated against already names
+        // the channel being taken. `runs::steps_for` puts them this way
+        // round for a switch and the other way round for an upgrade.
+        let outcome = jobs
+            .upgrade_control_plane(&say, NOW, &writes, Some(BETA))
+            .await;
+        let log = || {
+            jobs.get("test")
+                .map(|j| j.log.join("\n"))
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            outcome.as_ref().ok(),
+            Some(&JobState::Done),
+            "the control plane did not move onto the channel:\n{}",
+            log()
+        );
+        let control_plane = deployment.tag_of(&jobs, "firetower").await;
+        assert_eq!(
+            control_plane.as_deref(),
+            Some(BETA),
+            "the control plane should be on the channel being taken:\n{}",
+            log()
+        );
+
+        let outcome = jobs
+            .upgrade_self(&say, NOW, Some(BETA))
+            .await
+            .unwrap_or_else(|e| panic!("the updater's own step failed: {e:#}\n{}", log()));
+        // `Running` is the handover: the helper recreates this container
+        // after the job has returned, so the result is waited for. `Done`
+        // means it decided there was nothing to do, and no wait will change
+        // the answer — which is the shape of the defect, and is read once.
+        let updater = match outcome {
+            JobState::Running => deployment.tag_settled(&jobs, "updater", BETA).await,
+            _ => deployment.tag_of(&jobs, "updater").await,
+        };
+        assert_eq!(
+            updater.as_deref(),
+            Some(BETA),
+            "the switch left the updater on :{} while the control plane went to :{} — they are \
+             published together and cannot be on different channels:\n{}",
+            updater.as_deref().unwrap_or("?"),
+            control_plane.as_deref().unwrap_or("?"),
+            log()
+        );
+        assert_eq!(
+            updater, control_plane,
+            "both of the deployment's containers have to be on one channel"
+        );
+    }
+    /// An ordinary upgrade recreates the updater in the step **before** the
+    /// one that rewrites the deployment file — `runs::steps_for` puts them
+    /// that way round, and only a switch reverses it. So the file Compose is
+    /// run against for this recreate still names the tag the installation is
+    /// on, and `--pull never` makes that name the only thing that decides
+    /// which image comes up.
+    ///
+    /// Which is the whole of it: the release arrives under the tag it is
+    /// published on, and Compose asks this machine for a different name. The
+    /// name resolved locally to the image already running, Compose had
+    /// nothing to change, and the updater stayed on the release it was on
+    /// while reporting that it had been recreated. The control plane then
+    /// waited out five minutes for a version that was never going to arrive
+    /// and failed the run — the ordinary upgrade every installation has to
+    /// take.
+    ///
+    /// The same join #407 was in, on the other half of the contract: #477
+    /// proved it for the control plane's recreate, and nothing exercised
+    /// this one.
+    #[tokio::test]
+    async fn the_updater_comes_back_as_the_release_when_its_file_still_names_the_old_tag() {
+        use ft_updater_api::tags::{LATEST, STABLE};
+
+        // The shape of 0.55.0 beside 0.56.0: the file on the machine names
+        // the floating tag and the release is published on the
+        // general-access one. The registry has moved both; this machine has
+        // only the build it is running, under the one name its file uses.
+        let deployment = Deployment::made_on(LATEST, WAS).await;
+        let (jobs, say) = deployment.jobs();
+        let log = || {
+            jobs.get("test")
+                .map(|j| j.log.join("\n"))
+                .unwrap_or_default()
+        };
+
+        assert_eq!(
+            deployment.tag_of(&jobs, "updater").await.as_deref(),
+            Some(LATEST),
+            "the updater should start on the tag its own file names"
+        );
+        assert_eq!(
+            deployment.version_of(&jobs, "updater").await.as_deref(),
+            Some(WAS),
+            "running the release it has not upgraded from yet"
+        );
+
+        // `Some(STABLE)`: what the control plane sends, read off the file
+        // this run is going to write. The step that writes it has not run.
+        let outcome = jobs
+            .upgrade_self(&say, NOW, Some(STABLE))
+            .await
+            .unwrap_or_else(|e| panic!("the updater's own step failed: {e:#}\n{}", log()));
+        assert_eq!(
+            outcome,
+            JobState::Running,
+            "it should have handed over to Compose:\n{}",
+            log()
+        );
+
+        let running = deployment.version_settled(&jobs, "updater", NOW).await;
+        assert_eq!(
+            running.as_deref(),
+            Some(NOW),
+            "the updater came back as {:?} rather than the release — Compose was run against a \
+             file naming :{LATEST} with `--pull never`, so that is the name that had to mean the \
+             release:\n{}",
+            running.as_deref().unwrap_or("?"),
+            log()
         );
     }
 }
