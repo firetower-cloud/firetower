@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.1...firetower-v0.56.2) (2026-11-19)
+
+
+### Bug Fixes
+
+* **updater:** a channel switch moves the updater, and an ordinary upgrade can replace it at all ([7a9ce53](https://github.com/firetower-cloud/firetower/commit/7a9ce539fc4203a3c008e07462e64073949af07c))
+* **updater:** the release has to answer to the name the updater's own compose file gives it ([f89ad46](https://github.com/firetower-cloud/firetower/commit/f89ad463356c904c2335777e565f2294087c83da))
+
 ## [0.56.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.0...firetower-v0.56.1) (2026-11-19)
 
 
