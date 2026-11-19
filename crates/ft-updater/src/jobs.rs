@@ -838,8 +838,19 @@ impl Jobs {
 
             let container = match self.service_container(service).await {
                 Ok(Some(c)) => c,
-                _ => {
+                Ok(None) => {
                     last = "no container yet".into();
+                    continue;
+                }
+                // Polled through, because a daemon that goes quiet for one
+                // of ninety turns around this loop is not a reason to give
+                // up on a container that may yet come up — but kept as
+                // itself, so that if the wait does run out it names the real
+                // reason. Reported as "no container yet", a machine whose
+                // socket had gone looked exactly like a container taking its
+                // time, and the rollback blamed the release.
+                Err(e) => {
+                    last = format!("{e:#}");
                     continue;
                 }
             };
@@ -1518,6 +1529,13 @@ mod tests {
         create_fails: bool,
         /// Pulling the helper image fails, as a rate-limited registry does.
         helper_pull_fails: bool,
+        /// Compose is part-way through a recreate: the replica it is removing
+        /// is still in the list, and gone by the time anything asks the
+        /// daemon about it.
+        recreating: bool,
+        /// Inspecting a container fails for a reason that is *not* that it
+        /// has gone — a daemon in trouble rather than a container removed.
+        inspect_breaks: bool,
     }
 
     /// What the one container the fake daemon has reports as its image, when
@@ -1612,12 +1630,38 @@ mod tests {
         });
 
         if path.starts_with("/containers/json") {
+            // Mid-recreate the list has both in it, and the one being
+            // removed is listed first — which is the order that matters,
+            // because it is the one that used to lose the other.
+            if awkward.recreating {
+                return (
+                    200,
+                    serde_json::json!([
+                        {"Id": "dying-container"},
+                        {"Id": "updater-container"},
+                    ])
+                    .to_string(),
+                );
+            }
             return (
                 200,
                 serde_json::json!([{"Id": "updater-container"}]).to_string(),
             );
         }
+        // Listed a moment ago and removed since. The daemon's own words.
+        if path.starts_with("/containers/dying-container/json") {
+            return (
+                404,
+                r#"{"message":"No such container: dying-container"}"#.to_string(),
+            );
+        }
         if path.starts_with("/containers/updater-container/json") {
+            if awkward.inspect_breaks {
+                return (
+                    500,
+                    r#"{"message":"error while creating mount source path"}"#.to_string(),
+                );
+            }
             return (200, me.to_string());
         }
         if path.starts_with("/images/create") {
@@ -1820,6 +1864,100 @@ mod tests {
         assert!(
             asked.iter().any(|r| r.contains("POST /containers/create")),
             "it should still have made the helper: {asked:#?}"
+        );
+    }
+
+    /// A container that is listed and then gone is what a Compose recreate
+    /// looks like from out here, and it is not an error.
+    ///
+    /// The daemon lists containers before it is asked about each one, so an
+    /// id that was just listed can be a 404 by the time it is inspected —
+    /// that is the replica Compose is removing, which is what a recreate *is*.
+    /// The healthy container listed beside it is the answer, and the whole
+    /// call used to fail instead. The place that polls this while Compose
+    /// recreates is the readiness wait a rollback is decided by, so a
+    /// perfectly healthy upgrade could be rolled back for no reason. Flagged
+    /// on #479.
+    #[tokio::test]
+    async fn a_container_gone_between_the_list_and_the_inspect_is_left_out() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon(
+            seen.clone(),
+            Awkward {
+                recreating: true,
+                ..Default::default()
+            },
+        )
+        .await;
+        let (jobs, _say) = jobs_for(docker);
+
+        let found = jobs
+            .service_container("updater")
+            .await
+            .expect("a replica part-way through being removed is not a failure")
+            .expect("the container that is still there");
+        assert_eq!(found.name, "firetower-updater-1");
+
+        // It was asked about, too: what is skipped is one 404, not the list.
+        let asked = seen.lock().unwrap().clone();
+        assert!(
+            asked
+                .iter()
+                .any(|r| r.starts_with("GET /containers/dying-container/json")),
+            "{asked:#?}"
+        );
+    }
+
+    /// And the operation that was polling goes through, rather than failing
+    /// on a container nobody asked about.
+    #[tokio::test]
+    async fn an_upgrade_is_not_failed_by_a_replica_being_removed() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon(
+            seen,
+            Awkward {
+                recreating: true,
+                ..Default::default()
+            },
+        )
+        .await;
+        let (jobs, say) = jobs_for(docker);
+
+        jobs.upgrade_self(&say, "0.39.0", None)
+            .await
+            .expect("the upgrade should have gone through");
+    }
+
+    /// The other half, and the one that keeps the above a fix rather than a
+    /// swallow: an inspect that fails for any reason other than "that
+    /// container is gone" is still an error.
+    ///
+    /// A daemon in trouble reported as an empty project is the defect #383 is
+    /// open for, and this is the call site that would commit it — every
+    /// caller here reads "no container" as "this deployment does not have
+    /// one" and acts on it.
+    #[tokio::test]
+    async fn an_inspect_that_fails_for_another_reason_is_still_an_error() {
+        let seen: Seen = Default::default();
+        let (docker, _dir) = fake_daemon(
+            seen,
+            Awkward {
+                inspect_breaks: true,
+                ..Default::default()
+            },
+        )
+        .await;
+        let (jobs, _say) = jobs_for(docker);
+
+        let said = format!(
+            "{:#}",
+            jobs.service_container("updater")
+                .await
+                .expect_err("a daemon that refuses an inspect is not an empty project")
+        );
+        assert!(
+            said.contains("error while creating mount source path"),
+            "it should say what the daemon said: {said}"
         );
     }
 
