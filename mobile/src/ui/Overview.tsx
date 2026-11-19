@@ -19,7 +19,7 @@ import { Pressable, Text, View } from "react-native";
 import { ChevronRight, GitBranch, GitPullRequest, Link2, Shapes } from "lucide-react-native";
 import type { Artifact, PlanStep, Session } from "~/api/generated/model";
 import { BEAT_TOKEN, beatOf, elapsed, minutesSince, statusLabel } from "~/api/view";
-import { opens } from "~/api/workspaces";
+import { agentName, opens } from "~/api/workspaces";
 import { AgentMark } from "~/ui/AgentMark";
 import { Blocks } from "~/ui/Blocks";
 import { useTheme } from "~/design/theme";
@@ -130,9 +130,15 @@ function Member({
         <View className="flex-row items-baseline gap-2">
           {/* A subagent in the manager's workspace carries the workspace's
               name, so a roster of them reads as the same row four times. Its
-              title is the only thing that says what it was sent to do. */}
+              title is the only thing that says what it was sent to do.
+
+              And a child with a checkout of its own is named "<lead> / <what>"
+              so that it reads anywhere — which under the manager's own row
+              says the manager twice, once per member. `agentName` cuts it to
+              the leaf, here and on the manager's row above, which is what the
+              desk's `OverviewTab` does at both of the same two places. */}
           <Text numberOfLines={1} className="min-w-0 flex-1 font-medium text-ui text-bone">
-            {(shared ? session.title : session.name) || session.title}
+            {agentName((shared ? session.title : session.name) || session.title)}
           </Text>
           {leads ? <Text className="font-narrow text-micro uppercase tracking-[0.14em] text-mute">leads</Text> : null}
           <Text className="font-sans text-micro text-mute">{elapsed(minutesSince(session.updatedAt))}</Text>

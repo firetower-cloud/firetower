@@ -20,8 +20,11 @@
  * workspace. `speaksFor`, `flat` and `childrenWorking` are still only the
  * desk's, and `asking`, `lastMoved` and `childLine` are only the phone's:
  * what a row says about its children is a row's business, and the desk's rail
- * has no room for a second line. When a third client wants any of it, extract
- * the package the README promises.
+ * has no room for a second line. `agentName` is the desk's as well, but from
+ * its `OverviewTab` rather than from this file: it is `rowLabel`'s rule asked
+ * about a run instead of a place, so it belongs beside it — and a panel is
+ * not a place this client can test from, having no renderer. When a third
+ * client wants any of it, extract the package the README promises.
  *
  * **The band is the one place this goes past the rail rather than porting
  * it.** `BANDS`, `ranked`'s comparator and `banded` are the desk's `BANDS`,
@@ -226,6 +229,43 @@ export function rowLabel(place: Workspace, places: Workspace[]): string {
   const above = leadPlace(place, places);
   const prefix = above ? `${above.name} / ` : "";
   return prefix && place.name.startsWith(prefix) ? place.name.slice(prefix.length) : place.name;
+}
+
+/**
+ * The same rule for a **run**: what a delegated agent is called where the
+ * agent that delegated it is already on the screen.
+ *
+ * The Team panel's rows are sessions, not places, and there is no list of
+ * workspaces to strip a prefix against — the manager is drawn directly above
+ * the roster, which is the condition `rowLabel` goes looking for. So the lead
+ * is known rather than found, and the name is cut at its own last separator.
+ *
+ * **Only where the lead is beside it.** A flat list, a search result and the
+ * question before ending a workspace all keep the whole "<lead> / <agent>",
+ * because there the prefix is the only thing saying whose work it is. That
+ * is `rowLabel`'s rule and this does not widen it.
+ *
+ * `lastIndexOf`, never `indexOf` and never a split: a lead may itself be
+ * called "Hello / saluteur" — `delegate.rs` has that exact name in its
+ * tests — so a child of it is "Hello / saluteur / what" and only the final
+ * segment is the leaf.
+ *
+ * The desk's `OverviewTab` holds this beside the panel that draws it. It is
+ * here instead because this client's tests have no renderer, and a Team-panel
+ * rule that shipped wrong is one worth asserting without one — `opens` is in
+ * this file for the same reason.
+ */
+export function agentName(name: string | undefined): string {
+  /* **Guarded, because an answer that is not this shape should not take the
+     panel down.** `name` is required on the wire and a server that sends
+     something else — one version out, a proxy, a mock's catch-all — made
+     `lastIndexOf` throw and the whole Overview became the error boundary.
+     Three crashes on the desk came from exactly that, which is why its
+     `agentName` is guarded too; this tests the type rather than the truthiness
+     because a number is the shape that arrived and `!name` lets it through. */
+  if (typeof name !== "string" || !name) return "Untitled";
+  const at = name.lastIndexOf(" / ");
+  return at >= 0 ? name.slice(at + 3) : name;
 }
 
 /**

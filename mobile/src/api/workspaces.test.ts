@@ -31,6 +31,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Session, SessionStatus } from "~/api/generated/model";
 import {
+  agentName,
   asking,
   banded,
   bandOf,
@@ -508,6 +509,77 @@ describe("the row the Team panel marks", () => {
       expect(opened.bare, `opened at ${address}`).toEqual(opened.marked);
       expect(opened.marked).toHaveLength(1);
     }
+  });
+});
+
+/**
+ * **What the Team panel's rows are called.**
+ *
+ * Reported as: *"when I open the rail to see the sub workspaces of a
+ * workspace, the name of the sub workspace is always prefixed by `<workspace
+ * parent name> / `"* — a roster of eight under `Beta version` where seven
+ * rows opened with `Beta version /`, and the eighth, whose stored name never
+ * carried the prefix, read correctly and so said what the other seven should
+ * have.
+ *
+ * The rows here are **runs**, so `rowLabel` has nothing to work with: it
+ * strips a child's name against a list of places, and the panel has no list.
+ * `agentName` is the same rule asked about a run, and `label` below is the
+ * whole of what `ui/Overview.tsx` draws into a row — one `Member` component,
+ * which is why the manager above the roster is covered by the same claim.
+ */
+describe("what the Team panel's rows are called", () => {
+  /** The row's own expression, from `ui/Overview.tsx`. */
+  const label = (member: Session, shared = false) =>
+    agentName((shared ? member.title : member.name) || member.title);
+
+  it("says the leaf, and never the lead's name twice", () => {
+    const leaves = ["control-plane", "desktop-client", "sec-control-plane", "download-page", "pipeline"];
+    const roster = leaves.map((what, i) =>
+      run({ id: `s_k${i}`, workspaceId: `w_k${i}`, parentId: "s_lead", name: `Beta version / ${what}` }),
+    );
+    expect(roster.map((m) => label(m))).toEqual(leaves);
+  });
+
+  it("strips the manager's row by the same rule, and leaves a lead's own name whole", () => {
+    /* The desk strips at both of its two places; this panel has one `Member`
+       for the manager and the roster, so both are this one expression. */
+    expect(label(run({ id: "s_lead", name: "Beta version" }))).toBe("Beta version");
+    expect(label(run({ id: "s_mid", name: "Beta version / qa-pipeline" }))).toBe("qa-pipeline");
+  });
+
+  it("leaves a name that never carried a prefix exactly as it is", () => {
+    // `designer` on the report: the one row in eight that was already right.
+    expect(label(run({ id: "s_d", name: "designer" }))).toBe("designer");
+    // And the separator is " / ", spaces and all: a repository slug is not a
+    // delegation and neither is a path.
+    expect(agentName("acme/web")).toBe("acme/web");
+    expect(agentName("src/api/workspaces.ts")).toBe("src/api/workspaces.ts");
+  });
+
+  it("keeps the last segment only, because a lead may be named like a child", () => {
+    /* `delegate.rs` composes `"{lead} / {what}"` and its own tests use
+       "Hello / saluteur" as a real name, so the separator recurs and only the
+       final one is the cut. `indexOf`, or a split, would answer "saluteur". */
+    expect(agentName("Hello / saluteur / what")).toBe("what");
+    expect(agentName("a / b / c / d")).toBe("d");
+  });
+
+  it("reads a shared subagent's title, which is the only thing that differs", () => {
+    const sub = run({ id: "s_sub", workspaceId: "w_1", parentId: "s_1", name: "Beta version", title: "Token audit" });
+    expect(label(sub, true)).toBe("Token audit");
+    // Without it the roster would be the workspace's name, once per member.
+    expect(label(sub)).toBe("Beta version");
+  });
+
+  it("does not take the panel down for a name that is not one", () => {
+    /* Guarded on the desk after three crashes from exactly this, and the
+       panel is the whole screen on a phone. `name` is required on the wire,
+       which is not the same as present. */
+    expect(agentName(undefined)).toBe("Untitled");
+    expect(agentName("")).toBe("Untitled");
+    expect(() => agentName(42 as unknown as string)).not.toThrow();
+    expect(agentName(42 as unknown as string)).toBe("Untitled");
   });
 });
 
