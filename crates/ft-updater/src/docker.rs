@@ -123,7 +123,56 @@ impl Docker {
         container_from(&v)
     }
 
+    /// The same, for a container that may already have gone: `Ok(None)` when
+    /// the daemon says there is no such container.
+    ///
+    /// **A 404 from this endpoint is an answer, not a failure to get one.**
+    /// The only thing it can mean is that this id is not a container any
+    /// more. Every other way of not getting an answer stays an error, and the
+    /// two have to be kept apart: a socket that cannot be reached, or an
+    /// inspect the daemon refuses, is a machine in trouble, and reporting
+    /// that as an empty space is how a real fault gets read as "nothing
+    /// there".
+    async fn inspect_container_if_there(&self, id: &str) -> Result<Option<Container>> {
+        let response = self
+            .send(
+                Method::GET,
+                &format!("/containers/{}/json", encode(id)),
+                None,
+                None,
+            )
+            .await
+            .with_context(|| format!("inspecting container {id}"))?;
+        let status = response.status();
+        if status == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        let bytes = read_all(response.into_body()).await?;
+        if !status.is_success() {
+            return Err(anyhow!(
+                "inspecting container {id}: docker said {status}: {}",
+                error_message(&bytes).unwrap_or_else(|| String::from_utf8_lossy(&bytes).into())
+            ));
+        }
+        let v: Value = serde_json::from_slice(&bytes)
+            .with_context(|| format!("reading the answer to inspecting container {id}"))?;
+        container_from(&v).map(Some)
+    }
+
     /// Containers carrying every one of these labels.
+    ///
+    /// Listed, then inspected one at a time, because the list carries almost
+    /// none of [`Container`]'s fields. Those are separate requests, and **a
+    /// container can be gone between them**: a Compose recreate is two
+    /// containers for a moment, one of them the replica being removed, so an
+    /// id that was just listed can be a 404 by the time this asks about it.
+    /// That one is left out and the rest are returned — the containers that
+    /// are there, which is what was asked for.
+    ///
+    /// This used to fail the whole call, which during a recreate threw away
+    /// the healthy container along with its dying sibling. The place that
+    /// polls this while Compose recreates is the readiness wait a rollback is
+    /// decided by, so a healthy upgrade could be rolled back for no reason.
     pub async fn containers_labelled(&self, labels: &[(&str, &str)]) -> Result<Vec<Container>> {
         let filter = serde_json::json!({
             "label": labels.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>()
@@ -135,8 +184,18 @@ impl Docker {
         let listed: Vec<Value> = self.json(Method::GET, &path, None).await?;
         let mut found = Vec::new();
         for entry in listed {
-            if let Some(id) = entry.get("Id").and_then(Value::as_str) {
-                found.push(self.inspect_container(id).await?);
+            let Some(id) = entry.get("Id").and_then(Value::as_str) else {
+                continue;
+            };
+            // The `?` is still there: only a container that has gone is
+            // skipped. A daemon that has stopped answering fails the call,
+            // the way it did before.
+            match self.inspect_container_if_there(id).await? {
+                Some(container) => found.push(container),
+                None => tracing::debug!(
+                    container = id,
+                    "listed and then gone before it could be inspected"
+                ),
             }
         }
         Ok(found)
