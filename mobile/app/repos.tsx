@@ -21,17 +21,20 @@
  *
  * ## Why it is a page and not a sheet
  *
- * The picker on the form is a sheet, and this opens from it. A sheet over a
- * sheet is a stack with no back gesture — and this one holds a list of a
- * hundred rows, a filter, and an action. That is a page.
+ * The picker that opens this is a sheet. A sheet over a sheet is a stack with
+ * no back gesture — and this one holds a list of a hundred rows, a filter, and
+ * an action. That is a page.
  *
  * ## Coming back
  *
- * Reached from the form, what was just connected is chosen on it when you get
- * back. Those repositories are the only reason anybody came here; making them
- * reopen the picker to find rows they created ten seconds ago is the kind of
- * small friction that reads as the feature not being finished. `pick` is what
- * says the form is behind us — see `workspace/connected.ts`.
+ * What was just connected is chosen on the screen behind, when you get back.
+ * Those repositories are the only reason anybody came here; making them reopen
+ * the picker to find rows they created ten seconds ago is the kind of small
+ * friction that reads as the feature not being finished. `pick` is what says
+ * somebody is choosing rather than administering — see
+ * `workspace/connected.ts`, and `(tabs)/index.tsx`, which takes them on focus
+ * the way `new.tsx` does. **Two screens open this picker now**: the home
+ * composer, which is where work starts, and the form a task opens.
  */
 import { useMemo, useState } from "react";
 import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from "react-native";

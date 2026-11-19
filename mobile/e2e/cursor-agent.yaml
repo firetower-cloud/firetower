@@ -29,29 +29,47 @@ appId: com.usefiretower.app
 - tapOn: "Sign in"
 - assertVisible: "Dashboard"
 
-# **The `+` is gone**, because the screen it opened is the screen you are
-# already on. Starting work is the composer at the foot of the home: what you
-# type there seeds the form, so the name arrives already filled in and this
-# flow no longer types it twice.
+# **The `+` is gone and so is the form.** The screen the `+` opened is the
+# screen you are already on, and every control on the composer now resolves
+# over it: the shelf carries where the work happens, the picks carry what does
+# it, and `start-send` creates the session rather than pushing `/new`. Nothing
+# on this screen links to that route any more — only Tasks does, which is the
+# one arrival carrying a key and a URL.
 - tapOn:
     id: "start-text"
 - inputText: "${WORKSPACE_NAME}"
-- tapOn:
-    id: "start-send"
-- assertVisible: "New workspace"
 - hideKeyboard
-- tapOn: "Choose a repository"
+
+# The repository is the one thing that does not default: checking one out
+# nobody named is work done in the wrong place. Multi-select, so the picker
+# stays up and the back gesture is what closes it.
+- tapOn:
+    id: "shelf-repo"
 - tapOn: "firetower-cursor-pw-repo"
 - pressKey: Back
-- tapOn: "Choose a machine"
+- tapOn:
+    id: "shelf-host"
 - tapOn: "localhost"
-- tapOn: "Choose an agent"
-- tapOn: "Cursor Agent"
-- tapOn: "Choose an account"
-- tapOn: "Cursor Playwright"
-- tapOn: "Start the workspace"
 
-- assertVisible: "Answer the agent"
+# Agent and account are inside the run pick, where the desk's `RunPicker`
+# puts them. Each row opens a picker over the sheet and choosing returns to
+# the sheet, so both are taken without reopening anything.
+- tapOn:
+    id: "start-pick-run"
+- tapOn: "Agent"
+- tapOn: "Cursor Agent"
+- tapOn: "Account"
+- tapOn: "Cursor Playwright"
+- pressKey: Back
+
+# **What was typed is sent.** The workspace is named after the first line and
+# the agent is already working on it when the conversation opens, rather than
+# coming up idle — so this asserts the composer itself and not a line about
+# what the conversation holds.
+- tapOn:
+    id: "start-send"
+- assertVisible:
+    id: "composer"
 - tapOn:
     id: "composer"
 - inputText: "Read README.md and reply with its exact one-line content. Do not edit any files."

@@ -16,6 +16,11 @@
  * before touching anything" above it, delete half of it, or press send
  * unchanged. The agent starts working when a person decides it should.
  *
+ * **The form, specifically.** The home's composer *does* send what you typed,
+ * which is not a contradiction and is not this handoff's business: a sentence
+ * you just wrote is not an issue somebody else filed. `app/new.tsx` carries
+ * the whole of that argument.
+ *
  * ## Why memory
  *
  * The desktop uses `sessionStorage` — a draft belongs to the tab that started

@@ -1,8 +1,16 @@
 /**
- * Starting work.
+ * Starting work **from a task**.
  *
- * A workspace is a checkout on a machine with agents in it, so the form has to
- * ask for all three — and the contract is `NewSession`, not what seems like
+ * This was how work started here. It is not any more: the home's composer
+ * creates the workspace itself, the way the desk's does, and nothing links to
+ * this screen except `(tabs)/tasks.tsx`. That is the one arrival the composer
+ * cannot take — a task brings a key and a URL, which are parameters of the
+ * workspace exactly as the repository and the machine are, and the shelf has
+ * nowhere to put them. So the form stays, for the one job it is still the
+ * right shape for.
+ *
+ * A workspace is a checkout on a machine with agents in it, so the form asks
+ * for all three — and the contract is `NewSession`, not what seems like
  * enough. A form asking for a name, one repository and a first message is a
  * plausible-looking form that cannot express half of what a workspace is:
  * several repositories cut at different bases, which machine, whose
@@ -13,12 +21,34 @@
  * are the web build's, because there is one control plane and it has one idea
  * of what starting work means.
  *
- * ## No prompt is sent, ever
+ * ## This form sends no prompt; the home composer does
  *
- * Including from a task. The agent starts and waits; what you want doing is
- * said in the conversation, where it can be answered. A task seeds the
- * composer instead, unsent. That rule is the whole reason this form has no
- * "what should it do" box, and it is not an omission.
+ * **The rule used to be "no prompt is sent, ever", and that is no longer
+ * true** — it is true of this screen and false of the home, and the difference
+ * is not an inconsistency. It is what each surface *is*.
+ *
+ * **A form sends nothing.** You arrive here from a task, which means the thing
+ * to be done was written by somebody else, for a tracker, and has not been
+ * read by the person about to act on it. Six fields have no good place for a
+ * sentence either — there is no "what should it do" box here and that is
+ * deliberate, not an omission. So the agent starts and waits, the task seeds
+ * the conversation's composer instead, unsent, and the first thing that
+ * happens is a person reading what they are about to ask for. Add *let's plan
+ * this before touching anything* above it, delete half of it, or send it
+ * unchanged. See `leaveDraft` below, and `workspace/draft.ts`.
+ *
+ * **A composer sends what you typed.** The home's box is not a form with a
+ * text field in it; it is a composer, and the thing you type into a composer
+ * is a message. A filled ↑ that does not send is the single most surprising
+ * control a phone can draw, and it was the only one in this app. The desk has
+ * always worked this way — `StartComposer.tsx` passes
+ * `prompt: prompt.trim() || undefined` on create — and a person moving between
+ * the two clients should not have to learn which ↑ means send.
+ *
+ * What it costs, said plainly: from the home the agent begins work on arrival,
+ * before anybody has re-read the sentence. That is the trade, it was taken
+ * deliberately, and the thing that makes it safe is that the sentence is one
+ * you *just wrote* — which is exactly what is not true of a task.
  *
  * ## What the phone changes
  *
@@ -304,7 +334,9 @@ export default function NewWorkspace() {
                     accountId: accountId || undefined,
                     taskKey: seed.taskKey,
                     taskUrl: seed.taskUrl,
-                    // Never a prompt. See the note at the top of this file.
+                    /* No prompt — from *this* screen. The home's composer
+                       sends what you typed; a form does not. The note at the
+                       top of this file has the whole of that argument. */
                   },
                 });
                 /* The task's text goes into the composer, unsent. The agent

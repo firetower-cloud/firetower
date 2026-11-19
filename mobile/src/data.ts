@@ -9,6 +9,7 @@ import { useListHosts } from "~/api/generated/hosts/hosts";
 import { useListAgents } from "~/api/generated/agents/agents";
 import { useListProviderRepos, useListProviders } from "~/api/generated/providers/providers";
 import { useListAccounts } from "~/api/generated/accounts/accounts";
+import { useListRoles } from "~/api/generated/roles/roles";
 import { useMe } from "~/api/generated/auth/auth";
 import { useGetUpdates } from "~/api/generated/updates/updates";
 import { showsDot } from "~/api/updates";
@@ -28,6 +29,7 @@ import type {
   Page,
   RemoteRepo,
   Repo,
+  Role,
   Session,
   Task,
   TaskScope,
@@ -182,6 +184,23 @@ export function useUpdatesDot(): boolean {
 /** Named agent connections — whose subscription a session runs on. */
 export function useAccounts() {
   const q = useListAccounts();
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/**
+ * Agent profiles — the personas a session can be started as.
+ *
+ * `/api/v1/roles` has been generated into this client since the contract grew
+ * them and nothing here read it: the phone could start a workspace and not say
+ * who it was starting it as. The home composer's profile pick is the first
+ * consumer.
+ *
+ * *Roles* on the wire and *profiles* in the interface, which is the naming the
+ * other two clients already use — `Role` is the contract's word and no screen
+ * says it.
+ */
+export function useProfiles(): Feed<Role[]> {
+  const q = useListRoles();
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
 }
 

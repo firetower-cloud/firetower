@@ -6,6 +6,13 @@
  * opens a panel to change it. The panel is the platform's shape: it comes up
  * from the bottom, it is dismissed by tapping away or by the back gesture, and
  * it never traps you.
+ *
+ * **The surface is full width; its rows are clamped to `COLUMN` and centred.**
+ * At 951 an unclamped list puts the label at one end and the tick at the other
+ * — `measure.ts`'s own example of what the maximums are for. The panel itself
+ * stays edge to edge, because it is a modal over the screen and not a popover
+ * belonging to a column. Nothing moves below 640. Same change, same reason, in
+ * `Sheet`.
  */
 import { useEffect } from "react";
 import { Modal, Pressable, ScrollView, Text, View } from "react-native";
@@ -20,6 +27,7 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Check, ChevronDown, Plus } from "lucide-react-native";
 import { Waiting } from "~/ui/Waiting";
+import { COLUMN_MAX } from "~/ui/measure";
 import { useTheme } from "~/design/theme";
 
 export type Choice = {
@@ -200,6 +208,12 @@ export function Picker({
           slide,
         ]}
       >
+        {/* Everything inside the clamp, the grabber included: a centred list
+            under an off-centre handle reads as a misalignment. `flexShrink`
+            because this now stands between `maxHeight` and the scroller. */}
+        <View
+          style={{ width: "100%", maxWidth: COLUMN_MAX, alignSelf: "center", flexShrink: 1, minHeight: 0 }}
+        >
         {/* A generous target: the bar is 9pt tall and the grab is 28. */}
         <View className="items-center pb-2 pt-3">
           <View className="h-1 w-9 rounded-full bg-mute" />
@@ -259,6 +273,7 @@ export function Picker({
             </Pressable>
           ) : null}
         </ScrollView>
+        </View>
       </Animated.View>
       </GestureDetector>
     </Modal>
