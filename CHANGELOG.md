@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.56.3](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.2...firetower-v0.56.3) (2026-11-19)
+
+
+### Bug Fixes
+
+* **updater:** a container that goes while being listed is not a failed upgrade ([81a48ef](https://github.com/firetower-cloud/firetower/commit/81a48ef3893ffa6a1eb4cf1099b605688223a329))
+* **updater:** a container that goes while being listed is not a failed upgrade ([5daae7a](https://github.com/firetower-cloud/firetower/commit/5daae7ab3c84e03e004ebf2410df38efbac1478e))
+
 ## [0.56.2](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.1...firetower-v0.56.2) (2026-11-19)
 
 
