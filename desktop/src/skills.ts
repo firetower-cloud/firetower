@@ -474,6 +474,17 @@ export const RISK_ORDER = ["shell", "tools", "hooks", "scripts"];
 /**
  * Roughly what each agent will carry in descriptions, in tokens.
  *
+ * **`mobile/src/skills.ts` holds a copy of this, and of `SMALLEST_BUDGET`,
+ * `sameSet` and `fromDefaults`. The two must not drift.** The phone's skills
+ * sheet draws the same meter against the same numbers, so a budget raised
+ * here and not there — or there and not here — leaves one client telling
+ * somebody a selection fits when the agent will drop all of it. Copied rather
+ * than shared because the rule written at the top of
+ * `mobile/src/api/workspaces.ts` is that the second client ports with a
+ * comment and the third one extracts the package; the phone is the second.
+ * `mobile/src/skills.test.ts` pins every value below, so changing one side
+ * alone fails a build.
+ *
  * **The number that matters is the cliff.** Past its budget Codex removes
  * *every* description rather than the last one, so a meter that only warned at
  * the end would warn too late. Codex states its own in

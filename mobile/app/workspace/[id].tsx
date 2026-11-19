@@ -620,6 +620,9 @@ function Conversation({ place, address }: { place: Workspace; address: string })
       ) : (
       <Composer
         sessionId={speaker.id}
+        // Which token budget the skills meter is drawn against. `acp` asks a
+        // different question about the same field, so neither derives the other.
+        agent={speaker.agent}
         acp={speaker.agent === "KimiCode" || speaker.agent === "CursorAgent"}
         // What the stop button can reach, which is narrower than what is
         // working. See `interruptible`.

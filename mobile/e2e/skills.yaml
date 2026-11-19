@@ -1,0 +1,106 @@
+# The skills chip and the sheet behind it.
+#
+# `mobile/`'s vitest stubs `react-native` and has no renderer, so everything
+# `skills.ts` answers is unit-tested and nothing about the *drawing* is. This
+# is the other half: that the chip is in the control row rather than the pill,
+# that the whole 56pt row toggles rather than only the 22pt box, and that the
+# sheet's three regions — list, defaults switch, pinned footer — are all on
+# screen at once at 390pt with a keyboard up.
+#
+# **It has to be `auth refactor`, not the waiting chip.** The mock serves
+# `/api/v1/sessions/s_1/skills` and nothing else, so a transcript opened from
+# the home's *Agents waiting for you* chip is a session the skills route 404s
+# for — where the chip is correctly *absent*, which is the one state this flow
+# would then be unable to tell from a regression. `w_1` is that workspace, and
+# the deep link is how to reach it without depending on where a row sorts.
+#
+#   node desktop/scripts/mock-server.mjs 4488
+#   curl "http://localhost:4488/__reset?scene=default"
+#   maestro test e2e/skills.yaml
+appId: com.usefiretower.app
+---
+- launchApp
+- runFlow:
+    when:
+      visible: "Not Now"
+    commands:
+      - tapOn: "Not Now"
+
+- assertVisible: "Dashboard"
+- openLink: com.usefiretower.app://workspace/w_1
+- assertVisible: "auth refactor"
+- assertVisible: "Answer the agent"
+
+# At rest there is no chip, and that is the rule rather than an accident: the
+# pill *is* the not-replying state, so nothing is said about skills while you
+# are only reading.
+- assertNotVisible:
+    id: "skills"
+- takeScreenshot: skills-pill-at-rest
+
+# The card. The chip is first in the scrolling control strip, before the
+# session's own pickers.
+- tapOn:
+    id: "composer"
+- assertVisible:
+    id: "skills"
+- takeScreenshot: skills-chip
+
+- tapOn:
+    id: "skills"
+- assertVisible: "Skills for this session"
+- assertVisible: "Your defaults here"
+- assertVisible: "All skills"
+# The meter and the commit, both pinned under the list.
+- assertVisible: ".*tokens"
+- takeScreenshot: skills-sheet
+
+# The whole row is the target, not the 22pt box — tapping the name has to
+# tick it. The button's label carries the count, which is how a draft that is
+# about to be committed is told from one that is not.
+- tapOn: "dataviz"
+- assertVisible: "Confirm 3 skills"
+- takeScreenshot: skills-drafted
+
+# **No search box here, and that is the rule rather than a gap.** It appears
+# above eight skills, which is where the list stops fitting one screenful at
+# 56pt rows, and the mock's library is seven. The same threshold is why *All
+# skills* is not capped here either. Both are unit-tested in `skills.test.ts`.
+- assertNotVisible:
+    id: "skills-search"
+
+# Which repositories the switch would write to. With more than one it opens a
+# second `Picker` rather than disclosing inline — a disclosure inside a
+# scrolling sheet inside a modal is three nested scroll regions.
+- tapOn:
+    id: "skills-targets"
+- assertVisible: "(?i)default in"
+- assertVisible: "acme/web"
+- takeScreenshot: skills-targets
+# `Picker`'s scrim carries no testID of its own, so this is a point above it.
+- tapOn:
+    point: "50%,8%"
+- assertVisible: "Skills for this session"
+
+# Past the budget the agent drops *every* skill, so the sheet refuses rather
+# than letting somebody build a selection that silently does nothing. Sage,
+# then `kind-data` past 80%, then brick — and no ember anywhere.
+- tapOn: "pr-screenshots"
+- takeScreenshot: skills-meter-warm
+- tapOn: "deploy-runbook"
+# The last row sits under the switch above the footer, so the list is moved
+# before it is tapped rather than aimed at through another control.
+- swipe:
+    start: "50%, 60%"
+    end: "50%, 45%"
+- tapOn: "incident-timeline"
+- assertVisible: "Over the limit.*"
+- assertVisible: "Can't confirm"
+- takeScreenshot: skills-over-budget
+
+# Three ways out, and this is the one people reach for without being told.
+- swipe:
+    start: "50%, 55%"
+    end: "50%, 95%"
+- assertNotVisible: "Skills for this session"
+- takeScreenshot: skills-dismissed
