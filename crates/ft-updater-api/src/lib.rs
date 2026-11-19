@@ -306,6 +306,23 @@ pub fn split_reference(reference: &str) -> (String, String) {
     }
 }
 
+/// The tag a compose file's `image:` line gives a repository.
+///
+/// **In this crate because both sides of the contract have to get the same
+/// answer.** The control plane reads it to decide which tag to ask the
+/// updater to fetch; the updater reads it to decide what Compose will demand
+/// of the machine once the file has been rewritten. Two copies of this that
+/// disagree are an image pulled under one name and asked for under another,
+/// which is #407 — an upgrade that could not complete on any installation.
+pub fn image_tag(compose: &str, repository: &str) -> Option<String> {
+    compose.lines().find_map(|line| {
+        let value = line.trim_start().strip_prefix("image:")?;
+        let reference = value.trim().split(" #").next().unwrap_or("").trim();
+        let (repo, tag) = split_reference(reference);
+        (repo == repository).then_some(tag)
+    })
+}
+
 /// A full version is a pin; `latest`, `edge`, `stable`, `beta` and
 /// `major.minor` all float.
 ///

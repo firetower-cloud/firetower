@@ -49,7 +49,7 @@ use super::{client, version, Updates};
 use crate::AppState;
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
-use ft_updater_api::{tags, FileWrite, ImageRole, Status as UpdaterStatus};
+use ft_updater_api::{image_tag, tags, FileWrite, ImageRole, Status as UpdaterStatus};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use utoipa::ToSchema;
@@ -1411,16 +1411,6 @@ pub async fn fetch_tag(state: &AppState, writes: &[FileWrite]) -> Option<String>
         None => on_disk.await?,
     };
     image_tag(&compose, repository)
-}
-
-/// The tag a compose file's `image:` line gives a repository.
-fn image_tag(compose: &str, repository: &str) -> Option<String> {
-    compose.lines().find_map(|line| {
-        let value = line.trim_start().strip_prefix("image:")?;
-        let reference = value.trim().split(" #").next().unwrap_or("").trim();
-        let (repo, tag) = ft_updater_api::split_reference(reference);
-        (repo == repository).then_some(tag)
-    })
 }
 
 #[cfg(test)]
