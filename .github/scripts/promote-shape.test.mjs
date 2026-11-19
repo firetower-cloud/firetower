@@ -55,6 +55,32 @@ function job(workflow, name) {
 }
 
 /**
+ * The input names one trigger of `desktop-release.yml` declares.
+ *
+ * Which trigger an input is declared on is the whole guard on general access,
+ * so it is worth reading precisely rather than grepping for a string: an input
+ * absent from `workflow_dispatch` cannot be set by a dispatch at all — the
+ * form has no field and the API answers `Unexpected inputs provided` — so the
+ * bypass cannot be attempted rather than having to be caught. Detecting it
+ * instead was the defect: `github.event_name` is the triggering event of the
+ * whole run in a reusable workflow, so the check refused promotion itself.
+ */
+function declaredInputs(trigger) {
+  const on = DESKTOP.slice(DESKTOP.indexOf("\non:\n"), DESKTOP.indexOf("\npermissions:"));
+  const opens = `  ${trigger}:\n`;
+  const from = on.indexOf(opens);
+  if (from === -1) throw new Error(`desktop-release.yml has no ${trigger} trigger — this test is reading a file that moved`);
+  const rest = on.slice(from + opens.length);
+  const to = rest.search(/\n {2}\S/);
+  const block = to === -1 ? rest : rest.slice(0, to);
+  const at = block.indexOf("    inputs:\n");
+  if (at === -1) throw new Error(`${trigger} declares no inputs at all`);
+  // Six spaces exactly: an input name. A `description:` or an `options:` is
+  // eight, and a comment does not start with a name.
+  return [...block.slice(at).matchAll(/^ {6}([a-z_]+):$/gm)].map((m) => m[1]);
+}
+
+/**
  * A `gh` standing in for the repository: releases are directories, assets
  * are files in them. Real enough that `read-channel-manifest.sh` and
  * `publish-channel-pin.sh` run unmodified against it, which is the point —
@@ -331,13 +357,24 @@ describe("the promotion workflow", () => {
     // general access reads — with no typed confirmation, no check that the
     // version is on beta, and no channel-manifest write. Reproduced: it
     // published 0.60.0 to both while the manifest said beta 0.59.0.
-    const dispatch = DESKTOP.slice(DESKTOP.indexOf("workflow_dispatch:"), DESKTOP.indexOf("\npermissions:"));
-    assert.match(dispatch, /options: \[beta\]/, "general access is not offered as a dispatch option");
+    //
+    // It is closed by the dispatch having no such field, not by the publish
+    // job noticing one: the inputs that can reach general access are declared
+    // on `workflow_call` only, so there is nothing for a dispatcher to fill
+    // in. The describe block below runs the guard for each caller, which is
+    // the half that says promotion still gets through — the detection this
+    // replaced did not.
+    assert.deepEqual(declaredInputs("workflow_dispatch"), ["tag"], "a dispatch can set nothing but the tag");
+    for (const name of ["channel", "publish_only"]) {
+      assert.ok(declaredInputs("workflow_call").includes(name), `${name} is still a workflow_call input`);
+    }
 
-    // The option list is a courtesy; the event check is the rule, because
-    // dispatch and call share one `inputs` context.
+    // And never again decided by which event started the run. In a reusable
+    // workflow `github.event_name` is the triggering event of the whole run,
+    // so a check for `workflow_call` refused every promotion and permitted
+    // nothing — the one route it existed to allow.
     const publish = job(DESKTOP, "publish");
-    assert.match(publish, /github\.event_name \}\}" != workflow_call/);
+    assert.doesNotMatch(code(publish), /github\.event_name/);
     // And signing is never the same run as general access.
     assert.match(publish, /PUBLISH_ONLY" != true/);
     // The guard runs before anything is downloaded or written.
@@ -439,6 +476,186 @@ describe("the promotion workflow", () => {
     // "nothing newer, carry on" is the bug this branch has caught three times.
     assert.match(images, /channel-manifest\.mjs preflight/);
     assert.doesNotMatch(images, /gh api .*releases/);
+  });
+});
+
+/**
+ * **The guard on general access, run rather than read.**
+ *
+ * Everything above asserts the forbidden half, and asserting only that is
+ * #388's pattern exactly — *a check that passes without exercising what it
+ * claims*. A guard that refuses **everything** satisfies every "it refuses"
+ * assertion, and refusing everything is precisely what the previous version
+ * did: it asked `github.event_name != workflow_call`, which in a reusable
+ * workflow is the triggering event of the whole run, so the check meant to
+ * stop a dispatch stopped the promotion that called it — the only route it
+ * was there to permit. A desktop promotion failed in production on it.
+ *
+ * So these run the real step body under the environment GitHub would build
+ * for each caller: the promotion's inputs read out of `promote.yml`'s own
+ * `with:`, and a dispatch's out of what the trigger declares. Nothing here
+ * hard-codes `CHANNEL` — the step's `env:` mapping is evaluated, so an edit
+ * to it moves these tests with it rather than past them.
+ */
+describe("the guard permits promotion, and a dispatch cannot ask for general access", { skip: process.platform === "win32" }, () => {
+  const GUARD = "general access comes from promotion and from nowhere else";
+
+  /** One step's own lines, from its `- name:` to wherever the next step starts. */
+  function stepOf(jobText, name) {
+    const opens = `      - name: ${name}\n`;
+    const at = jobText.indexOf(opens);
+    if (at === -1) throw new Error(`no step called "${name}" — this test is reading a file that moved`);
+    const rest = jobText.slice(at + 1);
+    const to = rest.indexOf("\n      - ");
+    return rest.slice(0, to === -1 ? undefined : to);
+  }
+
+  /** A step's `run: |` body, dedented so bash can be handed it. */
+  function runBody(stepText) {
+    const marker = "        run: |\n";
+    const at = stepText.indexOf(marker);
+    if (at === -1) throw new Error("that step has no `run: |` — this test is reading a file that moved");
+    return stepText
+      .slice(at + marker.length)
+      .split("\n")
+      .map((line) => line.replace(/^ {10}/, ""))
+      .join("\n");
+  }
+
+  /** A step's `env:` block, as the unevaluated expressions it is written as. */
+  function envOf(stepText) {
+    const marker = "        env:\n";
+    const at = stepText.indexOf(marker);
+    if (at === -1) throw new Error("that step has no `env:` — this test is reading a file that moved");
+    const rest = stepText.slice(at + marker.length);
+    const to = rest.search(/\n {8}\S/);
+    const block = to === -1 ? rest : rest.slice(0, to);
+    return Object.fromEntries([...block.matchAll(/^ {10}([A-Z_]+): (.+)$/gm)].map((m) => [m[1], m[2]]));
+  }
+
+  /**
+   * One `env:` expression, evaluated as GitHub would for a caller's inputs.
+   *
+   * Only the two shapes this step uses. An input the caller did not supply is
+   * empty — which is what an input *not declared on this trigger* is, the
+   * thing `version` and `ref` in this same workflow have always relied on.
+   * `||` then supplies the literal, which is how a dispatch becomes beta.
+   */
+  function evaluate(expression, inputs) {
+    const parsed = /^\$\{\{ inputs\.([a-z_]+)(?: \|\| '([^']*)')? \}\}$/.exec(expression);
+    if (!parsed) throw new Error(`this test evaluates \`inputs.x\` and \`inputs.x || 'literal'\`, not ${expression}`);
+    const supplied = inputs[parsed[1]];
+    const value = supplied === undefined ? "" : String(supplied);
+    return value === "" && parsed[2] !== undefined ? parsed[2] : value;
+  }
+
+  const guardStep = () => stepOf(job(DESKTOP, "publish"), GUARD);
+  const guardEnv = (inputs) =>
+    Object.fromEntries(Object.entries(envOf(guardStep())).map(([name, expression]) => [name, evaluate(expression, inputs)]));
+
+  /** The guard, run for real against one caller's inputs. */
+  function guard(inputs) {
+    const dir = mkdtempSync(join(tmpdir(), "guard-"));
+    const script = join(dir, "guard.sh");
+    writeFileSync(script, runBody(guardStep()));
+    const result = spawnSync("bash", [script], {
+      encoding: "utf8",
+      env: { ...process.env, ...guardEnv(inputs) },
+    });
+    return { status: result.status, output: `${result.stdout}${result.stderr}` };
+  }
+
+  /** What `promote.yml` passes down, read out of the call itself. */
+  function promotionInputs() {
+    const desktop = job(PROMOTE, "desktop");
+    const marker = "    with:\n";
+    const at = desktop.indexOf(marker);
+    if (at === -1) throw new Error("promote.yml's desktop job no longer has a `with:` — this test is reading a file that moved");
+    return Object.fromEntries([...desktop.slice(at + marker.length).matchAll(/^ {6}([a-z_]+): (.+)$/gm)].map((m) => [m[1], m[2]]));
+  }
+
+  /** The addresses the publish job picks for a channel, from its own `case`. */
+  function addresses(channel) {
+    const publish = job(DESKTOP, "publish");
+    const from = publish.indexOf('case "$CHANNEL" in\n');
+    const to = publish.indexOf("esac", from);
+    if (from === -1 || to === -1) {
+      throw new Error("the publish job no longer picks its addresses with a case — this test is reading a file that moved");
+    }
+    const choose = publish
+      .slice(from, to + "esac".length)
+      .split("\n")
+      .map((line) => line.replace(/^ {10}/, ""))
+      .join("\n");
+    const result = spawnSync("bash", ["-c", `set -euo pipefail\n${choose}\nprintf '%s %s\\n' "$ROLLING" "$ALIASES"`], {
+      encoding: "utf8",
+      env: { ...process.env, CHANNEL: channel },
+    });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    return result.stdout.trim().split(/\s+/).filter(Boolean);
+  }
+
+  it("lets through the promotion that promote.yml actually makes", () => {
+    // **The half that was broken, and the reason this block exists.** Driven
+    // by the real caller rather than by a hand-written pair of values, so a
+    // change to what promotion asks for is a change to what is proved here.
+    const asked = promotionInputs();
+    assert.equal(asked.channel, "general", "promote.yml asks for general access");
+    assert.equal(asked.publish_only, "true", "and asks for it without rebuilding");
+
+    const env = guardEnv(asked);
+    assert.deepEqual(env, { CHANNEL: "general", PUBLISH_ONLY: "true" });
+    const run = guard(asked);
+    assert.equal(run.status, 0, `the guard refused the promotion: ${run.output}`);
+  });
+
+  it("writes general access's two addresses for that promotion", () => {
+    // Permitted *and* arriving where promotion needs it: `desktop-stable` and
+    // the legacy alias, which is what every general-access copy reads.
+    assert.deepEqual(addresses(guardEnv(promotionInputs()).CHANNEL), ["desktop-stable", "desktop-latest"]);
+  });
+
+  it("lets through a dispatched rebuild, which can only ever be beta", () => {
+    // A dispatch supplies the tag and nothing else, because the trigger
+    // declares nothing else — asserted above. `inputs.channel || 'beta'` is
+    // what turns that into beta, and an empty `publish_only` is what makes it
+    // build rather than only rewrite a manifest.
+    const dispatched = { tag: "desktop-v0.31.0" };
+    assert.deepEqual(declaredInputs("workflow_dispatch"), Object.keys(dispatched));
+
+    const env = guardEnv(dispatched);
+    assert.equal(env.CHANNEL, "beta", "an unsettable channel reads as beta");
+    assert.equal(env.PUBLISH_ONLY, "", "and an unsettable publish_only builds everything");
+    assert.equal(guard(dispatched).status, 0, "a rebuild is not what this guard is for");
+    assert.deepEqual(addresses(env.CHANNEL), ["desktop-beta"], "and it writes beta's address alone");
+  });
+
+  it("refuses a channel it does not know, and says who may ask for general access", () => {
+    // The dispatch surface cannot produce this, which is the point of the
+    // surface. It is the assertion behind the assertion: a `workflow_call`
+    // added later, or an edit to the `env:` above, still cannot invent a
+    // channel the address `case` would then fall through.
+    const run = guard({ channel: "stable", publish_only: true });
+    assert.equal(run.status, 1);
+    assert.match(run.output, /channel must be beta or general/);
+    assert.match(run.output, /Nothing has been published/);
+  });
+
+  it("refuses general access on a run that would also build", () => {
+    // The negative control the two permitted cases need: a guard that refused
+    // nothing at all would pass both of them.
+    const run = guard({ channel: "general", publish_only: false });
+    assert.equal(run.status, 1);
+    assert.match(run.output, /channel=general requires publish_only=true/);
+    assert.match(run.output, /Nothing has been published/);
+  });
+
+  it("decides from its own inputs, with no workflow expression left in the body", () => {
+    // The defect, pinned where it happened. A `${{ }}` in this body is how
+    // `github.event_name` got in, and an expression meaning one thing on a
+    // dispatch and another inside a called workflow is both wrong and
+    // unrunnable — by this test, and by anybody reading it.
+    assert.doesNotMatch(runBody(guardStep()), /\$\{\{/);
   });
 });
 
@@ -701,6 +918,55 @@ describe("promotion refuses, and moves nothing when it does", { skip: process.pl
     assert.equal(commit(repo, "control_plane:general=0.57.0").status, 0);
     assert.equal(reader(repo).control_plane.general, "0.57.0");
     assert.equal(reader(repo).control_plane.general_promoted_at, promotedAt);
+  });
+
+  /**
+   * **The desktop's order, interrupted — and this one happened.**
+   *
+   * The desktop writes its channel-manifest pin *first* and its live addresses
+   * last, so an interruption in between leaves the document ahead of what
+   * copies are offered: stale rather than wrong, which is the direction that
+   * ordering was chosen to fail in. A promotion of 0.31.0 stopped exactly
+   * there, because the guard in `desktop-release.yml` refused the promotion
+   * that would have written the addresses.
+   *
+   * Which turns "a re-run finishes it" from a design note into a claim with a
+   * live case behind it, and the case is the awkward one: the pin is *already*
+   * where it is being asked to go. The gate has to pass a promotion that moves
+   * nothing, and the writer has to rewrite the pin without reading it as a
+   * backwards move or as nothing to do. The existing re-run test above is the
+   * control plane's, whose pin is written last, so it never reaches this.
+   */
+  it("finishes a desktop promotion interrupted between its pin and its addresses", () => {
+    const halfDone = {
+      schema_version: 1,
+      control_plane: { beta: "0.56.0", general: "0.56.0", general_promoted_at: "2026-11-19T05:12:00Z" },
+      desktop: { beta: "0.31.0", general: "0.31.0", general_promoted_at: "2026-11-19T06:37:17Z" },
+    };
+    const repo = repository({ manifest: halfDone, releases: ["desktop-v0.30.0", "desktop-v0.31.0"] });
+
+    const gate = check(repo, { package: "desktop", version: "0.31.0" });
+    assert.equal(gate.status, 0, `the re-run was refused at the gate: ${gate.output}`);
+    assert.match(gate.output, /already on 0\.31\.0 on general access/, "and says why it is running anyway");
+
+    const again = commit(repo, "desktop:general=0.31.0");
+    assert.equal(again.status, 0, again.output);
+    assert.equal(reader(repo).desktop.general, "0.31.0");
+    assert.equal(reader(repo).desktop.beta, "0.31.0", "beta is left where it is");
+    assert.equal(
+      reader(repo).desktop.general_promoted_at,
+      "2026-11-19T06:37:17Z",
+      "the channel did not move, so when it last moved has not changed either",
+    );
+    assert.deepEqual(reader(repo).control_plane, halfDone.control_plane, "and the other package is untouched");
+
+    // The addresses the re-run goes on to write are idempotent on their own
+    // account, which is what makes the *whole* order repeatable rather than
+    // just this half of it. That is exercised where that loop's own tests
+    // live — `desktop/scripts/release-shape.test.mjs` runs it against an
+    // address already holding the version being written and asserts it is
+    // re-uploaded rather than skipped — so it is referenced here and not
+    // re-asserted more weakly.
   });
 
   /**
