@@ -11096,9 +11096,20 @@ async fn the_window_never_widens_what_a_profile_could_already_reach() {
     .expect("inside the scope it already had");
     assert_eq!(team_now(&state, &owner, &narrow).await.auto_added, 1);
 
-    // And a profile that could never delegate does not start now. Its own
-    // seeded team is empty, and the refusal is the one a position with nothing
-    // under it gets.
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A profile that could never delegate does not start now**, however empty
+/// the team it leads.
+///
+/// The other half of "the window grants nothing new": `can_delegate` was the
+/// old path's gate, so an Operator with a seeded team of its own is told the
+/// work is its own — the refusal a position with nothing under it gets, which
+/// is also what it will be told after the window.
+#[tokio::test]
+async fn a_profile_that_could_never_delegate_does_not_start_now() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let _engineer = a_profile(&state, &owner, "Engineer").await;
     let operator = a_profile(&state, &owner, "Operator").await;
     let theirs = saved_team(
         &state,
@@ -11112,12 +11123,13 @@ async fn the_window_never_widens_what_a_profile_could_already_reach() {
     as_if_seeded(&state, &theirs, 0).await;
     let not_a_manager =
         lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &theirs).await;
+
     let refused = crate::delegate::handle(
         &state,
         &asks(
             &host,
             &not_a_manager,
-            "n3",
+            "p1",
             "spawn",
             serde_json::json!({ "role": "Engineer", "goal": "write it" }),
         ),
