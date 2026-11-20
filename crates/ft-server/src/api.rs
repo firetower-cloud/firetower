@@ -850,6 +850,30 @@ mod tests {
             );
         }
     }
+
+    /// **Two reads at the same depth, one a static segment and one a
+    /// parameter** — `/api/v1/agent-teams/limits` beside
+    /// `/api/v1/agent-teams/{id}`, both GET. Whether that is allowed is
+    /// axum's answer rather than ours, and the cost of being wrong is a
+    /// control plane that panics at boot.
+    ///
+    /// Building the router is the check: a conflict is raised where a route is
+    /// inserted. The test above cannot stand in for it — its assertion
+    /// short-circuits on `json.contains`, so `router()` is never called.
+    #[test]
+    fn the_router_takes_a_static_segment_beside_a_parameter() {
+        let (_service, doc) = router().split_for_parts();
+        for path in [
+            "/api/v1/agent-teams",
+            "/api/v1/agent-teams/limits",
+            "/api/v1/agent-teams/{id}",
+        ] {
+            assert!(
+                doc.paths.paths.contains_key(path),
+                "{path} is missing from the contract"
+            );
+        }
+    }
 }
 
 impl From<sqlx::Error> for ApiError {
