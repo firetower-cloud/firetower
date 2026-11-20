@@ -26,4 +26,5 @@ export const PausedReason = {
   five_runs: 'five_runs',
   overran: 'overran',
   owner_disabled: 'owner_disabled',
+  team_changed: 'team_changed',
 } as const;

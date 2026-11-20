@@ -58,8 +58,13 @@ the machine is Firetower's pick, and the engine is the lead's own.
 There is deliberately no third state. A field is a commitment or a question,
 never a default that something else may quietly outrank.
 
-The `@mention` half is not here: a person picks a profile from the composer, and
-a lead picks one by name.
+The `@mention` half is not here: a person picks a profile **or a team** from
+the composer, and a lead picks one by name. The two are different rows in that
+picker and that is the point — a profile named on its own cannot hand work to
+anybody, and a team starts its lead with its reports reachable, so a profile
+that leads a team is offered twice and the sentence under the list says which
+of the two you are about to get. A schedule names one the same way, and pins
+the whole tree at approval; see [agent teams](./agent-teams.md).
 
 ## How it travels
 

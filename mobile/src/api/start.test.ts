@@ -2,11 +2,12 @@
  * The five answers the composer gives instead of asking.
  *
  * The home's start flow is a component and there is no renderer here, so what
- * is pinned is the fold underneath it: the name, the branch, the profile
- * order, what a search for a profile means, and whether the agent is a control
- * or a statement. Those are the parts that can be silently wrong — a branch
- * cut mid-word, a profile list that files Managers last, a pinned engine the
- * picker lets you change anyway.
+ * is pinned is the fold underneath it: the name, the branch, what the picker
+ * offers and in what order, what a search for one means, what picking it would
+ * do, and whether the agent is a control or a statement. Those are the parts
+ * that can be silently wrong — a branch cut mid-word, a team that does not
+ * name its lead, a count off by one, a pinned engine the picker lets you
+ * change anyway.
  *
  * `branchFor` and `fewWords` are the desk's, retyped (there is no shared
  * module), so their cases are the desk's too: the two clients have to agree
@@ -14,20 +15,23 @@
  * sentence.
  */
 import { describe, expect, it } from "vitest";
-import type { Account, AgentView, Host, Repo, Role } from "~/api/generated/model";
+import type { Account, AgentTeam, AgentView, Host, Repo, Role } from "~/api/generated/model";
 import {
   branchFor,
+  consequence,
   fewWords,
   firstLine,
   nameFor,
-  orderProfiles,
   pinnedAgent,
-  profileMatches,
   repoLabel,
   resolveStart,
   runLabel,
   searchable,
   seededSettings,
+  startableIn,
+  startableMatches,
+  startables,
+  type StartAs,
 } from "~/api/start";
 
 const role = (over: Partial<Role> = {}): Role => ({
@@ -97,8 +101,9 @@ const repo = (over: Partial<Repo> = {}): Repo =>
 const world = (over: Parameters<typeof resolveStart>[0] extends infer T ? Partial<T> : never = {}) =>
   resolveStart({
     draft: "Fix the amber meter",
-    chose: { profileId: null, repoIds: [], hostId: "", agentKind: "", accountId: "" },
+    chose: { startAs: null, repoIds: [], hostId: "", agentKind: "", accountId: "" },
     profiles: [],
+    teams: [],
     repos: [repo()],
     hosts: [host()],
     agents: [agentView()],
@@ -151,22 +156,61 @@ describe("the branch", () => {
   });
 
   it("is absent with nothing checked out", () => {
-    expect(world({ chose: { profileId: null, repoIds: [], hostId: "", agentKind: "", accountId: "" } }).branch)
+    expect(world({ chose: { startAs: null, repoIds: [], hostId: "", agentKind: "", accountId: "" } }).branch)
       .toBeUndefined();
-    expect(world({ chose: { profileId: null, repoIds: ["p1"], hostId: "", agentKind: "", accountId: "" } }).branch)
+    expect(world({ chose: { startAs: null, repoIds: ["p1"], hostId: "", agentKind: "", accountId: "" } }).branch)
       .toBe("agent/fix-the-amber-meter");
   });
 });
 
-describe("the profile list", () => {
-  it("floats the ones that can delegate, then files alphabetically", () => {
-    const list = [
-      role({ id: "1", name: "Zoe the QA" }),
-      role({ id: "2", name: "Engineer" }),
-      role({ id: "3", name: "Board lead", canDelegate: true }),
-      role({ id: "4", name: "Another lead", canDelegate: true }),
-    ];
-    expect(orderProfiles(list).map((p) => p.name)).toEqual([
+/** A team, with only the fields the picker reads. */
+const team = (over: Partial<AgentTeam> = {}): AgentTeam =>
+  ({
+    id: "t1",
+    name: "Product",
+    lead: "r1",
+    leadName: "Engineer",
+    positions: 8,
+    path: "u/kev/product_12345678",
+    mayWrite: true,
+    mayShare: true,
+    schedules: 0,
+    createdAt: "2026-01-01T00:00:00Z",
+    updatedAt: "2026-01-01T00:00:00Z",
+    ...over,
+  }) as AgentTeam;
+
+describe("what the picker offers", () => {
+  it("bands teams above profiles, alphabetically within each", () => {
+    // Not a new preference. This list used to float the delegating profiles
+    // to the top; reach has moved onto the team, so the position moves with
+    // it rather than being a second rule.
+    const all = startables(
+      [team({ id: "t2", name: "Zebra" }), team({ id: "t1", name: "Product" })],
+      [role({ id: "1", name: "Zoe the QA" }), role({ id: "2", name: "Engineer" })],
+    );
+    expect(all.map((s) => `${s.kind}:${s.name}`)).toEqual([
+      "team:Product",
+      "team:Zebra",
+      "profile:Engineer",
+      "profile:Zoe the QA",
+    ]);
+  });
+
+  it("keeps `orderProfiles`' sort among profiles while the old reach is live", () => {
+    // Teams took the top; they did not take this. A Manager started bare
+    // still hands work out during the window, which is the same fact that
+    // earns it a chip and its own sentence. Dies with #497.
+    const all = startables(
+      [],
+      [
+        role({ id: "1", name: "Zoe the QA" }),
+        role({ id: "2", name: "Engineer" }),
+        role({ id: "3", name: "Board lead", canDelegate: true }),
+        role({ id: "4", name: "Another lead", canDelegate: true }),
+      ],
+    );
+    expect(all.map((s) => s.name)).toEqual([
       "Another lead",
       "Board lead",
       "Engineer",
@@ -174,34 +218,182 @@ describe("the profile list", () => {
     ]);
   });
 
+  it("names a team's lead and its size", () => {
+    const [product] = startables([team()], [role()]);
+    expect(product.does).toBe("Led by Engineer");
+    expect(product.agents).toBe(8);
+    expect(product.lead).toBe("Engineer");
+  });
+
+  it("shows a profile that leads a team twice, once bare and once as the team", () => {
+    const all = startables([team()], [role()]);
+    expect(all.map((s) => s.kind)).toEqual(["team", "profile"]);
+    expect(all.every((s) => s.lead === "Engineer")).toBe(true);
+  });
+
+  it("offers no position, ever", () => {
+    // A position only means something inside its tree. This is built from the
+    // teams and the profiles and from nothing else.
+    const all = startables([team()], [role()]);
+    expect(all).toHaveLength(2);
+  });
+
+  it("will not start a team with no lead, or one whose lead you cannot use", () => {
+    const [leadless] = startables([team({ lead: undefined, leadName: undefined })], []);
+    expect(leadless.blocked).toBe("It has no lead, so there is nobody to start");
+    const [hidden] = startables([team({ leadName: undefined })], []);
+    expect(hidden.blocked).toBe("Its lead isn't a profile you can use");
+  });
+
   it("does not disturb what it was handed", () => {
     const list = [role({ id: "1", name: "B" }), role({ id: "2", name: "A" })];
-    orderProfiles(list);
+    startables([], list);
     expect(list.map((p) => p.name)).toEqual(["B", "A"]);
   });
 
-  it("offers a search field only above three", () => {
+  it("offers a search field only above three, counting the teams", () => {
     expect(searchable(3)).toBe(false);
     expect(searchable(4)).toBe(true);
+    expect(searchable(startables([team()], [role(), role({ id: "r2" })]).length)).toBe(false);
   });
 });
 
-describe("searching for a profile", () => {
-  const p = role({ name: "Security_advisor", does: "Reads a diff for anything that leaks" });
+describe("searching the picker", () => {
+  const [p] = startables(
+    [],
+    [role({ name: "Security_advisor", does: "Reads a diff for anything that leaks" })],
+  );
 
   it("matches the name or what it does", () => {
-    expect(profileMatches(p, "advisor")).toBe(true);
-    expect(profileMatches(p, "leaks")).toBe(true);
-    expect(profileMatches(p, "designer")).toBe(false);
+    expect(startableMatches(p, "advisor")).toBe(true);
+    expect(startableMatches(p, "leaks")).toBe(true);
+    expect(startableMatches(p, "designer")).toBe(false);
   });
 
   it("folds case, and reads an underscore as a space", () => {
-    expect(profileMatches(p, "SECURITY ADVISOR")).toBe(true);
-    expect(profileMatches(p, "security_advisor")).toBe(true);
+    expect(startableMatches(p, "SECURITY ADVISOR")).toBe(true);
+    expect(startableMatches(p, "security_advisor")).toBe(true);
   });
 
   it("leaves everything when nothing is typed", () => {
-    expect(profileMatches(p, "   ")).toBe(true);
+    expect(startableMatches(p, "   ")).toBe(true);
+  });
+
+  it("finds a team by its lead, which is what anybody remembers about one", () => {
+    const [product] = startables([team()], []);
+    expect(startableMatches(product, "engineer")).toBe(true);
+    expect(startableMatches(product, "prod")).toBe(true);
+  });
+});
+
+/**
+ * **The desk's sentence, to the character.** One agent or eight is the
+ * largest difference in this sheet and it is harder on a phone, not easier,
+ * so nothing here is shortened to save height.
+ */
+describe("what picking it would do", () => {
+  const say = (teams: AgentTeam[], profiles: Role[], start: StartAs) =>
+    consequence(startableIn(startables(teams, profiles), start));
+
+  it("states a team's lead, and what it can reach", () => {
+    expect(say([team()], [role()], { kind: "team", id: "t1" })).toBe(
+      "Starts Engineer, Product's lead. It can hand work to 7 other agents in the team.",
+    );
+  });
+
+  it("against a profile on its own, which cannot hand work to anybody", () => {
+    expect(say([team()], [role()], { kind: "profile", id: "r1" })).toBe(
+      "Starts Engineer on its own. It cannot hand work to anybody.",
+    );
+  });
+
+  it("counts one other as one agent, not one agents", () => {
+    expect(say([team({ positions: 2 })], [role()], { kind: "team", id: "t1" })).toBe(
+      "Starts Engineer, Product's lead. It can hand work to 1 other agent in the team.",
+    );
+  });
+
+  it("says a team of one cannot hand work on either", () => {
+    expect(say([team({ positions: 1 })], [role()], { kind: "team", id: "t1" })).toBe(
+      "Starts Engineer, Product's lead. Nothing reports to it yet, so it cannot hand work to anybody.",
+    );
+  });
+
+  it("does not claim a Manager cannot delegate while its old reach is live", () => {
+    expect(say([], [role({ id: "r7", name: "Orchestrator", canDelegate: true })], {
+      kind: "profile",
+      id: "r7",
+    })).toBe(
+      "Starts Orchestrator on its own. Its own profile still lets it hand work out, which an agent team replaces.",
+    );
+  });
+
+  it("says what is wrong with a row there is nothing to start", () => {
+    expect(
+      say([team({ lead: undefined, leadName: undefined })], [], { kind: "team", id: "t1" }),
+    ).toBe("Product can't be started. It has no lead, so there is nobody to start.");
+  });
+
+  it("says nothing about a plain workspace, which the row already states", () => {
+    expect(say([team()], [role()], null)).toBeNull();
+  });
+});
+
+/**
+ * **A team names its lead's profile too**, because the lead *is* a profile —
+ * so the engine, the settings and the account resolve from one place whichever
+ * way it was chosen. `create_session_as` makes the same resolution on the
+ * server and refuses a team beside a different profile.
+ */
+describe("starting as a team", () => {
+  it("runs the lead's profile, and carries its pinned engine", () => {
+    const lead = role({ id: "r1", name: "Engineer", agent: "Codex" });
+    const r = world({
+      profiles: [lead],
+      teams: [team()],
+      chose: { startAs: { kind: "team", id: "t1" }, repoIds: [], hostId: "", agentKind: "", accountId: "" },
+      agents: [agentView(), agentView({ kind: "Codex", label: "Codex", hosts: [] })],
+    });
+    expect(r.profile?.id).toBe("r1");
+    expect(r.team?.name).toBe("Product");
+    expect(r.locked).toBe(true);
+    expect(r.startable?.kind).toBe("team");
+  });
+
+  it("and a profile named bare picks up no team at all", () => {
+    // The distinction the picker carries: a profile that happens to lead a
+    // team does not pick that team up by being named on its own.
+    const r = world({
+      profiles: [role({ id: "r1" })],
+      teams: [team()],
+      chose: { startAs: { kind: "profile", id: "r1" }, repoIds: [], hostId: "", agentKind: "", accountId: "" },
+    });
+    expect(r.profile?.id).toBe("r1");
+    expect(r.team).toBeNull();
+  });
+
+  it("falls back from a team that can no longer be started, rather than sticking", () => {
+    // The lead's profile was deleted while the composer sat open holding the
+    // team. Sending it would be a refusal from the server about something
+    // this screen could already see.
+    const r = world({
+      profiles: [role({ id: "r1" })],
+      teams: [team({ lead: undefined, leadName: undefined })],
+      chose: { startAs: { kind: "team", id: "t1" }, repoIds: [], hostId: "", agentKind: "", accountId: "" },
+    });
+    expect(r.startable).toBeUndefined();
+    expect(r.profile).toBeNull();
+    expect(r.team).toBeNull();
+  });
+
+  it("resolves to nothing when the team's lead is a profile it cannot see", () => {
+    const r = world({
+      profiles: [],
+      teams: [team()],
+      chose: { startAs: { kind: "team", id: "t1" }, repoIds: [], hostId: "", agentKind: "", accountId: "" },
+    });
+    expect(r.profile).toBeNull();
+    expect(r.team?.id).toBe("t1");
   });
 });
 
@@ -209,7 +401,7 @@ describe("what the profile pins", () => {
   it("locks the agent pick when it names an engine", () => {
     const pinning = role({ id: "r9", agent: "Codex" });
     expect(pinnedAgent(pinning)).toBe("Codex");
-    const r = world({ profiles: [pinning], chose: { profileId: "r9", repoIds: [], hostId: "", agentKind: "", accountId: "" }, agents: [agentView(), agentView({ kind: "Codex", label: "Codex", hosts: [] })] });
+    const r = world({ profiles: [pinning], chose: { startAs: { kind: "profile", id: "r9" }, repoIds: [], hostId: "", agentKind: "", accountId: "" }, agents: [agentView(), agentView({ kind: "Codex", label: "Codex", hosts: [] })] });
     expect(r.locked).toBe(true);
     expect(r.agent?.kind).toBe("Codex");
   });
@@ -217,7 +409,7 @@ describe("what the profile pins", () => {
   it("leaves it a control when it names none", () => {
     const plain = role({ id: "r8" });
     expect(pinnedAgent(plain)).toBeNull();
-    expect(world({ profiles: [plain], chose: { profileId: "r8", repoIds: [], hostId: "", agentKind: "", accountId: "" } }).locked).toBe(false);
+    expect(world({ profiles: [plain], chose: { startAs: { kind: "profile", id: "r8" }, repoIds: [], hostId: "", agentKind: "", accountId: "" } }).locked).toBe(false);
   });
 
   it("is not locked by there being no profile at all", () => {
@@ -236,7 +428,7 @@ describe("what the profile pins", () => {
     const pinning = role({ id: "r9", agent: "Codex" });
     const r = world({
       profiles: [pinning],
-      chose: { profileId: "r9", repoIds: [], hostId: "", agentKind: "", accountId: "" },
+      chose: { startAs: { kind: "profile", id: "r9" }, repoIds: [], hostId: "", agentKind: "", accountId: "" },
       agents: [agentView(), agentView({ kind: "Codex", label: "Codex", hosts: [] })],
     });
     expect(r.agent?.kind).toBe("Codex");
@@ -265,7 +457,7 @@ describe("resolving what was never asked for", () => {
     const pinning = role({ id: "r9", agent: "Codex" });
     const r = world({
       profiles: [pinning],
-      chose: { profileId: "r9", repoIds: [], hostId: "", agentKind: "", accountId: "" },
+      chose: { startAs: { kind: "profile", id: "r9" }, repoIds: [], hostId: "", agentKind: "", accountId: "" },
       hosts: [host({ id: "h1", name: "claude-box" }), host({ id: "h2", name: "codex-box" })],
       agents: [
         agentView(),
@@ -280,7 +472,7 @@ describe("resolving what was never asked for", () => {
   it("still takes a machine chosen by hand, whatever is on it", () => {
     const r = world({
       hosts: [host({ id: "localhost", name: "localhost" }), host({ id: "h1" })],
-      chose: { profileId: null, repoIds: [], hostId: "localhost", agentKind: "", accountId: "" },
+      chose: { startAs: null, repoIds: [], hostId: "localhost", agentKind: "", accountId: "" },
     });
     expect(r.host?.id).toBe("localhost");
     expect(r.why?.say).toBe("Claude Code is not installed on localhost.");
@@ -290,7 +482,7 @@ describe("resolving what was never asked for", () => {
     const r = world({
       hosts: [host({ id: "h1", state: "Unreachable" }), host({ id: "h2", name: "spare" })],
       agents: [agentView({ hosts: [{ hostId: "h2", hostName: "spare", installed: true, behind: false, coveredByToken: true, mayUpdate: true }] as never })],
-      chose: { profileId: null, repoIds: [], hostId: "h1", agentKind: "", accountId: "" },
+      chose: { startAs: null, repoIds: [], hostId: "h1", agentKind: "", accountId: "" },
     });
     expect(r.host?.id).toBe("h2");
     expect(r.ready).toBe(true);

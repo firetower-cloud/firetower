@@ -114,6 +114,22 @@ pub struct AgentTeam {
     pub lead_name: Option<String>,
     /// How many positions it holds, the lead included.
     pub positions: i64,
+    /// **How many approved schedules saving this team would stop.**
+    ///
+    /// A schedule that names a team pins its whole tree at approval, and
+    /// changing the team clears that approval — so editing a team four
+    /// schedules pin pauses four schedules. The editor has to be able to say
+    /// that **before** Save rather than after, which is the whole reason this
+    /// is on the row a person reads rather than behind a second request.
+    ///
+    /// Only the approved ones, because only those are running and only those
+    /// are stopped. A draft that pins the team is re-pinned and has nothing
+    /// to lose.
+    ///
+    /// Counted across every owner, for the reason
+    /// `Db::schedules_pinning_team` gives: somebody else's schedule is no
+    /// less stopped for being somebody else's.
+    pub schedules: i64,
     /// Whether the person asking may edit or delete it.
     pub may_write: bool,
     /// Whether they may move it into a directory, or out of one.
@@ -398,7 +414,9 @@ fn slug_of(name: &str, id: &str) -> String {
 
 const TEAM_FIELDS: &str = "t.id, t.path::text AS path, t.name, t.created_at, t.updated_at, \
      lead.profile_id AS lead_profile, lr.name AS lead_name, \
-     (SELECT count(*) FROM agent_team_positions c WHERE c.team_id = t.id) AS positions";
+     (SELECT count(*) FROM agent_team_positions c WHERE c.team_id = t.id) AS positions, \
+     (SELECT count(*) FROM schedules s \
+       WHERE s.pins -> 'team' ->> 'id' = t.id AND s.approved_at IS NOT NULL) AS schedules";
 
 /// The joins `TEAM_FIELDS` reads from: the team's lead position, and the lead's
 /// profile **only when this person can see it**.
@@ -421,6 +439,7 @@ fn read_team(row: &sqlx::postgres::PgRow) -> AgentTeam {
         lead: row.get("lead_profile"),
         lead_name: row.get("lead_name"),
         positions: row.get("positions"),
+        schedules: row.get("schedules"),
         may_write: row.get("may_write"),
         may_share: row.get("may_share"),
         created_at: row.get("created_at"),

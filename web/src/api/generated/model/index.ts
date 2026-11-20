@@ -281,6 +281,7 @@ export * from './scheduleRun';
 export * from './scheduleRunId';
 export * from './scheduleRunsParams';
 export * from './scheduleRunState';
+export * from './scheduleTeam';
 export * from './scopeKind';
 export * from './sent';
 export * from './serverFrame';
