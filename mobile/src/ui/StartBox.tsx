@@ -100,6 +100,16 @@ export type Pick_ = {
   glyph: Agent | "person" | "none";
   label: string;
   /**
+   * What the label is *in*, dimmed after it — the agent team behind a lead.
+   *
+   * **You never talk to a team, you talk to its lead**, so the label is the
+   * lead's name and this is what stands behind it. A second `Text` in `mute`
+   * rather than a middle dot joined onto the label, which `STYLE.md` rules
+   * out for exactly this; both truncate, and the lead's name is the one that
+   * gets the room because it is who answers.
+   */
+  sub?: string;
+  /**
    * Chosen rather than resolved. `bone` against `dim` — the desk's `data-set`
    * said in weight, which is the only way a phone has to say it.
    */
@@ -335,11 +345,20 @@ export function StartBox({
                   )}
                   <Text
                     numberOfLines={1}
-                    className={`font-sans ${pick.set ? "text-bone" : "text-dim"}`}
+                    className={`shrink font-sans ${pick.set ? "text-bone" : "text-dim"}`}
                     style={{ fontSize: size.ui }}
                   >
                     {pick.label}
                   </Text>
+                  {pick.sub ? (
+                    <Text
+                      numberOfLines={1}
+                      className="shrink font-sans text-mute"
+                      style={{ fontSize: size.ui }}
+                    >
+                      in {pick.sub}
+                    </Text>
+                  ) : null}
                   {pick.locked ? null : <ChevronDown color={color.mute} size={13} />}
                 </Pressable>
               ))}

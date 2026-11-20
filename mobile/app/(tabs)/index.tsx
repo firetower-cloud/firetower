@@ -51,8 +51,14 @@ import { useListSchedules } from "~/api/generated/schedules/schedules";
 import type { Agent, Control, ControlKind, Session } from "~/api/generated/model";
 import { banded, childrenElsewhere, fleetLine, group, lead, useSettled, useVanished, type Workspace } from "~/api/workspaces";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
-import { repoLabel, resolveStart, runLabel, seededSettings } from "~/api/start";
-import { useAccounts, useAgents, useHosts, useProfiles, useRepos, useSessions, why } from "~/data";
+import {
+  repoLabel,
+  resolveStart,
+  runLabel,
+  seededSettings,
+  type StartAs,
+} from "~/api/start";
+import { useAccounts, useAgents, useAgentTeams, useHosts, useProfiles, useRepos, useSessions, why } from "~/data";
 import { takeConnected } from "~/workspace/connected";
 import { useServer } from "~/native/current";
 import { ServerChip } from "~/ui/ServerChip";
@@ -156,6 +162,7 @@ export default function Home() {
   const { data: hosts, loading: findingHosts } = useHosts();
   const { data: accounts, loading: findingAccounts } = useAccounts();
   const { data: profiles } = useProfiles();
+  const { data: teams } = useAgentTeams();
   const { data: artifacts = [] } = useListArtifacts();
   const schedules = useListSchedules();
   const create = useCreateSession();
@@ -273,7 +280,10 @@ export default function Home() {
   const [hostId, setHostId] = useState("");
   const [agentKind, setAgentKind] = useState("");
   const [accountId, setAccountId] = useState("");
-  const [profileId, setProfileId] = useState<string | null>(null);
+  /* **One selection, not two.** A profile and a team are mutually exclusive:
+     a team names its lead's profile on the server, and a team beside a
+     different profile is refused there. */
+  const [startAs, setStartAs] = useState<StartAs>(null);
   const [chosen, setChosen] = useState<Partial<Record<ControlKind, string>>>({});
 
   /* **The repository does not default, and it is the one thing here that
@@ -291,7 +301,7 @@ export default function Home() {
     if (defaulted.current || profiles.length === 0) return;
     defaulted.current = true;
     const def = profiles.find((p) => p.isDefault);
-    if (def) setProfileId(def.id);
+    if (def) setStartAs({ kind: "profile", id: def.id });
   }, [profiles]);
 
   /* Whatever was just connected on `/repos`, chosen here — the repository is
@@ -316,8 +326,9 @@ export default function Home() {
 
   const start = resolveStart({
     draft,
-    chose: { profileId, repoIds, hostId, agentKind, accountId },
+    chose: { startAs, repoIds, hostId, agentKind, accountId },
     profiles,
+    teams,
     repos,
     hosts,
     agents,
@@ -336,9 +347,9 @@ export default function Home() {
      cannot offer. Seeded from what the profile pins, when it pins for this
      engine — and still changeable before you send. */
   useEffect(() => {
-    setChosen(seededSettings(profiles.find((p) => p.id === profileId) ?? null, (kind as Agent) ?? null));
+    setChosen(seededSettings(start.profile, (kind as Agent) ?? null));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [kind, profileId]);
+  }, [kind, start.profile?.id]);
   const valueOf = useCallback(
     (c: Control) => chosen[c.kind] ?? c.current ?? undefined,
     [chosen],
@@ -382,7 +393,13 @@ export default function Home() {
           prompt: draft.trim() || undefined,
           repos: start.repos.map((r) => ({ repoId: r.id })),
           agent: start.agent.kind,
-          profile: profileId ?? undefined,
+          /* **One of the two, never both.** A team names its lead's profile
+             on the server; sending the profile as well would be the
+             contradiction `create_session_as` refuses, and sending only the
+             profile would start it bare with no reach — which is exactly the
+             difference the sheet just made visible. */
+          profile: startAs?.kind === "profile" ? startAs.id : undefined,
+          team: startAs?.kind === "team" ? startAs.id : undefined,
           accountId: start.account?.id,
           branch: start.branch,
           hostId: start.host?.id,
@@ -642,6 +659,9 @@ export default function Home() {
       id: "profile",
       glyph: (start.profile?.agent as Agent | undefined) ?? "person",
       label: start.profile?.name ?? "Just an agent",
+      /* The team behind the lead. The lead's name leads, because that is who
+         answers; the team is what stands behind it. */
+      sub: start.team?.name,
       set: !!start.profile,
       onPress: () => setSheet("profile"),
     },
@@ -722,9 +742,10 @@ export default function Home() {
       {sheet === "profile" ? (
         <ProfileSheet
           profiles={profiles}
-          profileId={profileId}
-          onPick={(id) => {
-            setProfileId(id);
+          teams={teams}
+          startAs={startAs}
+          onPick={(next) => {
+            setStartAs(next);
             setSheet(null);
           }}
           onClose={() => setSheet(null)}
