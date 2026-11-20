@@ -167,50 +167,45 @@ pub(super) async fn create_role(
     check_account(&state, me.id.as_str(), &new).await?;
     check_skills(&state, me.id.as_str(), &new).await?;
 
+    // Where it is going, before anything is written. Only where this person
+    // may write; a directory they cannot reach is "not found" rather than a
+    // different error.
+    //
+    // **Resolved first, and the row is born there** — it used to be created in
+    // this person's own space and moved afterwards. A name has to be free
+    // where a profile is *filed*, so the space a create passes through is the
+    // wrong thing to judge it against, and a move refused for a name left the
+    // profile behind in that space. `Roles::create_filed` has the rest.
+    let filed = match new.directory.as_deref().filter(|d| !d.is_empty()) {
+        None => None,
+        Some(directory) => {
+            let target = state
+                .access
+                .directory(directory)
+                .await?
+                .ok_or_else(|| ApiError::not_found("directory"))?;
+            let may = matches!(
+                state.access.level_on(me.id.as_str(), directory).await?,
+                Some(level) if level >= Level::Writer
+            );
+            if !may {
+                return Err(ApiError::not_found("directory"));
+            }
+            Some(target.slug)
+        }
+    };
+
     let id = state
         .roles
-        .create(me.org_id.as_str(), me.id.as_str(), &me.slug, &new)
+        .create_filed(
+            me.org_id.as_str(),
+            me.id.as_str(),
+            &me.slug,
+            filed.as_deref(),
+            &new,
+        )
         .await
         .map_err(wrote)?;
-
-    // Hand it to a directory, when one was named — the same operation the
-    // sharing sheet performs later, at the one moment nobody has to be told it
-    // changed hands. Only where this person may write; a directory they cannot
-    // reach is "not found" rather than a different error.
-    if let Some(directory) = new.directory.as_deref().filter(|d| !d.is_empty()) {
-        let target = state
-            .access
-            .directory(directory)
-            .await?
-            .ok_or_else(|| ApiError::not_found("directory"))?;
-        let may = matches!(
-            state.access.level_on(me.id.as_str(), directory).await?,
-            Some(level) if level >= Level::Writer
-        );
-        if !may {
-            return Err(ApiError::not_found("directory"));
-        }
-        let from = state
-            .access
-            .path_of(crate::access::FiledKind::Role, id.as_str())
-            .await?
-            .ok_or_else(|| ApiError::not_found("role"))?;
-        let whose = principal
-            .user
-            .as_ref()
-            .map(|u| u.username.clone())
-            .unwrap_or_else(|| me.id.as_str().to_string());
-        state
-            .access
-            .transfer(
-                &state.vault,
-                crate::access::FiledKind::Role,
-                id.as_str(),
-                &from.moved_to(ft_core::path::DIRECTORY, &target.slug),
-                &whose,
-            )
-            .await?;
-    }
 
     let made = state
         .roles
@@ -828,6 +823,15 @@ pub(super) async fn apply_role_import(
                 {
                     return Err(key_clash(Some(&held), write, &write.filed));
                 }
+                // And the name, which is one profile within one directory
+                // too (`roles_name_in_directory`). `parent` is the first two
+                // labels of where this is going, so it is the scope both
+                // questions are asked in — a profile's path is three labels.
+                if let Some(held) =
+                    crate::roles::named_already(&mut *tx, &parent, &write.asked.name, None).await?
+                {
+                    return Err(name_clash(&held, write, &write.filed));
+                }
                 crate::roles::create_in(
                     &mut *tx,
                     me.org_id.as_str(),
@@ -885,6 +889,19 @@ pub(super) async fn apply_role_import(
                     {
                         return Err(key_clash(Some(&held), write, &filed_in(&was.path, &here)));
                     }
+                }
+                // Unconditionally, unlike the key: a replace writes the name
+                // in the file whether or not a key is being adopted, so a
+                // bundle that renames `QA` to a name a sibling already holds
+                // is refused even when nothing else about it changed.
+                let there = crate::roles::filed_in_directory(&ft_core::ResourcePath::from_stored(
+                    &was.path,
+                ));
+                if let Some(held) =
+                    crate::roles::named_already(&mut *tx, &there, &write.asked.name, Some(profile))
+                        .await?
+                {
+                    return Err(name_clash(&held, write, &filed_in(&was.path, &here)));
                 }
                 crate::roles::replace_in(
                     &mut *tx,
@@ -988,6 +1005,29 @@ fn key_clash(
              nothing was written. Rename the folder `{}` is in, or file one of the two somewhere \
              else.",
             write.key, write.path
+        ),
+    )
+}
+
+/// What a name already filed there says, when a drop would write it.
+///
+/// The same shape as [`key_clash`] and a different question: a key is the
+/// folder the file sits in, a name is the line inside it, so the two ways out
+/// are different ones. `held_by` is always known here — a name is checked
+/// before every write in this handler, and the index behind it is the
+/// backstop that `crate::roles` turns into a sentence of its own.
+fn name_clash(held_by: &str, write: &import::Write, filed: &Option<import::Dir>) -> ApiError {
+    let somewhere = match filed {
+        Some(directory) => format!("`{}`", directory.name),
+        None => "your own space".to_string(),
+    };
+    ApiError::new(
+        ErrorCode::InvalidRequest,
+        format!(
+            "{somewhere} already holds a profile called `{held_by}`, and two profiles filed \
+             together cannot share a name, so nothing was written. Change the `name:` in `{}`, \
+             or file one of the two somewhere else.",
+            write.path
         ),
     )
 }
@@ -2461,6 +2501,108 @@ mod tests {
         assert!(said(&no).contains("nothing was written"), "{}", said(&no));
         assert_eq!(before, every_row(&state).await);
         assert_eq!(row(&state, &ana, &id).await.does, was.does);
+    }
+
+    /// **A name is free or taken where a profile is *filed*, and this
+    /// endpoint used to decide it somewhere else.**
+    ///
+    /// A create naming a directory inserted into the person's own space and
+    /// moved the row afterwards, so the name was judged against a space it
+    /// only passed through: an `Engineer` of your own refused an `Engineer`
+    /// that was never going to be filed beside it. Both halves are here —
+    /// the one that has to be accepted, and the one that has to be refused
+    /// with nothing stranded behind it.
+    #[tokio::test]
+    async fn a_profile_filed_into_a_directory_is_judged_against_that_directory() {
+        let (state, admin) = fixture().await;
+        let me = whoever(&admin).unwrap();
+        let shelf = state
+            .access
+            .create_directory(&me.org_id, "Platform", &me.id, &[])
+            .await
+            .unwrap();
+        let filed_into_platform = |name: &str| {
+            let mut new = asked_for(name);
+            new.directory = Some(shelf.id.as_str().to_string());
+            new
+        };
+
+        // One of their own, and one of the same name on the shelf.
+        made(&state, &admin, &asked_for("Engineer")).await;
+        let there = create_role(
+            State(state.clone()),
+            Extension(admin.clone()),
+            Json(filed_into_platform("Engineer")),
+        )
+        .await
+        .expect("two directories are two places");
+        assert_eq!(there.0, StatusCode::CREATED);
+        assert_eq!(
+            there.1.path,
+            format!(
+                "d/{}/{}",
+                shelf.slug,
+                "engineer_".to_string() + &there.1.id[there.1.id.len() - 8..]
+            )
+        );
+
+        // A second one there is refused — and nothing is left in the person's
+        // own space, which is where the row used to be stranded when the move
+        // that followed it was the half that failed.
+        let before = every_row(&state).await;
+        let no = create_role(
+            State(state.clone()),
+            Extension(admin.clone()),
+            Json(filed_into_platform("engineer")),
+        )
+        .await
+        .expect_err("but not twice in one directory");
+        // `said` is the error's `Debug`, so a quote in the sentence arrives
+        // escaped — these look for the words rather than the punctuation.
+        let says = said(&no);
+        assert!(
+            says.contains("engineer") && says.contains("already filed in"),
+            "it names the one there: {says}"
+        );
+        assert!(says.contains("platform"), "and where: {says}");
+        assert!(!says.contains("roles_name_in_directory"), "{says}");
+        assert_eq!(before, every_row(&state).await);
+    }
+
+    /// **An import is a write of a name too**, so a bundle that renames a
+    /// profile onto a name already filed beside it is refused and nothing in
+    /// the drop is written.
+    ///
+    /// Through the key, which is what makes it a rename rather than a match:
+    /// the drop's folder is `designer`, the row carrying that key is called
+    /// `Designer`, and the file inside says `Engineer` — which the profile
+    /// beside it already is.
+    #[tokio::test]
+    async fn a_bundle_cannot_rename_a_profile_onto_a_name_filed_beside_it() {
+        let (state, admin) = fixture().await;
+        keyed(&state, &admin, "Designer", "designer").await;
+        made(&state, &admin, &asked_for("Engineer")).await;
+
+        let before = every_row(&state).await;
+        let no = applied(
+            &state,
+            &admin,
+            plan_for(vec![bundle("designer", "Engineer")]),
+        )
+        .await
+        .expect_err("two profiles filed together cannot share a name");
+        let says = said(&no);
+        assert!(says.contains("engineer"), "it names the one there: {says}");
+        assert!(
+            says.contains("nothing was written"),
+            "and that nothing happened: {says}"
+        );
+        assert!(
+            says.contains("change the `name:`"),
+            "and what to do: {says}"
+        );
+        assert!(!says.contains("roles_name_in_directory"), "{says}");
+        assert_eq!(before, every_row(&state).await);
     }
 
     /// **A key is one profile within one directory**, and this is the ticket

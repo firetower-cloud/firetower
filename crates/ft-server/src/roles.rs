@@ -255,25 +255,47 @@ impl std::error::Error for Refused {}
 /// Manager by hand — and a machine this server cannot honour being *named* is
 /// the same promise the spawn path already makes (`delegate.rs`).
 ///
-/// **Read off the violation rather than checked before the write.** A `SELECT`
-/// first would race: `host_id` is `on delete set null`, so a machine removed
-/// between the look and the insert puts the raw error back — more rarely, and
-/// so more confusingly. This is the repository's own idiom for the shape
-/// (`api/accounts.rs`, on a unique violation), and it costs no round trip.
+/// **The machine is read off the violation rather than checked before the
+/// write.** A `SELECT` first would race: `host_id` is `on delete set null`, so
+/// a machine removed between the look and the insert puts the raw error back —
+/// more rarely, and so more confusingly. This is the repository's own idiom
+/// for the shape (`api/accounts.rs`, on a unique violation), and it costs no
+/// round trip.
 ///
-/// Only the one constraint. `roles` has four foreign keys and the other three
-/// are the server's own doing, not something a caller named, so they stay
+/// The name is both: asked before the write where the profile in the way can
+/// still be named, and read off the violation here, which is what holds in the
+/// window between the two and under a write path that forgets to ask. Only one
+/// of the two sentences can say which profile is in the way, and it is not
+/// this one.
+///
+/// Two constraints, then. `roles` has four foreign keys and three of them are
+/// the server's own doing rather than something a caller named, so those stay
 /// whatever they were.
 fn refused_by_constraint(e: &sqlx::Error, new: &NewRole) -> Option<Refused> {
     let db = e.as_database_error()?;
-    if !db.is_foreign_key_violation() || db.constraint() != Some("roles_host_id_fkey") {
-        return None;
+    if db.is_foreign_key_violation() && db.constraint() == Some("roles_host_id_fkey") {
+        return Some(Refused(format!(
+            "there is no machine \"{}\" — name one of yours, or leave it out and the machine is \
+             the lead's to choose",
+            new.machine.as_deref().unwrap_or_default()
+        )));
     }
-    Some(Refused(format!(
-        "there is no machine \"{}\" — name one of yours, or leave it out and the machine is \
-         the lead's to choose",
-        new.machine.as_deref().unwrap_or_default()
-    )))
+    // The name's own index, in the window a `SELECT` cannot close: somebody
+    // else committing that name in the same directory between the look and the
+    // write. Rare, and the only thing standing between it and a constraint
+    // name reaching a person — and it is what makes the rule hold against a
+    // write path added next spring that forgets to ask first. It cannot name
+    // the profile in the way, because the transaction is already aborted and
+    // there is nothing left to look one up with; the name is the clash here,
+    // so saying it is most of the sentence anyway.
+    if db.is_unique_violation() && db.constraint() == Some(NAME_IS_UNIQUE) {
+        return Some(Refused(format!(
+            "a profile called \"{}\" is already filed there, and two filed together cannot \
+             share a name. Pick another name, or file this one somewhere else.",
+            new.name.trim()
+        )));
+    }
+    None
 }
 
 /// Either the refusal above, or the error as it was, with its context.
@@ -700,7 +722,53 @@ impl Roles {
         person_slug: &str,
         new: &NewRole,
     ) -> Result<ft_core::RoleId> {
-        create_in(&self.pool, org, person, person_slug, Filing::default(), new).await
+        self.create_filed(org, person, person_slug, None, new).await
+    }
+
+    /// The same, born where it is going to live.
+    ///
+    /// **The destination decides a name, not the way there.** `create_role`
+    /// and the `create_profile` tool used to insert into the person's own
+    /// space and then move the row, which gave one name two scopes to be
+    /// unique in: a profile bound for `d/platform` was judged against the
+    /// space it passed through, so a `Reviewer` of your own would refuse a
+    /// `Reviewer` that was never going to be filed beside it — and a name
+    /// taken at the destination would leave a profile stranded in the
+    /// person's own space when the move was refused. One insert at the
+    /// destination is what the import has always done (see [`Filing`]), and
+    /// a role's transfer is an `UPDATE` of the path and nothing else, so
+    /// there is nothing else the move was for.
+    ///
+    /// `directory` is a slug, not an id, and whether this person may file
+    /// anything there is the caller's question — the same division
+    /// `create_in` and the import keep.
+    pub async fn create_filed(
+        &self,
+        org: &str,
+        person: &str,
+        person_slug: &str,
+        directory: Option<&str>,
+        new: &NewRole,
+    ) -> Result<ft_core::RoleId> {
+        let there = match directory {
+            Some(slug) => format!("{}.{slug}", ft_core::path::DIRECTORY),
+            None => format!("{}.{person_slug}", ft_core::path::PERSONAL),
+        };
+        if let Some(held) = named_already(&self.pool, &there, &new.name, None).await? {
+            return Err(name_taken(&held, &there).into());
+        }
+        create_in(
+            &self.pool,
+            org,
+            person,
+            person_slug,
+            Filing {
+                directory,
+                key: None,
+            },
+            new,
+        )
+        .await
     }
 
     /// Change a role's fields. The person must be able to work in where it is filed.
@@ -716,6 +784,21 @@ impl Roles {
         // interface drew `may_write` from.
         if !may_write_in(&self.pool, person, id).await? {
             return Ok(false);
+        }
+        // A rename has to land on a name that is free where this profile is
+        // filed, and itself is not in its own way: saving a profile without
+        // touching its name is most of what this endpoint does.
+        let Some(path) = path_of_role(&self.pool, id).await? else {
+            return Ok(false);
+        };
+        let there = filed_in_directory(&path);
+        if let Some(held) = named_already(&self.pool, &there, &new.name, Some(id)).await? {
+            return Err(Refused(format!(
+                "\"{held}\" is already filed in {}, and two profiles filed together cannot \
+                 share a name. Pick another name, or file one of the two somewhere else.",
+                place(&there)
+            ))
+            .into());
         }
         replace_in(&self.pool, id, None, new).await?;
         Ok(true)
@@ -754,10 +837,14 @@ impl Roles {
 /// is filed at creation, and the key its author gave it.
 ///
 /// `directory` is a **slug**, not an id, and a create files the row at its
-/// destination in one insert. `api::roles::create_role` creates and then moves
-/// because filing is a separate, later act there; inside an import the move
-/// would be a second write to roll back, and `access::transfer` for a role is
-/// an `UPDATE` of the path and nothing else.
+/// destination in one insert: inside an import the move would be a second
+/// write to roll back, and `access::transfer` for a role is an `UPDATE` of the
+/// path and nothing else.
+///
+/// Not the import's alone any longer. `api::roles::create_role` used to create
+/// and then move, on the grounds that filing is a separate and later act
+/// there, and a name that has to be free *where a profile is filed* made that
+/// untenable — [`Roles::create_filed`] says what it cost.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Filing<'a> {
     /// The directory to file it in, by slug. `None` is the person's own space.
@@ -1027,6 +1114,141 @@ pub fn key_already_filed_there(e: &anyhow::Error) -> bool {
 
 /// The index that makes a key one profile within one directory.
 pub const KEY_IS_UNIQUE: &str = "roles_author_key";
+
+// ── one name, one profile, within one directory ─────────────────────────
+//
+// `roles_name_in_directory` is the rule and
+// `migrations/server/20261120120000_profile_name_unique.sql` is why: a team
+// file names a member `platform/engineer`, and that reference is only stable
+// if the name cannot come to mean two profiles. The index is what makes it
+// hold against a direct API write; everything below is what makes a person
+// read a sentence instead of a constraint name.
+//
+// **Scoped to the directory and never to the installation**, which is the one
+// part of this that is not negotiable. Global uniqueness would let a
+// stranger's private names constrain somebody's own, and "that name is taken"
+// would tell the asker that something exists in a place they cannot see.
+// Everything these refusals name is filed in the directory being written to,
+// which the person asking can already read.
+
+/// The index that makes a name one profile within one directory.
+pub const NAME_IS_UNIQUE: &str = "roles_name_in_directory";
+
+/// The directory a profile is filed in, as an `ltree`: the scope a name is
+/// unique in.
+///
+/// The first two labels — `u.kevin`, `d.platform` — which is what "the
+/// directory it is filed in" means (`docs/paths-and-ownership.md` §1).
+/// [`filed_beside`] is the parent instead, and the two agree on every profile
+/// that exists: a path is three labels and nothing moves the leaf. The
+/// difference is in the migration, beside the index that depends on it.
+pub fn filed_in_directory(path: &ft_core::ResourcePath) -> String {
+    path.as_str()
+        .split('/')
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(".")
+}
+
+/// Whichever profile of this name is already filed in that directory, by the
+/// name it carries — so a refusal can show `engineer` when somebody typed
+/// `Engineer`.
+///
+/// **One spelling of the question**, asked by every path that writes a name:
+/// a create, a rename, a move (`access::transfer_in`) and an import
+/// (`api::roles::apply_role_import`). Asked first rather than read off the
+/// violation, for the reason the key's own check gives — the index answers
+/// with a constraint name once the transaction is already aborted, and there
+/// is nothing left to look the other profile up with.
+///
+/// `directory` is [`filed_in_directory`], and the comparison is the index's
+/// own: `lower(btrim(...))`, so it is case-insensitive and a stored space
+/// cannot hide a clash.
+pub async fn named_already<'e, E>(
+    x: E,
+    directory: &str,
+    name: &str,
+    except: Option<&str>,
+) -> Result<Option<String>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query_scalar::<_, String>(
+        "SELECT name FROM roles \
+          WHERE subpath(path, 0, 2) = $1::ltree \
+            AND lower(btrim(name)) = lower(btrim($2)) \
+            AND ($3::text IS NULL OR id <> $3) \
+          LIMIT 1",
+    )
+    .bind(directory)
+    .bind(name)
+    .bind(except)
+    .fetch_optional(x)
+    .await
+    .context("reading which profile is already called that")
+}
+
+/// Where a name has to be free, as a sentence says it.
+///
+/// The slug rather than a directory's display name: this layer holds a path,
+/// a lookup to turn `d.platform` into `Platform` would be a second query to
+/// say one word, and the slug is what `delegate.rs` already says to an agent
+/// and what the sharing sheet shows. `kevin's own space` rather than *your*
+/// own space, because a profile in somebody else's space is reachable through
+/// an exception on it — so "yours" would be a guess, and a wrong one is
+/// confusing in exactly the case somebody needs the sentence.
+pub fn place(directory: &str) -> String {
+    match directory.split_once('.') {
+        Some((ft_core::path::DIRECTORY, slug)) => format!("the \"{slug}\" directory"),
+        Some((_, slug)) => format!("{slug}'s own space"),
+        None => directory.to_string(),
+    }
+}
+
+/// What a name already filed there says, when a profile is being written.
+///
+/// Both halves of the sentence are the two ways out, which is the register the
+/// rest of this module's refusals are written in: what is in the way, and what
+/// to do about it.
+fn name_taken(held: &str, directory: &str) -> Refused {
+    Refused(format!(
+        "\"{held}\" is already filed in {}, and two profiles filed together cannot share a \
+         name. Call this one something else, or file it somewhere the name is free.",
+        place(directory)
+    ))
+}
+
+/// The name one profile carries. `None` when there is no such profile.
+pub async fn name_of_role<'e, E>(x: E, id: &str) -> Result<Option<String>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query_scalar::<_, String>("SELECT name FROM roles WHERE id = $1")
+        .bind(id)
+        .fetch_optional(x)
+        .await
+        .context("reading a profile's name")
+}
+
+/// Where a profile is filed. `None` when there is no such profile.
+///
+/// Unfiltered, and it answers only a question the caller has already earned:
+/// both callers hold a profile they have been allowed to write.
+/// `Access::path_of` is the same read for anything Placed, and this is here so
+/// that a rename can ask inside whatever executor it is already holding.
+async fn path_of_role<'e, E>(x: E, id: &str) -> Result<Option<ft_core::ResourcePath>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    Ok(
+        sqlx::query_scalar::<_, String>("SELECT path::text FROM roles WHERE id = $1")
+            .bind(id)
+            .fetch_optional(x)
+            .await
+            .context("reading where a profile is filed")?
+            .map(ft_core::ResourcePath::from_stored),
+    )
+}
 
 #[cfg(test)]
 mod tests {
@@ -1748,5 +1970,280 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(now.can_delegate);
+    }
+    // ── one name, one profile, within one directory ─────────────────────
+
+    /// A second profile of one name in one directory is refused, in a sentence
+    /// that names the one already there.
+    ///
+    /// Case-insensitively, and through the stored name rather than the one
+    /// typed: somebody who asks for `Engineer` where `engineer` is filed has
+    /// to be shown the profile they will actually find on the screen.
+    #[tokio::test]
+    async fn a_second_profile_of_one_name_in_one_directory_is_refused() {
+        let (roles, me, org, slug) = setup().await;
+        roles
+            .create(&org, &me, &slug, &new("Engineer"))
+            .await
+            .unwrap();
+
+        let no = roles
+            .create(&org, &me, &slug, &new("engineer"))
+            .await
+            .expect_err("two profiles filed together cannot share a name");
+        let says = format!("{no:#}");
+        assert!(
+            says.contains("\"Engineer\""),
+            "it names the one there: {says}"
+        );
+        assert!(
+            says.contains("admin's own space"),
+            "and where it is: {says}"
+        );
+        assert!(
+            says.contains("Call this one something else"),
+            "and what to do: {says}"
+        );
+        assert!(!says.contains(NAME_IS_UNIQUE), "not a constraint: {says}");
+
+        // A stored space cannot hide a clash either — every write trims, and
+        // the comparison does too.
+        assert!(roles
+            .create(&org, &me, &slug, &new("  ENGINEER  "))
+            .await
+            .is_err());
+
+        // And a name nobody is using is still just a profile.
+        roles
+            .create(&org, &me, &slug, &new("Reviewer"))
+            .await
+            .unwrap();
+    }
+
+    /// The same name in two places is two profiles, which is the whole reason
+    /// this is scoped to a directory and never to the installation.
+    ///
+    /// Three `Engineer`s, none of them a clash: one in each of two
+    /// directories and one in somebody's own space. A fourth beside the first
+    /// is the clash.
+    ///
+    /// Filed with `create_filed`, whose `directory` is a slug and needs no
+    /// `directories` row — a path is not a foreign key, and what is under test
+    /// is the scope rather than the sharing.
+    #[tokio::test]
+    async fn the_same_name_in_two_directories_is_two_profiles() {
+        let (roles, me, org, slug) = setup().await;
+        for place in [Some("platform"), Some("research"), None] {
+            roles
+                .create_filed(&org, &me, &slug, place, &new("Engineer"))
+                .await
+                .unwrap();
+        }
+        // A person's own space is its own directory, so two people may each
+        // have one. `ana` need not exist for this: the path is what decides,
+        // and `u.ana` is not `u.admin`.
+        roles
+            .create_filed(&org, &me, "ana", None, &new("Engineer"))
+            .await
+            .unwrap();
+
+        let no = roles
+            .create_filed(&org, &me, &slug, Some("platform"), &new("ENGINEER"))
+            .await
+            .expect_err("but not twice in one directory");
+        let says = format!("{no:#}");
+        assert!(
+            says.contains("the \"platform\" directory"),
+            "the directory it is in, by name: {says}"
+        );
+        // Four `Engineer`s stand, and the fifth is the only one refused.
+        // Counted off the table rather than through `visible`: nobody holds a
+        // grant on a directory that was never created, and who may *see* one
+        // of these is another test's subject.
+        let all: i64 = sqlx::query_scalar("SELECT count(*) FROM roles")
+            .fetch_one(&roles.pool)
+            .await
+            .unwrap();
+        assert_eq!(all, 4, "four places, four profiles of one name");
+    }
+
+    /// A rename is a write of a name, so it is held to the same rule — and a
+    /// profile is never in its own way, which is most of what this endpoint
+    /// does.
+    #[tokio::test]
+    async fn a_rename_into_a_name_already_there_is_refused() {
+        let (roles, me, org, slug) = setup().await;
+        roles
+            .create(&org, &me, &slug, &new("Engineer"))
+            .await
+            .unwrap();
+        let reviewer = roles
+            .create(&org, &me, &slug, &new("Reviewer"))
+            .await
+            .unwrap();
+
+        let no = roles
+            .update(&me, reviewer.as_str(), &new("engineer"))
+            .await
+            .expect_err("a rename cannot take a name that is filed there");
+        let says = format!("{no:#}");
+        assert!(
+            says.contains("\"Engineer\""),
+            "it names the one there: {says}"
+        );
+        assert!(says.contains("Pick another name"), "and what to do: {says}");
+        assert!(!says.contains(NAME_IS_UNIQUE), "not a constraint: {says}");
+
+        // Saving a profile without touching its name is the ordinary case.
+        let mut same = new("Reviewer");
+        same.does = "reads a branch and says what is wrong with it".into();
+        assert!(roles.update(&me, reviewer.as_str(), &same).await.unwrap());
+        // And a name that is free is a rename.
+        assert!(roles
+            .update(&me, reviewer.as_str(), &new("Architect"))
+            .await
+            .unwrap());
+        assert!(roles.by_name(&me, "architect").await.unwrap().is_some());
+    }
+
+    /// **The index is the rule, and the checks above are only how it reads.**
+    ///
+    /// `create_in` is the write itself and asks nobody — the import holds it
+    /// inside its own transaction — so this is what a direct API write, a
+    /// race between two creates, and a write path added next spring that
+    /// forgets to ask all come to. It is still a sentence rather than a
+    /// constraint name, which is what `refused_by_constraint` is for.
+    #[tokio::test]
+    async fn the_index_refuses_a_write_that_never_asked() {
+        let (roles, me, org, slug) = setup().await;
+        let mine = || async {
+            create_in(
+                &roles.pool,
+                &org,
+                &me,
+                &slug,
+                Filing::default(),
+                &new("Engineer"),
+            )
+            .await
+        };
+        mine().await.unwrap();
+        let no = mine().await.expect_err("the index holds on its own");
+        let says = format!("{no:#}");
+        assert!(
+            says.contains("\"Engineer\"") && says.contains("already filed there"),
+            "a sentence: {says}"
+        );
+        assert!(!says.contains(NAME_IS_UNIQUE), "not a constraint: {says}");
+    }
+
+    /// **The duplicates an installation already has are resolved by the
+    /// migration**, rather than left to fail at the next write.
+    ///
+    /// The index is already here, because a test database is migrated, so it
+    /// is dropped to make the state this was written for possible at all and
+    /// the migration is then replayed over it — which is what the `if not
+    /// exists` on the index is for.
+    ///
+    /// Three things are asserted, and the third is the one that would
+    /// otherwise be found out on somebody's installation: the oldest keeps the
+    /// name it had, a number is taken where it is free and the row's own
+    /// discriminator where it is not, and nothing comes out longer than the 64
+    /// characters `check` accepts — a name that cannot be saved again is a
+    /// profile nobody can edit.
+    #[tokio::test]
+    async fn existing_duplicates_are_resolved_by_the_migration() {
+        let (roles, me, org, _slug) = setup().await;
+        sqlx::query(&format!("DROP INDEX {NAME_IS_UNIQUE}"))
+            .execute(&roles.pool)
+            .await
+            .unwrap();
+
+        let long = "a".repeat(64);
+        let doubled: Vec<(&str, String, i32)> = vec![
+            // One directory, three spellings of one name, oldest first.
+            ("d.platform.one", "Engineer".into(), 3),
+            ("d.platform.two", "engineer".into(), 2),
+            ("d.platform.three", "ENGINEER".into(), 1),
+            // Another that already holds the number the first pass wants.
+            ("d.research.one", "Engineer 2".into(), 4),
+            ("d.research.two", "Engineer".into(), 3),
+            ("d.research.three", "Engineer".into(), 2),
+            // A name that is already as long as one can be.
+            ("u.admin.one", long.clone(), 2),
+            ("u.admin.two", long.clone(), 1),
+            // And one that was never in anybody's way.
+            ("u.admin.three", "Reviewer".into(), 1),
+        ];
+        let mut ids: std::collections::HashMap<&str, String> = Default::default();
+        for (path, name, days) in &doubled {
+            let id = ft_core::RoleId::new();
+            sqlx::query(
+                "INSERT INTO roles (id, org_id, path, created_by, name, slug, does, created_at) \
+                 VALUES ($1, $2, $3::ltree, $4, $5, $1, 'does a thing', \
+                         now() - ($6 || ' days')::interval)",
+            )
+            .bind(id.as_str())
+            .bind(&org)
+            .bind(path)
+            .bind(&me)
+            .bind(name)
+            .bind(days.to_string())
+            .execute(&roles.pool)
+            .await
+            .unwrap();
+            ids.insert(path, id.as_str().to_string());
+        }
+
+        sqlx::raw_sql(include_str!(
+            "../../../migrations/server/20261120120000_profile_name_unique.sql"
+        ))
+        .execute(&roles.pool)
+        .await
+        .unwrap();
+
+        let named = |path: &'static str| {
+            let pool = roles.pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>("SELECT name FROM roles WHERE path = $1::ltree")
+                    .bind(path)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap()
+            }
+        };
+
+        // The oldest keeps the name it had: whatever already names it — a
+        // lead spawning by name, somebody's muscle memory — most likely means
+        // the one that has been there longest.
+        assert_eq!(named("d.platform.one").await, "Engineer");
+        assert_eq!(named("d.platform.two").await, "engineer 2");
+        assert_eq!(named("d.platform.three").await, "ENGINEER 3");
+        // Nothing the first pass could number, because `Engineer 2` is taken:
+        // the row's own discriminator instead, which nothing can collide with.
+        assert_eq!(named("d.research.one").await, "Engineer 2");
+        assert_eq!(named("d.research.two").await, "Engineer");
+        let third = named("d.research.three").await;
+        let tail = &ids["d.research.three"][ids["d.research.three"].len() - 8..];
+        assert_eq!(third, format!("Engineer {tail}"), "the id, not a number");
+        // Nothing comes out too long to save.
+        assert_eq!(named("u.admin.one").await, long);
+        let numbered = named("u.admin.two").await;
+        assert_eq!(numbered.chars().count(), 64, "{numbered}");
+        assert!(numbered.ends_with(" 2"), "{numbered}");
+        // And a name nobody shared is untouched.
+        assert_eq!(named("u.admin.three").await, "Reviewer");
+
+        // Then the index is there, and holds.
+        assert!(create_in(
+            &roles.pool,
+            &org,
+            &me,
+            "admin",
+            Filing::default(),
+            &new("Reviewer")
+        )
+        .await
+        .is_err());
     }
 }

@@ -1592,6 +1592,29 @@ impl Access {
                             );
                         }
                     }
+                    // **And for the same reason, its name.** A profile's name
+                    // is one profile within the directory it is filed in
+                    // (`roles_name_in_directory`), so a move is a write of
+                    // that name into a scope it was never judged against —
+                    // the write path most easily forgotten, because nothing
+                    // about the profile changes. Asked here, where the
+                    // profile in the way can still be named and the person
+                    // can be told which directory to settle it in; the index
+                    // would answer with a constraint name and an aborted
+                    // transaction.
+                    let there = crate::roles::filed_in_directory(to);
+                    if let Some(name) = crate::roles::name_of_role(&mut **tx, id).await? {
+                        if let Some(held) =
+                            crate::roles::named_already(&mut **tx, &there, &name, Some(id)).await?
+                        {
+                            bail!(
+                                "`{held}` is already filed in {} and two profiles filed together \
+                                 cannot share a name, so this profile stays where it is. Rename \
+                                 one of the two there, or file this one somewhere else.",
+                                crate::roles::place(&there)
+                            );
+                        }
+                    }
                 }
                 let table = Self::table(other);
                 let done = sqlx::query(&format!(
@@ -2431,6 +2454,116 @@ mod tests {
                 .unwrap(),
             from
         );
+    }
+
+    /// **And a move into a directory where the profile's name is taken is
+    /// refused in a sentence that says where to settle it.**
+    ///
+    /// The write path most easily missed, because nothing about the profile
+    /// changes: a move writes its name into a directory the name was never
+    /// judged against. Case-insensitively, like every other reading of a name
+    /// — `roles_name_in_directory` compares `lower(btrim(...))`.
+    #[tokio::test]
+    async fn a_profile_cannot_be_filed_where_its_name_already_is() {
+        let (db, access, _accounts, org, admin) = set_up().await;
+        let vault = vault(&db);
+        let shelf = access
+            .create_directory(&org, "Platform", &admin, &[])
+            .await
+            .unwrap();
+        let roles = crate::roles::Roles::new(db.pool().clone());
+
+        let asked = |name: &str| crate::roles::NewRole {
+            name: name.into(),
+            does: "designs".into(),
+            placement: "lead".into(),
+            agent: None,
+            machine: None,
+            account: None,
+            settings: Default::default(),
+            instructions: String::new(),
+            on_usage_limit: None,
+            on_child_limit: None,
+            can_delegate: false,
+            delegate_scope: vec![],
+            include_always_on: None,
+            include_repo_defaults: None,
+            skill_scope: vec![],
+            directory: None,
+        };
+        // An `engineer` on the shelf, and an `Engineer` of their own — which
+        // is accepted, because two directories are two places.
+        roles
+            .create_filed(
+                org.as_str(),
+                admin.as_str(),
+                "admin",
+                Some(&shelf.slug),
+                &asked("engineer"),
+            )
+            .await
+            .unwrap();
+        let mine = roles
+            .create(org.as_str(), admin.as_str(), "admin", &asked("Engineer"))
+            .await
+            .unwrap();
+
+        let from = access
+            .path_of(FiledKind::Role, mine.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        let no = access
+            .transfer(
+                &vault,
+                FiledKind::Role,
+                mine.as_str(),
+                &from.moved_to(ft_core::path::DIRECTORY, &shelf.slug),
+                "admin",
+            )
+            .await
+            .expect_err("two profiles filed together cannot share a name");
+        let says = format!("{no:#}");
+        assert!(says.contains("engineer"), "it names the one there: {says}");
+        assert!(
+            says.contains("the \"platform\" directory"),
+            "and where to settle it: {says}"
+        );
+        assert!(
+            says.contains("Rename one of the two there"),
+            "and what to do: {says}"
+        );
+        assert!(
+            !says.contains("roles_name_in_directory"),
+            "not a constraint: {says}"
+        );
+
+        // Still where it was, and still called what it was called.
+        assert_eq!(
+            access
+                .path_of(FiledKind::Role, mine.as_str())
+                .await
+                .unwrap()
+                .unwrap(),
+            from
+        );
+
+        // Renaming it is what makes the move go through, which is what the
+        // sentence told them to do.
+        assert!(roles
+            .update(admin.as_str(), mine.as_str(), &asked("Architect"))
+            .await
+            .unwrap());
+        access
+            .transfer(
+                &vault,
+                FiledKind::Role,
+                mine.as_str(),
+                &from.moved_to(ft_core::path::DIRECTORY, &shelf.slug),
+                "admin",
+            )
+            .await
+            .unwrap();
     }
 
     /// A subscription's credential is *attached*: it has no path, and moving
