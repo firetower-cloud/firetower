@@ -55,6 +55,35 @@ function job(workflow, name) {
 }
 
 /**
+ * The `check` job's gate, as text: its `refuse` step and nothing after it.
+ *
+ * The telemetry step below it is a separate `run:` with a `jq` of its own, so
+ * an assertion about how the gate reads the manifest has to stop at the
+ * boundary or it reads the wrong script.
+ */
+function gate(workflow = PROMOTE) {
+  const check = job(workflow, "check");
+  const to = check.indexOf("      - name: how many installations");
+  if (to === -1) throw new Error("the gate is no longer followed by the telemetry step — this test is reading a file that moved");
+  return check.slice(0, to);
+}
+
+/**
+ * One `workflow_dispatch` input of `promote.yml`, as declared.
+ *
+ * Six spaces is an input name and eight is one of its fields, which is how the
+ * block ends without parsing YAML.
+ */
+function dispatchInput(name) {
+  const on = PROMOTE.slice(PROMOTE.indexOf("\non:\n"), PROMOTE.indexOf("\npermissions:"));
+  const at = on.indexOf(`      ${name}:\n`);
+  if (at === -1) throw new Error(`promote.yml declares no ${name} input — this test is reading a file that moved`);
+  const rest = on.slice(at + `      ${name}:\n`.length);
+  const to = rest.search(/\n {6}\S/);
+  return to === -1 ? rest : rest.slice(0, to);
+}
+
+/**
  * The input names one trigger of `desktop-release.yml` declares.
  *
  * Which trigger an input is declared on is the whole guard on general access,
@@ -187,7 +216,7 @@ describe("the channel manifest on a release", () => {
 });
 
 describe("the promotion workflow", () => {
-  it("takes a confirmation that has to match, and checks it before anything else", () => {
+  it("takes a confirmation that has to match a typed version, and checks it before anything else", () => {
     // Promotion cannot be undone, and the refusals below are silent on the
     // accident that matters: promoting a *newer* version than intended passes
     // every one of them. A mis-click is what this answers, so it is answered
@@ -198,6 +227,103 @@ describe("the promotion workflow", () => {
     assert.ok(confirm > 0, "the confirmation is compared against the version");
     assert.ok(confirm < check.indexOf("gh release view"), "and before anything is looked up");
     assert.ok(confirm < check.indexOf("read-channel-manifest.sh"));
+
+    // **And it is that comparison which is conditional, not the rule.** The
+    // accident the retyping answers is a version chosen in a browser earlier
+    // and superseded by the time it is dispatched, so where a version *was*
+    // typed the rule is untouched: given, equal, checked here. The guard is on
+    // `$VERSION` being non-empty and on nothing else — not on the confirmation
+    // being filled in, which would turn "I left it blank" into a pass.
+    assert.match(check, /if \[ -n "\$VERSION" \] && \[ "\$CONFIRM" != "\$VERSION" \]; then/);
+    // The wording is the one it has always been; the behaviour tests below
+    // dispatch an empty confirmation against a typed version and read it back.
+    assert.match(check, /The confirmation says '\$CONFIRM' and the version says '\$VERSION'/);
+  });
+
+  /**
+   * **Why the confirmation is conditional rather than weakened.**
+   *
+   * `version` is optional, and empty means "whatever this package is on beta
+   * now", resolved during the run from the published manifest. A stale browser
+   * tab cannot decide that version — the tab contributes no version at all —
+   * so the failure the retyping guards is unreachable and the field may be
+   * left empty. Filled in anyway, it is a double-check and has to match the
+   * resolved version.
+   *
+   * What must not drift with it: the resolved version is not privileged. It
+   * reaches the format check, the release check and the preflight by the same
+   * path a typed one does, and it is read with the writer's own parser rather
+   * than a second, looser copy of the rule in shell.
+   */
+  it("takes an optional version and resolves an empty one from the beta pin", () => {
+    assert.match(dispatchInput("package"), /required: true/, "the package is still a required choice");
+    for (const name of ["version", "confirm"]) {
+      assert.match(dispatchInput(name), /required: false/, `${name} is optional`);
+    }
+    // The form has to say what empty does, or the operator cannot know.
+    assert.match(dispatchInput("version"), /empty to promote whatever this package is on beta/);
+
+    const refuse = code(gate());
+    // From the file the shared reader already wrote, through the manifest
+    // script's own `read` — not a second fetch, and not inline JSON parsing.
+    assert.match(refuse, /channel-manifest\.mjs read --held "\$RUNNER_TEMP\/held\.json"/);
+    assert.doesNotMatch(refuse, /gh (api|release download)/, "the manifest is fetched by the shared reader alone");
+    assert.doesNotMatch(refuse, /jq/, "and read by the writer's parser, never by jq");
+    // The two defects the gate was rewritten for, which reading a second pin
+    // is a fresh chance to reintroduce: a command substitution captured on its
+    // own line rather than inside a condition, and no second copy of a
+    // comparison the manifest script already owns.
+    assert.match(refuse, /^ *held_pins=\$\(node \.github\/scripts\/channel-manifest\.mjs read /m);
+    assert.match(refuse, /^ *VERSION=\$\(printf '%s\\n' "\$held_pins" \| sed -n /m);
+    assert.match(refuse, /^ *state=\$\(\.github\/scripts\/read-channel-manifest\.sh /m);
+    assert.doesNotMatch(refuse, /sort -V/);
+
+    // Resolved *before* the checks a typed version faces, so it faces them in
+    // the same order rather than skipping any.
+    const resolved = refuse.indexOf("channel-manifest.mjs read");
+    assert.ok(resolved > 0);
+    assert.ok(resolved < refuse.indexOf("grep -qE '^[0-9]"), "the format check is downstream of the resolve");
+    assert.ok(resolved < refuse.indexOf("gh release view"), "and so is the release check");
+    assert.ok(resolved < refuse.indexOf("preflight"), "and so is the preflight");
+
+    // And absence has no beta pin to offer, so it says so rather than
+    // resolving to an empty string.
+    assert.match(refuse, /first promotion of a repository has to name its version explicitly/);
+  });
+
+  /**
+   * **One version, and every job on it.**
+   *
+   * `inputs.version` stopped being the truth the moment it could be left
+   * empty: on the normal path it *is* the empty string. A job still reading it
+   * would re-tag `:stable` at `ghcr.io/…/firetower:` while the manifest said
+   * something had been promoted — a leg acting on nothing, with nothing going
+   * red. So the gate publishes what it resolved and everything downstream
+   * reads that.
+   */
+  it("routes every job through the resolved version, never through inputs.version", () => {
+    assert.equal([...code(PROMOTE).matchAll(/inputs\.version/g)].length, 1, "exactly one reader of the typed input");
+    assert.match(code(gate()), /VERSION: \$\{\{ inputs\.version \}\}/, "and it is the gate, which is the step that can resolve it");
+
+    // Published by the step, exposed by the job.
+    assert.match(code(gate()), /echo "version=\$VERSION" >> "\$GITHUB_OUTPUT"/);
+    assert.match(job(PROMOTE, "check"), /^ {6}version: \$\{\{ steps\.refuse\.outputs\.version \}\}$/m);
+    // The telemetry step is in `check` itself, where there is no `needs` to
+    // read: a step reads the step.
+    const telemetry = job(PROMOTE, "check").slice(job(PROMOTE, "check").indexOf("      - name: how many installations"));
+    assert.match(telemetry, /VERSION: \$\{\{ steps\.refuse\.outputs\.version \}\}/);
+
+    // Every other job, and the dependency that makes the read work at all —
+    // without `needs: check` the expression is a silent empty string.
+    for (const name of ["images", "pin_first", "desktop", "pin_last", "worker", "promoted"]) {
+      const text = job(PROMOTE, name);
+      assert.match(text, /needs\.check\.outputs\.version/, `${name} acts on the resolved version`);
+      assert.match(text, /needs: (check\b|\[check[,\]])/, `${name} depends on check, or it would read an empty string`);
+      assert.doesNotMatch(code(text), /inputs\.version/, `${name} must not read the typed input`);
+    }
+    // Including in the UI: the staging step's name is what somebody watching
+    // the run reads, so it has to name the version actually being staged.
+    assert.match(job(PROMOTE, "images"), /- name: stage \$\{\{ matrix\.name \}\} \$\{\{ needs\.check\.outputs\.version \}\} and check it/);
   });
 
   /**
@@ -744,6 +870,20 @@ describe("promotion refuses, and moves nothing when it does", { skip: process.pl
     return { status: result.status, output: `${result.stdout}${result.stderr}` };
   }
 
+  /**
+   * What the gate published for the jobs below it.
+   *
+   * `version` is the one that matters here: every job downstream reads
+   * `needs.check.outputs.version`, so this file is what a run promotes. Read
+   * rather than asserted on the log, because an empty string in the log and an
+   * empty string in an output look nothing alike to a reader and exactly alike
+   * to a `grep`.
+   */
+  function outputs(repo) {
+    const lines = readFileSync(join(repo.dir, "outputs"), "utf8").split("\n").filter(Boolean);
+    return Object.fromEntries(lines.map((line) => [line.slice(0, line.indexOf("=")), line.slice(line.indexOf("=") + 1)]));
+  }
+
   /** Run the commit point — the manifest write promotion ends with. */
   function commit(repo, spec, env = {}) {
     const result = spawnSync("bash", [join(ROOT, ".github/scripts/publish-channel-pin.sh"), spec], {
@@ -772,9 +912,177 @@ describe("promotion refuses, and moves nothing when it does", { skip: process.pl
     // gate that refuses everything.
     const repo = repository({ manifest: published });
     assert.equal(check(repo).status, 0);
+    // And a typed version arrives downstream as itself.
+    assert.equal(outputs(repo).version, "0.57.0");
+    assert.equal(outputs(repo).tag, "firetower-v0.57.0");
     assert.equal(commit(repo, "control_plane:general=0.57.0").status, 0);
     assert.equal(reader(repo).control_plane.general, "0.57.0");
     assert.equal(reader(repo).control_plane.beta, "0.58.0", "beta is left where it is");
+  });
+
+  it("refuses a typed version whose confirmation was left empty", () => {
+    // The field is optional in the form now, which is exactly the shape of
+    // "typed the version, tabbed past the confirmation, hit the button". It
+    // has to be the same refusal it always was, in the same words, before the
+    // first network call.
+    const repo = repository({ manifest: published });
+    const r = check(repo, { version: "0.57.0", confirm: "" });
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /confirmation says '' and the version says '0\.57\.0'/);
+    assert.equal(reader(repo).control_plane.general, "0.55.0");
+    assert.equal(readFileSync(join(repo.dir, "gh.log"), "utf8").trim(), "", "and nothing is looked up");
+  });
+
+  /**
+   * **The version nobody typed, and why it needs no retyping.**
+   *
+   * Empty means "whatever this package is on beta", resolved here from the
+   * published manifest at the moment of the run. The header's own reason for
+   * the confirmation is a version chosen in a browser earlier — "a mis-click,
+   * or a stale browser tab offering a version that has since been superseded"
+   * — and a tab that supplies no version cannot supply a superseded one. What
+   * this has to prove is that the resolution is real: that the gate promotes
+   * the pin rather than an empty string, and that the pin is this package's.
+   */
+  it("promotes the beta pin when no version is given", () => {
+    const repo = repository({ manifest: published });
+    const r = check(repo, { version: "", confirm: "" });
+    assert.equal(r.status, 0, r.output);
+    assert.match(r.output, /promotes control_plane's beta pin: 0\.58\.0/);
+    // The jobs below act on this, not on the empty input.
+    assert.equal(outputs(repo).version, "0.58.0");
+    assert.equal(outputs(repo).tag, "firetower-v0.58.0");
+    // End to end, through the writer the gate just preflighted.
+    assert.equal(commit(repo, `control_plane:general=${outputs(repo).version}`).status, 0);
+    assert.equal(reader(repo).control_plane.general, "0.58.0");
+  });
+
+  it("resolves the pin of the package being promoted, and not the other one", () => {
+    // One `sed` away from promoting the control plane's version onto the
+    // desktop: both packages are in the same document, and the beta lines
+    // differ only by the name in front of them.
+    const repo = repository({ manifest: published, releases: ["desktop-v0.21.0"] });
+    const r = check(repo, { package: "desktop", version: "", confirm: "" });
+    assert.equal(r.status, 0, r.output);
+    assert.equal(outputs(repo).version, "0.21.0", "the desktop's pin, not the control plane's 0.58.0");
+    assert.equal(outputs(repo).tag, "desktop-v0.21.0");
+  });
+
+  it("takes a confirmation on a resolved version as a double-check, and refuses if it disagrees", () => {
+    // An operator who knows which version they expect can say so without
+    // typing it into two fields — and if the beta pin has moved under them
+    // since they looked, that is a refusal rather than a surprise.
+    const agreed = repository({ manifest: published });
+    assert.equal(check(agreed, { version: "", confirm: "0.58.0" }).status, 0);
+    assert.equal(outputs(agreed).version, "0.58.0");
+
+    const moved = repository({ manifest: published });
+    const r = check(moved, { version: "", confirm: "0.57.0" });
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /is on 0\.58\.0 on beta, and the confirmation says '0\.57\.0'/);
+    assert.match(r.output, /Nothing has been promoted/);
+    assert.equal(reader(moved).control_plane.general, "0.55.0");
+  });
+
+  it("refuses an empty version when there is no manifest to resolve one from", () => {
+    // The bootstrap, which is the one case with no beta pin to default to.
+    // Resolving it to an empty string would promote nothing while every job
+    // below acted as though something had moved.
+    const repo = repository();
+    assert.equal(reader(repo), null);
+    const r = check(repo, { version: "", confirm: "" });
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /first promotion of a repository has to name its version explicitly/);
+    assert.equal(outputs(repo).version, undefined, "and it published no version for anything to act on");
+
+    // The typed first promotion still goes through, which is what absence is
+    // allowed to be at all.
+    assert.equal(check(repo, { version: "0.57.0" }).status, 0, "absence is still the bootstrap case for a typed version");
+  });
+
+  it("refuses an empty version when this package has no beta pin", () => {
+    // A document that reads, with nothing in it for this package: the other
+    // package has been promoted and this one never has. Nothing to default to,
+    // and both shapes of "nothing" have to be told from a pin — a `null` pin
+    // and an absent package print the same empty string to a careless reader.
+    for (const manifest of [
+      { schema_version: 1, desktop: { beta: "0.21.0", general: "0.20.0", general_promoted_at: null } },
+      { schema_version: 1, control_plane: { beta: null, general: null, general_promoted_at: null } },
+    ]) {
+      const repo = repository({ manifest });
+      const r = check(repo, { version: "", confirm: "" });
+      assert.notEqual(r.status, 0, `${JSON.stringify(manifest)} must be refused`);
+      assert.match(r.output, /no beta pin for control_plane/);
+      assert.equal(outputs(repo).version, undefined);
+      assert.deepEqual(reader(repo), manifest, "and nothing touched");
+    }
+  });
+
+  /**
+   * **A resolved version is not an exempt version.**
+   *
+   * It came out of the manifest, which is a reason to believe it and not a
+   * reason to skip anything: the pin is written by a different workflow, and
+   * "the document said so" is how a malformed pin or a deleted release would
+   * reach the re-tag. Every refusal a typed version faces, a resolved one
+   * faces, in the same order.
+   */
+  it("puts a resolved version through every check a typed one passes", () => {
+    // The release check, on a beta pin whose release is not there.
+    const missing = repository({ manifest: { schema_version: 1, control_plane: { beta: "0.99.0", general: "0.55.0", general_promoted_at: null } } });
+    const r = check(missing, { version: "", confirm: "" });
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /no firetower-v0\.99\.0 release/);
+    // It published the version it resolved before reaching that check, as it
+    // publishes the tag, and that is harmless for the same reason: a `check`
+    // that fails is a `check` no job below it runs behind. What matters is
+    // that a pin out of the manifest does not buy its way past the check.
+    assert.equal(outputs(missing).version, "0.99.0");
+
+    // The parser, on the documents that used to pass the gate and fail at the
+    // commit point. There is no version to resolve out of a document nobody
+    // understands, so this stops before there is anything to promote.
+    for (const bad of [{}, { schema_version: 2 }, { schema_version: 1, control_plane: { general: false, beta: false } }]) {
+      const repo = repository({ manifest: bad });
+      const gate = check(repo, { version: "", confirm: "" });
+      assert.notEqual(gate.status, 0, `${JSON.stringify(bad)} must be refused`);
+      assert.equal(outputs(repo).version, undefined, `${JSON.stringify(bad)}: and nothing resolved out of it`);
+      assert.deepEqual(reader(repo), bad, "and nothing touched");
+      // Refused *as an unusable document*, in the parser's own words. A
+      // looser read would still refuse these — `{}` resolves to no pin and
+      // `false` fails the format check — so asserting only "it refused"
+      // passes on a gate that stopped for the wrong reason and would stop
+      // for none at all on the next document nobody thought of.
+      assert.match(gate.output, /(not being rewritten|nothing is being moved)/i, JSON.stringify(bad));
+    }
+
+    // And a read that went wrong is not absence: it must not become "no
+    // manifest, so name your version", which would hand the operator a
+    // perfectly good reason to type one and promote past a pin nobody read.
+    for (const API_ERROR of ["gh: API rate limit exceeded (HTTP 403)", "error connecting to api.github.com"]) {
+      const repo = repository({ manifest: published });
+      const unreadable = check(repo, { version: "", confirm: "", API_ERROR });
+      assert.notEqual(unreadable.status, 0, `${API_ERROR} must stop the run`);
+      assert.match(unreadable.output, /Could not read the published channel manifest/);
+      assert.equal(reader(repo).control_plane.general, "0.55.0");
+    }
+    // Nor is a destroyed one.
+    const destroyed = repository({ manifest: published });
+    assert.notEqual(commit(destroyed, "control_plane:general=0.57.0", { FAIL_UPLOAD: "channels.json" }).status, 0);
+    const after = check(destroyed, { version: "", confirm: "" });
+    assert.notEqual(after.status, 0);
+    assert.match(after.output, /destroyed\s+manifest/);
+  });
+
+  it("resolves to a pin general access already holds, and finishes rather than refusing", () => {
+    // What an empty version resolves to for most of this repository's life:
+    // beta and general on the same version, because the last promotion already
+    // happened. It is the re-run case, so it has to pass — and say so.
+    const repo = repository({ manifest: { schema_version: 1, control_plane: { beta: "0.58.0", general: "0.58.0", general_promoted_at: "2026-10-01T00:00:00Z" } } });
+    const r = check(repo, { version: "", confirm: "" });
+    assert.equal(r.status, 0, r.output);
+    assert.equal(outputs(repo).version, "0.58.0");
+    assert.match(r.output, /already on 0\.58\.0 on general access/);
   });
 
   it("refuses a confirmation that does not match, and looks nothing up", () => {

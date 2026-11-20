@@ -9,8 +9,15 @@
  * anything a successful run does.
  */
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { Refused, newer, parseHeld, pin } from "./channel-manifest.mjs";
+
+const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "channel-manifest.mjs");
 
 const NOW = "2026-11-18T12:00:00Z";
 const held = (doc) => parseHeld(JSON.stringify(doc));
@@ -220,5 +227,94 @@ describe("promoting", () => {
       assert.ok(r, `${spec} must be refused`);
       assert.equal(r.code, 64, spec);
     }
+  });
+});
+
+/**
+ * **`read`, which is the command a caller with no version yet has to use.**
+ *
+ * A promotion dispatched without a version promotes whatever the package is on
+ * beta, which means something has to hand it that pin. These run the command
+ * line rather than the function, because the contract the workflow depends on
+ * is the command line: the exact `held <package>.<channel>=<pin>` lines it
+ * prints, and the exit codes it prints them instead of.
+ *
+ * The refusals are the point. A caller that is about to *default* to a pin has
+ * to be told "this document is not one we understand" — handed an empty string
+ * instead, it would promote nothing while the run it belongs to acted as
+ * though it had promoted something.
+ */
+describe("reading the pins out of what is published", () => {
+  /** The command line, against a document written to a file. */
+  function cli(args, document) {
+    const dir = mkdtempSync(join(tmpdir(), "channels-"));
+    const at = join(dir, "held.json");
+    if (document !== undefined) writeFileSync(at, typeof document === "string" ? document : `${JSON.stringify(document)}\n`);
+    const r = spawnSync("node", [SCRIPT, ...args.map((a) => (a === "@held" ? at : a))], { encoding: "utf8" });
+    return { status: r.status, out: r.stdout, err: r.stderr };
+  }
+
+  const published = {
+    schema_version: 1,
+    control_plane: { beta: "0.58.0", general: "0.55.0", general_promoted_at: NOW },
+    desktop: { beta: "0.21.0", general: null, general_promoted_at: null },
+  };
+
+  it("prints one line per channel, for every package in the document", () => {
+    const r = cli(["read", "--held", "@held"], published);
+    assert.equal(r.status, 0, r.err);
+    assert.deepEqual(r.out.trimEnd().split("\n"), [
+      "held control_plane.beta=0.58.0",
+      "held control_plane.general=0.55.0",
+      "held desktop.beta=0.21.0",
+      // A pin that was never set is an empty value rather than a missing
+      // line, so "this package has no beta pin" is answerable without a
+      // second question — which is the case a first promotion of one package
+      // on a document the other package wrote is in.
+      "held desktop.general=",
+    ]);
+  });
+
+  it("prints the same lines preflight does, so one format is parsed", () => {
+    const read = cli(["read", "--held", "@held"], published);
+    const preflight = cli(["preflight", "--held", "@held", "--set", "control_plane:general=0.57.0"], published);
+    assert.equal(preflight.status, 0, preflight.err);
+    const held = preflight.out.split("\n").filter((line) => line.startsWith("held "));
+    assert.deepEqual(read.out.trimEnd().split("\n"), held);
+  });
+
+  it("stops on a document it does not understand, rather than printing nothing", () => {
+    // Every one of these read as "nothing is pinned yet" to the `jq` this
+    // replaced, which is the state a promotion is allowed to write anything
+    // from. Exit 2, so the caller's log says it could not be used rather than
+    // that it was refused.
+    for (const bad of ["{}", '{"schema_version":2}', '{"schema_version":1,"control_plane":{"beta":false}}', "<!DOCTYPE html>", ""]) {
+      const r = cli(["read", "--held", "@held"], bad);
+      assert.equal(r.status, 2, `${bad} must stop the caller: ${r.out}${r.err}`);
+      assert.equal(r.out, "", `${bad} must print no pins`);
+      assert.match(r.err, /(not being (rewritten|moved)|nothing is being moved)/i, bad);
+    }
+  });
+
+  it("refuses to be asked about a document that does not exist", () => {
+    // Absence is a question with no answer here: there is no pin in a
+    // document that was never published, so what absence means is the
+    // caller's to decide before it asks. For a promotion it means the first
+    // one, which has to name its version.
+    const r = cli(["read"], undefined);
+    assert.equal(r.status, 64);
+    assert.match(r.err, /--held is required/);
+  });
+
+  it("refuses a --set, because it decides nothing and writes nothing", () => {
+    const r = cli(["read", "--held", "@held", "--set", "control_plane:general=0.57.0"], published);
+    assert.equal(r.status, 64);
+    assert.match(r.err, /takes no --set/);
+  });
+
+  it("still says what the commands are when it is given something else", () => {
+    const r = cli(["peek", "--held", "@held"], published);
+    assert.equal(r.status, 64);
+    assert.match(r.err, /`pin`, `preflight` and `read`/);
   });
 });
