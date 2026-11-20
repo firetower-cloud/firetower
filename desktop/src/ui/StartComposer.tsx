@@ -402,9 +402,16 @@ export function StartComposer({
      team beside a different profile, so the two cannot disagree. */
   const everyStart = useMemo(() => startables(teams, profiles), [teams, profiles]);
   const start = startableIn(everyStart, startAs);
-  const team = startAs?.kind === "team" ? teams.find((t) => t.id === startAs.id) : undefined;
+  /* **A held pick that has gone falls back rather than sticking**, which is
+     what every other resolved default on this page does. A team's lead
+     profile can be deleted, or the team filed away, while a composer sits
+     open holding it — and sending it would be a refusal from the server
+     about something this screen could already see. */
+  const startable = start && !start.blocked ? start : undefined;
+  const team =
+    startable?.kind === "team" ? teams.find((t) => t.id === startable.id) : undefined;
   const profile = profiles.find(
-    (p) => p.id === (startAs?.kind === "team" ? team?.lead : startAs?.id),
+    (p) => p.id === (startable?.kind === "team" ? team?.lead : startable?.id),
   );
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
   // A saved engine is used only while it still exists and is supported — one
@@ -530,8 +537,8 @@ export function StartComposer({
              contradiction `create_session_as` refuses, and sending only the
              profile would start it bare with no reach — which is exactly the
              difference the picker just made visible. */
-          profile: startAs?.kind === "profile" ? startAs.id : undefined,
-          team: startAs?.kind === "team" ? startAs.id : undefined,
+          profile: startable?.kind === "profile" ? startable.id : undefined,
+          team: startable?.kind === "team" ? startable.id : undefined,
           accountId: account.id,
           branch,
           hostId: host?.id,
@@ -1222,7 +1229,7 @@ export function startables(teams: AgentTeam[], profiles: Role[]): Startable[] {
          stand in; one whose lead is filed somewhere this person cannot reach
          has nothing they could be started as. */
       blocked: !t.lead
-        ? "No lead yet, so there is nobody to start"
+        ? "It has no lead, so there is nobody to start"
         : t.leadName
           ? undefined
           : "Its lead isn't a profile you can use",
@@ -1276,6 +1283,10 @@ export function startableMatches(s: Startable, q: string): boolean {
  */
 export function consequence(s: Startable | undefined): string | null {
   if (!s) return null;
+  /* **A row there is nothing to start says so**, rather than a sentence about
+     a lead it does not have. Reachable without picking one: a team's lead
+     profile can be deleted while a composer is open holding it. */
+  if (s.blocked) return `${s.name} can't be started. ${s.blocked}.`;
   if (s.kind === "team") {
     const lead = s.lead ?? "its lead";
     const others = Math.max(0, s.agents - 1);

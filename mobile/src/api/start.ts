@@ -180,7 +180,7 @@ export function startables(teams: AgentTeam[], profiles: Role[]): Startable[] {
            about the one thing it was for. */
         does: t.leadName ? `Led by ${t.leadName}` : undefined,
         blocked: !t.lead
-          ? "No lead yet, so there is nobody to start"
+          ? "It has no lead, so there is nobody to start"
           : t.leadName
             ? undefined
             : "Its lead isn't a profile you can use",
@@ -240,6 +240,10 @@ export function startableMatches(
  */
 export function consequence(s: Startable | undefined): string | null {
   if (!s) return null;
+  /* **A row there is nothing to start says so**, rather than a sentence about
+     a lead it does not have. Reachable without picking one: a team's lead
+     profile can be deleted while a composer is open holding it. */
+  if (s.blocked) return `${s.name} can't be started. ${s.blocked}.`;
   if (s.kind === "team") {
     const lead = s.lead ?? "its lead";
     const others = Math.max(0, s.agents - 1);
@@ -318,7 +322,13 @@ export type Start = {
   profile: Role | null;
   /** The team it runs as, when one was picked. Null for a lone profile. */
   team: AgentTeam | null;
-  /** The row that was picked, which is what the sentence is said about. */
+  /**
+   * The row that will actually be started, and what the composer sends.
+   *
+   * Absent when nothing is picked **or** when what was picked can no longer
+   * be started — a team whose lead profile has been deleted since. Falling
+   * back is the rule the machine and the account follow too.
+   */
   startable: Startable | undefined;
   /** The engine the profile pins. Non-null means the agent is shown, not chosen. */
   pinned: Agent | null;
@@ -386,14 +396,18 @@ export function resolveStart(input: {
      the engine, the pinned settings and the account resolve from one place
      either way. `create_session_as` makes the same resolution and refuses a
      team beside a different profile, so the two cannot disagree. */
-  const startable = startableIn(startables(teams, profiles), chose.startAs);
+  /* **A held pick that has gone falls back rather than sticking**, which is
+     the rule the machine and the account above already follow: a team's lead
+     profile can be deleted, or the team filed away, while a composer sits
+     open holding it, and sending it would be a refusal from the server about
+     something this screen could already see. */
+  const held = startableIn(startables(teams, profiles), chose.startAs);
+  const startable = held && !held.blocked ? held : undefined;
   const team =
-    chose.startAs?.kind === "team"
-      ? (teams.find((t) => t.id === chose.startAs!.id) ?? null)
-      : null;
+    startable?.kind === "team" ? (teams.find((t) => t.id === startable.id) ?? null) : null;
   const profile =
     profiles.find(
-      (p) => p.id === (chose.startAs?.kind === "team" ? team?.lead : chose.startAs?.id),
+      (p) => p.id === (startable?.kind === "team" ? team?.lead : startable?.id),
     ) ?? null;
   const pinned = pinnedAgent(profile);
   const wanted = pinned ?? chose.agentKind;

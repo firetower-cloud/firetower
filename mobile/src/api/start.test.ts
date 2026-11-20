@@ -219,7 +219,7 @@ describe("what the picker offers", () => {
 
   it("will not start a team with no lead, or one whose lead you cannot use", () => {
     const [leadless] = startables([team({ lead: undefined, leadName: undefined })], []);
-    expect(leadless.blocked).toBe("No lead yet, so there is nobody to start");
+    expect(leadless.blocked).toBe("It has no lead, so there is nobody to start");
     const [hidden] = startables([team({ leadName: undefined })], []);
     expect(hidden.blocked).toBe("Its lead isn't a profile you can use");
   });
@@ -307,6 +307,12 @@ describe("what picking it would do", () => {
     );
   });
 
+  it("says what is wrong with a row there is nothing to start", () => {
+    expect(
+      say([team({ lead: undefined, leadName: undefined })], [], { kind: "team", id: "t1" }),
+    ).toBe("Product can't be started. It has no lead, so there is nobody to start.");
+  });
+
   it("says nothing about a plain workspace, which the row already states", () => {
     expect(say([team()], [role()], null)).toBeNull();
   });
@@ -342,6 +348,20 @@ describe("starting as a team", () => {
       chose: { startAs: { kind: "profile", id: "r1" }, repoIds: [], hostId: "", agentKind: "", accountId: "" },
     });
     expect(r.profile?.id).toBe("r1");
+    expect(r.team).toBeNull();
+  });
+
+  it("falls back from a team that can no longer be started, rather than sticking", () => {
+    // The lead's profile was deleted while the composer sat open holding the
+    // team. Sending it would be a refusal from the server about something
+    // this screen could already see.
+    const r = world({
+      profiles: [role({ id: "r1" })],
+      teams: [team({ lead: undefined, leadName: undefined })],
+      chose: { startAs: { kind: "team", id: "t1" }, repoIds: [], hostId: "", agentKind: "", accountId: "" },
+    });
+    expect(r.startable).toBeUndefined();
+    expect(r.profile).toBeNull();
     expect(r.team).toBeNull();
   });
 

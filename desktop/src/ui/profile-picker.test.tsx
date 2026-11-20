@@ -140,7 +140,7 @@ describe("what the picker offers", () => {
     // onto its positions, and when the position was the root it takes the
     // whole tree. There is no lead's seat to stand in.
     const [leadless] = startables([team("t_02", "Growth", null, 0)], []);
-    expect(leadless.blocked).toBe("No lead yet, so there is nobody to start");
+    expect(leadless.blocked).toBe("It has no lead, so there is nobody to start");
     expect(draw([], [team("t_02", "Growth", null, 0)])).toContain("nobody to start");
   });
 
@@ -210,6 +210,16 @@ describe("the sentence under the box", () => {
     const manager = role("p_09", "Orchestrator", true);
     expect(say([], [manager], { kind: "profile", id: "p_09" })).toBe(
       "Starts Orchestrator on its own. Its own profile still lets it hand work out, which an agent team replaces.",
+    );
+  });
+
+  it("says what is wrong with a row there is nothing to start", () => {
+    // Reachable without picking one: a team's lead profile can be deleted
+    // while a composer sits open holding that team. The sentence must not be
+    // about a lead it does not have.
+    const leadless = team("t_04", "Growth", null, 0);
+    expect(say([leadless], [], { kind: "team", id: "t_04" })).toBe(
+      "Growth can't be started. It has no lead, so there is nobody to start.",
     );
   });
 

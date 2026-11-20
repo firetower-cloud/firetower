@@ -214,9 +214,13 @@ export function NewSchedule({
      team names its lead's profile too. The composer's own resolution. */
   const everyStart = useMemo(() => startables(teams, profiles), [teams, profiles]);
   const start = startableIn(everyStart, startAs);
-  const team = startAs?.kind === "team" ? teams.find((t) => t.id === startAs.id) : undefined;
+  /* A held pick that has gone falls back rather than sticking — the
+     composer's rule, for the same reason. */
+  const startable = start && !start.blocked ? start : undefined;
+  const team =
+    startable?.kind === "team" ? teams.find((t) => t.id === startable.id) : undefined;
   const profile = profiles.find(
-    (p) => p.id === (startAs?.kind === "team" ? team?.lead : startAs?.id),
+    (p) => p.id === (startable?.kind === "team" ? team?.lead : startable?.id),
   );
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
   const picked = agents.some((a) => a.kind === where.agent) ? (where.agent as Agent) : undefined;
@@ -389,8 +393,8 @@ export function NewSchedule({
         timezone: zone,
         /* One of the two, never both: the server names the lead's profile
            from the team and refuses a team beside a different one. */
-        profile: startAs?.kind === "profile" ? startAs.id : undefined,
-        team: startAs?.kind === "team" ? startAs.id : undefined,
+        profile: startable?.kind === "profile" ? startable.id : undefined,
+        team: startable?.kind === "team" ? startable.id : undefined,
         agent: kind,
         accountId: accountId || undefined,
         /* What this engine actually offers, at the value this sheet is

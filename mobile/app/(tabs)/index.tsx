@@ -398,8 +398,8 @@ export default function Home() {
              contradiction `create_session_as` refuses, and sending only the
              profile would start it bare with no reach — which is exactly the
              difference the sheet just made visible. */
-          profile: startAs?.kind === "profile" ? startAs.id : undefined,
-          team: startAs?.kind === "team" ? startAs.id : undefined,
+          profile: start.startable?.kind === "profile" ? start.startable.id : undefined,
+          team: start.startable?.kind === "team" ? start.startable.id : undefined,
           accountId: start.account?.id,
           branch: start.branch,
           hostId: start.host?.id,
