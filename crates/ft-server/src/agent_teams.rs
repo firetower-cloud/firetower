@@ -300,6 +300,29 @@ fn walk(
             node.profile
         )));
     }
+    /* **One profile at most once among one position's children.** A lead
+    hands work off by *name* — `role: "Engineer"` — so two sibling seats of
+    one profile would be a name that does not say which seat is meant, and
+    picking either would be the guess `at_most_one` exists to refuse. This
+    is the same rule #489 applies to profile names within a directory, one
+    level down: make the reference unambiguous where somebody can still see
+    what they drew, rather than at the spawn that cannot be answered.
+    Across the team it stays legal, which is what per-position instructions
+    are for — two seats of one profile in different branches are told
+    different things and are never resolved against each other. */
+    for (at, child) in node.children.iter().enumerate() {
+        if node.children[..at]
+            .iter()
+            .any(|c| c.profile == child.profile)
+        {
+            return Err(Refused(format!(
+                "`{}` is already a direct report of this position. A lead hands work off by \
+                 name, so two of one profile reporting to one position would not say which is \
+                 meant. The same profile can sit elsewhere in the team.",
+                child.profile
+            )));
+        }
+    }
     ancestors.push(node.profile.clone());
     for child in &node.children {
         walk(child, depth + 1, ancestors, counted)?;
@@ -982,14 +1005,36 @@ mod tests {
     }
 
     /// A profile may sit in a team twice — that is what per-position
-    /// instructions are for — but never beneath itself.
+    /// instructions are for — but never beneath itself, and never twice under
+    /// one position.
     #[test]
     fn a_profile_may_be_in_a_team_twice_but_not_under_itself() {
+        // Two seats of one profile, in different branches: legal, and told
+        // apart by what each seat says.
         let twice = team(seat(
+            "role_lead",
+            vec![
+                seat("role_a", vec![seat("role_eng", vec![])]),
+                seat("role_b", vec![seat("role_eng", vec![])]),
+            ],
+        ));
+        assert!(
+            check(&twice).is_ok(),
+            "two seats, one profile, two branches"
+        );
+
+        // Two of one profile reporting to the *same* position: a name that
+        // does not say which is meant.
+        let ambiguous = team(seat(
             "role_lead",
             vec![seat("role_eng", vec![]), seat("role_eng", vec![])],
         ));
-        assert!(check(&twice).is_ok(), "two seats, one profile");
+        let refused = check(&ambiguous).expect_err("two siblings of one profile");
+        assert!(
+            refused.0.contains("already a direct report"),
+            "the refusal says what the clash was: {}",
+            refused.0
+        );
 
         let under_itself = team(seat("role_lead", vec![seat("role_lead", vec![])]));
         let refused = check(&under_itself).expect_err("a profile under itself");
@@ -1023,5 +1068,617 @@ mod tests {
         ];
         let order: Vec<String> = in_reading_order(flat).into_iter().map(|p| p.id).collect();
         assert_eq!(order, vec!["lead", "a", "a1", "a2", "b"]);
+    }
+    // ── against a real database ─────────────────────────────────────────
+    //
+    // The unit tests above own the arithmetic of the limits. Everything below
+    // is what they cannot reach: that a team is filed and permissioned exactly
+    // as a profile is, that one profile in two teams has two sets of children,
+    // and that a save keeps the seats a running session is standing in.
+
+    use crate::accounts::Accounts;
+    use crate::db::Db;
+
+    struct World {
+        db: Db,
+        teams: AgentTeams,
+        roles: crate::roles::Roles,
+        accounts: Accounts,
+        org: String,
+        me: String,
+        my_slug: String,
+    }
+
+    async fn world() -> World {
+        let (db, me) = Db::open_for_test_owned().await.unwrap();
+        let pool = db.pool().clone();
+        let org = db.org().await.unwrap();
+        let my_slug: String = sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1")
+            .bind(&me)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        World {
+            teams: AgentTeams::new(pool.clone()),
+            roles: crate::roles::Roles::new(pool.clone()),
+            accounts: Accounts::new(pool.clone()),
+            db,
+            org,
+            me,
+            my_slug,
+        }
+    }
+
+    impl World {
+        /// A profile, through the same `check` the API applies.
+        async fn profile(&self, name: &str) -> String {
+            self.profile_of(&self.me, &self.my_slug, name).await
+        }
+
+        async fn profile_of(&self, person: &str, slug: &str, name: &str) -> String {
+            let new: crate::roles::NewRole = serde_json::from_value(serde_json::json!({
+                "name": name,
+                "does": format!("{name}, and when to reach for it"),
+                "placement": "here",
+                "instructions": format!("How {name} works"),
+            }))
+            .unwrap();
+            crate::roles::check(&new).unwrap();
+            self.roles
+                .create(&self.org, person, slug, &new)
+                .await
+                .unwrap()
+                .as_str()
+                .to_string()
+        }
+
+        async fn colleague(&self, name: &str) -> (String, String) {
+            let org = ft_core::OrgId::from_stored(self.org.clone());
+            let who = self
+                .accounts
+                .create_user(&org, name, &format!("{name}@example.test"), "member")
+                .await
+                .unwrap()
+                .0
+                .id
+                .as_str()
+                .to_string();
+            let slug: String = sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1")
+                .bind(&who)
+                .fetch_one(self.db.pool())
+                .await
+                .unwrap();
+            (who, slug)
+        }
+    }
+
+    fn named(name: &str, lead: NewPosition) -> NewAgentTeam {
+        NewAgentTeam {
+            name: name.into(),
+            lead,
+            directory: None,
+        }
+    }
+
+    /// Filed, shared and permissioned exactly as a profile is — which means
+    /// through the one predicate and nothing else.
+    ///
+    /// A colleague with no grant is not told it exists; an exception named on
+    /// the team is the fourth route in and reaches it; and `Viewer` is not
+    /// `Writer`, so somebody given a look cannot rewrite the tree.
+    #[tokio::test]
+    async fn a_team_is_filed_and_permissioned_exactly_as_a_profile_is() {
+        let w = world().await;
+        let lead = w.profile("Orchestrator").await;
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named("Platform", seat(&lead, vec![])),
+            )
+            .await
+            .unwrap();
+        let (ana, _) = w.colleague("ana").await;
+
+        assert_eq!(
+            w.teams.visible(&w.me, Level::Viewer).await.unwrap().len(),
+            1,
+            "mine, in my own space"
+        );
+        assert!(
+            w.teams
+                .visible(&ana, Level::Viewer)
+                .await
+                .unwrap()
+                .is_empty(),
+            "a colleague with no grant is not told it exists"
+        );
+
+        let access = crate::access::Access::new(w.db.pool().clone());
+        access
+            .set_exception(
+                crate::access::FiledKind::AgentTeam,
+                id.as_str(),
+                &ana,
+                Level::Viewer,
+            )
+            .await
+            .unwrap();
+        let hers = w.teams.visible(&ana, Level::Viewer).await.unwrap();
+        assert_eq!(hers.len(), 1, "named on the team, and reaching it");
+        assert!(!hers[0].may_write, "a look is not a licence to rewrite it");
+        assert!(
+            w.teams
+                .one(&ana, id.as_str(), Level::Writer)
+                .await
+                .unwrap()
+                .is_none(),
+            "and Writer is absent rather than refused"
+        );
+        assert!(
+            !w.teams
+                .write(&ana, id.as_str(), &named("Hers", seat(&lead, vec![])))
+                .await
+                .unwrap(),
+            "so her save does nothing"
+        );
+    }
+
+    /// **The sentence the whole ticket exists for.** The same profile in two
+    /// teams has different children and different extra instructions, with
+    /// identical name, description, instructions and skills.
+    #[tokio::test]
+    async fn one_profile_in_two_teams_has_two_sets_of_children() {
+        let w = world().await;
+        let designer = w.profile("Designer").await;
+        let illustrator = w.profile("Illustrator").await;
+        let writer = w.profile("Writer").await;
+
+        // In Studio the Designer has two reports and a note about this team.
+        let studio = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named(
+                    "Studio",
+                    NewPosition {
+                        id: None,
+                        profile: designer.clone(),
+                        instructions: "In Studio, ship the brand system first.".into(),
+                        children: vec![seat(&illustrator, vec![]), seat(&writer, vec![])],
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+        // In Platform the same Designer leads nobody.
+        let platform = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named(
+                    "Platform",
+                    NewPosition {
+                        id: None,
+                        profile: designer.clone(),
+                        instructions: "In Platform, only the console.".into(),
+                        children: vec![],
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        let in_studio = w
+            .teams
+            .lead_of(&w.me, studio.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        let in_platform = w
+            .teams
+            .lead_of(&w.me, platform.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(in_studio.profile, in_platform.profile, "one profile");
+        assert_ne!(in_studio.position, in_platform.position, "two positions");
+        assert_eq!(
+            w.teams
+                .reports(&w.me, &in_studio.position)
+                .await
+                .unwrap()
+                .iter()
+                .map(|r| r.profile.name.clone())
+                .collect::<Vec<_>>(),
+            vec!["Illustrator", "Writer"],
+            "three reports in one team"
+        );
+        assert!(
+            w.teams
+                .reports(&w.me, &in_platform.position)
+                .await
+                .unwrap()
+                .is_empty(),
+            "and none in the other"
+        );
+        assert_ne!(
+            in_studio.instructions, in_platform.instructions,
+            "different extra instructions"
+        );
+
+        // And the profile itself is one row, unchanged by either.
+        let row = w
+            .roles
+            .one(&w.me, &designer, Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.name, "Designer");
+        assert_eq!(row.instructions, "How Designer works");
+        assert!(
+            row.delegate_scope.is_empty(),
+            "nothing about reach is written onto the profile"
+        );
+    }
+
+    /// Adding a profile that leads another team creates a position with no
+    /// children, and the other team is unchanged. **Nothing travels.**
+    #[tokio::test]
+    async fn importing_a_lead_of_another_team_brings_nothing_with_it() {
+        let w = world().await;
+        let (qa, eng, ops) = (
+            w.profile("QA").await,
+            w.profile("Engineer").await,
+            w.profile("Ops").await,
+        );
+        // QA leads its own team, with two reports.
+        let theirs = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named(
+                    "QA's own",
+                    seat(&qa, vec![seat(&eng, vec![]), seat(&ops, vec![])]),
+                ),
+            )
+            .await
+            .unwrap();
+        // And is given a seat in another team.
+        let mine = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named("Mine", seat(&eng, vec![seat(&qa, vec![])])),
+            )
+            .await
+            .unwrap();
+
+        let here = w.teams.positions(&w.me, mine.as_str()).await.unwrap();
+        let qa_here = here.iter().find(|p| p.profile == qa).unwrap();
+        assert!(
+            w.teams
+                .reports(&w.me, &qa_here.id)
+                .await
+                .unwrap()
+                .is_empty(),
+            "the seat comes with nothing under it"
+        );
+        let there = w
+            .teams
+            .lead_of(&w.me, theirs.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            w.teams.reports(&w.me, &there.position).await.unwrap().len(),
+            2,
+            "and the other team is exactly as it was"
+        );
+    }
+
+    /// A save keeps the seats it names, and **a session standing in one keeps
+    /// its place**. Sibling order is explicit, so swapping two is a save.
+    #[tokio::test]
+    async fn a_save_keeps_the_seats_it_names_and_removes_the_rest() {
+        let w = world().await;
+        let (lead, a, b, c) = (
+            w.profile("Lead").await,
+            w.profile("A").await,
+            w.profile("B").await,
+            w.profile("C").await,
+        );
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named(
+                    "Platform",
+                    seat(
+                        &lead,
+                        vec![seat(&a, vec![seat(&c, vec![])]), seat(&b, vec![])],
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+        let before = w.teams.positions(&w.me, id.as_str()).await.unwrap();
+        let find = |rows: &[Position], profile: &str| {
+            rows.iter().find(|p| p.profile == profile).unwrap().clone()
+        };
+        let (was_lead, was_a, was_b, was_c) = (
+            find(&before, &lead),
+            find(&before, &a),
+            find(&before, &b),
+            find(&before, &c),
+        );
+        assert_eq!(
+            before.iter().map(|p| p.profile.clone()).collect::<Vec<_>>(),
+            vec![lead.clone(), a.clone(), c.clone(), b.clone()],
+            "the lead, then each subtree in full"
+        );
+
+        // Swap A and B, keep A's subtree, drop C.
+        w.teams
+            .write(
+                &w.me,
+                id.as_str(),
+                &named(
+                    "Platform",
+                    NewPosition {
+                        id: Some(was_lead.id.clone()),
+                        profile: lead.clone(),
+                        instructions: String::new(),
+                        children: vec![
+                            NewPosition {
+                                id: Some(was_b.id.clone()),
+                                profile: b.clone(),
+                                instructions: String::new(),
+                                children: vec![],
+                            },
+                            NewPosition {
+                                id: Some(was_a.id.clone()),
+                                profile: a.clone(),
+                                instructions: "Now with a note.".into(),
+                                children: vec![],
+                            },
+                        ],
+                    },
+                ),
+            )
+            .await
+            .unwrap();
+
+        let after = w.teams.positions(&w.me, id.as_str()).await.unwrap();
+        assert_eq!(
+            after.iter().map(|p| p.profile.clone()).collect::<Vec<_>>(),
+            vec![lead.clone(), b.clone(), a.clone()],
+            "B first now, and C gone"
+        );
+        assert_eq!(
+            find(&after, &a).id,
+            was_a.id,
+            "A is the same row, so a session standing in it still is"
+        );
+        assert_eq!(find(&after, &a).instructions, "Now with a note.");
+        assert!(
+            w.teams.standing(&w.me, &was_c.id).await.unwrap().is_none(),
+            "and the removed seat is gone rather than orphaned"
+        );
+    }
+
+    /// An id from somewhere else is refused rather than quietly minted into a
+    /// new seat.
+    #[tokio::test]
+    async fn an_id_that_is_not_this_teams_is_refused() {
+        let w = world().await;
+        let lead = w.profile("Lead").await;
+        let other = w.profile("Other").await;
+        let mine = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named("Mine", seat(&lead, vec![])),
+            )
+            .await
+            .unwrap();
+        let theirs = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named("Theirs", seat(&other, vec![])),
+            )
+            .await
+            .unwrap();
+        let elsewhere = w
+            .teams
+            .lead_of(&w.me, theirs.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        let mine_lead = w
+            .teams
+            .lead_of(&w.me, mine.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+
+        let refused = w
+            .teams
+            .write(
+                &w.me,
+                mine.as_str(),
+                &named(
+                    "Mine",
+                    NewPosition {
+                        id: Some(mine_lead.position.clone()),
+                        profile: lead.clone(),
+                        instructions: String::new(),
+                        children: vec![NewPosition {
+                            id: Some(elsewhere.position.clone()),
+                            profile: other.clone(),
+                            instructions: String::new(),
+                            children: vec![],
+                        }],
+                    },
+                ),
+            )
+            .await
+            .expect_err("an id from another team");
+        assert!(
+            format!("{refused}").contains("not a position in this team"),
+            "{refused}"
+        );
+    }
+
+    /// **The intersection, which is the security of the feature.** A seat
+    /// whose profile this person cannot reach is not a report, and its name is
+    /// withheld from the map rather than the seat being hidden.
+    #[tokio::test]
+    async fn a_seat_whose_profile_nobody_can_see_is_not_a_report() {
+        let w = world().await;
+        let (ana, ana_slug) = w.colleague("ana").await;
+        let lead = w.profile_of(&ana, &ana_slug, "Hers").await;
+        let secret = w.profile_of(&ana, &ana_slug, "Secret").await;
+        // Ana's team, with both of her own profiles in it.
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &ana,
+                &ana_slug,
+                None,
+                &named("Hers", seat(&lead, vec![seat(&secret, vec![])])),
+            )
+            .await
+            .unwrap();
+
+        // She shares the team with me, and neither profile.
+        let access = crate::access::Access::new(w.db.pool().clone());
+        access
+            .set_exception(
+                crate::access::FiledKind::AgentTeam,
+                id.as_str(),
+                &w.me,
+                Level::Viewer,
+            )
+            .await
+            .unwrap();
+
+        let standing = w.teams.lead_of(&w.me, id.as_str()).await.unwrap().unwrap();
+        assert!(
+            w.teams
+                .reports(&w.me, &standing.position)
+                .await
+                .unwrap()
+                .is_empty(),
+            "a profile I cannot reach is not something I can be handed"
+        );
+        assert_eq!(
+            w.teams
+                .reports(&ana, &standing.position)
+                .await
+                .unwrap()
+                .len(),
+            1,
+            "and is exactly one for her"
+        );
+        let seen = w.teams.positions(&w.me, id.as_str()).await.unwrap();
+        assert_eq!(seen.len(), 2, "the shape of the tree is the team's");
+        assert!(
+            seen.iter().all(|p| p.profile_name.is_none()),
+            "and the names are the profiles', withheld"
+        );
+    }
+
+    /// A team cannot be written naming a profile its author cannot see.
+    #[tokio::test]
+    async fn a_team_cannot_name_a_profile_its_author_cannot_see() {
+        let w = world().await;
+        let (ana, ana_slug) = w.colleague("ana").await;
+        let mine = w.profile("Mine").await;
+        let hers = w.profile_of(&ana, &ana_slug, "Hers").await;
+        let refused = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named("Mine", seat(&mine, vec![seat(&hers, vec![])])),
+            )
+            .await
+            .expect_err("naming somebody else's profile");
+        assert!(
+            format!("{refused}").contains("aren't ones you can use"),
+            "{refused}"
+        );
+    }
+
+    /// Deleting a profile takes its seats and everything under them, which is
+    /// what makes #494's confirmation a true statement about what will happen.
+    #[tokio::test]
+    async fn deleting_a_profile_takes_its_seats_and_their_children() {
+        let w = world().await;
+        let (lead, mid, leaf) = (
+            w.profile("Lead").await,
+            w.profile("Mid").await,
+            w.profile("Leaf").await,
+        );
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named(
+                    "Platform",
+                    seat(&lead, vec![seat(&mid, vec![seat(&leaf, vec![])])]),
+                ),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            w.teams.positions(&w.me, id.as_str()).await.unwrap().len(),
+            3
+        );
+        assert!(w.roles.delete(&w.me, &mid).await.unwrap());
+        assert_eq!(
+            w.teams
+                .positions(&w.me, id.as_str())
+                .await
+                .unwrap()
+                .iter()
+                .map(|p| p.profile.clone())
+                .collect::<Vec<_>>(),
+            vec![lead],
+            "the seat and the one under it went with it"
+        );
     }
 }

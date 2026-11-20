@@ -351,6 +351,10 @@ pub enum FiledKind {
     Artifact,
     /// A saved kind of agent a lead can start.
     Role,
+    /// A team of agents: a name, the profile that leads it, and the tree of
+    /// positions delegation resolves from. Not a [`Team`], which is a group of
+    /// people — see `migrations/server/20261120120000_agent_teams.sql`.
+    AgentTeam,
     /// The one kind that is never in a directory.
     ///
     /// It is in this enum because the screens that list what somebody owns,
@@ -370,6 +374,7 @@ impl FiledKind {
             "skill" => FiledKind::Skill,
             "artifact" => FiledKind::Artifact,
             "role" => FiledKind::Role,
+            "agentTeam" => FiledKind::AgentTeam,
             "repository" => FiledKind::Repository,
             other => bail!("{other} is not something a directory holds"),
         })
@@ -385,6 +390,7 @@ impl FiledKind {
             FiledKind::Skill => "skill",
             FiledKind::Artifact => "artifact",
             FiledKind::Role => "role",
+            FiledKind::AgentTeam => "agent team",
             FiledKind::Repository => "repository",
         }
     }
@@ -922,6 +928,7 @@ impl Access {
             FiledKind::Skill => "skills",
             FiledKind::Artifact => "artifacts",
             FiledKind::Role => "roles",
+            FiledKind::AgentTeam => "agent_teams",
             // Never reached by a move: `is_filable` refuses before this, and
             // `may_share` would refuse again on the personal path. Named
             // anyway, because the one place a kind becomes a table name should

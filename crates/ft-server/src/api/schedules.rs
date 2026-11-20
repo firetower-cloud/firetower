@@ -676,7 +676,12 @@ async fn pins_for(
     let (persona, fingerprint) = match profile {
         None => (None, None),
         Some(role) => (
-            Some(super::sessions::persona_for(state, owner_id, role).await?),
+            // No seat: a schedule names a profile, and a schedule that names
+            // a *team* pins the whole tree at approval, which is #493's. So
+            // an approved run is composed the way an unteamed profile is, and
+            // nothing here can quietly acquire a reach somebody did not
+            // approve.
+            Some(super::sessions::persona_for(state, owner_id, role, None).await?),
             Some(profile_fingerprint(role)),
         ),
     };
