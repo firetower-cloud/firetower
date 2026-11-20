@@ -98,9 +98,14 @@ pub struct AgentTeam {
     pub id: String,
     pub path: String,
     pub name: String,
-    /// The profile that leads it, by id. Absent only for a team whose lead
-    /// profile was deleted, which the cascade makes impossible — kept
-    /// `Option` so a reader never panics over a row it did not expect.
+    /// The profile that leads it, by id.
+    ///
+    /// **Absent for a team whose lead profile was deleted**, which is a real
+    /// state rather than an impossible one: deleting a profile cascades onto
+    /// its positions, and when the position was the root that takes the whole
+    /// tree with it. The team is then an empty team with a name, and a save
+    /// that names a lead is what repairs it. #494's confirmation is what tells
+    /// somebody that is about to happen.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lead: Option<String>,
     /// What that profile is called, or absent when it is filed somewhere this
@@ -1761,5 +1766,65 @@ mod tests {
                 + &hers[0].path[hers[0].path.rfind('_').unwrap() + 1..]
         );
         assert!(hers[0].may_write, "and a writer there may change it");
+    }
+    /// Deleting the profile that *leads* a team empties the team rather than
+    /// deleting it, and a save with a new lead repairs it.
+    ///
+    /// The cascade runs from the root position, so it takes the whole tree.
+    /// That is the approved behaviour — a profile's deletion is confirmed
+    /// against the teams it is in — and what matters here is that nothing
+    /// panics over a team with no lead and that it is not a dead row.
+    #[tokio::test]
+    async fn deleting_a_leads_profile_empties_the_team_and_a_save_repairs_it() {
+        let w = world().await;
+        let (lead, report, successor) = (
+            w.profile("Lead").await,
+            w.profile("Report").await,
+            w.profile("Successor").await,
+        );
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named("Platform", seat(&lead, vec![seat(&report, vec![])])),
+            )
+            .await
+            .unwrap();
+        assert!(w.roles.delete(&w.me, &lead).await.unwrap());
+
+        let now = w
+            .teams
+            .one(&w.me, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .expect("the team is still there");
+        assert_eq!(now.positions, 0, "the cascade ran from the root");
+        assert!(now.lead.is_none(), "so it has nobody leading it");
+        assert!(now.lead_name.is_none());
+        assert!(
+            w.teams.lead_of(&w.me, id.as_str()).await.unwrap().is_none(),
+            "and nothing to stand in"
+        );
+
+        assert!(w
+            .teams
+            .write(
+                &w.me,
+                id.as_str(),
+                &named("Platform", seat(&successor, vec![]))
+            )
+            .await
+            .unwrap());
+        let repaired = w
+            .teams
+            .one(&w.me, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(repaired.lead.as_deref(), Some(successor.as_str()));
+        assert_eq!(repaired.positions, 1);
     }
 }
