@@ -41,6 +41,7 @@ import {
 import { createRole, getListRolesQueryKey, useListRoles } from "~/api/generated/roles/roles";
 import type { Position, Role } from "~/api/generated/model";
 import { trouble, useSkills, why } from "~/data";
+import { useLeaveGuard } from "~/shims/next-navigation";
 import { Button, Icon } from "~/components/ui";
 import { Note, Trouble, WhereTo } from "~/ui/config/bits";
 import {
@@ -66,6 +67,7 @@ import {
   removeSeat,
   toNewPosition,
   type Card,
+  type Change,
   type Seat,
 } from "~/ui/config/team-map";
 
@@ -129,6 +131,8 @@ export function TeamMap({
   const [problem, setProblem] = useState<string | null>(null);
   /** Which auto-added seat the review is on, or -1 before it has started. */
   const [reviewing, setReviewing] = useState(-1);
+  /** Where somebody was going when the draft stopped them. */
+  const [leaving, setLeaving] = useState<{ resume: () => void } | null>(null);
   const surface = useRef<HTMLDivElement>(null);
 
   /* ── What the cards read from ─────────────────────────────────────── */
@@ -166,6 +170,20 @@ export function TeamMap({
   );
 
   /**
+   * **Leaving with a draft asks.**
+   *
+   * Save being the only commit is the whole promise of this screen, and a
+   * surface that drops unsaved work on the way out breaks it quietly — which
+   * is the one failure a commit boundary must not have. Every way out of here
+   * goes through `navigate`: the back link, a rail row, a palette command.
+   */
+  useLeaveGuard((resume) => {
+    if (pending.length === 0 || saving) return false;
+    setLeaving({ resume });
+    return true;
+  });
+
+  /**
    * The name on a card, or nothing when the profile is out of reach.
    *
    * **The server decides, and this does not look for a second opinion.** A
@@ -197,8 +215,8 @@ export function TeamMap({
     setSelected(null);
   };
 
-  const save = async () => {
-    if (!team || !draft || saving) return;
+  const save = async (): Promise<boolean> => {
+    if (!team || !draft || saving) return false;
     setSaving(true);
     setProblem(null);
     try {
@@ -211,11 +229,20 @@ export function TeamMap({
          has to carry back. Until it lands, what is on screen is what was
          sent, so nothing flickers. */
       seen.current = null;
+      return true;
     } catch (e) {
       setProblem(why(e));
+      return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  /** Go after all, without being asked again. */
+  const andGo = () => {
+    const go = leaving?.resume;
+    setLeaving(null);
+    go?.();
   };
 
   /** Make a profile and put it straight under the card that asked for one. */
@@ -449,8 +476,64 @@ export function TeamMap({
           onCreate={makeProfile}
         />
       )}
+
+      {leaving && (
+        <Sheet
+          title={`Save your changes to ${team.name}?`}
+          onClose={() => setLeaving(null)}
+          foot={
+            <>
+              <span className="msg">{problem ?? ""}</span>
+              <Button variant="quiet" onClick={() => setLeaving(null)}>
+                Stay here
+              </Button>
+              <Button
+                variant="default"
+                onClick={() => {
+                  discard();
+                  andGo();
+                }}
+              >
+                Discard
+              </Button>
+              <Button
+                variant="primary"
+                disabled={saving}
+                onClick={() => void save().then((wrote) => wrote && andGo())}
+              >
+                {saving ? "Saving…" : "Save and go"}
+              </Button>
+            </>
+          }
+        >
+          <p className="max-w-[60ch] text-body leading-relaxed text-text">
+            {describeChanges(pending)} The map is showing them until you decide.
+          </p>
+        </Sheet>
+      )}
     </section>
   );
+}
+
+/**
+ * What is waiting, in the words of what was done rather than a bare number.
+ *
+ * *2 changes* says nothing about whether leaving would cost a subtree, and
+ * that is the thing somebody is deciding.
+ */
+export function describeChanges(pending: Change[]): string {
+  const added = pending.filter((c) => c.kind === "add").length;
+  const removed = pending.filter((c) => c.kind === "remove");
+  const moved = pending.filter((c) => c.kind === "move").length;
+  const gone = removed.reduce((n, c) => n + 1 + c.under, 0);
+  const parts: string[] = [];
+  if (added) parts.push(added === 1 ? "one position added" : `${added} positions added`);
+  if (removed.length) parts.push(gone === 1 ? "one taken out" : `${gone} taken out`);
+  if (moved) parts.push(moved === 1 ? "one moved" : `${moved} moved`);
+  if (!parts.length) return "Nothing is saved yet.";
+  const said =
+    parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  return `Not saved yet: ${said}.`;
 }
 
 /* ── The card ────────────────────────────────────────────────────────────── */

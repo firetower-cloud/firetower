@@ -6630,8 +6630,15 @@ html:not([data-platform="macos"]) {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 2px;
-    padding: 0 7px;
+    gap: 0;
+    /* **9px top and bottom, because that is exactly how far the two controls
+       reach inside.** C3 asks that neither control's box intersect the other
+       or the chip strip, and with the content filling the card they both
+       overlapped it by about two pixels — nothing obscured, and a stated
+       condition quietly not met, which is worse than one never written. The
+       inset makes the clearance a property of the box rather than something
+       the content happens to leave over. */
+    padding: 9px 7px;
     border-radius: 8px;
     background: var(--color-panel);
     box-shadow: var(--shadow-raise);
@@ -6643,9 +6650,16 @@ html:not([data-platform="macos"]) {
   .oc:hover {
     background: var(--color-raise);
   }
+  /* **A pinned height, not a measured one.** The inset above leaves a plain
+     34px card 16px for this row, and what the row would otherwise measure
+     depends on three fonts and a glyph agreeing — which is how it came out at
+     16.5 and put the `+` a quarter of a pixel into it. 15 leaves half a pixel
+     either side and fits a 12px mark beside 11.5px type. */
   .oc .seat {
     display: flex;
     align-items: center;
+    flex: none;
+    height: 15px;
     gap: 6px;
     min-width: 0;
   }
@@ -6659,6 +6673,9 @@ html:not([data-platform="macos"]) {
     flex: 1;
     min-width: 0;
     font-size: var(--text-meta);
+    /* Tighter than the tier's 1.45, which is set for prose. A 34px card with
+       9px of inset leaves 16px for this row, and 1.45 wants 17. */
+    line-height: 1.25;
     font-weight: 500;
     color: var(--color-bone);
     white-space: nowrap;
@@ -6673,6 +6690,7 @@ html:not([data-platform="macos"]) {
   }
   .oc .brf {
     display: block;
+    margin-top: 1px;
     padding-left: 19px;
     font-size: var(--text-micro);
     line-height: 1.3;
@@ -6737,9 +6755,14 @@ html:not([data-platform="macos"]) {
    * mono where the name would be. No colour — brick means something failed,
    * and nothing here has.
    */
+  /* **The border and nothing else.** It used to set a box-shadow too, which
+     landed after `[data-auto]`'s at equal specificity and took the amber ring
+     off a seat that was both — and a seat whose profile nobody can read is
+     precisely the one somebody is least able to assess for themselves, so it
+     is the last one that should lose the mark saying nobody chose it. Two
+     states, two channels: a border for out of reach, a ring for unreviewed. */
   .oc[data-withheld="true"] {
-    box-shadow: var(--shadow-raise), inset 0 0 0 1px var(--color-settling);
-    border: 1px dashed var(--color-line);
+    border: 1px dashed var(--color-settling);
   }
   .oc[data-withheld="true"] .nm {
     font-family: var(--font-mono);
@@ -6826,7 +6849,6 @@ html:not([data-platform="macos"]) {
     flex-direction: column;
     gap: 0;
     padding-left: 19px;
-    margin-top: 1px;
     overflow: hidden;
   }
   .oc .pinrow {

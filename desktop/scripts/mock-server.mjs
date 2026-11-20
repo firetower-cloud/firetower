@@ -654,6 +654,26 @@ const server = createServer(async (req, res) => {
     return json(res, { code: "ActionFailed", message: "the control plane refused: upstream timed out" }, 500);
   }
 
+  /* A profile, as the inline *Create a profile for this seat* makes one.
+     `roles` is a read in the table below, so without this a create answered
+     200 with the whole library. */
+  if (req.method === "POST" && path === "/api/v1/roles") {
+    const body = await sent(req);
+    const made = role({
+      id: `r_${++positionSeq}`,
+      name: body.name ?? "Untitled",
+      does: body.does ?? "",
+      instructions: body.instructions ?? "",
+      placement: body.placement ?? "lead",
+      agent: body.agent ?? null,
+      skillScope: body.skillScope ?? [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    ROLES.push(made);
+    return json(res, made);
+  }
+
   /* One agent team, its whole tree, and the save that replaces it. The save
      is the only commit the map makes, so this is the one write. */
   const team_of = /^\/api\/v1\/agent-teams\/(at_[^/]+)$/.exec(path);
@@ -1078,7 +1098,33 @@ const server = createServer(async (req, res) => {
     "/api/v1/events": [],
   };
 
-  if (path in routes) return json(res, routes[path]);
+  /**
+   * The read table, and **only for reads**.
+   *
+   * It used to answer `path in routes` with no method in it, so a `POST` to a
+   * path with no write handler fell through to the GET body and came back
+   * **200 with the list**. Eleven paths in this table are also write
+   * endpoints in the real contract — roles, skills, sessions, repos, hosts,
+   * directories, providers, teams, agent accounts, update runs — and every
+   * one of them looked like it worked. A client that then read `made.id` off
+   * an array got `undefined` and carried on.
+   *
+   * That is worse than no mock: it turns a route nobody implemented into a
+   * test that passes. A write with nowhere to go says so now.
+   */
+  if (path in routes) {
+    if (req.method !== "GET") {
+      return json(
+        res,
+        {
+          code: "NotImplemented",
+          message: `the mock has no ${req.method} for ${path} — add a handler above the read table`,
+        },
+        501,
+      );
+    }
+    return json(res, routes[path]);
+  }
   /* The file itself. `useFileText` reads the body as bytes and decides for
      itself whether it is text, a picture or too big — so this answers with
      the text and nothing around it. */
@@ -1519,7 +1565,7 @@ const role = (over) => ({
   mayShare: true, mayWrite: true, settings: { model: null, effort: null, mode: null, sandbox: null },
   createdAt: minutesAgo(20000), updatedAt: minutesAgo(400), ...over,
 });
-const ROLES = [
+let ROLES = [
   role({
     id: "r_1", name: "Reviewer", isDefault: true, skillScope: ["sk_3", "sk_4"],
     does: "Reads a change and says what is wrong with it. Never writes.",

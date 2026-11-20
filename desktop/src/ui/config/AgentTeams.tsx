@@ -74,10 +74,10 @@ export function AgentTeams({ open }: { open: string | null }) {
       ),
   );
 
-  const go = (id: string) => {
-    setOpened(id);
-    navigate(`${HOME}/${id}`);
-  };
+  /* **Navigate, and let `useOpened` follow the address.** Setting the open
+     team here as well would unmount the map before the leave guard could put
+     its question on screen, which is the one moment the draft still exists. */
+  const go = (id: string) => navigate(`${HOME}/${id}`);
 
   const make = async () => {
     if (!naming?.lead || !naming.name.trim() || busy) return;
@@ -108,13 +108,7 @@ export function AgentTeams({ open }: { open: string | null }) {
 
   if (opened) {
     return (
-      <TeamMap
-        id={opened}
-        onClose={() => {
-          setOpened(null);
-          navigate(HOME);
-        }}
-      />
+      <TeamMap id={opened} onClose={() => navigate(HOME)} />
     );
   }
 
