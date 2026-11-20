@@ -1,7 +1,7 @@
 # Agent teams
 
 **Status:** built, first slice — the expand half of an expand/contract.
-`20261120120000_agent_teams.sql`, `crates/ft-server/src/agent_teams.rs`,
+`20261120130000_agent_teams.sql`, `crates/ft-server/src/agent_teams.rs`,
 `crates/ft-server/src/api/agent_teams.rs`, and the position-aware halves of
 `crates/ft-server/src/delegate.rs` and `api/sessions.rs`.
 

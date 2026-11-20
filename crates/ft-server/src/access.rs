@@ -353,7 +353,7 @@ pub enum FiledKind {
     Role,
     /// A team of agents: a name, the profile that leads it, and the tree of
     /// positions delegation resolves from. Not a [`Team`], which is a group of
-    /// people — see `migrations/server/20261120120000_agent_teams.sql`.
+    /// people — see `migrations/server/20261120130000_agent_teams.sql`.
     AgentTeam,
     /// The one kind that is never in a directory.
     ///
