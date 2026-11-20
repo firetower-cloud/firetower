@@ -145,7 +145,8 @@ describe("a schedule stopped because its agent team changed", () => {
     expect(says?.headline).toBe(
       "Firetower stopped this schedule because the Product agent team changed.",
     );
-    expect(says?.because).toContain("turn it on again");
+    // The closing sentence the other four share.
+    expect(says?.because).toContain("It will not run again until you turn it on.");
   });
 
   test("and still says something true when the pinned team cannot be named", () => {

@@ -153,8 +153,12 @@ export function pauseSays(schedule: Schedule, machine?: string | null): PauseSay
         headline: team
           ? `Firetower stopped this schedule because the ${team} agent team changed.`
           : "Firetower stopped this schedule because the agent team it runs as changed.",
+        /* The shape its four siblings share: what is true, what to do, then
+           the same closing sentence. And no jargon — "the tree" is what this
+           feature's documentation calls the shape; a person reads a map of
+           who is in the team. */
         because:
-          "It runs as that team's lead, and the tree it was approved on is not the tree it would run now. Read what the team is, then turn it on again.",
+          "It runs as that team's lead, and the team is not the one it was approved with. Look at who is in it now. It will not run again until you turn it on.",
       };
     }
 
