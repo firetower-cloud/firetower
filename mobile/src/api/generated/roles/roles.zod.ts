@@ -436,3 +436,31 @@ export const ExportRoleResponse = zod.object({
   "text": zod.string().describe('The file.')
 }).describe('A profile as the file that describes it, ready to be written into a\nrepository.\n\nThe text and the path it belongs at, rather than a download: the folder\nname is the profile\'s identity, so a client that is handed only\n`PROFILE.md` has to work out where to put it, and this is the one place\nthat knows.')
 
+/**
+ * The drawer's *In teams* tab, and the confirmation before a delete. It
+ * answers both in one request, which is the point: the alternative reads
+ * every team's whole tree and filters it in the window, at a request a team,
+ * and moves the rules about withheld names there at the same time.
+ *
+ * A profile this person cannot see is **not found**, as every other read of
+ * one is. What comes back is already narrowed to the teams they may see.
+ * @summary Where this profile sits: one entry per position it holds, in a team this
+person can see.
+ */
+export const RolePositionsParams = zod.object({
+  "id": zod.string().describe('Role id')
+})
+
+export const RolePositionsResponseItem = zod.object({
+  "instructions": zod.string().describe('This seat\'s own instructions.'),
+  "leads": zod.boolean().describe('It is the team\'s lead, so deleting the profile empties the team.'),
+  "mayWrite": zod.boolean().describe('Whether this person may change that team.'),
+  "position": zod.string().describe('The seat itself.'),
+  "reportsTo": zod.string().nullish().describe('The profile it reports to, by name. Absent for a lead, and absent\nwhen that profile is one this person cannot see.'),
+  "takes": zod.int().describe('How many positions go if this one goes: itself and everything under\nit. What the confirmation counts.'),
+  "team": zod.string(),
+  "teamName": zod.string(),
+  "under": zod.array(zod.string()).describe('The profiles directly under it in this team, by name, in sibling\norder. A name this person cannot see is absent, as it is from\n[`AgentTeam::members`].')
+}).describe('Where one profile sits in one team.\n\nThe answer to *is this the same Designer* — yes, and here is each seat it\nholds, with what sits above and below it in that team. #494\'s drawer reads\nits **In teams** tab off these, and so does the confirmation before a\nprofile is deleted: deleting one takes every position that references it\nand everything under those, so the teams and the count have to be on\nscreen before the press.\n\n**One request rather than one per team.** The alternative is reading every\nteam\'s whole tree and filtering it in the client, which is a request a team\nand puts the withholding rules in the client at the same time.')
+export const RolePositionsResponse = zod.array(RolePositionsResponseItem)
+
