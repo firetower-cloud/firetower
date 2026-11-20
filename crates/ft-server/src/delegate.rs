@@ -1255,20 +1255,25 @@ fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
     })
 }
 
-/// File a just-made profile in a named directory, when the agent named one.
+/// Where the agent asked for a profile it is making to be filed: the
+/// directory's slug, and where that is in words for the agent to repeat.
 ///
-/// Returns where it ended up, in words for the agent to repeat. The agent says
-/// a directory's name; it is resolved, checked that this person may write
-/// there, and moved with the same transfer the sharing sheet uses.
-async fn file_profile(
+/// The agent says a directory's *name*; it is resolved, and that this person
+/// may write there is checked here rather than inside the write.
+///
+/// **Asked before the profile is made, not after.** This used to create the
+/// profile in the owner's own space and move the row with the same transfer
+/// the sharing sheet uses — a name that has to be free *where a profile is
+/// filed* cannot be judged against a space it only passes through, and a move
+/// refused for a name left the profile behind in that space. See
+/// [`crate::roles::Roles::create_filed`].
+async fn where_to_file(
     state: &AppState,
-    role_id: &str,
     input: &Value,
     owner: &str,
-    whose: &str,
-) -> Result<String> {
+) -> Result<Option<(String, String)>> {
     let Some(name) = text(input, "directory") else {
-        return Ok("your own space".into());
+        return Ok(None);
     };
     let org = state.db.org().await?;
     let target = state
@@ -1286,22 +1291,8 @@ async fn file_profile(
             target.slug
         );
     }
-    let from = state
-        .access
-        .path_of(crate::access::FiledKind::Role, role_id)
-        .await?
-        .context("the profile that was just made could not be found to file it")?;
-    state
-        .access
-        .transfer(
-            &state.vault,
-            crate::access::FiledKind::Role,
-            role_id,
-            &from.moved_to(ft_core::path::DIRECTORY, &target.slug),
-            whose,
-        )
-        .await?;
-    Ok(format!("the \"{}\" directory", target.slug))
+    let said = format!("the \"{}\" directory", target.slug);
+    Ok(Some((target.slug.clone(), said)))
 }
 
 /// The slug and username of a session's owner, for filing and the vault log.
@@ -1355,7 +1346,7 @@ fn profile_shape(new: &crate::roles::NewRole) -> String {
 /// space. Absent, like every other field here, leaves it where it is.
 ///
 /// The same `transfer` the sheet performs and the same Writer check
-/// `file_profile` makes, so nothing about who may file what is decided twice.
+/// `where_to_file` makes, so nothing about who may file what is decided twice.
 async fn refile(
     state: &AppState,
     session: &Session,
@@ -1745,9 +1736,21 @@ async fn create_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
     let dropped = resolve_scopes(state, owner, &request.input, &mut new, (&[], &[])).await?;
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     let org = state.db.org().await?;
-    let (slug, whose) = owner_of(state, &session).await?;
-    let id = state.roles.create(&org, owner, &slug, &new).await?;
-    let where_it_is = file_profile(state, id.as_str(), &request.input, owner, &whose).await?;
+    let (slug, _) = owner_of(state, &session).await?;
+    let filed = where_to_file(state, &request.input, owner).await?;
+    state
+        .roles
+        .create_filed(
+            &org,
+            owner,
+            &slug,
+            filed.as_ref().map(|(slug, _)| slug.as_str()),
+            &new,
+        )
+        .await?;
+    let where_it_is = filed
+        .map(|(_, said)| said)
+        .unwrap_or_else(|| "your own space".to_string());
     Ok(format!(
         "Created the \"{}\" profile in {where_it_is} — {}.{} {} It's on the Profiles screen now.",
         new.name.trim(),
@@ -2513,7 +2516,12 @@ fn new_skill_from(input: &Value) -> Result<crate::skills::NewSkill> {
 }
 
 /// File a just-made skill in a named directory, when the agent named one. The
-/// same transfer the sharing sheet uses — see [`file_profile`].
+/// same transfer the sharing sheet uses.
+///
+/// Still a create and then a move, which a profile no longer is: nothing holds
+/// a skill's name within a directory, so there is no scope for the space it
+/// passes through to be the wrong one. See [`where_to_file`], which is the
+/// profile's half of this and says why.
 async fn file_skill(
     state: &AppState,
     skill_id: &str,
