@@ -100,11 +100,28 @@ describe("which destination a path is in", () => {
   test("every configuration pane a destination owns", () => {
     expect(destinationAt("/configuration/skills")).toBe("customize");
     expect(destinationAt("/configuration/roles")).toBe("customize");
+    expect(destinationAt("/configuration/agent-teams")).toBe("customize");
     expect(destinationAt("/configuration/agents")).toBe("customize");
     expect(destinationAt("/configuration/repositories")).toBe("repos");
     expect(destinationAt("/configuration/git-hosts")).toBe("repos");
     expect(destinationAt("/configuration/machines")).toBe("machines");
     expect(destinationAt("/configuration/trackers")).toBe("tasks");
+  });
+
+  /**
+   * **Agent teams and teams are two different nouns sharing a word.**
+   *
+   * `teams` is a group of *people* and belongs to Settings; `agent-teams` is
+   * a tree of positions and belongs to Customize. The pair is asserted
+   * together because the mistake this guards against is one pane quietly
+   * taking the other's address — the reason `docs/agent-teams.md` gives for
+   * the name.
+   */
+  test("a team of agents and a team of people are different places", () => {
+    expect(destinationAt("/configuration/agent-teams")).toBe("customize");
+    expect(destinationAt("/configuration/teams")).toBeNull();
+    /* And one team opened keeps Customize lit, the way one skill does. */
+    expect(destinationAt("/configuration/agent-teams/at_1")).toBe("customize");
   });
 
   /* **And Settings' five own none of the six.** These answered "settings"

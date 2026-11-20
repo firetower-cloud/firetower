@@ -6529,3 +6529,518 @@ html:not([data-platform="macos"]) {
     color: var(--color-text);
   }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   The agent-team map
+
+   A team's tree, drawn as cards and hairlines on a surface of its own.
+   Everything here is geometry the component cannot express as utilities: a
+   card is absolutely positioned at a point `team-map.ts` worked out, and the
+   connectors are 1px boxes at points it worked out too.
+
+   The arrangement is **Hybrid** — the lead and its children spread with elbow
+   connectors, and everything below them indents. `team-map.ts` carries the
+   measurements and the reason.
+   ───────────────────────────────────────────────────────────────────────── */
+@layer components {
+  /* ── The map's own action row ───────────────────────────────────
+     What the map shows, what that costs, and what is unsaved. One row at
+     `--row-tight`, every control on one baseline at the desk's single
+     control height.
+
+     **Save and Discard are here and not in the status strip.** The strip is
+     22px of window chrome and the desk has one control height, 30px, so a
+     button in it overhangs by four pixels top and bottom. The strip holds
+     counts and a sentence. */
+  .mapbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: none;
+    margin: 14px 0 0;
+    min-height: var(--row-tight);
+    flex-wrap: wrap;
+  }
+  .mapbar .mm {
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  /* The pending group: the count, then the two ways out of it. Sage,
+     because what it marks is work in hand rather than anything wrong. */
+  .mapbar .pend {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
+    height: var(--row-tight);
+    padding: 0 4px 0 11px;
+    border-radius: 99px;
+    background: var(--color-sage-tint);
+    box-shadow: inset 0 0 0 1px var(--color-sage-deep);
+  }
+  .mapbar .pend .n {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-meta);
+    color: var(--color-sage);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .mapbar .pend .btn.quiet {
+    color: var(--color-sage);
+  }
+  .mapbar .pend .btn.quiet:hover {
+    background: color-mix(in srgb, var(--color-sage) 18%, transparent);
+    color: var(--color-bone);
+  }
+
+  /* The surface the tree is drawn on, and the plane inside it that is the
+     size of the drawing. Scrolls in both directions: a tree wider than the
+     pane scrolls here rather than pushing the page sideways. */
+  .mapsurface {
+    position: relative;
+    margin-top: 10px;
+    border-top: 1px solid var(--color-line-soft);
+    background: var(--color-ground);
+    overflow: auto;
+    min-height: 240px;
+    max-height: calc(100vh - 330px);
+  }
+  [data-theme="light"] .mapsurface {
+    background: var(--color-raise);
+  }
+  .mapplane {
+    position: relative;
+  }
+  .mapplane .vr,
+  .mapplane .hr {
+    position: absolute;
+    background: var(--color-line);
+  }
+
+  /* ── A card is a position ───────────────────────────────────────
+     One line of profile, and a second line of extra instruction when the
+     position carries any. That second line is what tells two positions of
+     one profile apart — not a name somebody typed, but the thing that
+     actually makes them different. */
+  .oc {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    padding: 0 7px;
+    border-radius: 8px;
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
+    text-align: left;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      box-shadow var(--dur-native) var(--ease-swift);
+  }
+  .oc:hover {
+    background: var(--color-raise);
+  }
+  .oc .seat {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .oc .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .oc .nm {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-meta);
+    font-weight: 500;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .oc .cnt {
+    flex: none;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+  .oc .brf {
+    display: block;
+    padding-left: 19px;
+    font-size: var(--text-micro);
+    line-height: 1.3;
+    font-style: italic;
+    color: var(--color-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* The lead. A hairline rather than a tint: it is the top of the tree, which
+     the drawing already says, and a second filled surface up there would
+     compete with the one marking what is selected. */
+  .oc[data-lead="true"] {
+    box-shadow: var(--shadow-raise), inset 0 0 0 1px var(--color-line);
+  }
+  .oc[data-lead="true"] .nm {
+    font-weight: var(--font-weight-mid);
+  }
+  /**
+   * A seat nobody placed.
+   *
+   * During the compatibility window a hand-off to a profile with no seat yet
+   * succeeds and adds one. That learning is deliberate and it is how a team
+   * could grow without anybody choosing, which is the unbounded reach this
+   * whole effort removes — slower. **It being visible is the mitigation**, so
+   * a seat that arrived on its own cannot look like one somebody placed.
+   *
+   * Amber, and a glyph beside it. Not ember: ember means an agent is waiting
+   * on you, and this is the other thing amber is for — something you have not
+   * done yet. Nothing is wrong, so it is not brick either.
+   */
+  .oc[data-auto="true"] {
+    box-shadow: var(--shadow-raise), inset 0 0 0 1px var(--color-amber-deep);
+  }
+  .oc .auto {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-amber-soft);
+  }
+
+  /* Drawn and not yet saved. */
+  .oc[data-pending="true"] {
+    box-shadow: var(--shadow-raise), inset 0 0 0 1.5px var(--color-sage);
+  }
+  /* Open in whatever is docked beside the map. */
+  .oc[data-on="true"] {
+    background: var(--color-overlay);
+    box-shadow: var(--shadow-raise), inset 0 0 0 1.5px var(--color-bone);
+  }
+
+  /**
+   * A seat whose profile this person cannot see.
+   *
+   * The shape of the tree belongs to the team, which they may see; the
+   * profile's name belongs to the profile, which they may not. So the seat is
+   * drawn and the name is withheld — a gap would misrepresent the team.
+   *
+   * It has to read as *there and unreadable* rather than as an error, so it
+   * keeps the card's own shadow and is marked by shape: a dashed inset ring,
+   * the house treatment for something out of reach, and the profile's id in
+   * mono where the name would be. No colour — brick means something failed,
+   * and nothing here has.
+   */
+  .oc[data-withheld="true"] {
+    box-shadow: var(--shadow-raise), inset 0 0 0 1px var(--color-settling);
+    border: 1px dashed var(--color-line);
+  }
+  .oc[data-withheld="true"] .nm {
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    font-weight: 400;
+    color: var(--color-mute);
+  }
+
+  /* ── The card's two controls ────────────────────────────────────
+     The `+` at the bottom centre, on the trunk the connector leaves from,
+     and the remove control at the top right, clear of it and of the chips
+     inside. Neither box may intersect the other.
+
+     **Shown on hover and on focus, never on hover alone.** The card's is the
+     only route to either, and a hover-only control cannot be reached from a
+     keyboard. */
+  .oc .plus,
+  .oc .bin {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 99px;
+    background: var(--color-overlay);
+    box-shadow: var(--shadow-raise);
+    color: var(--color-dim);
+    opacity: 0;
+    z-index: 2;
+    transition:
+      opacity var(--dur-native) var(--ease-swift),
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .oc .plus {
+    bottom: -9px;
+    left: 50%;
+    margin-left: -9px;
+  }
+  .oc .bin {
+    top: -9px;
+    right: -9px;
+    color: var(--color-mute);
+  }
+  .oc:hover .plus,
+  .oc:hover .bin,
+  .oc:focus-within .plus,
+  .oc:focus-within .bin,
+  .oc[data-on="true"] .plus,
+  .oc[data-on="true"] .bin {
+    opacity: 1;
+  }
+  .oc .plus:focus-visible,
+  .oc .bin:focus-visible {
+    opacity: 1;
+  }
+  .oc .plus:hover {
+    background: var(--color-bone);
+    color: var(--color-panel);
+  }
+  .oc .bin:hover,
+  .oc .bin:focus-visible {
+    background: var(--color-brick);
+    color: var(--color-bone);
+  }
+
+  /* ── Skills, when the map is showing them ───────────────────────
+     **`.pin`, and not `.sk`.** `.sk` is the Skills pane's own row and it
+     carries `margin-inline: -14px`; a chip wearing it was pulled 28px left of
+     where the layout had measured it, so two chips on one row overlapped and
+     the first one read as a clipped word. Every name under `.oc` is one the
+     sheet does not already use, and `team-classes.test.ts` keeps it that
+     way.
+
+     A grey pill with no glyph of its own: `docs/built-in-skills.md` rejects
+     per-skill icons outright as decoration standing in for the description,
+     and at this size one costs a third of the chip. Dropping it is what lets
+     two chips share a row.
+
+     No gap between rows and a fixed row height, so the card's declared
+     height and its content agree exactly at any cap. */
+  .oc .pins {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding-left: 19px;
+    margin-top: 1px;
+    overflow: hidden;
+  }
+  .oc .pinrow {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    min-width: 0;
+    height: 14px;
+  }
+  .oc .pin {
+    display: inline-flex;
+    align-items: center;
+    flex: none;
+    height: 13px;
+    padding: 0 7px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    color: var(--color-dim);
+    font-size: 9px;
+    line-height: 13px;
+    white-space: nowrap;
+    box-shadow: inset 0 0 0 1px var(--color-line-soft);
+  }
+  .oc[data-on="true"] .pin {
+    background: var(--color-panel);
+  }
+  .oc .pin.more {
+    background: none;
+    box-shadow: none;
+    padding: 0 3px;
+    color: var(--color-mute);
+  }
+
+  /* ── The switch ─────────────────────────────────────────────────
+     One named thing that is on or off, so a switch rather than two segments:
+     two segments say two equal modes. The track and knob are
+     `SkillPicker.tsx`'s. */
+  .swrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    flex: none;
+    height: var(--control);
+    padding: 0 11px 0 9px;
+    border-radius: 99px;
+    color: var(--color-dim);
+    font-size: var(--text-ui);
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .swrow:hover {
+    background: var(--color-raise);
+    color: var(--color-text);
+  }
+  .swrow[aria-checked="true"] {
+    color: var(--color-bone);
+  }
+  .swrow .lane {
+    position: relative;
+    display: block;
+    width: 28px;
+    height: 16px;
+    flex: none;
+    border-radius: 99px;
+    background: var(--color-raise);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .swrow[aria-checked="true"] .lane {
+    background: var(--color-sage-deep);
+  }
+  .swrow .knob {
+    position: absolute;
+    top: 50%;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+    border-radius: 99px;
+    background: var(--color-mute);
+    transition:
+      left 150ms var(--ease-swift),
+      background 150ms var(--ease-swift);
+  }
+  .swrow[aria-checked="true"] .knob {
+    left: 14px;
+    background: var(--color-sage);
+  }
+
+  /* ── A sheet ────────────────────────────────────────────────────
+     Wider than `.dlg` and with a scrolling body, for the one question in
+     this screen that is a form rather than a yes: a name, and a profile to
+     lead it. Same radius, same float, same ground as the dialog. */
+  .sheetcard {
+    display: flex;
+    flex-direction: column;
+    width: 33rem;
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 18px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(255 255 255 / 0.07);
+    overflow: hidden;
+  }
+  [data-theme="light"] .sheetcard {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.07);
+  }
+  .sheetcard > .sh {
+    flex: none;
+    padding: 22px 24px 0;
+  }
+  .sheetcard > .bd {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 10px 24px 4px;
+  }
+  .sheetcard > .ft {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    padding: 16px 24px 18px;
+  }
+  .sheetcard > .ft .msg {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+
+  /* A list to pick one thing out of: the lead, or the profile a `+` puts
+     under a card. Bounded, so a long library does not push the buttons off
+     the sheet. */
+  .picklist {
+    border-radius: 12px;
+    border: 1px solid var(--color-line);
+    background: var(--color-ground);
+    overflow: auto;
+    max-height: 13rem;
+  }
+  [data-theme="light"] .picklist {
+    background: var(--color-panel);
+  }
+  .picklist .pr {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 7px 11px;
+    min-height: var(--row-tight);
+    border-bottom: 1px solid var(--color-line-soft);
+    text-align: left;
+  }
+  .picklist .pr:last-child {
+    border-bottom: 0;
+  }
+  .picklist .pr:hover {
+    background: var(--color-raise);
+  }
+  .picklist .pr .nm {
+    flex: none;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+  .picklist .pr .ds {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .picklist .pr .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  /* The way out of a list that does not hold what somebody wanted. */
+  .picklist .pr.make .nm,
+  .picklist .pr.make .g {
+    color: var(--color-slate);
+  }
+
+  /* The chosen lead, once there is one. */
+  .leadpick {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    border-radius: 12px;
+    border: 1px solid var(--color-line);
+    background: var(--color-ground);
+    padding: 9px 11px;
+    font-size: var(--text-ui);
+  }
+  [data-theme="light"] .leadpick {
+    background: var(--color-panel);
+  }
+  .leadpick b {
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .leadpick .ds {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
