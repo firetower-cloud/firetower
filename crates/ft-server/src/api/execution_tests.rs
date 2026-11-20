@@ -11102,10 +11102,13 @@ async fn a_team_whose_lead_changed_is_not_adopted_and_the_switch_says_so() {
     )
     .await
     .expect_err("the switch is not the way out of this one");
-    assert!(
-        refused.message.contains("Platform") && refused.message.contains("set what it runs as"),
-        "{}",
-        refused.message
+    // **The whole sentence, not two fragments.** Two `contains` either side of
+    // a gap assert nothing about the gap, which is where twenty-two spaces sat
+    // unnoticed. Anything a person reads is asserted entire.
+    assert_eq!(
+        refused.message,
+        "The “Platform” agent team is not the one this was approved on, so turning it on would \
+         start something nobody has read. Open it and set what it runs as."
     );
 }
 
@@ -11211,4 +11214,45 @@ async fn a_tree_that_changed_without_an_edit_is_refused_at_the_gate() {
     // Nothing cleared the approval, because nothing edited the team.
     let still = state.db.schedule(&on.id).await.unwrap().unwrap();
     assert!(still.approved_at.is_some());
+
+    // **So the gate is the only thing standing in the way, and it is.** Driven
+    // through a real launch rather than inferred from the fingerprints
+    // differing: what this claims is that the run is refused and that the
+    // sentence names the team, and neither is observable from the hash.
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &on.id,
+            None,
+            Utc::now(),
+            still.revision,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &still, &claim, crate::schedules::launch::Why::Clock)
+        .await
+        .expect("a refusal is an outcome");
+    let run = runs_of(&state, &on.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert_eq!(run.state, ScheduleRunState::Failed);
+    // **The history line a person reads, entire** — `"Refused. "` and then the
+    // sentence, which is the shape `reason` gives every row. Asserting the
+    // whole of it is what makes the spacing part of the test.
+    assert_eq!(
+        run.detail.as_deref(),
+        Some(
+            "Refused. The “Platform” agent team has changed since this schedule was approved, \
+             so it will not run on it. Open the schedule, read what the team is now, and \
+             approve it again."
+        )
+    );
 }

@@ -1012,7 +1012,9 @@ pub(super) async fn approve_schedule(
             return Err(ApiError::new(
                 ErrorCode::InvalidRequest,
                 format!(
-                    "The “{name}” agent team is not the one this was approved on, so turning it                      on would start something nobody has read. Open it and set what it runs as."
+                    "The “{name}” agent team is not the one this was approved on, so \
+                     turning it on would start something nobody has read. Open \
+                     it and set what it runs as."
                 ),
             ));
         }

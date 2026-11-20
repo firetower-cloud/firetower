@@ -884,7 +884,9 @@ async fn gate(
             return Err(Stopped {
                 state: "failed",
                 detail: format!(
-                    "The “{name}” agent team this schedule was approved with is gone, or is no                      longer shared with whoever this runs as. Open the schedule and pick what it                      should run as now."
+                    "The “{name}” agent team this schedule was approved with is gone, or is \
+                     no longer shared with whoever this runs as. Open the \
+                     schedule and pick what it should run as now."
                 ),
                 code: ErrorCode::InvalidRequest,
                 and_stop: None,
@@ -894,7 +896,9 @@ async fn gate(
             return Err(Stopped {
                 state: "failed",
                 detail: format!(
-                    "The “{name}” agent team has changed since this schedule was approved, so it                      will not run on it. Open the schedule, read what the team is now, and                      approve it again."
+                    "The “{name}” agent team has changed since this schedule was approved, \
+                     so it will not run on it. Open the schedule, read what the \
+                     team is now, and approve it again."
                 ),
                 code: ErrorCode::InvalidRequest,
                 and_stop: None,
