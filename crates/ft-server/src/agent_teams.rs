@@ -248,6 +248,17 @@ pub struct Standing {
     pub parent: Option<String>,
 }
 
+/// A profile above a position, and how far above it sits.
+///
+/// `steps` is 1 for the position's own lead, 2 for its lead's lead, and so on.
+/// It is what lets a refusal say *where* a named profile is rather than only
+/// that it is not below.
+#[derive(Debug, Clone)]
+pub struct Above {
+    pub name: String,
+    pub steps: i32,
+}
+
 /// One report: a seat, and the profile in it.
 #[derive(Debug, Clone)]
 pub struct Report {
@@ -608,27 +619,72 @@ impl AgentTeams {
             .collect()
     }
 
-    /// The profile in the position above this one: an agent's own lead.
+    /// **Every profile above this position, nearest first** — the chain an
+    /// agent reports up through.
     ///
-    /// Read so that an agent naming it gets a refusal that says what it did
-    /// rather than "no subagent called that", which would claim a profile does
-    /// not exist when it plainly does. Absent when the lead's profile is one
-    /// this person cannot see — there is then no name to put in a sentence,
-    /// and the generic refusal is the honest one.
-    pub async fn lead_above(&self, person: &str, position: &str) -> Result<Option<String>> {
+    /// Read so that an agent naming one of them gets a refusal that says what
+    /// it did rather than "no subagent called that", which would claim a
+    /// profile does not exist when it plainly does and send the agent looking
+    /// for a mistake that is not there.
+    ///
+    /// **The whole chain and not only the parent.** The immediate lead was the
+    /// first case anybody hit, but a grandparent has exactly the same problem,
+    /// and with [`MAX_DEPTH`] levels permitted a chain long enough to reach
+    /// one is ordinary rather than exotic.
+    ///
+    /// An ancestor whose profile this person cannot see is left out: there is
+    /// then no name to put in a sentence, and the generic refusal is the
+    /// honest one. Same intersection as everywhere else.
+    ///
+    /// Bounded by `MAX_DEPTH`, which is not belt-and-braces: the recursion
+    /// walks `parent_id`, and a cycle written by anything other than
+    /// [`AgentTeams::write`] would otherwise spin in the database rather than
+    /// fail.
+    pub async fn above(&self, person: &str, position: &str) -> Result<Vec<Above>> {
         let sql = format!(
-            "SELECT r.name FROM agent_team_positions p \
-               JOIN agent_team_positions up ON up.id = p.parent_id \
-               JOIN roles r ON r.id = up.profile_id \
-              WHERE p.id = $2 AND {visible}",
+            "WITH RECURSIVE up AS ( \
+                 SELECT p.parent_id AS id, 1 AS steps \
+                   FROM agent_team_positions p WHERE p.id = $2 \
+                 UNION ALL \
+                 SELECT a.parent_id, up.steps + 1 \
+                   FROM up JOIN agent_team_positions a ON a.id = up.id \
+                  WHERE up.steps < {bound} \
+             ) \
+             SELECT r.name AS name, up.steps AS steps \
+               FROM up \
+               JOIN agent_team_positions a ON a.id = up.id \
+               JOIN roles r ON r.id = a.profile_id \
+              WHERE {visible} ORDER BY up.steps",
+            bound = MAX_DEPTH,
             visible = filed_where("r", 1, Level::Viewer),
         );
-        sqlx::query_scalar(&sql)
+        let rows = sqlx::query(&sql)
             .bind(person)
             .bind(position)
-            .fetch_optional(&self.pool)
+            .fetch_all(&self.pool)
             .await
-            .context("reading the profile a position reports to")
+            .context("reading the profiles a position reports up through")?;
+        Ok(rows
+            .iter()
+            .map(|r| Above {
+                name: r.get("name"),
+                steps: r.get("steps"),
+            })
+            .collect())
+    }
+
+    /// The nearest of those: an agent's own lead.
+    ///
+    /// [`above`](Self::above) with the first answer taken, kept as its own
+    /// question because "who do I report to" is asked on its own.
+    pub async fn lead_above(&self, person: &str, position: &str) -> Result<Option<String>> {
+        Ok(self
+            .above(person, position)
+            .await?
+            .into_iter()
+            .next()
+            .filter(|a| a.steps == 1)
+            .map(|a| a.name))
     }
 
     /// File a new team, with its tree, in one transaction.
@@ -1826,5 +1882,98 @@ mod tests {
             .unwrap();
         assert_eq!(repaired.lead.as_deref(), Some(successor.as_str()));
         assert_eq!(repaired.positions, 1);
+    }
+    /// The chain above a position, nearest first — and **an ancestor whose
+    /// profile this person cannot see is left out of it.**
+    ///
+    /// The ordering is what lets a refusal say *where* a named profile sits,
+    /// and the omission is the same intersection every other read makes: a
+    /// refusal that named a profile the asker cannot reach would disclose it
+    /// in the course of being helpful.
+    #[tokio::test]
+    async fn the_chain_above_a_position_is_nearest_first_and_intersected() {
+        let w = world().await;
+        let (ana, ana_slug) = w.colleague("ana").await;
+        // Ana's team, four deep, with the *middle* profile hers alone and the
+        // other three shared with me.
+        let top = w.profile_of(&ana, &ana_slug, "Top").await;
+        let hidden = w.profile_of(&ana, &ana_slug, "Hidden").await;
+        let mid = w.profile_of(&ana, &ana_slug, "Mid").await;
+        let leaf = w.profile_of(&ana, &ana_slug, "Leaf").await;
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &ana,
+                &ana_slug,
+                None,
+                &named(
+                    "Hers",
+                    seat(
+                        &top,
+                        vec![seat(&hidden, vec![seat(&mid, vec![seat(&leaf, vec![])])])],
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+
+        let access = crate::access::Access::new(w.db.pool().clone());
+        for on in [id.as_str()] {
+            access
+                .set_exception(
+                    crate::access::FiledKind::AgentTeam,
+                    on,
+                    &w.me,
+                    Level::Viewer,
+                )
+                .await
+                .unwrap();
+        }
+        for profile in [&top, &mid, &leaf] {
+            access
+                .set_exception(
+                    crate::access::FiledKind::Role,
+                    profile,
+                    &w.me,
+                    Level::Viewer,
+                )
+                .await
+                .unwrap();
+        }
+
+        let seats = w.teams.positions(&ana, id.as_str()).await.unwrap();
+        let bottom = seats.iter().find(|p| p.profile == leaf).unwrap();
+
+        // For Ana, the whole chain, nearest first.
+        let hers = w.teams.above(&ana, &bottom.id).await.unwrap();
+        assert_eq!(
+            hers.iter()
+                .map(|a| (a.name.as_str(), a.steps))
+                .collect::<Vec<_>>(),
+            vec![("Mid", 1), ("Hidden", 2), ("Top", 3)],
+            "nearest first, with how far up each one is"
+        );
+        assert_eq!(
+            w.teams
+                .lead_above(&ana, &bottom.id)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("Mid"),
+            "and the nearest on its own"
+        );
+
+        // For me, the one I cannot reach is simply not there — and the step
+        // counts of the others do not shift to cover the gap, because they are
+        // how far up the position actually is.
+        let mine = w.teams.above(&w.me, &bottom.id).await.unwrap();
+        assert_eq!(
+            mine.iter()
+                .map(|a| (a.name.as_str(), a.steps))
+                .collect::<Vec<_>>(),
+            vec![("Mid", 1), ("Top", 3)],
+            "no Hidden, and Top is still three up"
+        );
     }
 }

@@ -613,33 +613,48 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         })? {
             Some(found) => Some(found.clone()),
             None => {
-                /* **An agent naming its own lead gets its own sentence.**
-                Falling through to "no subagent called that" would tell an
-                agent a profile does not exist when it plainly does — it is
-                the one it reports to — and the agent would waste its turn
-                working out which of them was wrong. Work goes down the
-                tree; handing back is how it goes up, and that is the thing
-                to say. */
+                /* **An agent naming anything above it gets its own
+                sentence.** Falling through to "no subagent called that"
+                would tell an agent a profile does not exist when it
+                plainly does — it is one of the ones it reports up
+                through — and the agent would waste its turn working out
+                which of them was wrong. Work goes down the tree; handing
+                back is how it goes up, and that is the thing to say.
+
+                **The whole chain, not only the parent.** The immediate
+                lead was the first case anybody hit, and a grandparent has
+                exactly the same problem: with six levels permitted, a
+                chain long enough to reach one is ordinary. So the sentence
+                says *where* the named profile sits, and the agent learns
+                the shape rather than doubting the name. */
                 if let Some(standing) = &standing {
-                    if let Some(above) = state
+                    let chain = state
                         .agent_teams
-                        .lead_above(lead.owner.as_str(), &standing.position)
-                        .await?
+                        .above(lead.owner.as_str(), &standing.position)
+                        .await?;
+                    if let Some(found) = chain
+                        .iter()
+                        .find(|a| a.name.eq_ignore_ascii_case(wanted.trim()))
                     {
-                        if above.eq_ignore_ascii_case(wanted.trim()) {
-                            bail!(
-                                "\"{above}\" is the position above yours in the \"{}\" team — your \
-                                 own lead. Work goes down the tree, not back up: finish your \
-                                 turn and what you say is delivered to it. The profiles you can \
-                                 start are the ones reporting to you: {}.",
-                                standing.team_name,
-                                reach
-                                    .iter()
-                                    .map(|r| r.profile.name.as_str())
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            );
-                        }
+                        let mine: Vec<&str> =
+                            reach.iter().map(|r| r.profile.name.as_str()).collect();
+                        // The nearest one is the only one a hand-back
+                        // reaches directly, so it is what the sentence
+                        // points at whichever ancestor was named.
+                        bail!(
+                            "\"{}\" is {} in the \"{}\" team, so it is not yours to start. Work \
+                             goes down the tree, not back up: finish your turn and what you say \
+                             is delivered to {}. The profiles you can start are the ones \
+                             reporting to you: {}.",
+                            found.name,
+                            where_it_sits(found.steps),
+                            standing.team_name,
+                            match found.steps {
+                                1 => "it".to_string(),
+                                _ => "your own lead, which is what carries it further".to_string(),
+                            },
+                            mine.join(", ")
+                        );
                     }
                 }
                 /* One entry per name, with a collision marked rather than
@@ -1095,6 +1110,24 @@ fn brief(
          without reading the whole transcript. A handful of steps, one in progress at a time.",
     );
     text
+}
+
+/// Where a named profile sits relative to the one asking, in words.
+///
+/// Words rather than a number because the sentence is read by an agent
+/// deciding what to do next, and "two positions above yours" is a shape it can
+/// act on where "2" is a value it has to interpret. Bounded by
+/// `agent_teams::MAX_DEPTH`, so the table is never short; the digits are a
+/// fallback rather than a case anybody reaches.
+fn where_it_sits(steps: i32) -> String {
+    match steps {
+        1 => "the position above yours — your own lead".to_string(),
+        2 => "two positions above yours — your lead's own lead".to_string(),
+        3 => "three positions above yours".to_string(),
+        4 => "four positions above yours".to_string(),
+        5 => "five positions above yours".to_string(),
+        n => format!("{n} positions above yours"),
+    }
 }
 
 /// The tool's result once a child exists.

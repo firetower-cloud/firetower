@@ -10472,17 +10472,24 @@ async fn a_profile_started_with_no_team_cannot_delegate_and_says_why() {
     state.fleet.stop_supervising(&host.id).await;
 }
 
-/// **An agent naming its own lead gets its own sentence.**
+/// **An agent naming anything above it gets its own sentence.**
 ///
 /// Falling through to "no subagent called that" would tell an agent a profile
-/// does not exist when it is the one it reports to, and the agent would spend
-/// its turn working out which of them was wrong.
+/// does not exist when it is one of the ones it reports up through, and the
+/// agent would spend its turn working out which of them was wrong.
+///
+/// **A grandparent has exactly the same problem as a parent**, which is the
+/// half this originally missed: the generic not-found is wrong for the same
+/// reason at any distance, and with six levels permitted a chain long enough
+/// to reach one is ordinary. So the chain is four deep here and the sentence
+/// is asked for from two rungs down as well as one.
 #[tokio::test]
-async fn an_agent_naming_its_own_lead_gets_its_own_refusal() {
+async fn an_agent_naming_anything_above_it_gets_its_own_refusal() {
     let (state, _principal, host, ready, owner) = fixture().await;
     let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
     let engineer = a_profile(&state, &owner, "Engineer").await;
     let reviewer = a_profile(&state, &owner, "Reviewer").await;
+    let builder = a_profile(&state, &owner, "Builder").await;
     let team = saved_team(
         &state,
         &owner,
@@ -10492,7 +10499,13 @@ async fn an_agent_naming_its_own_lead_gets_its_own_refusal() {
                 "profile": orchestrator,
                 "children": [{
                     "profile": engineer,
-                    "children": [{ "profile": reviewer }],
+                    "children": [{
+                        "profile": reviewer,
+                        // So the Reviewer has somebody to hand to, and its
+                        // `spawn` reaches the name resolution rather than
+                        // being refused for having no reports.
+                        "children": [{ "profile": builder }],
+                    }],
                 }],
             },
         }),
@@ -10513,6 +10526,7 @@ async fn an_agent_naming_its_own_lead_gets_its_own_refusal() {
     .unwrap();
     let child = child_of(&state, &lead, "u1").await;
 
+    // One rung up: its own lead.
     let refused = crate::delegate::handle(
         &state,
         &asks(
@@ -10535,6 +10549,71 @@ async fn an_agent_naming_its_own_lead_gets_its_own_refusal() {
         said.contains("Reviewer"),
         "and it says what this one can start instead: {said}"
     );
+
+    // Two rungs up: the same problem, and until QA found it the same generic
+    // not-found.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &child.id,
+            "u3",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let grandchild = child_of(&state, &child.id, "u3").await;
+
+    let far = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &grandchild.id,
+            "u4",
+            "spawn",
+            serde_json::json!({ "role": "Orchestrator", "goal": "take this back" }),
+        ),
+    )
+    .await
+    .expect_err("its lead's own lead");
+    let said = format!("{far:#}");
+    assert!(
+        !said.contains("no subagent called"),
+        "a grandparent is not a profile that does not exist: {said}"
+    );
+    assert!(
+        said.contains("Orchestrator") && said.contains("two positions above yours"),
+        "it names the profile and says where it sits: {said}"
+    );
+    assert!(
+        said.contains("your lead's own lead"),
+        "in a shape rather than a number: {said}"
+    );
+    assert!(
+        said.contains("delivered to your own lead"),
+        "and points the hand-back at the one rung a hand-back reaches: {said}"
+    );
+    assert!(
+        said.contains("Builder"),
+        "and still says what this one can start: {said}"
+    );
+
+    // And the rung in between is still the nearer sentence.
+    let near = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &grandchild.id,
+            "u5",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "back to you" }),
+        ),
+    )
+    .await
+    .expect_err("its own lead, from one rung further down");
+    assert!(format!("{near:#}").contains("your own lead"), "{near:#}");
 
     state.fleet.stop_supervising(&host.id).await;
 }
