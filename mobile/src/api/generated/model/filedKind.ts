@@ -17,5 +17,6 @@ export const FiledKind = {
   skill: 'skill',
   artifact: 'artifact',
   role: 'role',
+  agentTeam: 'agentTeam',
   repository: 'repository',
 } as const;

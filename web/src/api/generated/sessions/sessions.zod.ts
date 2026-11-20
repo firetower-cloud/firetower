@@ -64,6 +64,7 @@ export const ListSessionsResponseItem = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('The position in an agent team this session occupies, by id, when it\noccupies one.\n\n**What it may hand work to, when it has one**: the profiles its\nposition\'s children reference, and nothing else. Inherited down the\nlineage — a lead\'s child occupies the child of the lead\'s position — so\nthe chain of sessions walks the chain of positions.\n\nAbsent for every session a person started without naming a team, which\nis every session there was. Absent means the old path: a Manager\nprofile\'s own `delegate_scope`, or no delegation at all.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -116,6 +117,7 @@ export const CreateSessionBody = zod.object({
   "skills": zod.array(zod.string()).nullish().describe('The skills to start with, by id. Omit (null) to take your defaults for\nthe repositories; a list — including an empty one — overrides them.'),
   "taskKey": zod.string().nullish().describe('The task this is for, when it was started from one.'),
   "taskUrl": zod.string().nullish(),
+  "team": zod.string().nullish().describe('The agent team to start as, by id. Omit for a lone profile.\n\n**You never talk to a team — you talk to its lead, with its team behind\nit.** Naming one starts the session in that team\'s lead position, which\nis what gives it a reach: the profiles reporting to that position are\nthe ones it may hand work to, and a child it starts inherits the seat\nbelow its own.\n\nIt decides the profile too, because the lead *is* a profile: naming a\nteam and a different profile is a contradiction rather than two\nsettings, and is refused.\n\nOmitting it is the whole of the compatibility story. A profile named on\nits own holds no position and delegates the way it always did — through\nits own `can_delegate` and `delegate_scope` — or not at all.'),
   "workspaceId": zod.union([zod.null(),zod.string().describe('A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation.')]).optional()
 }).describe('What the API accepts to launch one.')
 
@@ -160,6 +162,7 @@ export const CreateSessionResponse = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('The position in an agent team this session occupies, by id, when it\noccupies one.\n\n**What it may hand work to, when it has one**: the profiles its\nposition\'s children reference, and nothing else. Inherited down the\nlineage — a lead\'s child occupies the child of the lead\'s position — so\nthe chain of sessions walks the chain of positions.\n\nAbsent for every session a person started without naming a team, which\nis every session there was. Absent means the old path: a Manager\nprofile\'s own `delegate_scope`, or no delegation at all.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -265,6 +268,7 @@ export const GetSessionResponse = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('The position in an agent team this session occupies, by id, when it\noccupies one.\n\n**What it may hand work to, when it has one**: the profiles its\nposition\'s children reference, and nothing else. Inherited down the\nlineage — a lead\'s child occupies the child of the lead\'s position — so\nthe chain of sessions walks the chain of positions.\n\nAbsent for every session a person started without naming a team, which\nis every session there was. Absent means the old path: a Manager\nprofile\'s own `delegate_scope`, or no delegation at all.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -356,6 +360,7 @@ export const RenameSessionResponse = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('The position in an agent team this session occupies, by id, when it\noccupies one.\n\n**What it may hand work to, when it has one**: the profiles its\nposition\'s children reference, and nothing else. Inherited down the\nlineage — a lead\'s child occupies the child of the lead\'s position — so\nthe chain of sessions walks the chain of positions.\n\nAbsent for every session a person started without naming a team, which\nis every session there was. Absent means the old path: a Manager\nprofile\'s own `delegate_scope`, or no delegation at all.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -1210,6 +1215,7 @@ export const SetShareResponse = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('The position in an agent team this session occupies, by id, when it\noccupies one.\n\n**What it may hand work to, when it has one**: the profiles its\nposition\'s children reference, and nothing else. Inherited down the\nlineage — a lead\'s child occupies the child of the lead\'s position — so\nthe chain of sessions walks the chain of positions.\n\nAbsent for every session a person started without naming a team, which\nis every session there was. Absent means the old path: a Manager\nprofile\'s own `delegate_scope`, or no delegation at all.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),

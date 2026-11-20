@@ -444,6 +444,22 @@ async fn usable_account(state: &AppState, owner: &str, id: &str, agent: Agent) -
     Ok(found.id)
 }
 
+/// One profile a session may hand work to, and where that permission came
+/// from.
+///
+/// **Two paths, one list.** A session holding a position in a team reaches its
+/// position's children; one holding none reaches its profile's own
+/// `delegate_scope`. The difference is `position`: with it, the child inherits
+/// a seat and can hand work on in turn, and the seat's own instructions travel
+/// into its brief. Without it, the child is a leaf — which is exactly what
+/// every delegated child is today.
+#[derive(Debug, Clone)]
+struct Reachable {
+    position: Option<String>,
+    instructions: String,
+    profile: crate::roles::Role,
+}
+
 /// Start a child for the session that asked.
 async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     let lead = state
@@ -452,20 +468,9 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         .await?
         .context("the session that asked no longer exists")?;
 
-    // Flat, deliberately: a child may not start children of its own. The
-    // lead decides the shape of the work, and with no cap on how many
-    // children it starts, depth is the one thing still holding the count
-    // down — a tree nobody can see the bottom of is how a handful of
-    // workspaces becomes a thousand.
-    if lead.parent_id.is_some() {
-        bail!("this session is itself a child, and children cannot spawn");
-    }
-
-    // Only a Manager delegates. A session started as an Operator profile — or
-    // as no profile at all — does the work itself rather than handing it off,
-    // which is the whole of what the distinction means. Load the whole profile,
-    // not just the flag: its `delegate_scope` decides which subagents it may
-    // even see.
+    // Which profile this session runs, whole rather than just its flag: the
+    // old path reads `delegate_scope` off it, and both paths read what it says
+    // about a child that runs out.
     let manager = match &lead.profile_id {
         Some(pid) => {
             state
@@ -475,12 +480,18 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         }
         None => None,
     };
-    if !manager.as_ref().map(|p| p.can_delegate).unwrap_or(false) {
-        bail!(
-            "this session is not a Manager, so it does the work itself. Start the workspace as a \
-             Manager profile to hand work off."
-        );
-    }
+
+    /* **Where this session stands, which decides where its reach comes
+    from.** A session holding a position in a team resolves through that
+    position's children; one holding none falls back to its profile's own
+    `delegate_scope`, which is every session that exists today. Read
+    through `filed_where`, so a team filed somewhere its owner can no
+    longer reach resolves to nothing and the session falls back — failing
+    closed rather than keeping a reach into a team taken away from it. */
+    let standing = match &lead.position_id {
+        Some(id) => state.agent_teams.standing(lead.owner.as_str(), id).await?,
+        None => None,
+    };
 
     // The same call again — a worker that reconnects re-announces what its
     // agent is still blocked on — is the same child, not a second one.
@@ -489,29 +500,94 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         return Ok(started(&existing, shares));
     }
 
-    let goal = text(&request.input, "goal")
-        .context("spawn needs a `goal`: what the child should accomplish")?;
-
-    // The subagents this Manager may delegate to: what its owner can see,
-    // narrowed to its `delegate_scope` when it has one. An empty scope is "any",
-    // which is the default. Everything outside is invisible — a name off this
-    // list is refused exactly as a name that was never defined, so an out-of-
-    // scope profile reads as *does not exist* rather than *not allowed*.
-    let team: Vec<crate::roles::Role> = {
-        let visible = state
-            .roles
-            .visible(lead.owner.as_str(), crate::access::Level::Viewer)
-            .await?;
-        let scope = manager
-            .as_ref()
-            .map(|m| &m.delegate_scope)
-            .filter(|s| !s.is_empty());
-        match scope {
-            Some(scope) => visible
+    /* What this session may hand work to, and nothing else.
+    **Intersected with what its owner can actually see on both paths** —
+    that intersection is load-bearing security rather than tidiness, and is
+    the one thing the two have in common. */
+    let reach: Vec<Reachable> = match &standing {
+        Some(standing) => {
+            /* A position's children. **No flat rule here**: the tree is
+            the bound. A seat's children are the only thing an agent in it
+            can start, so a chain of sessions walks a chain of positions
+            and cannot be longer than the tree is deep
+            (`agent_teams::MAX_DEPTH`). That is why the depth limit is the
+            only guardrail delegation needs, and why there is no second
+            rule about how deep a spawn may go to keep in step with it. */
+            let reports = state
+                .agent_teams
+                .reports(lead.owner.as_str(), &standing.position)
+                .await?;
+            if reports.is_empty() {
+                bail!(
+                    "nothing reports to your position in the \"{}\" team, so this work is yours \
+                     to do rather than hand on. Add a position under it on Configuration → \
+                     Agent teams if somebody should be doing part of this.",
+                    standing.team_name
+                );
+            }
+            reports
                 .into_iter()
-                .filter(|r| scope.contains(&r.id))
-                .collect(),
-            None => visible,
+                .map(|r| Reachable {
+                    position: Some(r.position),
+                    instructions: r.instructions,
+                    profile: r.profile,
+                })
+                .collect()
+        }
+        None => {
+            // Flat, deliberately, on the old path: a child may not start
+            // children of its own. The lead decides the shape of the work, and
+            // with no cap on how many children it starts, depth is the one
+            // thing still holding the count down. A session that holds a
+            // position is bounded by its tree instead, which is what lets that
+            // one delegate further.
+            if lead.parent_id.is_some() {
+                bail!("this session is itself a child, and children cannot spawn");
+            }
+            /* **Not in a team, and not a Manager: nobody to hand to, and
+            the sentence says which fix.** Reach is a property of a
+            relationship now, so the answer is a team rather than a flag —
+            and the old flag is named too, because during the compatibility
+            window it is still a live way to delegate and a refusal that
+            mentioned only one of the two would send somebody to the wrong
+            screen. */
+            if !manager.as_ref().map(|p| p.can_delegate).unwrap_or(false) {
+                bail!(
+                    "this session holds no position in an agent team and its profile is not a \
+                     Manager, so there is nobody for it to hand work to. Reach comes from a \
+                     team: put this profile in one under Configuration → Agent teams and start \
+                     the workspace as that team, and the profiles reporting to its position are \
+                     the ones it can start."
+                );
+            }
+            // What its owner can see, narrowed to its `delegate_scope` when it
+            // has one. An empty scope is "any", which is the default.
+            // Everything outside is invisible — a name off this list is refused
+            // exactly as a name that was never defined, so an out-of-scope
+            // profile reads as *does not exist* rather than *not allowed*.
+            let visible = state
+                .roles
+                .visible(lead.owner.as_str(), crate::access::Level::Viewer)
+                .await?;
+            let scope = manager
+                .as_ref()
+                .map(|m| &m.delegate_scope)
+                .filter(|s| !s.is_empty());
+            let narrowed: Vec<crate::roles::Role> = match scope {
+                Some(scope) => visible
+                    .into_iter()
+                    .filter(|r| scope.contains(&r.id))
+                    .collect(),
+                None => visible,
+            };
+            narrowed
+                .into_iter()
+                .map(|profile| Reachable {
+                    position: None,
+                    instructions: String::new(),
+                    profile,
+                })
+                .collect()
         }
     };
     /* **The fourth place a profile is resolved by name, and the one that
@@ -524,10 +600,63 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
 
     Not found is untouched: that message is good and was never the
     defect. */
-    let role = match text(&request.input, "role") {
-        Some(wanted) => match at_most_one("subagent", wanted.trim(), &team, |r| r.name.as_str())? {
+    /* Read after the reach is settled, so that a session with nobody to
+    hand to is told *that* rather than told to name a goal first. Both are
+    true of a malformed call from an agent that cannot delegate, and the
+    one worth a turn is the one it cannot fix by adding a field. */
+    let goal = text(&request.input, "goal")
+        .context("spawn needs a `goal`: what the child should accomplish")?;
+
+    let found = match text(&request.input, "role") {
+        Some(wanted) => match at_most_one("subagent", wanted.trim(), &reach, |r| {
+            r.profile.name.as_str()
+        })? {
             Some(found) => Some(found.clone()),
             None => {
+                /* **An agent naming anything above it gets its own
+                sentence.** Falling through to "no subagent called that"
+                would tell an agent a profile does not exist when it
+                plainly does — it is one of the ones it reports up
+                through — and the agent would waste its turn working out
+                which of them was wrong. Work goes down the tree; handing
+                back is how it goes up, and that is the thing to say.
+
+                **The whole chain, not only the parent.** The immediate
+                lead was the first case anybody hit, and a grandparent has
+                exactly the same problem: with six levels permitted, a
+                chain long enough to reach one is ordinary. So the sentence
+                says *where* the named profile sits, and the agent learns
+                the shape rather than doubting the name. */
+                if let Some(standing) = &standing {
+                    let chain = state
+                        .agent_teams
+                        .above(lead.owner.as_str(), &standing.position)
+                        .await?;
+                    if let Some(found) = chain
+                        .iter()
+                        .find(|a| a.name.eq_ignore_ascii_case(wanted.trim()))
+                    {
+                        let mine: Vec<&str> =
+                            reach.iter().map(|r| r.profile.name.as_str()).collect();
+                        // The nearest one is the only one a hand-back
+                        // reaches directly, so it is what the sentence
+                        // points at whichever ancestor was named.
+                        bail!(
+                            "\"{}\" is {} in the \"{}\" team, so it is not yours to start. Work \
+                             goes down the tree, not back up: finish your turn and what you say \
+                             is delivered to {}. The profiles you can start are the ones \
+                             reporting to you: {}.",
+                            found.name,
+                            where_it_sits(found.steps),
+                            standing.team_name,
+                            match found.steps {
+                                1 => "it".to_string(),
+                                _ => "your own lead, which is what carries it further".to_string(),
+                            },
+                            mine.join(", ")
+                        );
+                    }
+                }
                 /* One entry per name, with a collision marked rather than
                 printed twice. `Engineer, Engineer` is the truth and reads
                 as a bug, which costs the reader more than it tells them;
@@ -537,13 +666,13 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
                 the resolution matches, so what is listed once is what
                 resolves once. */
                 let mut counted: Vec<(String, usize)> = Vec::new();
-                for r in &team {
+                for r in &reach {
                     match counted
                         .iter_mut()
-                        .find(|(n, _)| n.eq_ignore_ascii_case(&r.name))
+                        .find(|(n, _)| n.eq_ignore_ascii_case(&r.profile.name))
                     {
                         Some((_, seen)) => *seen += 1,
-                        None => counted.push((r.name.clone(), 1)),
+                        None => counted.push((r.profile.name.clone(), 1)),
                     }
                 }
                 let names: Vec<String> = counted
@@ -567,6 +696,18 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         },
         None => None,
     };
+    /* The seat the child will stand in, and the instructions that belong to
+    it. **This is the inheritance**: the child of the lead's position is the
+    child's position, which is what makes a session's place in a team
+    something it passes on rather than something it is told once. A one-off
+    with no `role` names no seat, so it is a leaf and cannot hand work on —
+    which is what `spawn` refuses it for, in those words. */
+    let seat = found.as_ref().and_then(|f| f.position.clone());
+    let seat_instructions = found
+        .as_ref()
+        .map(|f| f.instructions.clone())
+        .unwrap_or_default();
+    let role = found.map(|f| f.profile);
 
     // A role that pins a field enforces it — the lead's own argument does not
     // override it, which is the point of pinning. A role that leaves a field
@@ -611,11 +752,34 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     }
     let name = text(&request.input, "name").or_else(|| role.as_ref().map(|r| r.name.clone()));
     let reason = text(&request.input, "reason").or_else(|| role.as_ref().map(|r| r.does.clone()));
+    /* **What the child will be able to hand work to, read before it exists.**
+    Its seat's children, through the same intersection its own `spawn` will
+    use, so what the brief promises and what the call allows are one answer.
+    Empty for a leaf, which is every delegated child before this. */
+    let onward: Vec<Reachable> = match &seat {
+        Some(seat) => state
+            .agent_teams
+            .reports(lead.owner.as_str(), seat)
+            .await?
+            .into_iter()
+            .map(|r| Reachable {
+                position: Some(r.position),
+                instructions: r.instructions,
+                profile: r.profile,
+            })
+            .collect(),
+        None => Vec::new(),
+    };
     let prompt = brief(
         &lead,
         &goal,
         text(&request.input, "context").as_deref(),
         role.as_ref(),
+        standing.as_ref().filter(|_| seat.is_some()).map(|s| Seat {
+            team: s.team_name.as_str(),
+            instructions: seat_instructions.as_str(),
+            onward: &onward,
+        }),
     );
 
     // Built the way the API builds one, so every default and every check that
@@ -836,8 +1000,40 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     if let Some(role) = &role {
         state.db.set_profile(&child.id, role.id.as_str()).await?;
     }
+    /* **And where it stands, which is the inheritance this whole effort
+    rides on.** The child occupies the child of the lead's position, so its
+    own reach is that seat's children — and so on down, bounded by how deep
+    the tree is. Null when the lead resolved the old way, or when this was a
+    one-off with no profile named: both of those are leaves, and a leaf is
+    refused the next `spawn` with a sentence that says why. */
+    if let Some(seat) = &seat {
+        state.db.set_position(&child.id, seat).await?;
+    }
 
     Ok(started(&child, shares))
+}
+
+/// Where a delegated child is standing, when it is standing somewhere.
+///
+/// A child carries its persona in its brief rather than in a composed
+/// `persona` — the lead's own on top of the brief would make it the lead — so
+/// everything the seat says has to be said here.
+struct Seat<'a> {
+    /// The team's name, so the child can tell which of a profile's seats it is
+    /// reading.
+    team: &'a str,
+    /// Instructions for this seat only. **Added to the profile's, never in
+    /// place of them** — the one rule a position has, and the reason there is
+    /// no resolution order to reason about anywhere in this feature.
+    instructions: &'a str,
+    /// What this child may hand work to **in turn**, already intersected with
+    /// what the owner can see.
+    ///
+    /// Empty for a leaf, which is every delegated child before agent teams.
+    /// Non-empty is the new thing, and it has to be *said*: the child has the
+    /// `spawn` tool whatever its seat, and one that is told nothing would
+    /// either never use it or guess a name and spend a turn being refused.
+    onward: &'a [Reachable],
 }
 
 /// What the child is first told.
@@ -851,6 +1047,7 @@ fn brief(
     goal: &str,
     context: Option<&str>,
     role: Option<&crate::roles::Role>,
+    seat: Option<Seat<'_>>,
 ) -> String {
     let mut text = format!("Task: {goal}");
     if let Some(context) = context {
@@ -866,6 +1063,32 @@ fn brief(
         if !role.instructions.trim().is_empty() {
             text.push_str("\n\n");
             text.push_str(role.instructions.trim());
+        }
+        if let Some(seat) = &seat {
+            if !seat.instructions.trim().is_empty() {
+                text.push_str(&format!(
+                    "\n\nAnd in the \"{}\" team, where you are standing:\n\n",
+                    seat.team
+                ));
+                text.push_str(seat.instructions.trim());
+            }
+        }
+    }
+
+    // What it may hand on, and how. The same guidance a lead gets, because it
+    // is a lead: it holds a position with profiles reporting to it, and the
+    // mechanics of `spawn` do not change with how far down the tree it is.
+    if let Some(seat) = seat.filter(|s| !s.onward.is_empty()) {
+        text.push_str("\n\n");
+        text.push_str(&ft_core::delegation_guidance(Some(seat.team)));
+        text.push_str("\n\nThe profiles reporting to your position — pass the name as `role`:\n");
+        for r in seat.onward {
+            text.push_str(&format!(
+                "- **{}** — {}{}\n",
+                r.profile.name,
+                r.profile.does,
+                left_open(&r.profile)
+            ));
         }
     }
 
@@ -887,6 +1110,24 @@ fn brief(
          without reading the whole transcript. A handful of steps, one in progress at a time.",
     );
     text
+}
+
+/// Where a named profile sits relative to the one asking, in words.
+///
+/// Words rather than a number because the sentence is read by an agent
+/// deciding what to do next, and "two positions above yours" is a shape it can
+/// act on where "2" is a value it has to interpret. Bounded by
+/// `agent_teams::MAX_DEPTH`, so the table is never short; the digits are a
+/// fallback rather than a case anybody reaches.
+fn where_it_sits(steps: i32) -> String {
+    match steps {
+        1 => "the position above yours — your own lead".to_string(),
+        2 => "two positions above yours — your lead's own lead".to_string(),
+        3 => "three positions above yours".to_string(),
+        4 => "four positions above yours".to_string(),
+        5 => "five positions above yours".to_string(),
+        n => format!("{n} positions above yours"),
+    }
 }
 
 /// The tool's result once a child exists.
@@ -2923,6 +3164,7 @@ mod tests {
             "Add a limiter",
             Some("Use the token bucket in api/."),
             None,
+            None,
         );
         assert!(text.starts_with("Task: Add a limiter"));
         assert!(text.contains("Context:\nUse the token bucket"));
@@ -2960,7 +3202,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let text = brief(&lead, "Review it", None, Some(&role));
+        let text = brief(&lead, "Review it", None, Some(&role), None);
         assert!(text.contains("acting as the \"reviewer\" subagent"));
         assert!(text.contains("reads a branch and reports problems"));
         assert!(text.contains("Report findings as path:line."));
@@ -3071,6 +3313,7 @@ mod tests {
         let state = AppState {
             skills: crate::skills::Skills::new(db.pool().clone()),
             roles: crate::roles::Roles::new(db.pool().clone()),
+            agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
             updates: crate::updates::Updates::new(db.pool().clone()),
             policy: crate::auth::Policy::open(),
             access: crate::access::Access::new(db.pool().clone()),

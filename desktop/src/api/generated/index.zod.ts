@@ -1,5 +1,6 @@
 export * from './access/access.zod.ts';
 export * from './accounts/accounts.zod.ts';
+export * from './agent-teams/agent-teams.zod.ts';
 export * from './agents/agents.zod.ts';
 export * from './artifacts/artifacts.zod.ts';
 export * from './auth/auth.zod.ts';
