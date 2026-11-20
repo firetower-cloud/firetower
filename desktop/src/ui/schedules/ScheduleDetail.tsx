@@ -31,13 +31,11 @@ import { Icon, IconButton } from "~/components/ui";
 import { WhereTo } from "~/ui/config/bits";
 import { navigate } from "~/shims/next-navigation";
 import { useConfirm } from "~/ui/Confirm";
+import { flipSchedule, Refused } from "./turn";
 import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
 import {
   deleteSchedule,
   getListSchedulesQueryKey,
-  pauseSchedule,
-  resumeSchedule,
-  approveSchedule,
   useOneSchedule,
   useScheduleRuns,
 } from "~/api/generated/schedules/schedules";
@@ -97,6 +95,12 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
    * times a day.
    */
   const [moving, setMoving] = useState(false);
+  /* Why the switch did nothing, drawn where the switch is. See `turn.tsx`:
+     this used to be an unhandled rejection.
+
+     Not `refused`: that name is taken on this page by *the last run was
+     refused*, which is a different sentence about a different thing. */
+  const [wouldNot, setWouldNot] = useState<string | null>(null);
   /* **The same sheet the create screen uses**, filled in. `?edit=1` is read
      once on the way in, for the rail's row and for a link somebody kept;
      afterwards this is ordinary state, like the create sheet on the library
@@ -252,10 +256,13 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
               aria-label={it.active ? "Pause future runs" : "Turn it on"}
               title={it.active ? "Pause future runs" : "Turn it on"}
               onClick={async () => {
-                if (it.active) await pauseSchedule(it.id);
-                else if (it.approvedAt) await resumeSchedule(it.id);
-                else await approveSchedule(it.id, { revision: it.revision });
-                await refresh();
+                /* **Every press answers.** This awaited three bare mutations,
+                   so a refused approval — which is what turning on a schedule
+                   whose agent team changed is — went to an unhandled
+                   rejection and the switch did not move. */
+                const says = await flipSchedule(it);
+                setWouldNot(says);
+                if (!says) await refresh();
               }}
             >
               <i />
@@ -264,6 +271,11 @@ export function ScheduleDetail({ schedule: given }: { schedule: Schedule }) {
             <IconButton of={MoreHorizontal} label="More" onClick={(e) => menu.show(e, it)} />
           </div>
         </div>
+
+        {/* **What just happened, above what is standing.** A refused press is
+            the newest fact on the screen and the answer to the thing you just
+            did; the two boxes below are states this schedule is in. */}
+        <Refused says={wouldNot} />
 
         {/* **It cannot run.** In brick, leading with the fix. A different
             thing from a it that stopped itself, which is amber. */}

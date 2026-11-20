@@ -22,15 +22,13 @@ import { Icon, IconButton } from "~/components/ui";
 import { Section, WhereTo } from "~/ui/config/bits";
 import { ContextMenu, useMenu, type MenuItem } from "~/ui/ContextMenu";
 import { useConfirm } from "~/ui/Confirm";
+import { flipSchedule, Refused } from "./turn";
 import { navigate } from "~/shims/next-navigation";
 import {
   useListSchedules,
   useAllRuns,
   getListSchedulesQueryKey,
   deleteSchedule,
-  pauseSchedule,
-  resumeSchedule,
-  approveSchedule,
   runScheduleNow,
 } from "~/api/generated/schedules/schedules";
 import type { Schedule } from "~/api/generated/model";
@@ -86,6 +84,11 @@ function Library({
   const waiting = schedules.filter((s) => (s.made.byAgent && !s.approvedAt) || stoppedByFiretower(s));
   const mine = schedules.filter((s) => !waiting.includes(s));
   const proposals = waiting.filter((s) => s.made.byAgent && !s.approvedAt).length;
+  /* **Why a press did nothing, above the list rather than in the row.** A row
+     is five columns of fixed width and a refusal is a sentence; the composer
+     puts `create.isError` above the thing it is about for the same reason.
+     Held here so either table's switch can reach it. */
+  const [refused, setRefused] = useState<string | null>(null);
 
   return (
     <div className="scroll-slim h-full overflow-y-auto">
@@ -103,6 +106,7 @@ function Library({
         trouble={library.error ? "error" : null}
         onRetry={() => library.refetch()}
       >
+        <Refused says={refused} />
         {schedules.length === 0 ? (
           <Examples first onPick={onNew} />
         ) : (
@@ -124,7 +128,7 @@ function Library({
                 <ColumnHeads />
                 <div className="lrows">
                   {waiting.map((s) => (
-                    <Row key={s.id} schedule={s} />
+                    <Row key={s.id} schedule={s} onRefused={setRefused} />
                   ))}
                 </div>
               </section>
@@ -137,7 +141,7 @@ function Library({
               <ColumnHeads />
               <div className="lrows">
                 {mine.map((s) => (
-                  <Row key={s.id} schedule={s} />
+                  <Row key={s.id} schedule={s} onRefused={setRefused} />
                 ))}
               </div>
             </section>
@@ -173,7 +177,14 @@ function ColumnHeads() {
   );
 }
 
-function Row({ schedule }: { schedule: Schedule }) {
+function Row({
+  schedule,
+  onRefused,
+}: {
+  schedule: Schedule;
+  /** Where a refused press puts its sentence. See `turn.tsx`. */
+  onRefused: (says: string | null) => void;
+}) {
   const client = useQueryClient();
   const menu = useMenu<Schedule>();
   const confirm = useConfirm();
@@ -183,10 +194,12 @@ function Row({ schedule }: { schedule: Schedule }) {
   const refresh = () => client.invalidateQueries({ queryKey: getListSchedulesQueryKey() });
 
   const flip = async () => {
-    if (schedule.active) await pauseSchedule(schedule.id);
-    else if (schedule.approvedAt) await resumeSchedule(schedule.id);
-    else await approveSchedule(schedule.id, { revision: schedule.revision });
-    await refresh();
+    /* **Every press answers.** This awaited three bare mutations, so a refused
+       approval — which is what turning on a schedule whose agent team changed
+       is — went to an unhandled rejection and the row did not move. */
+    const says = await flipSchedule(schedule);
+    onRefused(says);
+    if (!says) await refresh();
   };
 
   const items: MenuItem[] = [
