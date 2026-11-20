@@ -198,7 +198,18 @@ pub struct NewPosition {
     #[serde(default)]
     pub instructions: String,
     /// Its reports, in the order they should sit.
+    // **`no_recursion` is not cosmetic.** The type is recursive, and without
+    // it `ToSchema` expands itself forever — the document is built in a test
+    // (`api::tests::the_document_describes_every_route`), so the symptom is a
+    // stack overflow rather than anything subtle. With it the field is a
+    // `$ref` back to this schema, which is what a recursive shape means in
+    // OpenAPI and what every client generates a recursive type from.
+    //
+    // Not a doc comment, because utoipa copies those into the contract and
+    // the three clients, and a note about Rust's schema derive is not
+    // something a TypeScript reader of this field needs.
     #[serde(default)]
+    #[schema(no_recursion)]
     pub children: Vec<NewPosition>,
 }
 
@@ -1680,5 +1691,73 @@ mod tests {
             vec![lead],
             "the seat and the one under it went with it"
         );
+    }
+    /// Filed into a directory through the one operation that moves anything,
+    /// and reachable there by whoever the directory is granted to.
+    ///
+    /// `access::transfer` takes a `FiledKind` and an id and nothing else, so
+    /// this is the proof that a team joined that list rather than growing a
+    /// move of its own — and that the sharing endpoints, which call exactly
+    /// this, work on one without a line being written for them.
+    #[tokio::test]
+    async fn a_team_files_into_a_directory_through_the_one_transfer() {
+        let w = world().await;
+        let lead = w.profile("Orchestrator").await;
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named("Platform", seat(&lead, vec![])),
+            )
+            .await
+            .unwrap();
+        let (ana, _) = w.colleague("ana").await;
+
+        sqlx::query(
+            "INSERT INTO directories (id, org_id, name, slug) VALUES ('d_b', $1, 'Backend', 'backend')",
+        )
+        .bind(&w.org)
+        .execute(w.db.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO grants (directory_id, subject_kind, subject_id, level) \
+             VALUES ('d_b', 'person', $1, 'writer')",
+        )
+        .bind(&ana)
+        .execute(w.db.pool())
+        .await
+        .unwrap();
+
+        let access = crate::access::Access::new(w.db.pool().clone());
+        let vault =
+            crate::vault::Vault::new(w.db.pool().clone(), crate::vault::crypto::RootKey::generate());
+        let from = access
+            .path_of(crate::access::FiledKind::AgentTeam, id.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        access
+            .transfer(
+                &vault,
+                crate::access::FiledKind::AgentTeam,
+                id.as_str(),
+                &from.moved_to(ft_core::path::DIRECTORY, "backend"),
+                "admin",
+            )
+            .await
+            .unwrap();
+
+        let hers = w.teams.visible(&ana, Level::Writer).await.unwrap();
+        assert_eq!(hers.len(), 1, "filing it handed it to the directory");
+        assert_eq!(
+            hers[0].path,
+            "d/backend/platform_".to_string()
+                + &hers[0].path[hers[0].path.rfind('_').unwrap() + 1..]
+        );
+        assert!(hers[0].may_write, "and a writer there may change it");
     }
 }
