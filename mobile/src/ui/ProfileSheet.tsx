@@ -116,11 +116,15 @@ function Row({
   return (
     <Pressable
       onPress={onPress}
+      /* Not merely dimmed: a row that looks pressable and silently does
+         nothing is worse than one that plainly is not a control, and the
+         second line is already carrying the reason. */
+      disabled={dimmed}
       className={`min-h-[56px] flex-row items-center gap-3 px-5 py-2.5 ${
         first ? "" : "border-t border-line-soft"
       }`}
       style={dimmed ? { opacity: 0.4 } : undefined}
-      android_ripple={{ color: color.overlay }}
+      android_ripple={dimmed ? undefined : { color: color.overlay }}
     >
       <View className="w-[22px] items-center">{glyph}</View>
       <View className="min-w-0 flex-1">
