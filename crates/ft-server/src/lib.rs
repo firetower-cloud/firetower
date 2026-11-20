@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 pub mod access;
 pub mod accounts;
+pub mod agent_teams;
 pub mod api;
 pub mod artifact;
 pub mod auth;
@@ -82,6 +83,8 @@ pub struct AppState {
     /// The skill library, and what each session is reading from it.
     pub skills: skills::Skills,
     pub roles: roles::Roles,
+    /// Agent teams, and the positions delegation resolves from.
+    pub agent_teams: agent_teams::AgentTeams,
     /// What this deployment will accept, so `/bootstrap` can say so.
     ///
     /// A copy rather than a reference to the gate's: the gate enforces it and
@@ -235,6 +238,7 @@ pub async fn run(config: Config) -> Result<()> {
         access: access::Access::new(db_pool.clone()),
         skills: skills::Skills::new(db_pool.clone()),
         roles: roles::Roles::new(db_pool.clone()),
+        agent_teams: agent_teams::AgentTeams::new(db_pool.clone()),
         forwards: Default::default(),
         previews: Default::default(),
         names,

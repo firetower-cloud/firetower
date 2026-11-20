@@ -525,7 +525,12 @@ fn nonblank(s: &Option<String>) -> Option<&str> {
     s.as_deref().filter(|v| !v.trim().is_empty())
 }
 
-const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.author_key, r.does, \
+/// Every column a [`Role`] is read from, prefixed `r.`.
+///
+/// `pub(crate)` so `agent_teams` can select a position's profile in the same
+/// query as the position — one spelling of what a profile's columns are, which
+/// is what stops the two drifting the day a field is added.
+pub(crate) const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.author_key, r.does, \
                       r.placement, r.agent, r.host_id, r.agent_account_id, \
                       r.pref_model, r.pref_effort, r.pref_mode, r.pref_sandbox, r.instructions, \
                       r.can_delegate, r.delegate_scope, r.skill_scope, \
@@ -533,7 +538,11 @@ const FIELDS: &str = "r.id, r.path::text AS path, r.name, r.author_key, r.does, 
                       r.on_usage_limit, r.on_child_limit, \
                       r.created_at, r.updated_at";
 
-fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
+/// One row as a [`Role`]. `pub(crate)` for the reason [`FIELDS`] is.
+///
+/// It reads `may_write` and `may_share` with `get`, so a query that selects
+/// `FIELDS` has to select those two as well.
+pub(crate) fn read(row: sqlx::postgres::PgRow) -> Result<Role> {
     Ok(Role {
         id: row.get("id"),
         // Slashes on the wire, dots in the database — the same conversion every

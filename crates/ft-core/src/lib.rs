@@ -27,9 +27,9 @@ pub mod turn;
 
 pub use grants::{Level, SubjectKind};
 pub use ids::{
-    ArtifactId, ArtifactVersionId, DeliveryId, DirectoryId, HostId, OrgId, RepoId, RoleId,
-    ScheduleId, ScheduleRunId, SessionId, SkillId, SkillVersionId, TeamId, TriggerId, UserId,
-    WorkspaceId,
+    AgentTeamId, ArtifactId, ArtifactVersionId, DeliveryId, DirectoryId, HostId, OrgId, PositionId,
+    RepoId, RoleId, ScheduleId, ScheduleRunId, SessionId, SkillId, SkillVersionId, TeamId,
+    TriggerId, UserId, WorkspaceId,
 };
 pub use path::{slug, ResourcePath};
 pub use session::{
@@ -1087,12 +1087,11 @@ The `firetower-artifacts` skill has the rest: what the page is rendered inside,
 what makes one good, and how to use a richer artifact skill alongside it.
 ";
 
-/// What a Manager is told about handing work off.
+/// What a Manager is told about handing work off — the opening, for a session
+/// whose reach is its profile's own `delegate_scope`.
 ///
-/// Composed into a Manager profile's persona — only a Manager gets it, because
-/// only a Manager delegates. The profiles it may hand to are listed after this,
-/// by the control plane, from what its owner can see.
-pub const DELEGATION_GUIDANCE: &str = "\
+/// The old path, kept while both exist. See [`delegation_guidance`].
+const DELEGATING_AS_A_MANAGER: &str = "\
 ## Delegating
 
 You are a Manager: you may hand work to other profiles rather than doing all of
@@ -1107,7 +1106,37 @@ To start one of your profiles, pass `role: \"<name>\"` to `spawn` — it supplie
 the instructions, and it says where its children run. For a one-off, omit
 `role` and describe the work in `goal`. If you name a profile that does not
 exist, the refusal lists the ones that do.
+";
 
+/// The same opening for a session that holds a **position in a team**, where
+/// its reach is that position's children and nothing else.
+///
+/// `{team}` is the team's name. Said as a relationship rather than as a
+/// property of this agent, because that is what it now is: the same profile in
+/// another team has other reports, or none.
+const DELEGATING_IN_A_POSITION: &str = "\
+## Delegating
+
+You hold a position in the \"{team}\" team, and the profiles **reporting to
+your position** are the ones you may hand work to. They are listed below, and
+they are the whole of it: a profile that is not on that list is not yours to
+start, however plainly it exists elsewhere. `spawn` starts one — in this
+workspace, sharing its directory and branch, or in a workspace of its own on
+its own branch — and `children` lists, steers or stops the ones you started. A
+child knows nothing of this conversation: give it everything in `goal` and
+`context`. Its result arrives here as a message when it hands back, between
+your turns, so dispatch, do what does not depend on it, then end your turn.
+
+To hand work to one of your reports, pass `role: \"<name>\"` to `spawn` — it
+supplies the instructions, and it says where its children run. For a one-off,
+omit `role` and describe the work in `goal`; a one-off holds no position, so it
+cannot hand work on again. Your reports may have reports of their own, and each
+of them hands work only to the ones directly under it — so give a report the
+whole of a branch of work and let it break that up itself.
+";
+
+/// The rest, which is the same whichever way the reach was decided.
+const DELEGATING_REST: &str = "
 A profile may **commit** to an engine, a machine and a placement, or leave any
 of the three **open**. What it commits to is binding: your argument does not
 override it, and the list above marks which fields each profile leaves open so
@@ -1143,6 +1172,29 @@ each reading is — put all three in the description of the option it belongs to
 and say so when a reading is old enough to doubt. A question offering three
 bare account names gives somebody no way to choose between them, and they are
 being asked precisely because the choice spends real money.";
+
+/// What an agent that may hand work off is told about doing it.
+///
+/// Composed into the persona by the control plane, which then lists what this
+/// agent may actually hand to. **Two openings and one body**, because there are
+/// two ways an agent comes by its reach and exactly one set of mechanics:
+///
+/// * `Some(team)` — it holds a position in that team, and its reach is that
+///   position's children. The new path.
+/// * `None` — it is a Manager profile, and its reach is the profile's own
+///   `delegate_scope`. The old path, which keeps working for a session that
+///   holds no position (#497 is what removes it).
+///
+/// The body is shared rather than copied: the two openings differ in *where
+/// the reach comes from*, and nothing about `spawn`'s own mechanics changes
+/// with the answer.
+pub fn delegation_guidance(team: Option<&str>) -> String {
+    let opening = match team {
+        Some(name) => DELEGATING_IN_A_POSITION.replace("{team}", name),
+        None => DELEGATING_AS_A_MANAGER.to_string(),
+    };
+    format!("{opening}{DELEGATING_REST}")
+}
 
 /// Whether there is anybody to answer a permission prompt.
 ///

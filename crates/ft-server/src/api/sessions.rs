@@ -1530,7 +1530,7 @@ pub(super) async fn persona_for(
     }
     if profile.can_delegate {
         text.push('\n');
-        text.push_str(ft_core::DELEGATION_GUIDANCE);
+        text.push_str(&ft_core::delegation_guidance(None));
         /* And this Manager's own answer to the question the guidance leaves
         to it. Said here rather than in the shared text because it is the
         one part of delegating that is per-profile: the guidance explains

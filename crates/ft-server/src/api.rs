@@ -11,6 +11,7 @@
 
 pub(crate) mod access;
 pub(crate) mod accounts;
+pub(crate) mod agent_teams;
 pub(crate) mod agents;
 mod annotations;
 pub(crate) mod artifacts;
@@ -435,6 +436,12 @@ async fn credential_on(
     components(schemas(
         crate::roles::Role,
         crate::roles::NewRole,
+        crate::agent_teams::AgentTeam,
+        crate::agent_teams::NewAgentTeam,
+        crate::agent_teams::NewPosition,
+        crate::agent_teams::Position,
+        crate::agent_teams::TeamWithPositions,
+        crate::agent_teams::Limits,
         crate::roles::import::ProfileDrop,
         crate::roles::import::ImportPlan,
         crate::db::Bucket,
@@ -668,6 +675,16 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(roles::role_import_limits))
         .routes(routes!(roles::plan_role_import))
         .routes(routes!(roles::apply_role_import))
+        .routes(routes!(
+            agent_teams::list_agent_teams,
+            agent_teams::create_agent_team
+        ))
+        .routes(routes!(agent_teams::agent_team_limits))
+        .routes(routes!(
+            agent_teams::get_agent_team,
+            agent_teams::update_agent_team,
+            agent_teams::delete_agent_team
+        ))
         .routes(routes!(secrets::list_secrets))
         .routes(routes!(secrets::replace_secret, secrets::remove_secret))
         .routes(routes!(secrets::reveal_secret))

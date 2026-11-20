@@ -289,6 +289,19 @@ pub struct Session {
     /// rail reads to say which kind of agent a workspace holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
+    /// The position in an agent team this session occupies, by id, when it
+    /// occupies one.
+    ///
+    /// **What it may hand work to, when it has one**: the profiles its
+    /// position's children reference, and nothing else. Inherited down the
+    /// lineage — a lead's child occupies the child of the lead's position — so
+    /// the chain of sessions walks the chain of positions.
+    ///
+    /// Absent for every session a person started without naming a team, which
+    /// is every session there was. Absent means the old path: a Manager
+    /// profile's own `delegate_scope`, or no delegation at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position_id: Option<String>,
     /// What the lead said this child was for, in its own words.
     ///
     /// Carried so the child's own screen can say why it exists — the first

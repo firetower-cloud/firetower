@@ -1673,6 +1673,22 @@ impl Db {
         Ok(())
     }
 
+    /// Record which position in an agent team a session occupies.
+    ///
+    /// **The edge the whole of agent teams rides on.** A person starting work
+    /// as a team stands in its lead's seat; a lead spawning a child puts the
+    /// child in the seat below its own. After the row exists, for the reason
+    /// `set_profile` and `set_lineage` are: it is one more thing a session may
+    /// or may not have.
+    pub async fn set_position(&self, session: &SessionId, position: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET position_id = $1 WHERE id = $2")
+            .bind(position)
+            .bind(session.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Keep the system prompt a session was launched with.
     ///
     /// Written whenever a run is launched or relaunched, because a relaunch
@@ -4111,6 +4127,12 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
             .get::<Option<String>, _>("parent_id")
             .map(SessionId::from_stored),
         profile_id: r.get::<Option<String>, _>("profile_id"),
+        // `try_get`, because one read of a session predates the column being
+        // selectable: `s.*` carries it everywhere, and a query that one day
+        // names its columns should not panic over this one.
+        position_id: r
+            .try_get::<Option<String>, _>("position_id")
+            .unwrap_or_default(),
         spawn_reason: r.get("spawn_reason"),
         // Null for every session whose agent never set one through the plan
         // tool — which is most of them, since the two engines we drive keep
