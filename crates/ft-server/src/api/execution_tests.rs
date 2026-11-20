@@ -10455,6 +10455,20 @@ async fn a_profile_started_with_no_team_cannot_delegate_and_says_why() {
     assert!(said.contains("no position in an agent team"), "{said}");
     assert!(said.contains("Agent teams"), "and names the fix: {said}");
 
+    // And it is told that first, rather than told to name a `goal` it would
+    // then be refused for anyway. Both are true of this call; only one of
+    // them is worth a turn.
+    let bare = crate::delegate::handle(
+        &state,
+        &asks(&host, &session, "n2", "spawn", serde_json::json!({})),
+    )
+    .await
+    .expect_err("no team, and no goal either");
+    assert!(
+        format!("{bare:#}").contains("no position in an agent team"),
+        "{bare:#}"
+    );
+
     state.fleet.stop_supervising(&host.id).await;
 }
 

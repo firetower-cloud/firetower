@@ -500,9 +500,6 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         return Ok(started(&existing, shares));
     }
 
-    let goal = text(&request.input, "goal")
-        .context("spawn needs a `goal`: what the child should accomplish")?;
-
     /* What this session may hand work to, and nothing else.
     **Intersected with what its owner can actually see on both paths** —
     that intersection is load-bearing security rather than tidiness, and is
@@ -603,6 +600,13 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
 
     Not found is untouched: that message is good and was never the
     defect. */
+    /* Read after the reach is settled, so that a session with nobody to
+    hand to is told *that* rather than told to name a goal first. Both are
+    true of a malformed call from an agent that cannot delegate, and the
+    one worth a turn is the one it cannot fix by adding a field. */
+    let goal = text(&request.input, "goal")
+        .context("spawn needs a `goal`: what the child should accomplish")?;
+
     let found = match text(&request.input, "role") {
         Some(wanted) => match at_most_one("subagent", wanted.trim(), &reach, |r| {
             r.profile.name.as_str()
