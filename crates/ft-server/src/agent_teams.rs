@@ -1733,8 +1733,10 @@ mod tests {
         .unwrap();
 
         let access = crate::access::Access::new(w.db.pool().clone());
-        let vault =
-            crate::vault::Vault::new(w.db.pool().clone(), crate::vault::crypto::RootKey::generate());
+        let vault = crate::vault::Vault::new(
+            w.db.pool().clone(),
+            crate::vault::crypto::RootKey::generate(),
+        );
         let from = access
             .path_of(crate::access::FiledKind::AgentTeam, id.as_str())
             .await

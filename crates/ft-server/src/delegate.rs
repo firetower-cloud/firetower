@@ -733,12 +733,34 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     }
     let name = text(&request.input, "name").or_else(|| role.as_ref().map(|r| r.name.clone()));
     let reason = text(&request.input, "reason").or_else(|| role.as_ref().map(|r| r.does.clone()));
+    /* **What the child will be able to hand work to, read before it exists.**
+    Its seat's children, through the same intersection its own `spawn` will
+    use, so what the brief promises and what the call allows are one answer.
+    Empty for a leaf, which is every delegated child before this. */
+    let onward: Vec<Reachable> = match &seat {
+        Some(seat) => state
+            .agent_teams
+            .reports(lead.owner.as_str(), seat)
+            .await?
+            .into_iter()
+            .map(|r| Reachable {
+                position: Some(r.position),
+                instructions: r.instructions,
+                profile: r.profile,
+            })
+            .collect(),
+        None => Vec::new(),
+    };
     let prompt = brief(
         &lead,
         &goal,
         text(&request.input, "context").as_deref(),
         role.as_ref(),
-        &seat_instructions,
+        standing.as_ref().filter(|_| seat.is_some()).map(|s| Seat {
+            team: s.team_name.as_str(),
+            instructions: seat_instructions.as_str(),
+            onward: &onward,
+        }),
     );
 
     // Built the way the API builds one, so every default and every check that
@@ -972,6 +994,29 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     Ok(started(&child, shares))
 }
 
+/// Where a delegated child is standing, when it is standing somewhere.
+///
+/// A child carries its persona in its brief rather than in a composed
+/// `persona` — the lead's own on top of the brief would make it the lead — so
+/// everything the seat says has to be said here.
+struct Seat<'a> {
+    /// The team's name, so the child can tell which of a profile's seats it is
+    /// reading.
+    team: &'a str,
+    /// Instructions for this seat only. **Added to the profile's, never in
+    /// place of them** — the one rule a position has, and the reason there is
+    /// no resolution order to reason about anywhere in this feature.
+    instructions: &'a str,
+    /// What this child may hand work to **in turn**, already intersected with
+    /// what the owner can see.
+    ///
+    /// Empty for a leaf, which is every delegated child before agent teams.
+    /// Non-empty is the new thing, and it has to be *said*: the child has the
+    /// `spawn` tool whatever its seat, and one that is told nothing would
+    /// either never use it or guess a name and spend a turn being refused.
+    onward: &'a [Reachable],
+}
+
 /// What the child is first told.
 ///
 /// The goal as the task, the context beneath it, the role it is acting as if
@@ -983,11 +1028,7 @@ fn brief(
     goal: &str,
     context: Option<&str>,
     role: Option<&crate::roles::Role>,
-    // The child's seat in the team, when it has one. **Added to the profile's
-    // instructions, never in place of them** — the one rule a position has,
-    // and the reason there is no resolution order to reason about anywhere in
-    // this feature.
-    seat: &str,
+    seat: Option<Seat<'_>>,
 ) -> String {
     let mut text = format!("Task: {goal}");
     if let Some(context) = context {
@@ -1004,9 +1045,31 @@ fn brief(
             text.push_str("\n\n");
             text.push_str(role.instructions.trim());
         }
-        if !seat.trim().is_empty() {
-            text.push_str("\n\nAnd in this team, where you are standing:\n\n");
-            text.push_str(seat.trim());
+        if let Some(seat) = &seat {
+            if !seat.instructions.trim().is_empty() {
+                text.push_str(&format!(
+                    "\n\nAnd in the \"{}\" team, where you are standing:\n\n",
+                    seat.team
+                ));
+                text.push_str(seat.instructions.trim());
+            }
+        }
+    }
+
+    // What it may hand on, and how. The same guidance a lead gets, because it
+    // is a lead: it holds a position with profiles reporting to it, and the
+    // mechanics of `spawn` do not change with how far down the tree it is.
+    if let Some(seat) = seat.filter(|s| !s.onward.is_empty()) {
+        text.push_str("\n\n");
+        text.push_str(&ft_core::delegation_guidance(Some(seat.team)));
+        text.push_str("\n\nThe profiles reporting to your position — pass the name as `role`:\n");
+        for r in seat.onward {
+            text.push_str(&format!(
+                "- **{}** — {}{}\n",
+                r.profile.name,
+                r.profile.does,
+                left_open(&r.profile)
+            ));
         }
     }
 
@@ -3064,7 +3127,7 @@ mod tests {
             "Add a limiter",
             Some("Use the token bucket in api/."),
             None,
-            "",
+            None,
         );
         assert!(text.starts_with("Task: Add a limiter"));
         assert!(text.contains("Context:\nUse the token bucket"));
@@ -3102,7 +3165,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let text = brief(&lead, "Review it", None, Some(&role), "");
+        let text = brief(&lead, "Review it", None, Some(&role), None);
         assert!(text.contains("acting as the \"reviewer\" subagent"));
         assert!(text.contains("reads a branch and reports problems"));
         assert!(text.contains("Report findings as path:line."));

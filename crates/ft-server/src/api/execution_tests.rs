@@ -10329,6 +10329,23 @@ async fn a_child_in_a_position_hands_work_on_and_a_one_off_cannot() {
     .unwrap();
     let engineer = child_of(&state, &lead, "d1").await;
     assert!(engineer.parent_id.is_some(), "it is a child");
+    /* **And it is told it is a lead.** A delegated child carries its
+    persona in its brief rather than in a composed `persona`, so if the
+    brief did not say this the child would hold the `spawn` tool, hold a
+    seat with somebody under it, and have no idea who — it would guess a
+    name and spend a turn being refused. */
+    assert!(
+        engineer
+            .prompt
+            .contains("The profiles reporting to your position"),
+        "{}",
+        engineer.prompt
+    );
+    assert!(
+        engineer.prompt.contains("**Reviewer**"),
+        "and names them: {}",
+        engineer.prompt
+    );
 
     crate::delegate::handle(
         &state,
@@ -10384,6 +10401,11 @@ async fn a_child_in_a_position_hands_work_on_and_a_one_off_cannot() {
     .unwrap();
     let one_off = child_of(&state, &lead, "d4").await;
     assert!(one_off.position_id.is_none(), "a one-off holds no seat");
+    assert!(
+        !one_off.prompt.contains("reporting to your position"),
+        "and is not told it can hand work on, because it cannot: {}",
+        one_off.prompt
+    );
     let flat = crate::delegate::handle(
         &state,
         &asks(
