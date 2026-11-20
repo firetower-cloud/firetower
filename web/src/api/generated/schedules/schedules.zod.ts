@@ -39,6 +39,8 @@ export const AllRunsResponse = zod.array(AllRunsResponseItem)
 /**
  * @summary Every schedule of yours, newest change first.
  */
+export const listSchedulesResponseChoicesTeamTwoPositionsMin = 0;
+
 export const listSchedulesResponseRunsTotalMin = 0;
 
 export const listSchedulesResponseStreakCountedMin = 0;
@@ -71,7 +73,12 @@ export const ListSchedulesResponseItem = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.union([zod.null(),zod.object({
+  "id": zod.string(),
+  "name": zod.string().describe('What it was called at approval.'),
+  "positions": zod.int().min(listSchedulesResponseChoicesTeamTwoPositionsMin).describe('How many positions the pinned tree holds, the lead included. One is a\nlead with nothing under it, which can hand work to nobody.')
+}).describe('The agent team it runs as, **as it was when somebody approved it**.\n\nAbsent for a schedule that names a lone profile, which cannot hand work\nto anybody. See [`ScheduleTeam`].')]).optional()
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -103,7 +110,7 @@ export const ListSchedulesResponseItem = zod.object({
   "who": zod.string().describe('The person, or the profile the agent was running as.')
 }).describe('Who wrote a schedule.'),
   "name": zod.string(),
-  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
+  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled', 'team_changed']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
   "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
@@ -226,8 +233,11 @@ export const CreateScheduleBody = zod.object({
   "sandbox": zod.string().nullish()
 }).optional().describe('Model, effort, permissions and sandbox. **Pinned explicitly** — see\n[`pins_for`].'),
   "skills": zod.array(zod.string()).nullish().describe('The skills each run reads. `null` takes the repository\'s defaults *at\ncreation* and pins the result.'),
+  "team": zod.string().nullish().describe('The agent team each run starts as, by id. Omit for a lone profile.\n\n**You never talk to a team — you talk to its lead, with its team behind\nit.** Naming one runs each occurrence as that team\'s lead, with the\nprofiles reporting to its position reachable. Naming nothing, or naming\na profile on its own, is a run that cannot hand work to anybody: a\nprofile that happens to lead a team does not pick the team up by being\nnamed bare.\n\nA team and a different profile is a contradiction rather than two\nsettings and is refused, which is the rule `NewSession` already\nfollows.\n\n**The whole tree is pinned at approval**, not resolved at each run —\nfor the reason the profile\'s revision is pinned: an edit must not be\nable to change what an unattended run does. Editing the team clears\nthe approval instead, and the next run is refused until somebody\nlooks.'),
   "timezone": zod.string().describe('An IANA name. Required, and not defaulted to the server\'s own zone:\n"09:00" means nothing without saying whose nine.')
 }).describe('What the API accepts to write one down.')
+
+export const createScheduleResponseChoicesTeamTwoPositionsMin = 0;
 
 export const createScheduleResponseRunsTotalMin = 0;
 
@@ -261,7 +271,12 @@ export const CreateScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.union([zod.null(),zod.object({
+  "id": zod.string(),
+  "name": zod.string().describe('What it was called at approval.'),
+  "positions": zod.int().min(createScheduleResponseChoicesTeamTwoPositionsMin).describe('How many positions the pinned tree holds, the lead included. One is a\nlead with nothing under it, which can hand work to nobody.')
+}).describe('The agent team it runs as, **as it was when somebody approved it**.\n\nAbsent for a schedule that names a lone profile, which cannot hand work\nto anybody. See [`ScheduleTeam`].')]).optional()
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -293,7 +308,7 @@ export const CreateScheduleResponse = zod.object({
   "who": zod.string().describe('The person, or the profile the agent was running as.')
 }).describe('Who wrote a schedule.'),
   "name": zod.string(),
-  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
+  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled', 'team_changed']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
   "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
@@ -402,6 +417,8 @@ export const OneScheduleParams = zod.object({
   "id": zod.string().describe('Schedule id')
 })
 
+export const oneScheduleResponseChoicesTeamTwoPositionsMin = 0;
+
 export const oneScheduleResponseRunsTotalMin = 0;
 
 export const oneScheduleResponseStreakCountedMin = 0;
@@ -434,7 +451,12 @@ export const OneScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.union([zod.null(),zod.object({
+  "id": zod.string(),
+  "name": zod.string().describe('What it was called at approval.'),
+  "positions": zod.int().min(oneScheduleResponseChoicesTeamTwoPositionsMin).describe('How many positions the pinned tree holds, the lead included. One is a\nlead with nothing under it, which can hand work to nobody.')
+}).describe('The agent team it runs as, **as it was when somebody approved it**.\n\nAbsent for a schedule that names a lone profile, which cannot hand work\nto anybody. See [`ScheduleTeam`].')]).optional()
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -466,7 +488,7 @@ export const OneScheduleResponse = zod.object({
   "who": zod.string().describe('The person, or the profile the agent was running as.')
 }).describe('Who wrote a schedule.'),
   "name": zod.string(),
-  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
+  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled', 'team_changed']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
   "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
@@ -594,8 +616,11 @@ export const UpdateScheduleBody = zod.object({
   "sandbox": zod.string().nullish()
 }).optional().describe('Model, effort, permissions and sandbox. **Pinned explicitly** — see\n[`pins_for`].'),
   "skills": zod.array(zod.string()).nullish().describe('The skills each run reads. `null` takes the repository\'s defaults *at\ncreation* and pins the result.'),
+  "team": zod.string().nullish().describe('The agent team each run starts as, by id. Omit for a lone profile.\n\n**You never talk to a team — you talk to its lead, with its team behind\nit.** Naming one runs each occurrence as that team\'s lead, with the\nprofiles reporting to its position reachable. Naming nothing, or naming\na profile on its own, is a run that cannot hand work to anybody: a\nprofile that happens to lead a team does not pick the team up by being\nnamed bare.\n\nA team and a different profile is a contradiction rather than two\nsettings and is refused, which is the rule `NewSession` already\nfollows.\n\n**The whole tree is pinned at approval**, not resolved at each run —\nfor the reason the profile\'s revision is pinned: an edit must not be\nable to change what an unattended run does. Editing the team clears\nthe approval instead, and the next run is refused until somebody\nlooks.'),
   "timezone": zod.string().describe('An IANA name. Required, and not defaulted to the server\'s own zone:\n"09:00" means nothing without saying whose nine.')
 }).describe('What the API accepts to write one down.')
+
+export const updateScheduleResponseChoicesTeamTwoPositionsMin = 0;
 
 export const updateScheduleResponseRunsTotalMin = 0;
 
@@ -629,7 +654,12 @@ export const UpdateScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.union([zod.null(),zod.object({
+  "id": zod.string(),
+  "name": zod.string().describe('What it was called at approval.'),
+  "positions": zod.int().min(updateScheduleResponseChoicesTeamTwoPositionsMin).describe('How many positions the pinned tree holds, the lead included. One is a\nlead with nothing under it, which can hand work to nobody.')
+}).describe('The agent team it runs as, **as it was when somebody approved it**.\n\nAbsent for a schedule that names a lone profile, which cannot hand work\nto anybody. See [`ScheduleTeam`].')]).optional()
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -661,7 +691,7 @@ export const UpdateScheduleResponse = zod.object({
   "who": zod.string().describe('The person, or the profile the agent was running as.')
 }).describe('Who wrote a schedule.'),
   "name": zod.string(),
-  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
+  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled', 'team_changed']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
   "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
@@ -735,6 +765,8 @@ export const ApproveScheduleQueryParams = zod.object({
   "revision": zod.int().optional().describe('The revision being approved')
 })
 
+export const approveScheduleResponseChoicesTeamTwoPositionsMin = 0;
+
 export const approveScheduleResponseRunsTotalMin = 0;
 
 export const approveScheduleResponseStreakCountedMin = 0;
@@ -767,7 +799,12 @@ export const ApproveScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.union([zod.null(),zod.object({
+  "id": zod.string(),
+  "name": zod.string().describe('What it was called at approval.'),
+  "positions": zod.int().min(approveScheduleResponseChoicesTeamTwoPositionsMin).describe('How many positions the pinned tree holds, the lead included. One is a\nlead with nothing under it, which can hand work to nobody.')
+}).describe('The agent team it runs as, **as it was when somebody approved it**.\n\nAbsent for a schedule that names a lone profile, which cannot hand work\nto anybody. See [`ScheduleTeam`].')]).optional()
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -799,7 +836,7 @@ export const ApproveScheduleResponse = zod.object({
   "who": zod.string().describe('The person, or the profile the agent was running as.')
 }).describe('Who wrote a schedule.'),
   "name": zod.string(),
-  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
+  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled', 'team_changed']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
   "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
@@ -862,6 +899,8 @@ export const PauseScheduleParams = zod.object({
   "id": zod.string().describe('Schedule id')
 })
 
+export const pauseScheduleResponseChoicesTeamTwoPositionsMin = 0;
+
 export const pauseScheduleResponseRunsTotalMin = 0;
 
 export const pauseScheduleResponseStreakCountedMin = 0;
@@ -894,7 +933,12 @@ export const PauseScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.union([zod.null(),zod.object({
+  "id": zod.string(),
+  "name": zod.string().describe('What it was called at approval.'),
+  "positions": zod.int().min(pauseScheduleResponseChoicesTeamTwoPositionsMin).describe('How many positions the pinned tree holds, the lead included. One is a\nlead with nothing under it, which can hand work to nobody.')
+}).describe('The agent team it runs as, **as it was when somebody approved it**.\n\nAbsent for a schedule that names a lone profile, which cannot hand work\nto anybody. See [`ScheduleTeam`].')]).optional()
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -926,7 +970,7 @@ export const PauseScheduleResponse = zod.object({
   "who": zod.string().describe('The person, or the profile the agent was running as.')
 }).describe('Who wrote a schedule.'),
   "name": zod.string(),
-  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
+  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled', 'team_changed']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
   "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),
@@ -991,6 +1035,8 @@ export const ResumeScheduleParams = zod.object({
   "id": zod.string().describe('Schedule id')
 })
 
+export const resumeScheduleResponseChoicesTeamTwoPositionsMin = 0;
+
 export const resumeScheduleResponseRunsTotalMin = 0;
 
 export const resumeScheduleResponseStreakCountedMin = 0;
@@ -1023,7 +1069,12 @@ export const ResumeScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.union([zod.null(),zod.object({
+  "id": zod.string(),
+  "name": zod.string().describe('What it was called at approval.'),
+  "positions": zod.int().min(resumeScheduleResponseChoicesTeamTwoPositionsMin).describe('How many positions the pinned tree holds, the lead included. One is a\nlead with nothing under it, which can hand work to nobody.')
+}).describe('The agent team it runs as, **as it was when somebody approved it**.\n\nAbsent for a schedule that names a lone profile, which cannot hand work\nto anybody. See [`ScheduleTeam`].')]).optional()
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -1055,7 +1106,7 @@ export const ResumeScheduleResponse = zod.object({
   "who": zod.string().describe('The person, or the profile the agent was running as.')
 }).describe('Who wrote a schedule.'),
   "name": zod.string(),
-  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
+  "pausedReason": zod.union([zod.null(),zod.enum(['three_failures', 'five_runs', 'overran', 'owner_disabled', 'team_changed']).describe('Which rule stopped a schedule.\n\n**The rule, and nothing else.** Not a composed sentence and not a tally:\nthe streak is the leading part of the history the page already draws, so it\ncounts the failures and the questions itself and says the exact shape —\nincluding the mixed case, which no single rule name covers. A sentence\nstored here would be a second copy of that, free to disagree with it.\n\nNull — `None` — is a person. "You paused this" and "this gave up" have to\nread differently, and the absence is the cheapest way to tell them apart.')]).optional(),
   "prompt": zod.string().describe('What it asks for.'),
   "repoId": zod.union([zod.null(),zod.string().describe('Which repository, if any. A schedule with none is a bare agent, and\nseveral things about it are different — see `deleteCleanRuns`.\n\nThe **first** of `repos`, kept as its own field because every screen\nthat draws one repository reads this and most schedules have one.')]).optional(),
   "repoSlug": zod.string().nullish(),

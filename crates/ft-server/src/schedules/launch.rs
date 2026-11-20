@@ -848,6 +848,60 @@ async fn gate(
         }
     }
 
+    // **And the team is still the tree that was approved.**
+    //
+    // Belt and braces, and the braces are the half that cannot be done any
+    // other way. Editing a team clears the approval on every schedule that
+    // pins it, so an edit never reaches here — but a team can change shape
+    // without anybody editing *it*: deleting a profile cascades onto its
+    // seats, deleting the team takes the lot, and filing it somewhere the
+    // owner cannot reach makes the tree unreadable to the run. None of those
+    // pass through the team editor, and all three change what an approved run
+    // may hand work to.
+    //
+    // So the fingerprint is recomputed from the same read the pins were taken
+    // from, and a difference is a refusal rather than a run. Fail closed: the
+    // remedy is a person looking at what the team is now, which is what
+    // approving again is.
+    if let Some((team, name, approved)) = crate::api::schedules::approved_team(&schedule.pins) {
+        // `detail` rather than `positions`, because it asks whether the
+        // owner may see the *team* as well as reading its seats — and a team
+        // filed somewhere they can no longer reach is exactly one of the
+        // three cases this check exists for.
+        let live = state
+            .agent_teams
+            .detail(&schedule.owner_id, &team, crate::access::Level::Viewer)
+            .await
+            .map_err(|e| Stopped {
+                state: "failed",
+                detail: format!("Firetower could not check this schedule's agent team: {e:#}"),
+                code: ErrorCode::ActionFailed,
+                and_stop: None,
+            })?
+            .map(|t| t.positions)
+            .unwrap_or_default();
+        if live.is_empty() {
+            return Err(Stopped {
+                state: "failed",
+                detail: format!(
+                    "The “{name}” agent team this schedule was approved with is gone, or is no                      longer shared with whoever this runs as. Open the schedule and pick what it                      should run as now."
+                ),
+                code: ErrorCode::InvalidRequest,
+                and_stop: None,
+            });
+        }
+        if crate::api::schedules::team_fingerprint_of(&live) != approved {
+            return Err(Stopped {
+                state: "failed",
+                detail: format!(
+                    "The “{name}” agent team has changed since this schedule was approved, so it                      will not run on it. Open the schedule, read what the team is now, and                      approve it again."
+                ),
+                code: ErrorCode::InvalidRequest,
+                and_stop: None,
+            });
+        }
+    }
+
     // 7 · Only now: the repository's own secrets and the agent's token,
     // inside `create_session_as`. Every one is resolved fresh at its current
     // value, which is the point — a rotated secret takes effect without
@@ -878,6 +932,22 @@ pub fn spec_of(schedule: &crate::db::ScheduleRow) -> Result<ft_core::NewSession,
     for field in ["settings", "skills", "accountId", "profile"] {
         if let Some(pinned) = schedule.pins.get(field) {
             obj.insert(field.to_string(), pinned.clone());
+        }
+    }
+
+    // **The team, from the pins rather than from the spec.** The spec carries
+    // it too, and this is the one that decides: the pins are what approval
+    // wrote down, and the gate above has already refused a tree that is not
+    // the approved one. `create_session_as` stands the run in that team's
+    // lead seat, which is where the pinned persona's reach came from.
+    match schedule.pins.get("team").and_then(|t| t.get("id")) {
+        Some(id) => {
+            obj.insert("team".into(), id.clone());
+        }
+        // A schedule with no team must not inherit one from a spec written by
+        // some other path. There is one answer to "what does this run as".
+        None => {
+            obj.remove("team");
         }
     }
 
