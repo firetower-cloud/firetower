@@ -34,6 +34,31 @@ use utoipa::ToSchema;
 use crate::access::{filed_where, Level};
 use crate::roles::Role;
 
+pub mod seed;
+
+/// The flag the whole feature sits behind, for the compatibility window's
+/// duration.
+///
+/// **On unless somebody says otherwise.** A deprecation that is meant to be
+/// silent cannot be opt-in: the teams have to exist and have to resolve, or
+/// nobody gets the reach the seeding just materialised for them. So the flag
+/// is a way *out* rather than a way in — one variable to set on an
+/// installation where something about teams has gone wrong, after which every
+/// session is back on `can_delegate`/`delegate_scope` with nothing lost,
+/// because this is the expand half and nothing has been dropped yet.
+///
+/// `off`, `0`, `no` and `false` turn it off; anything else, including unset,
+/// leaves it on. It goes away with #497, which is what makes the old path
+/// impossible to fall back to.
+pub const ENABLED_ENV: &str = "FIRETOWER_AGENT_TEAMS";
+
+fn reads_as_off(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "off" | "0" | "no" | "false"
+    )
+}
+
 /// How deep a team's tree may go, counting the lead as level one.
 ///
 /// **This and [`MAX_POSITIONS`] are the only structural guardrail delegation
@@ -114,6 +139,21 @@ pub struct AgentTeam {
     pub lead_name: Option<String>,
     /// How many positions it holds, the lead included.
     pub positions: i64,
+    /// How many of those positions **nobody chose** — added by a spawn during
+    /// the compatibility window.
+    ///
+    /// Here rather than only on the tree so a list row can say *2 added
+    /// automatically* without reading it. Zero for every team somebody drew,
+    /// and zero again for a seeded one the moment somebody saves it, because a
+    /// save is what reviewing a team means. See `agent_teams/window.rs`.
+    pub auto_added: i64,
+    /// Whether this team was **materialised from what its lead profile had
+    /// actually spawned**, rather than drawn by somebody.
+    ///
+    /// True for the teams #491's seeding produced at the cut, and the reason
+    /// to say so on the wire is that a team nobody authored deserves a look
+    /// before it is trusted — it is a reading of history, not a decision.
+    pub seeded: bool,
     /// Whether the person asking may edit or delete it.
     pub may_write: bool,
     /// Whether they may move it into a directory, or out of one.
@@ -153,6 +193,15 @@ pub struct Position {
     pub instructions: String,
     /// Its place among its siblings, from zero.
     pub order: i32,
+    /// When the compatibility window added this seat, if it did — **absent
+    /// for a seat a person chose.**
+    ///
+    /// The mark the map draws, and the whole mitigation for a learning phase
+    /// that grows a team without anybody deciding. Saving the team clears it:
+    /// a save sends the whole tree with the whole tree on screen, so a marked
+    /// seat kept through one is a seat somebody has now chosen.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_added_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// A team and its tree.
@@ -246,6 +295,12 @@ pub struct Standing {
     pub instructions: String,
     /// The position above it, which is its lead. None for a team's lead.
     pub parent: Option<String>,
+    /// Whether the team was seeded from lineage rather than drawn.
+    ///
+    /// Read here because the compatibility window turns on it and on nothing
+    /// else: a team somebody authored is exactly what they authored, from the
+    /// first spawn onwards. See `agent_teams/window.rs`.
+    pub team_seeded: bool,
 }
 
 /// A profile above a position, and how far above it sits.
@@ -398,7 +453,10 @@ fn slug_of(name: &str, id: &str) -> String {
 
 const TEAM_FIELDS: &str = "t.id, t.path::text AS path, t.name, t.created_at, t.updated_at, \
      lead.profile_id AS lead_profile, lr.name AS lead_name, \
-     (SELECT count(*) FROM agent_team_positions c WHERE c.team_id = t.id) AS positions";
+     t.seeded_at IS NOT NULL AS seeded, \
+     (SELECT count(*) FROM agent_team_positions c WHERE c.team_id = t.id) AS positions, \
+     (SELECT count(*) FROM agent_team_positions c \
+       WHERE c.team_id = t.id AND c.auto_added_at IS NOT NULL) AS auto_added";
 
 /// The joins `TEAM_FIELDS` reads from: the team's lead position, and the lead's
 /// profile **only when this person can see it**.
@@ -421,6 +479,8 @@ fn read_team(row: &sqlx::postgres::PgRow) -> AgentTeam {
         lead: row.get("lead_profile"),
         lead_name: row.get("lead_name"),
         positions: row.get("positions"),
+        auto_added: row.get("auto_added"),
+        seeded: row.get("seeded"),
         may_write: row.get("may_write"),
         may_share: row.get("may_share"),
         created_at: row.get("created_at"),
@@ -431,15 +491,55 @@ fn read_team(row: &sqlx::postgres::PgRow) -> AgentTeam {
 #[derive(Clone)]
 pub struct AgentTeams {
     pool: PgPool,
+    /// Whether this installation runs agent teams at all — [`ENABLED_ENV`].
+    ///
+    /// Held here rather than read per call, and held *here* rather than on
+    /// `AppState`, because this module is the only thing that has to know. Off
+    /// makes every read answer as an installation with no teams: no team is
+    /// visible, no session is standing anywhere, and so `delegate` and
+    /// `persona_for` take the old path without either of them carrying a
+    /// branch for it. One predicate, one place, and nothing to keep in step.
+    enabled: bool,
 }
 
 impl AgentTeams {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        let enabled = match std::env::var(ENABLED_ENV) {
+            Ok(value) => !reads_as_off(&value),
+            Err(_) => true,
+        };
+        if !enabled {
+            tracing::warn!(
+                "agent teams are turned off ({ENABLED_ENV}): every session delegates the old \
+                 way, through its profile's own reach"
+            );
+        }
+        Self { pool, enabled }
+    }
+
+    /// The same pool with the feature off, for a test that pins what an
+    /// installation which has turned it off actually does.
+    ///
+    /// Not an environment variable in a test: these run in parallel threads in
+    /// one process, and a test that set one would decide the answer for
+    /// whichever other test read it at the same moment.
+    pub fn turned_off(&self) -> Self {
+        Self {
+            pool: self.pool.clone(),
+            enabled: false,
+        }
+    }
+
+    /// Whether this installation runs agent teams.
+    pub fn enabled(&self) -> bool {
+        self.enabled
     }
 
     /// Every team this person may see, at the given level or better.
     pub async fn visible(&self, person: &str, at_least: Level) -> Result<Vec<AgentTeam>> {
+        if !self.enabled {
+            return Ok(Vec::new());
+        }
         let sql = format!(
             "SELECT {TEAM_FIELDS}, {writable} AS may_write, {shareable} AS may_share \
                FROM agent_teams t {joins} WHERE {visible} ORDER BY t.name",
@@ -458,6 +558,9 @@ impl AgentTeams {
 
     /// One team, if this person may see it.
     pub async fn one(&self, person: &str, id: &str, at_least: Level) -> Result<Option<AgentTeam>> {
+        if !self.enabled {
+            return Ok(None);
+        }
         let sql = format!(
             "SELECT {TEAM_FIELDS}, {writable} AS may_write, {shareable} AS may_share \
                FROM agent_teams t {joins} WHERE t.id = $2 AND {visible}",
@@ -496,8 +599,11 @@ impl AgentTeams {
     /// referencing a profile this person cannot reach comes back without them
     /// rather than not at all — see [`Position::profile_name`].
     pub async fn positions(&self, person: &str, team: &str) -> Result<Vec<Position>> {
+        if !self.enabled {
+            return Ok(Vec::new());
+        }
         let sql = format!(
-            "SELECT p.id, p.profile_id, p.parent_id, p.instructions, p.ord, \
+            "SELECT p.id, p.profile_id, p.parent_id, p.instructions, p.ord, p.auto_added_at, \
                     r.name AS profile_name, r.does AS profile_does \
                FROM agent_team_positions p \
                LEFT JOIN roles r ON r.id = p.profile_id AND {visible} \
@@ -520,6 +626,7 @@ impl AgentTeams {
                 parent: row.get("parent_id"),
                 instructions: row.get("instructions"),
                 order: row.get("ord"),
+                auto_added_at: row.get("auto_added_at"),
             })
             .collect();
         Ok(in_reading_order(flat))
@@ -533,9 +640,12 @@ impl AgentTeams {
     /// why. The alternative is an agent keeping a reach into a team that has
     /// been taken away from it.
     pub async fn standing(&self, person: &str, position: &str) -> Result<Option<Standing>> {
+        if !self.enabled {
+            return Ok(None);
+        }
         let sql = format!(
             "SELECT p.id, p.team_id, t.name AS team_name, p.profile_id, p.instructions, \
-                    p.parent_id \
+                    p.parent_id, t.seeded_at IS NOT NULL AS team_seeded \
                FROM agent_team_positions p JOIN agent_teams t ON t.id = p.team_id \
               WHERE p.id = $2 AND {visible}",
             visible = filed_where("t", 1, Level::Viewer),
@@ -553,6 +663,7 @@ impl AgentTeams {
             profile: r.get("profile_id"),
             instructions: r.get("instructions"),
             parent: r.get("parent_id"),
+            team_seeded: r.get("team_seeded"),
         }))
     }
 
@@ -562,6 +673,9 @@ impl AgentTeams {
     /// team stands in its lead's seat, and everything below inherits from
     /// there.
     pub async fn lead_of(&self, person: &str, team: &str) -> Result<Option<Standing>> {
+        if !self.enabled {
+            return Ok(None);
+        }
         let sql = format!(
             "SELECT p.id FROM agent_team_positions p JOIN agent_teams t ON t.id = p.team_id \
               WHERE p.team_id = $2 AND p.parent_id IS NULL AND {visible}",
@@ -588,6 +702,9 @@ impl AgentTeams {
     /// off the list is refused exactly as a name that was never defined, and a
     /// profile the owner cannot reach is not on the list at all.
     pub async fn reports(&self, person: &str, position: &str) -> Result<Vec<Report>> {
+        if !self.enabled {
+            return Ok(Vec::new());
+        }
         let sql = format!(
             "SELECT p.id AS position_id, p.instructions AS position_instructions, p.ord, \
                     {fields}, {writable} AS may_write, {shareable} AS may_share \
@@ -641,6 +758,9 @@ impl AgentTeams {
     /// [`AgentTeams::write`] would otherwise spin in the database rather than
     /// fail.
     pub async fn above(&self, person: &str, position: &str) -> Result<Vec<Above>> {
+        if !self.enabled {
+            return Ok(Vec::new());
+        }
         let sql = format!(
             "WITH RECURSIVE up AS ( \
                  SELECT p.parent_id AS id, 1 AS steps \
@@ -700,6 +820,14 @@ impl AgentTeams {
         directory: Option<&str>,
         new: &NewAgentTeam,
     ) -> Result<ft_core::AgentTeamId> {
+        if !self.enabled {
+            return Err(Refused(format!(
+                "agent teams are turned off on this installation ({ENABLED_ENV}), so there is \
+                 nothing to put a profile in. A profile's own reach is what delegation reads \
+                 while they are off."
+            ))
+            .into());
+        }
         check(new)?;
         let id = ft_core::AgentTeamId::new();
         let slug = slug_of(&new.name, id.as_str());
@@ -745,6 +873,9 @@ impl AgentTeams {
     /// different lead is not the same tree and pretending otherwise would be
     /// the one case where in-place updates lie.
     pub async fn write(&self, person: &str, id: &str, new: &NewAgentTeam) -> Result<bool> {
+        if !self.enabled {
+            return Ok(false);
+        }
         check(new)?;
         let mut tx = self.pool.begin().await?;
 
@@ -932,6 +1063,14 @@ async fn write_tree(
 ///
 /// `ord` is normalised to the array index here and nowhere else, which is what
 /// lets the column be plain rather than unique — see the migration.
+///
+/// **An in-place update clears `auto_added_at`**, which is how a seat the
+/// compatibility window added stops being marked. A save carries the whole
+/// tree, and the person sending it had the whole tree on screen with every
+/// mark drawn on it — so a marked seat that survives a save is one they have
+/// now chosen, and that is the whole of what reviewing a team means. There is
+/// deliberately no accept-this-seat endpoint: a second way to clear the mark
+/// would be a second answer to "who decided this".
 async fn write_position(
     tx: &mut Transaction<'_, Postgres>,
     id: &str,
@@ -944,7 +1083,8 @@ async fn write_position(
     if existing {
         sqlx::query(
             "UPDATE agent_team_positions \
-                SET profile_id = $2, parent_id = $3, instructions = $4, ord = $5 \
+                SET profile_id = $2, parent_id = $3, instructions = $4, ord = $5, \
+                    auto_added_at = NULL \
               WHERE id = $1 AND team_id = $6",
         )
         .bind(id)
@@ -1129,6 +1269,7 @@ mod tests {
             parent: parent.map(str::to_string),
             instructions: String::new(),
             order,
+            auto_added_at: None,
         };
         // lead → a (→ a1, a2), b
         let flat = vec![
@@ -1202,6 +1343,83 @@ mod tests {
                 .unwrap()
                 .as_str()
                 .to_string()
+        }
+
+        /// A profile that could hand work off: what the old arrangement
+        /// called a Manager, and the only kind the seeding builds a team
+        /// for.
+        async fn manager(&self, name: &str) -> String {
+            let id = self.profile(name).await;
+            sqlx::query("UPDATE roles SET can_delegate = true WHERE id = $1")
+                .bind(&id)
+                .execute(self.db.pool())
+                .await
+                .unwrap();
+            id
+        }
+
+        /// One hand-off that actually happened: a session running `lead`, and
+        /// a child of it running `child`.
+        ///
+        /// Written as rows rather than through a launch because that is
+        /// exactly what the seeding reads — `sessions.parent_id` and the two
+        /// `profile_id`s, and nothing else about either session.
+        async fn spawned(&self, lead: &str, child: &str) {
+            let parent = self.session(lead, None).await;
+            self.session(child, Some(&parent)).await;
+        }
+
+        async fn session(&self, profile: &str, parent: Option<&str>) -> String {
+            let workspace = self.workspace().await;
+            let id = ft_core::SessionId::new().as_str().to_string();
+            sqlx::query(
+                "INSERT INTO sessions \
+                   (id, user_id, workspace_id, title, prompt, agent, status, profile_id, \
+                    parent_id) \
+                 VALUES ($1, $2, $5, 'seeding', 'do it', 'claude', 'Finished', $3, $4)",
+            )
+            .bind(&id)
+            .bind(&self.me)
+            .bind(profile)
+            .bind(parent)
+            .bind(&workspace)
+            .execute(self.db.pool())
+            .await
+            .unwrap();
+            id
+        }
+
+        /// One workspace for all of this fixture's sessions, which is what
+        /// `placement: "here"` produces anyway.
+        async fn workspace(&self) -> String {
+            let host = self.db.ensure_test_host("seeding", &self.me).await.unwrap();
+            sqlx::query(
+                "INSERT INTO workspaces (id, created_by, host_id, name, path) \
+                 VALUES ('w_seeding', $1, $2, 'seeding', ('u.' || $3 || '.seeding')::ltree) \
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(&self.me)
+            .bind(host.id.as_str())
+            .bind(&self.my_slug)
+            .execute(self.db.pool())
+            .await
+            .unwrap();
+            "w_seeding".to_string()
+        }
+
+        /// What the one team this fixture produced holds, lead first.
+        async fn team_named(&self, name: &str) -> (AgentTeam, Vec<String>) {
+            let team = self
+                .teams
+                .visible(&self.me, Level::Viewer)
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|t| t.name == name)
+                .unwrap_or_else(|| panic!("a team called {name}"));
+            let seats = self.teams.positions(&self.me, &team.id).await.unwrap();
+            let profiles = seats.iter().map(|p| p.profile.clone()).collect();
+            (team, profiles)
         }
 
         async fn colleague(&self, name: &str) -> (String, String) {
@@ -1975,5 +2193,367 @@ mod tests {
             vec![("Mid", 1), ("Top", 3)],
             "no Hidden, and Top is still three up"
         );
+    }
+
+    // ── seeding from session lineage (#491) ─────────────────────────────
+    //
+    // The old default meant *anything the owner can see*, which cannot become
+    // a tree, so each team is materialised from what its lead profile
+    // actually spawned. These are that, against fixture lineage: what a team
+    // comes out holding, what the empty case produces, what happens past the
+    // limits, and that the cut does not re-assert itself.
+
+    /// **The ticket's own sentence.** A delegating profile gets a team named
+    /// after it, holding the profiles it actually spawned — and nothing else
+    /// it merely could have.
+    #[tokio::test]
+    async fn a_team_is_seeded_from_what_a_profile_actually_spawned() {
+        let w = world().await;
+        let orchestrator = w.manager("Orchestrator").await;
+        let engineer = w.profile("Engineer").await;
+        let reviewer = w.profile("Reviewer").await;
+        // Visible to the same person, reachable under the old default, and
+        // never once used. The whole reason a visibility snapshot was not the
+        // answer.
+        let unused = w.profile("Unused").await;
+
+        w.spawned(&orchestrator, &engineer).await;
+        w.spawned(&orchestrator, &reviewer).await;
+        // Twice, which is one position and not two.
+        w.spawned(&orchestrator, &engineer).await;
+
+        let done = seed::seed(&w.teams, &w.org).await.unwrap().unwrap();
+        assert_eq!(done.teams, 1, "one delegating profile, one team");
+        assert_eq!(done.positions, 3, "its lead and the two it spawned");
+        assert!(done.truncated.is_empty());
+
+        let (team, seats) = w.team_named("Orchestrator").await;
+        assert!(team.seeded, "a team nobody drew says so");
+        assert_eq!(team.lead.as_deref(), Some(orchestrator.as_str()));
+        assert_eq!(team.positions, 3);
+        assert_eq!(
+            team.auto_added, 0,
+            "seeded is not the same as added behind somebody's back — the team says it was \
+             materialised, and no seat claims the window put it there"
+        );
+        assert_eq!(seats[0], orchestrator, "the lead reads first");
+        assert!(seats.contains(&engineer) && seats.contains(&reviewer));
+        assert!(
+            !seats.contains(&unused),
+            "a profile it could have reached and never did is not a report"
+        );
+        assert_eq!(seats.len(), 3);
+
+        // One level, because a child cannot spawn today, so there is no
+        // deeper lineage to read.
+        let under: Vec<Option<String>> = w
+            .teams
+            .positions(&w.me, &team.id)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|p| p.parent)
+            .collect();
+        let lead_seat = under[0].clone();
+        assert!(lead_seat.is_none(), "the lead has nobody above it");
+        assert!(
+            under[1..].iter().all(|p| p.is_some()),
+            "and everything else reports straight to it: {under:?}"
+        );
+
+        // And nothing was made for a profile that could not delegate, however
+        // much of it there is in the lineage.
+        assert!(
+            w.teams
+                .visible(&w.me, Level::Viewer)
+                .await
+                .unwrap()
+                .iter()
+                .all(|t| t.name == "Orchestrator"),
+            "only the delegating profile gets one"
+        );
+    }
+
+    /// **A profile that never spawned gets an empty team, not a missing one.**
+    ///
+    /// The team is where reach is authored now, so arriving with nowhere to
+    /// author it would be the break the seeding exists to avoid.
+    #[tokio::test]
+    async fn a_profile_that_never_spawned_gets_an_empty_team() {
+        let w = world().await;
+        let quiet = w.manager("Quiet").await;
+        let _never_used = w.profile("Engineer").await;
+
+        let done = seed::seed(&w.teams, &w.org).await.unwrap().unwrap();
+        assert_eq!(done.teams, 1);
+        assert_eq!(done.positions, 1, "the lead, and nobody under it");
+
+        let (team, seats) = w.team_named("Quiet").await;
+        assert!(team.seeded);
+        assert_eq!(team.lead.as_deref(), Some(quiet.as_str()));
+        assert_eq!(seats, vec![quiet], "a name, a lead, and an empty tree");
+        assert!(
+            w.teams.lead_of(&w.me, &team.id).await.unwrap().is_some(),
+            "and somewhere to stand, which is what makes it a team rather than a row"
+        );
+    }
+
+    /// A profile that only ever spawned **itself** gets an empty team.
+    ///
+    /// `check` refuses a profile under itself on every write, so seeding one
+    /// would make a team nobody could ever save. The narrowest break in the
+    /// old behaviour, and the only one.
+    #[tokio::test]
+    async fn a_profile_that_only_spawned_itself_gets_an_empty_team() {
+        let w = world().await;
+        let recursive = w.manager("Recursive").await;
+        w.spawned(&recursive, &recursive).await;
+
+        let done = seed::seed(&w.teams, &w.org).await.unwrap().unwrap();
+        assert_eq!(done.positions, 1, "itself is not a report");
+        let (_, seats) = w.team_named("Recursive").await;
+        assert_eq!(seats, vec![recursive]);
+    }
+
+    /// **Past the limit, the most recently spawned survive, and it is
+    /// recorded.**
+    ///
+    /// A team holds `MAX_POSITIONS` seats with its lead among them, so a
+    /// longer history than that cannot all come across. Refusing the team
+    /// would leave the profile with no reach at all, and raising the limit for
+    /// migrated teams would make the limit a suggestion.
+    #[tokio::test]
+    async fn a_spawn_history_longer_than_a_team_holds_keeps_the_most_recent() {
+        let w = world().await;
+        let busy = w.manager("Busy").await;
+        let room = MAX_POSITIONS - 1;
+        // One more than fits, spawned oldest first, so the one left out is
+        // the one it has not reached for in longest.
+        let mut spawned = Vec::new();
+        for i in 0..room + 1 {
+            let p = w.profile(&format!("Report{i}")).await;
+            w.spawned(&busy, &p).await;
+            spawned.push(p);
+        }
+
+        let done = seed::seed(&w.teams, &w.org).await.unwrap().unwrap();
+        assert_eq!(done.positions, MAX_POSITIONS, "full, and no fuller");
+        assert_eq!(
+            done.truncated.len(),
+            1,
+            "and it is reported rather than silent"
+        );
+        let cut = &done.truncated[0];
+        assert_eq!(cut.profile, busy);
+        assert_eq!(cut.spawned, room + 1);
+        assert_eq!(cut.kept, room);
+
+        let (team, seats) = w.team_named("Busy").await;
+        assert_eq!(team.positions as usize, MAX_POSITIONS);
+        assert!(
+            !seats.contains(&spawned[0]),
+            "the oldest hand-off is the one left out"
+        );
+        assert!(
+            seats.contains(spawned.last().unwrap()),
+            "and the newest is in"
+        );
+    }
+
+    /// **A team is filed where its lead profile is filed**, so exactly the
+    /// people who can use the profile can see the team.
+    ///
+    /// Dropping it into the creator's own space would leave a directory's
+    /// colleagues with a profile whose team they cannot reach — and a position
+    /// that resolves to nothing, which fails closed and says nothing.
+    #[tokio::test]
+    async fn a_seeded_team_is_filed_where_its_lead_profile_is() {
+        let w = world().await;
+        let (ana, _) = w.colleague("ana").await;
+        let access = crate::access::Access::new(w.db.pool().clone());
+        let directory = access
+            .create_directory(
+                &ft_core::OrgId::from_stored(w.org.clone()),
+                "Backend",
+                &ft_core::UserId::from_stored(w.me.clone()),
+                &[crate::access::NewGrant {
+                    subject_kind: crate::access::SubjectKind::Person,
+                    subject_id: ana.clone(),
+                    level: Level::Writer,
+                }],
+            )
+            .await
+            .unwrap();
+
+        let orchestrator = w.manager("Orchestrator").await;
+        let engineer = w.profile("Engineer").await;
+        for id in [&orchestrator, &engineer] {
+            sqlx::query("UPDATE roles SET path = $2::ltree WHERE id = $1")
+                .bind(id)
+                .bind(format!("d.{}.{}", directory.slug, id))
+                .execute(w.db.pool())
+                .await
+                .unwrap();
+        }
+        w.spawned(&orchestrator, &engineer).await;
+
+        seed::seed(&w.teams, &w.org).await.unwrap().unwrap();
+        let hers = w.teams.visible(&ana, Level::Viewer).await.unwrap();
+        assert_eq!(hers.len(), 1, "it landed in the directory, not in my space");
+        assert!(hers[0].path.starts_with(&format!("d/{}/", directory.slug)));
+    }
+
+    /// **The cut happens once.** A team somebody deleted afterwards stays
+    /// deleted — a migration that keeps re-asserting itself is worse than one
+    /// that was wrong once.
+    #[tokio::test]
+    async fn the_cut_is_recorded_and_never_runs_twice() {
+        let w = world().await;
+        let orchestrator = w.manager("Orchestrator").await;
+        let engineer = w.profile("Engineer").await;
+        w.spawned(&orchestrator, &engineer).await;
+
+        assert!(seed::seed(&w.teams, &w.org).await.unwrap().is_some());
+        assert!(
+            seed::seed(&w.teams, &w.org).await.unwrap().is_none(),
+            "the second run finds the work done"
+        );
+
+        let (team, _) = w.team_named("Orchestrator").await;
+        assert!(w.teams.delete(&w.me, &team.id).await.unwrap());
+        assert!(seed::seed(&w.teams, &w.org).await.unwrap().is_none());
+        assert!(
+            w.teams
+                .visible(&w.me, Level::Viewer)
+                .await
+                .unwrap()
+                .is_empty(),
+            "and it stays deleted"
+        );
+
+        let (teams, positions): (i32, i32) =
+            sqlx::query_as("SELECT teams, positions FROM agent_team_seeding WHERE org_id = $1")
+                .bind(&w.org)
+                .fetch_one(w.db.pool())
+                .await
+                .unwrap();
+        assert_eq!(
+            (teams, positions),
+            (1, 2),
+            "the record is what the cut produced, not a live count"
+        );
+    }
+
+    /// With the feature turned off nothing is seeded and no team is visible,
+    /// which is the whole of what the flag has to mean.
+    #[tokio::test]
+    async fn nothing_is_seeded_while_agent_teams_are_turned_off() {
+        let w = world().await;
+        let orchestrator = w.manager("Orchestrator").await;
+        let engineer = w.profile("Engineer").await;
+        w.spawned(&orchestrator, &engineer).await;
+
+        let off = w.teams.turned_off();
+        assert!(seed::seed(&off, &w.org).await.unwrap().is_none());
+        assert!(
+            w.teams
+                .visible(&w.me, Level::Viewer)
+                .await
+                .unwrap()
+                .is_empty(),
+            "and the cut was not claimed either, so turning it back on still seeds"
+        );
+        assert!(seed::seed(&w.teams, &w.org).await.unwrap().is_some());
+    }
+
+    /// **A save is what reviewing a team means**, so it clears the marks the
+    /// window left — and `auto_added` is what a list row counts to tell
+    /// somebody there is something to review.
+    #[tokio::test]
+    async fn saving_a_team_clears_what_the_window_added() {
+        let w = world().await;
+        let lead = w.profile("Orchestrator").await;
+        let report = w.profile("Engineer").await;
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named("Platform", seat(&lead, vec![])),
+            )
+            .await
+            .unwrap();
+        let lead_seat = w
+            .teams
+            .lead_of(&w.me, id.as_str())
+            .await
+            .unwrap()
+            .unwrap()
+            .position;
+        sqlx::query(
+            "INSERT INTO agent_team_positions \
+               (id, team_id, profile_id, parent_id, ord, auto_added_at) \
+             VALUES ($1, $2, $3, $4, 0, now())",
+        )
+        .bind(ft_core::PositionId::new().as_str())
+        .bind(id.as_str())
+        .bind(&report)
+        .bind(&lead_seat)
+        .execute(w.db.pool())
+        .await
+        .unwrap();
+
+        let before = w
+            .teams
+            .one(&w.me, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(before.auto_added, 1, "one seat to review");
+        let marked = w.teams.positions(&w.me, id.as_str()).await.unwrap();
+        assert!(
+            marked[1].auto_added_at.is_some(),
+            "and the seat says when it arrived"
+        );
+        assert!(
+            marked[0].auto_added_at.is_none(),
+            "while the one somebody chose says nothing"
+        );
+
+        // Saved with the seat kept, which is a person choosing it.
+        assert!(w
+            .teams
+            .write(
+                &w.me,
+                id.as_str(),
+                &NewAgentTeam {
+                    name: "Platform".into(),
+                    lead: NewPosition {
+                        id: Some(lead_seat.clone()),
+                        profile: lead.clone(),
+                        instructions: String::new(),
+                        children: vec![NewPosition {
+                            id: Some(marked[1].id.clone()),
+                            profile: report.clone(),
+                            instructions: String::new(),
+                            children: vec![],
+                        }],
+                    },
+                    directory: None,
+                }
+            )
+            .await
+            .unwrap());
+
+        let after = w
+            .teams
+            .one(&w.me, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.positions, 2, "the seat is still there");
+        assert_eq!(after.auto_added, 0, "and nobody has to review it again");
     }
 }
