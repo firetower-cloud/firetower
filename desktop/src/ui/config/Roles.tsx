@@ -981,11 +981,11 @@ export function filedIn(path: string): string {
  * `filing.ts` keeps for `mayMove`: one question, asked on both sides, and the
  * two have to agree.
  *
- * `where` is `null` when the destination is not known yet — `useMe()` has not
- * answered, so the person's own root cannot be spelled. No opinion rather than
- * a guess: an unanswered query is not an answer (`pinnedAccountFits` says the
- * same about an account list), and the server still refuses what this cannot
- * see.
+ * `directory` is [`filedIn`] of where it would land, and `null` when that is
+ * not known yet — `useMe()` has not answered, so the person's own root cannot
+ * be spelled. No opinion rather than a guess: an unanswered query is not an
+ * answer (`pinnedAccountFits` says the same about an account list), and the
+ * server still refuses what this cannot see.
  *
  * It can only ever name a profile this person already has in front of them,
  * which is the whole reason the rule is scoped to a directory: a check across
@@ -995,15 +995,16 @@ export function filedIn(path: string): string {
  */
 export function nameTakenBy(
   name: string,
-  where: string | null,
+  directory: string | null,
   self: string | undefined,
   all: Role[],
 ): string | null {
   const wanted = name.trim().toLowerCase();
-  if (!wanted || !where) return null;
+  if (!wanted || !directory) return null;
   return (
     all.find(
-      (r) => r.id !== self && filedIn(r.path) === where && r.name.trim().toLowerCase() === wanted,
+      (r) =>
+        r.id !== self && filedIn(r.path) === directory && r.name.trim().toLowerCase() === wanted,
     )?.name ?? null
   );
 }
