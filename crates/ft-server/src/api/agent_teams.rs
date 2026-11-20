@@ -28,6 +28,40 @@ fn refused(e: crate::agent_teams::Refused) -> ApiError {
     ApiError::new(ErrorCode::InvalidRequest, e.to_string())
 }
 
+/// **Every schedule pinning this team loses its approval, and gains the tree
+/// as it is now.**
+///
+/// A schedule that names a team pins the whole tree at approval, for the
+/// reason it already pins a profile revision rather than an id: an edit must
+/// not be able to change what an unattended run does. A team id resolved at
+/// run time would be the same mistake with a larger blast radius — a seat
+/// added to a team would silently widen what an approved run may hand work
+/// to.
+///
+/// That leaves one question, and both of the easy answers to it are wrong.
+/// Silently keeping the old shape means a fix never reaches the schedule;
+/// silently adopting the new one is exactly what approval exists to prevent.
+/// So **both halves happen and neither is silent**: the pins become the tree
+/// as it is now, and the approval goes, so the next run is refused until
+/// somebody looks at what the team became. Turning it back on is the look.
+///
+/// Composed as the schedule's **owner**, who every run is started as — not as
+/// whoever edited the team, who may be somebody else entirely and whose reach
+/// is not what the run will have.
+///
+/// A schedule whose owner can no longer resolve the team at all keeps the
+/// pins it had and loses the approval anyway. Nothing is lost: the launch
+/// gate recomputes the fingerprint and refuses, with a sentence naming the
+/// team. Fail closed, which is the rule everywhere else in this feature.
+async fn unapprove_schedules_on(state: &crate::AppState, team: &str) -> ApiResult<()> {
+    let reason = crate::schedules::reason_name(ft_core::schedule::PausedReason::TeamChanged);
+    for row in state.db.schedules_pinning_team(team).await? {
+        let pins = super::schedules::repin_team(state, &row).await;
+        state.db.unapprove_for_team(&row.id, &pins, reason).await?;
+    }
+    Ok(())
+}
+
 /// The same, for a refusal raised from inside a write.
 ///
 /// `crate::agent_teams` reports a profile nobody can see, an id that is not
@@ -177,6 +211,10 @@ pub(super) async fn update_agent_team(
     {
         return Err(ApiError::not_found("agent team"));
     }
+    // **After the write, so what is pinned is what was saved.** The count the
+    // editor showed before Save is `AgentTeam::schedules`, read off the same
+    // predicate this walks.
+    unapprove_schedules_on(&state, &id).await?;
     state
         .agent_teams
         .detail(me.id.as_str(), &id, Level::Viewer)
@@ -196,6 +234,24 @@ pub(super) async fn delete_agent_team(
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
     let me = whoever(&principal)?;
+    // **Before the delete, because afterwards there is no tree to re-pin
+    // and no name to put in a sentence.** A deleted team cannot be adopted,
+    // so each schedule keeps the tree it was approved on and loses the
+    // approval; the launch gate then refuses with the team's own name, which
+    // is the only place that name still exists.
+    //
+    // Ordered this way the failure is the safe one: a delete that then fails
+    // leaves schedules unapproved for a team that is still there, which a
+    // person can fix by looking. The other order leaves them approved on a
+    // team that has gone.
+    if state
+        .agent_teams
+        .one(me.id.as_str(), &id, Level::Writer)
+        .await?
+        .is_some()
+    {
+        unapprove_schedules_on(&state, &id).await?;
+    }
     if !state.agent_teams.delete(me.id.as_str(), &id).await? {
         return Err(ApiError::not_found("agent team"));
     }

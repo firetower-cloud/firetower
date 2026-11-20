@@ -10015,6 +10015,7 @@
           "members",
           "autoAdded",
           "seeded",
+          "schedules",
           "mayWrite",
           "mayShare",
           "createdAt",
@@ -10077,6 +10078,11 @@
             "type": "integer",
             "format": "int64",
             "description": "How many positions it holds, the lead included."
+          },
+          "schedules": {
+            "type": "integer",
+            "format": "int64",
+            "description": "**How many approved schedules saving this team would stop.**\n\nA schedule that names a team pins its whole tree at approval, and\nchanging the team clears that approval — so editing a team four\nschedules pin pauses four schedules. The editor has to be able to say\nthat **before** Save rather than after, which is the whole reason this\nis on the row a person reads rather than behind a second request.\n\nOnly the approved ones, because only those are running and only those\nare stopped. A draft that pins the team is re-pinned and has nothing\nto lose.\n\nCounted across every owner, for the reason\n`Db::schedules_pinning_team` gives: somebody else's schedule is no\nless stopped for being somebody else's."
           },
           "seeded": {
             "type": "boolean",
@@ -14448,6 +14454,13 @@
             },
             "description": "The skills each run reads. `null` takes the repository's defaults *at\ncreation* and pins the result."
           },
+          "team": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The agent team each run starts as, by id. Omit for a lone profile.\n\n**You never talk to a team — you talk to its lead, with its team behind\nit.** Naming one runs each occurrence as that team's lead, with the\nprofiles reporting to its position reachable. Naming nothing, or naming\na profile on its own, is a run that cannot hand work to anybody: a\nprofile that happens to lead a team does not pick the team up by being\nnamed bare.\n\nA team and a different profile is a contradiction rather than two\nsettings and is refused, which is the rule `NewSession` already\nfollows.\n\n**The whole tree is pinned at approval**, not resolved at each run —\nfor the reason the profile's revision is pinned: an edit must not be\nable to change what an unattended run does. Editing the team clears\nthe approval instead, and the next run is refused until somebody\nlooks."
+          },
           "timezone": {
             "type": "string",
             "description": "An IANA name. Required, and not defaulted to the server's own zone:\n\"09:00\" means nothing without saying whose nine."
@@ -14882,7 +14895,8 @@
           "three_failures",
           "five_runs",
           "overran",
-          "owner_disabled"
+          "owner_disabled",
+          "team_changed"
         ]
       },
       "Pending": {
@@ -17057,6 +17071,17 @@
               "type": "string"
             },
             "description": "The skills each run reads, by id, resolved at approval."
+          },
+          "team": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ScheduleTeam",
+                "description": "The agent team it runs as, **as it was when somebody approved it**.\n\nAbsent for a schedule that names a lone profile, which cannot hand work\nto anybody. See [`ScheduleTeam`]."
+              }
+            ]
           }
         }
       },
@@ -17185,6 +17210,30 @@
           "missed",
           "lost"
         ]
+      },
+      "ScheduleTeam": {
+        "type": "object",
+        "description": "The team a schedule runs as, pinned.\n\n**The name and the size are the pinned ones, not the live ones.** A screen\nthat joined against the team list would draw whatever the team is now,\nwhich is the one thing an approved schedule is not — the whole reason the\ntree is pinned is that an edit must not change what the unattended run\ndoes. So a schedule carries what it was approved on, and a team that has\nsince been edited reads as the approval it still holds while its own page\nsays the approval is gone.",
+        "required": [
+          "id",
+          "name",
+          "positions"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "What it was called at approval."
+          },
+          "positions": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many positions the pinned tree holds, the lead included. One is a\nlead with nothing under it, which can hand work to nobody.",
+            "minimum": 0
+          }
+        }
       },
       "ScopeKind": {
         "type": "string",

@@ -37,6 +37,7 @@ import {
   Server,
   ServerOff,
   UserRound,
+  Users,
   X,
 } from "lucide-react";
 import { Icon } from "~/components/ui";
@@ -47,10 +48,11 @@ import { VoiceDialog } from "~/ui/voice/Dialogs";
 import { useVoice } from "~/ui/voice/useVoice";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { Pop } from "~/ui/Pop";
-import { Menu, Opt, Sift, looselyMatches } from "~/ui/menus";
+import { Head, Menu, Opt, Sift, looselyMatches } from "~/ui/menus";
 import { Readout, isReady } from "~/components/HostReadiness";
 import { useHostReadiness } from "~/api/generated/hosts/hosts";
 import { useListRoles } from "~/api/generated/roles/roles";
+import { useListAgentTeams } from "~/api/generated/agent-teams/agent-teams";
 import { useCreateSession } from "~/api/generated/sessions/sessions";
 import { machineLabel, machines } from "~/api/environments";
 import { canRun, NoMachine, resolve, type Where } from "~/components/WhereItRuns";
@@ -65,7 +67,7 @@ import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { openExternal } from "~/open";
 import { isMac } from "~/platform";
 import { dropSeed, seedWaiting, type Seed } from "~/start";
-import type { Agent, Control, ControlKind, Role } from "~/api/generated/model";
+import type { Agent, AgentTeam, Control, ControlKind, Role } from "~/api/generated/model";
 
 type Checkout = { id: string; slug: string };
 
@@ -237,6 +239,7 @@ export function StartComposer({
   const { data: agents } = useAgents();
   const { data: accounts } = useAccounts();
   const profiles = useListRoles().data ?? [];
+  const teams = useListAgentTeams().data ?? [];
   const create = useCreateSession();
 
   const [prompt, setPrompt] = useState(() => seeded(seed));
@@ -248,15 +251,21 @@ export function StartComposer({
     hostId: "",
     agent: recall(LAST_AGENT) as Where["agent"],
   }));
-  const [profileId, setProfileId] = useState<string | null>(null);
+  /* **One selection, not two.** A profile and a team are mutually exclusive —
+     a team names its lead's profile on the server, and a team beside a
+     different profile is refused there — so two pieces of state would be two
+     things able to disagree about what is about to start. */
+  const [startAs, setStartAs] = useState<StartAs>(null);
   // Start as the profile the person marked default, once the list is in — but
-  // only the first time, so changing it here afterwards sticks.
+  // only the first time, so changing it here afterwards sticks. A default is a
+  // profile's own flag and there is no team equivalent: entering a team is
+  // explicit, which is what keeps "a profile started bare has no reach" true.
   const defaulted = useRef(false);
   useEffect(() => {
     if (defaulted.current || profiles.length === 0) return;
     defaulted.current = true;
     const def = profiles.find((p) => p.isDefault);
-    if (def) setProfileId(def.id);
+    if (def) setStartAs({ kind: "profile", id: def.id });
   }, [profiles]);
   const [accountId, setAccountId] = useState(() => recall(LAST_ACCOUNT));
   const [connecting, setConnecting] = useState(false);
@@ -386,7 +395,24 @@ export function StartComposer({
      a `useState` whose only setter lived in a popover nothing could open. */
   const selectedSkills = defaultSkillIds;
 
-  const profile = profiles.find((p) => p.id === profileId);
+  /* **The profile that will actually run**, whichever way it was chosen. A
+     team names its lead's profile too, because the lead *is* a profile — so
+     the engine, the pinned settings and the skills resolve from one place
+     either way. `create_session_as` makes the same resolution and refuses a
+     team beside a different profile, so the two cannot disagree. */
+  const everyStart = useMemo(() => startables(teams, profiles), [teams, profiles]);
+  const start = startableIn(everyStart, startAs);
+  /* **A held pick that has gone falls back rather than sticking**, which is
+     what every other resolved default on this page does. A team's lead
+     profile can be deleted, or the team filed away, while a composer sits
+     open holding it — and sending it would be a refusal from the server
+     about something this screen could already see. */
+  const startable = start && !start.blocked ? start : undefined;
+  const team =
+    startable?.kind === "team" ? teams.find((t) => t.id === startable.id) : undefined;
+  const profile = profiles.find(
+    (p) => p.id === (startable?.kind === "team" ? team?.lead : startable?.id),
+  );
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
   // A saved engine is used only while it still exists and is supported — one
   // that was uninstalled falls back rather than leaving a dead selection.
@@ -421,7 +447,7 @@ export function StartComposer({
       });
     }
     setChosen(seed);
-  }, [kind, profileId]);
+  }, [kind, profile?.id]);
   const valueOf = (c: Control) => chosen[c.kind] ?? c.current ?? undefined;
 
   const readiness = useHostReadiness(
@@ -506,7 +532,13 @@ export function StartComposer({
           workspaceId: seed?.workspaceId as never,
           repos: checkouts.map((c) => ({ repoId: c.id })),
           agent: kind,
-          profile: profileId ?? undefined,
+          /* **One of the two, never both.** A team names its lead's profile
+             on the server; sending the profile as well would be the
+             contradiction `create_session_as` refuses, and sending only the
+             profile would start it bare with no reach — which is exactly the
+             difference the picker just made visible. */
+          profile: startable?.kind === "profile" ? startable.id : undefined,
+          team: startable?.kind === "team" ? startable.id : undefined,
           accountId: account.id,
           branch,
           hostId: host?.id,
@@ -795,12 +827,21 @@ export function StartComposer({
                 onClick={(e) => toggle("profile", e.currentTarget)}
                 data-set={!!profile}
                 className="chip"
-                title="Which profile the agent wears"
+                /* The consequence, reachable without opening anything: the
+                   one-agent-or-eight distinction is what somebody comes back
+                   to this chip to check. */
+                title={consequence(start) ?? "Which profile the agent wears"}
               >
                 <span className="grid place-items-center text-mute">
                   {pinned ? <AgentMark agent={pinned} size={15} /> : <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />}
                 </span>
+                {/* **The lead's name, with its team beside it.** You never
+                    talk to a team — you talk to its lead — so the chip says
+                    who is about to answer, and the team is what is behind it.
+                    Two spans rather than a middle dot, which `STYLE.md` rules
+                    out for exactly this. */}
                 <span className="lbl">{profile ? profile.name : "Just an agent"}</span>
+                {team && <span className="shrink-0 text-mute">in {team.name}</span>}
                 <Icon of={ChevronDown} size={12} className="text-mute" />
               </button>
               {kind && (
@@ -877,9 +918,10 @@ export function StartComposer({
         <Pop anchor={open.at} onClose={close} width={320}>
           <ProfileMenu
             profiles={profiles}
-            profileId={profileId}
-            onPick={(id) => {
-              setProfileId(id);
+            teams={teams}
+            startAs={startAs}
+            onPick={(next) => {
+              setStartAs(next);
               close();
             }}
           />
@@ -1101,88 +1143,304 @@ export function RepoMenu({
 }
 
 /**
- * The profile list, which grows: a person accumulates roles, so once there are
- * more than a handful this filters, and it always floats the Managers to the
- * top — the lead you'd start a board as is the one you reach for most.
- * Remounts each time the menu opens, so the search box starts empty.
+ * What a composer will start as: a lone profile, an agent team, or neither.
+ *
+ * **A team is entered explicitly.** A profile that happens to lead a team does
+ * not pick that team up by being named bare — `docs/agent-teams.md` and
+ * `NewSession.team` are the server half of the same rule — so these are two
+ * kinds of choice and not one with a flag on it. `null` is *Just an agent*,
+ * which is a value and not a dismissal.
+ */
+export type StartAs = { kind: "profile" | "team"; id: string } | null;
+
+/**
+ * One row the picker offers.
+ *
+ * **A position is never one of these.** A position only means something inside
+ * its tree: it is not a thing you can start work as, and the only way to reach
+ * one is through the team that holds it. This type is built from the team list
+ * and the profile list and from nothing else, which is how that stays true
+ * rather than being remembered.
+ */
+export type Startable = {
+  kind: "profile" | "team";
+  id: string;
+  /** The row's title: the team's name, or the profile's. */
+  name: string;
+  /** The profile that will actually run — a team's lead, or the profile. */
+  lead: string | null;
+  /** How many agents the run has: a team's positions, or one. */
+  agents: number;
+  /** The engine the profile that runs pins, when it pins one. */
+  agent?: string | null;
+  /** The second line. What a profile does, or who leads a team. */
+  does?: string;
+  /** Why this cannot be started, when it cannot. */
+  blocked?: string;
+  /**
+   * The old per-profile reach, which agent teams replace.
+   *
+   * Still live during the compatibility window: a Manager profile started
+   * bare does still hand work out, so the sentence under the box may not say
+   * it cannot. Goes with `roles.can_delegate` in #497.
+   */
+  delegates?: boolean;
+};
+
+/**
+ * Everything the picker offers, in the order it offers it.
+ *
+ * **Teams group above profiles**, and that is not a new preference: the picker
+ * already floated the delegating profiles to the top, because the lead you
+ * would start a board as is the one you reach for most. Reach has moved off
+ * the profile and onto the team, so that position moves with it.
+ *
+ * **And within the profiles, the old sort survives for as long as the old
+ * reach does.** That is the correction: moving the preference onto teams is
+ * right *after* the compatibility window, and during it a Manager profile
+ * started bare genuinely still hands work out — which is the same fact that
+ * earns it a chip and its own sentence in [`consequence`]. Three things
+ * saying *this one delegates* and a sort saying nothing is one of them
+ * wrong. So a profile that can still reach somebody still files with the
+ * ones that can, and the guard dies with `roles.can_delegate` in #497
+ * alongside the sentence — one field, one removal, one story.
+ *
+ * Then alphabetical, `localeCompare` so an accented name files where a person
+ * would look for it.
+ *
+ * **A profile that leads a team appears twice** — once bare and once as the
+ * team — and that is deliberate. The two start completely different things:
+ * picking the profile gets one agent that cannot delegate at all, picking the
+ * team gets that same profile with its reports reachable. Showing it once
+ * would mean one row standing for two outcomes, with nothing on screen saying
+ * which you were about to get.
+ *
+ * A team and a profile that share a name — common, because a team is often
+ * named after what its lead does — are told apart by the group labels. Neither
+ * is renamed.
+ */
+export function startables(teams: AgentTeam[], profiles: Role[]): Startable[] {
+  const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
+  /* Delegating profiles first while any of them still delegate, then by name.
+     `Number(…)` because `canDelegate` is a boolean and a comparator needs a
+     number. Goes with #497. */
+  const byReach = (a: Role, b: Role) =>
+    Number(b.canDelegate) - Number(a.canDelegate) || byName(a, b);
+
+  const asTeam = (t: AgentTeam): Startable => {
+    const lead = t.lead ? profiles.find((p) => p.id === t.lead) : undefined;
+    return {
+      kind: "team",
+      id: t.id,
+      name: t.name,
+      lead: t.leadName ?? null,
+      agents: t.positions,
+      agent: lead?.agent ?? null,
+      /* **Its lead, named before it is picked.** If the picker says *Growth*
+         and the conversation opens with the Orchestrator, the row misled
+         somebody about the one thing it was for. */
+      does: t.leadName ? `Led by ${t.leadName}` : undefined,
+      /* Two real states, both of which would fail at the launch rather than
+         here. A team whose lead profile was deleted has no root position to
+         stand in; one whose lead is filed somewhere this person cannot reach
+         has nothing they could be started as. */
+      blocked: !t.lead
+        ? "It has no lead, so there is nobody to start"
+        : t.leadName
+          ? undefined
+          : "Its lead isn't a profile you can use",
+    };
+  };
+
+  return [
+    ...[...teams].sort(byName).map(asTeam),
+    ...[...profiles].sort(byReach).map((p) => ({
+      kind: "profile" as const,
+      id: p.id,
+      name: p.name,
+      lead: p.name,
+      agents: 1,
+      agent: p.agent ?? null,
+      does: p.does,
+      delegates: p.canDelegate,
+    })),
+  ];
+}
+
+/** Whichever of the two kinds is in force, or nothing. */
+export function startableIn(all: Startable[], start: StartAs): Startable | undefined {
+  return start ? all.find((s) => s.kind === start.kind && s.id === start.id) : undefined;
+}
+
+/**
+ * Whether a query leaves a row.
+ *
+ * The name, what it does, and for a team its lead — because the lead is what
+ * somebody remembers about a team they set up months ago, and it is what the
+ * row is about.
+ */
+export function startableMatches(s: Startable, q: string): boolean {
+  return looselyMatches(`${s.name} ${s.does ?? ""} ${s.lead ?? ""}`, q);
+}
+
+/**
+ * **What picking this would actually do**, said under the list rather than
+ * discovered afterwards.
+ *
+ * The behavioural difference between the two kinds is the largest thing in
+ * this picker and the whole reason a team is a row of its own: a profile
+ * started on its own cannot delegate at all, while a team starts its lead
+ * with its members reachable. One agent, or eight. So the sentence names the
+ * lead, names the team it leads, and counts what it can reach.
+ *
+ * `null` is not a selection and gets no consequence — the row already says
+ * *no profile, a plain workspace*, and the footer is then free to say what
+ * profiles are for, which is what somebody meeting an empty list needs.
+ */
+export function consequence(s: Startable | undefined): string | null {
+  if (!s) return null;
+  /* **A row there is nothing to start says so**, rather than a sentence about
+     a lead it does not have. Reachable without picking one: a team's lead
+     profile can be deleted while a composer is open holding it. */
+  if (s.blocked) return `${s.name} can't be started. ${s.blocked}.`;
+  if (s.kind === "team") {
+    const lead = s.lead ?? "its lead";
+    const others = Math.max(0, s.agents - 1);
+    if (others === 0) {
+      return `Starts ${lead}, ${s.name}'s lead. Nothing reports to it yet, so it cannot hand work to anybody.`;
+    }
+    return `Starts ${lead}, ${s.name}'s lead. It can hand work to ${others} other agent${
+      others === 1 ? "" : "s"
+    } in the team.`;
+  }
+  /* **The compatibility window, said plainly.** A Manager profile started
+     bare still hands work out through its own older settings, so "it cannot
+     hand work to anybody" would be false of it. This clause goes with
+     `roles.can_delegate` in #497, and the sentence above it is the one that
+     survives. */
+  if (s.delegates) {
+    return `Starts ${s.name} on its own. Its own profile still lets it hand work out, which an agent team replaces.`;
+  }
+  return `Starts ${s.name} on its own. It cannot hand work to anybody.`;
+}
+
+/**
+ * The teams and the profiles, in one list, which grows — so once there are
+ * more than a handful this filters. Remounts each time the menu opens, so the
+ * search box starts empty.
+ *
+ * **It is still `ProfileMenu`, and that is the right name.** You never talk to
+ * a team: you talk to its lead, with its team behind it. So every row here
+ * ends in a profile, and a team is how you pick one that has a team behind it
+ * — which is exactly what the chip this drops from says it is for.
  */
 export function ProfileMenu({
   profiles,
-  profileId,
+  teams,
+  startAs,
   onPick,
 }: {
   profiles: Role[];
-  profileId: string | null;
-  onPick: (id: string | null) => void;
+  teams: AgentTeam[];
+  startAs: StartAs;
+  onPick: (next: StartAs) => void;
 }) {
-  const ordered = useMemo(
-    () =>
-      [...profiles].sort(
-        (a, b) =>
-          Number(b.canDelegate) - Number(a.canDelegate) ||
-          a.name.localeCompare(b.name),
-      ),
-    [profiles],
-  );
+  const all = useMemo(() => startables(teams, profiles), [teams, profiles]);
+  const picked = startableIn(all, startAs);
+  /* The labels exist to tell a team from a profile of the same name. With no
+     teams at all there is nothing to tell apart, so this menu looks exactly
+     as it did — one list, no headings over it. */
+  const grouped = teams.length > 0;
 
   return (
     <>
       {/* The same box as the repository menu, from the same place. What a
-          query means here is the name or what the profile *does*, which is
-          how somebody looks for one they set up months ago. */}
+          query means here is the name, what the profile *does*, and a team's
+          lead — which is how somebody looks for one they set up months ago. */}
       <Sift
-        items={ordered}
-        match={(p, q) =>
-          looselyMatches(`${p.name} ${p.does ?? ""}`, q)
-        }
-        when={profiles.length > 3}
-        placeholder="Search profiles"
-        noun="profile"
-        onlyOne={(p) => onPick(p.id)}
+        items={all}
+        match={startableMatches}
+        when={all.length > 3}
+        placeholder={grouped ? "Search teams and profiles" : "Search profiles"}
+        noun={grouped ? "team or profile" : "profile"}
+        onlyOne={(s) => !s.blocked && onPick({ kind: s.kind, id: s.id })}
       >
-        {(shown, query) => (
-          <>
-            {/* Only with nothing typed: *Just an agent* is not a profile and
-                cannot match a search for one. */}
-            {!query.trim() && (
-              <Opt
-                on={!profileId}
-                onPick={() => onPick(null)}
-                icon={<UserRound className="h-4 w-4" strokeWidth={1.8} />}
-                title="Just an agent"
-                sub="No profile — a plain workspace"
-              />
-            )}
-            {shown.map((p) => (
-              <Opt
-                key={p.id}
-                on={p.id === profileId}
-                onPick={() => onPick(p.id)}
-                icon={
-                  p.agent ? (
-                    <AgentMark agent={p.agent as Agent} size={16} />
-                  ) : (
-                    <UserRound className="h-4 w-4" strokeWidth={1.8} />
-                  )
-                }
-                title={p.name}
-                sub={p.does}
-                chip={p.canDelegate ? "can delegate" : undefined}
-              />
-            ))}
-          </>
-        )}
+        {(shown, query) => {
+          const rows = (kind: Startable["kind"]) => shown.filter((s) => s.kind === kind);
+          return (
+            <>
+              {/* Only with nothing typed: *Just an agent* is neither a team
+                  nor a profile and cannot match a search for one. */}
+              {!query.trim() && (
+                <Opt
+                  on={!startAs}
+                  onPick={() => onPick(null)}
+                  icon={<UserRound className="h-4 w-4" strokeWidth={1.8} />}
+                  title="Just an agent"
+                  sub="No profile — a plain workspace"
+                />
+              )}
+              {(["team", "profile"] as const).map((kind) => {
+                const group = rows(kind);
+                if (group.length === 0) return null;
+                return (
+                  <div key={kind}>
+                    {grouped && <Head>{kind === "team" ? "Agent teams" : "Profiles"}</Head>}
+                    {group.map((s) => (
+                      <Opt
+                        key={`${s.kind}:${s.id}`}
+                        on={s.kind === startAs?.kind && s.id === startAs.id}
+                        disabled={!!s.blocked}
+                        onPick={() => !s.blocked && onPick({ kind: s.kind, id: s.id })}
+                        icon={
+                          s.agent ? (
+                            <AgentMark agent={s.agent as Agent} size={16} />
+                          ) : s.kind === "team" ? (
+                            <Users className="h-4 w-4" strokeWidth={1.8} />
+                          ) : (
+                            <UserRound className="h-4 w-4" strokeWidth={1.8} />
+                          )
+                        }
+                        title={s.name}
+                        sub={s.blocked ?? s.does}
+                        /* **The size, before it is picked.** One agent or
+                           eight is the difference this row has to carry, and
+                           the count is the shortest true way to say it. */
+                        chip={
+                          s.kind === "team"
+                            ? `${s.agents} agent${s.agents === 1 ? "" : "s"}`
+                            : s.delegates
+                              ? "can delegate"
+                              : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            </>
+          );
+        }}
       </Sift>
-      {/* **What they are for, and a way to get one** — rather than a
-          definition of the word. Somebody meeting an empty list needs the
-          route, and the route is the Profiles page: making one there is two
-          choices (describe it to an agent, or fill in the form), which is not
-          a thing to reproduce inside a menu. */}
+      {/* **What picking this would do, or what they are for.**
+          `RepoMenu`'s footer says what ticking another repository does; this
+          is the same job. With something chosen it is the consequence — one
+          agent, or a lead with its team reachable — and with nothing chosen
+          it is what profiles and teams are for, which is what somebody
+          meeting an empty list needs rather than a definition of the word.
+          The route out of an empty list is the Profiles page: making one
+          there is two choices, which is not a thing to reproduce inside a
+          menu. */}
       <div className="pkfoot">
-        <p>
-          You can create agent profiles to divide your work across teams of agents (e.g. a
-          designer, an engineer, a security advisor, a QA, etc.)
-        </p>
+        {picked ? (
+          <p>{consequence(picked)}</p>
+        ) : (
+          <p>
+            You can create agent profiles to divide your work across teams of agents (e.g. a
+            designer, an engineer, a security advisor, a QA, etc.) Put them in an agent team and
+            its lead can hand work to the rest.
+          </p>
+        )}
         {profiles.length === 0 && (
           <button
             onClick={() => navigate("/configuration/roles")}

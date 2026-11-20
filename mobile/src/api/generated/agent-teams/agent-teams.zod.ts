@@ -21,6 +21,7 @@ export const ListAgentTeamsResponseItem = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
+  "schedules": zod.int().describe('**How many approved schedules saving this team would stop.**\n\nA schedule that names a team pins its whole tree at approval, and\nchanging the team clears that approval — so editing a team four\nschedules pin pauses four schedules. The editor has to be able to say\nthat **before** Save rather than after, which is the whole reason this\nis on the row a person reads rather than behind a second request.\n\nOnly the approved ones, because only those are running and only those\nare stopped. A draft that pins the team is re-pinned and has nothing\nto lose.\n\nCounted across every owner, for the reason\n`Db::schedules_pinning_team` gives: somebody else\'s schedule is no\nless stopped for being somebody else\'s.'),
   "seeded": zod.boolean().describe('Whether this team was **materialised from what its lead profile had\nactually spawned**, rather than drawn by somebody.\n\nTrue for the teams #491\'s seeding produced at the cut, and the reason\nto say so on the wire is that a team nobody authored deserves a look\nbefore it is trusted — it is a reading of history, not a decision.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A team, as a list row reads it.')
@@ -50,6 +51,7 @@ export const CreateAgentTeamResponse = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
+  "schedules": zod.int().describe('**How many approved schedules saving this team would stop.**\n\nA schedule that names a team pins its whole tree at approval, and\nchanging the team clears that approval — so editing a team four\nschedules pin pauses four schedules. The editor has to be able to say\nthat **before** Save rather than after, which is the whole reason this\nis on the row a person reads rather than behind a second request.\n\nOnly the approved ones, because only those are running and only those\nare stopped. A draft that pins the team is re-pinned and has nothing\nto lose.\n\nCounted across every owner, for the reason\n`Db::schedules_pinning_team` gives: somebody else\'s schedule is no\nless stopped for being somebody else\'s.'),
   "seeded": zod.boolean().describe('Whether this team was **materialised from what its lead profile had\nactually spawned**, rather than drawn by somebody.\n\nTrue for the teams #491\'s seeding produced at the cut, and the reason\nto say so on the wire is that a team nobody authored deserves a look\nbefore it is trusted — it is a reading of history, not a decision.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A team, as a list row reads it.').and(zod.object({
@@ -100,6 +102,7 @@ export const GetAgentTeamResponse = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
+  "schedules": zod.int().describe('**How many approved schedules saving this team would stop.**\n\nA schedule that names a team pins its whole tree at approval, and\nchanging the team clears that approval — so editing a team four\nschedules pin pauses four schedules. The editor has to be able to say\nthat **before** Save rather than after, which is the whole reason this\nis on the row a person reads rather than behind a second request.\n\nOnly the approved ones, because only those are running and only those\nare stopped. A draft that pins the team is re-pinned and has nothing\nto lose.\n\nCounted across every owner, for the reason\n`Db::schedules_pinning_team` gives: somebody else\'s schedule is no\nless stopped for being somebody else\'s.'),
   "seeded": zod.boolean().describe('Whether this team was **materialised from what its lead profile had\nactually spawned**, rather than drawn by somebody.\n\nTrue for the teams #491\'s seeding produced at the cut, and the reason\nto say so on the wire is that a team nobody authored deserves a look\nbefore it is trusted — it is a reading of history, not a decision.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A team, as a list row reads it.').and(zod.object({
@@ -143,6 +146,7 @@ export const UpdateAgentTeamResponse = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
+  "schedules": zod.int().describe('**How many approved schedules saving this team would stop.**\n\nA schedule that names a team pins its whole tree at approval, and\nchanging the team clears that approval — so editing a team four\nschedules pin pauses four schedules. The editor has to be able to say\nthat **before** Save rather than after, which is the whole reason this\nis on the row a person reads rather than behind a second request.\n\nOnly the approved ones, because only those are running and only those\nare stopped. A draft that pins the team is re-pinned and has nothing\nto lose.\n\nCounted across every owner, for the reason\n`Db::schedules_pinning_team` gives: somebody else\'s schedule is no\nless stopped for being somebody else\'s.'),
   "seeded": zod.boolean().describe('Whether this team was **materialised from what its lead profile had\nactually spawned**, rather than drawn by somebody.\n\nTrue for the teams #491\'s seeding produced at the cut, and the reason\nto say so on the wire is that a team nobody authored deserves a look\nbefore it is trusted — it is a reading of history, not a decision.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A team, as a list row reads it.').and(zod.object({

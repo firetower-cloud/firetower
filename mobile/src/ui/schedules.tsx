@@ -107,6 +107,13 @@ export function tagOf(schedule: Schedule): string | null {
     }
     case "overran":
       return "Kept overrunning";
+    /* **Why, not what.** A schedule that runs as an agent team pins the whole
+       tree at approval, so an edit to the team is a change to what the
+       unattended run would do — and the one thing somebody needs to know is
+       which thing changed under it. Read-only here: turning it back on is a
+       desk act, as approving one always has been. */
+    case "team_changed":
+      return "Team changed";
     default:
       return "Firetower stopped it";
   }

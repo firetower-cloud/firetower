@@ -218,6 +218,14 @@ async fn propose_schedule(state: &AppState, request: &AgentRequest) -> Result<St
             cadence,
             timezone,
             profile,
+            // **No team, and not because the tool is small.** A profile is
+            // identity; a team is a reach, and a proposal that named one
+            // would be an agent writing down an authorization for several
+            // more agents to run unattended. The person approving is who may
+            // say that, and they say it in the sheet — which is the same
+            // ruling as "an agent may propose but not activate", one level
+            // further in.
+            team: None,
             agent: session.agent,
             account_id: None,
             settings: Default::default(),

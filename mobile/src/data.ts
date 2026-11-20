@@ -10,6 +10,7 @@ import { useListAgents } from "~/api/generated/agents/agents";
 import { useListProviderRepos, useListProviders } from "~/api/generated/providers/providers";
 import { useListAccounts } from "~/api/generated/accounts/accounts";
 import { useListRoles } from "~/api/generated/roles/roles";
+import { useListAgentTeams } from "~/api/generated/agent-teams/agent-teams";
 import { useMe } from "~/api/generated/auth/auth";
 import { useGetUpdates } from "~/api/generated/updates/updates";
 import { showsDot } from "~/api/updates";
@@ -24,6 +25,7 @@ import {
 import { useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type {
+  AgentTeam,
   DiffSince,
   FileDiff,
   ListTasksParams,
@@ -203,6 +205,18 @@ export function useAccounts() {
  */
 export function useProfiles(): Feed<Role[]> {
   const q = useListRoles();
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
+}
+
+/**
+ * Every agent team this person can see, with its lead and its size.
+ *
+ * What the composer's picker bands above the profiles. Empty is the ordinary
+ * case and not a failure: a team is authored on a desk, and most installs
+ * have none.
+ */
+export function useAgentTeams(): Feed<AgentTeam[]> {
+  const q = useListAgentTeams();
   return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null };
 }
 

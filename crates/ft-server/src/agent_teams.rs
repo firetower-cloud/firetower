@@ -184,6 +184,22 @@ pub struct AgentTeam {
     /// to say so on the wire is that a team nobody authored deserves a look
     /// before it is trusted — it is a reading of history, not a decision.
     pub seeded: bool,
+    /// **How many approved schedules saving this team would stop.**
+    ///
+    /// A schedule that names a team pins its whole tree at approval, and
+    /// changing the team clears that approval — so editing a team four
+    /// schedules pin pauses four schedules. The editor has to be able to say
+    /// that **before** Save rather than after, which is the whole reason this
+    /// is on the row a person reads rather than behind a second request.
+    ///
+    /// Only the approved ones, because only those are running and only those
+    /// are stopped. A draft that pins the team is re-pinned and has nothing
+    /// to lose.
+    ///
+    /// Counted across every owner, for the reason
+    /// `Db::schedules_pinning_team` gives: somebody else's schedule is no
+    /// less stopped for being somebody else's.
+    pub schedules: i64,
     /// Whether the person asking may edit or delete it.
     pub may_write: bool,
     /// Whether they may move it into a directory, or out of one.
@@ -491,7 +507,9 @@ fn slug_of(name: &str, id: &str) -> String {
 ///
 /// `seeded` and `auto_added` say where the team and its seats came from, so a
 /// row can read *2 added automatically* without opening the tree — see
-/// `agent_teams/window.rs`.
+/// `agent_teams/window.rs`. `schedules` counts the approved schedules a save
+/// would stop, which is the one consequence the editor has to state *before*
+/// Save — see `Db::schedules_pinning_team`.
 fn team_fields(person: usize) -> String {
     format!(
         "t.id, t.path::text AS path, t.name, t.created_at, t.updated_at, \
@@ -501,6 +519,8 @@ fn team_fields(person: usize) -> String {
          (SELECT count(*) FROM agent_team_positions c WHERE c.team_id = t.id) AS positions, \
          (SELECT count(*) FROM agent_team_positions c \
            WHERE c.team_id = t.id AND c.auto_added_at IS NOT NULL) AS auto_added, \
+         (SELECT count(*) FROM schedules s \
+           WHERE s.pins -> 'team' ->> 'id' = t.id AND s.approved_at IS NOT NULL) AS schedules, \
          ARRAY(SELECT DISTINCT mr.name \
                  FROM agent_team_positions mp \
                  JOIN roles mr ON mr.id = mp.profile_id AND {visible} \
@@ -551,6 +571,7 @@ fn read_team(row: &sqlx::postgres::PgRow) -> AgentTeam {
         members: row.get("members"),
         auto_added: row.get("auto_added"),
         seeded: row.get("seeded"),
+        schedules: row.get("schedules"),
         may_write: row.get("may_write"),
         may_share: row.get("may_share"),
         created_at: row.get("created_at"),

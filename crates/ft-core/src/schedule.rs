@@ -155,6 +155,17 @@ pub enum PausedReason {
     /// The owner's account was disabled. Not really a pause — the schedule has
     /// nobody to run as.
     OwnerDisabled,
+    /// The agent team this schedule runs as was changed, so the tree it was
+    /// approved on is not the tree it would run now.
+    ///
+    /// **Not a streak rule.** Nothing failed and nobody paused it: a schedule
+    /// pins a team's whole tree at approval, and an edit to that team is a
+    /// change to what the unattended run would do. The approval goes with it
+    /// and the schedule stops, which is what makes the change something
+    /// somebody has to look at rather than something that arrives at 9am.
+    /// `OwnerDisabled` is the precedent for a reason that is about the world
+    /// around the schedule rather than about its runs.
+    TeamChanged,
 }
 
 /// The streak, counted off the run history at read time.
@@ -343,6 +354,32 @@ pub struct ScheduleChoices {
     /// The skills each run reads, by id, resolved at approval.
     #[serde(default)]
     pub skills: Vec<String>,
+    /// The agent team it runs as, **as it was when somebody approved it**.
+    ///
+    /// Absent for a schedule that names a lone profile, which cannot hand work
+    /// to anybody. See [`ScheduleTeam`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<ScheduleTeam>,
+}
+
+/// The team a schedule runs as, pinned.
+///
+/// **The name and the size are the pinned ones, not the live ones.** A screen
+/// that joined against the team list would draw whatever the team is now,
+/// which is the one thing an approved schedule is not — the whole reason the
+/// tree is pinned is that an edit must not change what the unattended run
+/// does. So a schedule carries what it was approved on, and a team that has
+/// since been edited reads as the approval it still holds while its own page
+/// says the approval is gone.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ScheduleTeam {
+    pub id: String,
+    /// What it was called at approval.
+    pub name: String,
+    /// How many positions the pinned tree holds, the lead included. One is a
+    /// lead with nothing under it, which can hand work to nobody.
+    pub positions: u32,
 }
 
 /// A schedule, as a client reads it.

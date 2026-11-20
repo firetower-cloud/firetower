@@ -281,6 +281,7 @@ export * from './scheduleRun.ts';
 export * from './scheduleRunId.ts';
 export * from './scheduleRunsParams.ts';
 export * from './scheduleRunState.ts';
+export * from './scheduleTeam.ts';
 export * from './scopeKind.ts';
 export * from './sent.ts';
 export * from './serverFrame.ts';

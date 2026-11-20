@@ -11645,3 +11645,523 @@ async fn two_spawns_naming_one_profile_at_once_add_one_seat() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+Scheduling a team: the whole tree pinned at approval, and an edit that
+takes the approval with it.
+────────────────────────────────────────────────────────────────────────── */
+
+/// A team saved through the endpoint a person's Save calls, so the
+/// approval-clearing hook runs.
+async fn resaved_team(
+    state: &AppState,
+    principal: &crate::auth::Principal,
+    id: &str,
+    fields: serde_json::Value,
+) {
+    let _ = super::agent_teams::update_agent_team(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(id.to_string()),
+        Json(serde_json::from_value(fields).unwrap()),
+    )
+    .await
+    .expect("a team its writer may save");
+}
+
+/// A schedule that runs as a team, approved.
+async fn a_team_schedule(
+    state: &AppState,
+    principal: &crate::auth::Principal,
+    owner: &str,
+    name: &str,
+    team: &str,
+) -> ft_core::schedule::Schedule {
+    the_owners_subscription(state, owner).await;
+    let mut new = a_schedule(name, weekdays_at("08:30"));
+    new.team = Some(team.to_string());
+    let made = create(state, principal, new)
+        .await
+        .expect("a team schedule");
+    let Json(on) = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(made.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect("a person may approve it");
+    on
+}
+
+/// **A schedule that names a team pins the whole tree at approval.**
+///
+/// Not the team's id to be resolved at 9am: that is the mistake the profile's
+/// fingerprint already exists to prevent, with a larger blast radius — a seat
+/// added to a team would silently widen what an unattended run may hand work
+/// to. So the tree, its name, its size and a fingerprint of its shape are
+/// written down, and the composed persona is the lead's *in that seat*, which
+/// is where the reach is actually stated to the agent.
+///
+/// And naming a team beside a different profile is refused, in the same words
+/// `create_session_as` refuses it: it is a contradiction rather than two
+/// settings.
+#[tokio::test]
+async fn a_schedule_that_names_a_team_pins_the_whole_tree() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let designer = a_profile(&state, &owner, "Designer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": {
+                "profile": orchestrator,
+                "children": [{ "profile": engineer }, { "profile": designer }],
+            },
+        }),
+    )
+    .await;
+
+    let on = a_team_schedule(&state, &principal, &owner, "Morning sweep", &team).await;
+
+    let pinned = on.choices.team.as_ref().expect("the team it runs as");
+    assert_eq!(pinned.id, team);
+    assert_eq!(pinned.name, "Platform");
+    assert_eq!(pinned.positions, 3, "the lead and its two reports");
+    assert_eq!(
+        on.choices.profile.as_deref(),
+        Some(orchestrator.as_str()),
+        "naming the team names its lead's profile too — a lead is a profile"
+    );
+
+    let row = state.db.schedule(&on.id).await.unwrap().unwrap();
+    let tree = row.pins["team"]["tree"].as_array().expect("the whole tree");
+    assert_eq!(tree.len(), 3, "every seat, not just the count");
+    assert!(
+        row.pins["team"]["fingerprint"]
+            .as_str()
+            .is_some_and(|f| f.len() == 64),
+        "a fingerprint the gate can recompute"
+    );
+    assert_eq!(
+        row.pins["team"]["position"].as_str(),
+        Some(
+            state
+                .agent_teams
+                .lead_of(&owner, &team)
+                .await
+                .unwrap()
+                .unwrap()
+                .position
+                .as_str()
+        ),
+        "the lead's seat, which is where each run stands"
+    );
+
+    // The reach is *in* the prompt, so the pinned persona has to carry it.
+    let persona = row.pins["persona"].as_str().unwrap_or_default();
+    assert!(
+        persona.contains("The profiles reporting to your position"),
+        "{persona}"
+    );
+    assert!(
+        persona.contains("Engineer") && persona.contains("Designer"),
+        "{persona}"
+    );
+
+    // And `spec_of` puts the team back, so the launch stands in that seat.
+    let spec = crate::schedules::launch::spec_of(&row).expect("it reads back as a launch");
+    assert_eq!(spec.team.as_deref(), Some(team.as_str()));
+
+    // A team beside a profile that is not its lead is a contradiction.
+    let mut confused = a_schedule("Confused", weekdays_at("08:30"));
+    confused.team = Some(team.clone());
+    confused.profile = Some(engineer.clone());
+    let refused = create(&state, &principal, confused)
+        .await
+        .expect_err("not two settings");
+    assert!(
+        refused.message.contains("led by a different profile"),
+        "{}",
+        refused.message
+    );
+}
+
+/// **A profile named bare pins no team**, which is the distinction the
+/// composer's picker carries and the one this whole ticket exists to keep
+/// true: a profile that happens to lead a team does not pick the team up.
+#[tokio::test]
+async fn a_schedule_naming_a_lead_bare_gets_no_team_and_no_reach() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": { "profile": orchestrator, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+    the_owners_subscription(&state, &owner).await;
+
+    let mut bare = a_schedule("Bare", weekdays_at("08:30"));
+    bare.profile = Some(orchestrator.clone());
+    let made = create(&state, &principal, bare)
+        .await
+        .expect("a lone profile");
+    assert!(
+        made.choices.team.is_none(),
+        "the lead's own team is not picked up by naming the lead"
+    );
+
+    let row = state.db.schedule(&made.id).await.unwrap().unwrap();
+    let persona = row.pins["persona"].as_str().unwrap_or_default();
+    assert!(
+        !persona.contains("reporting to your position"),
+        "nothing about a position, because it holds none: {persona}"
+    );
+    assert!(row.pins["team"].is_null());
+    let spec = crate::schedules::launch::spec_of(&row).expect("it reads back as a launch");
+    assert!(spec.team.is_none());
+    let _ = team;
+}
+
+/// **Editing a team pauses every schedule that pins it, and hands each one
+/// the tree as it is now.**
+///
+/// Both halves, because either on its own is wrong: keeping the old shape
+/// means a fix never reaches the schedule, and adopting the new one without
+/// clearing the approval is exactly what approval exists to prevent.
+///
+/// The count the editor shows **before** Save is asserted here too, off the
+/// same predicate the hook walks — that is the whole of "editing a team that
+/// four schedules pin pauses four schedules, and the editor says so first".
+#[tokio::test]
+async fn editing_a_team_pauses_the_schedules_that_pin_it_and_adopts_the_new_tree() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let designer = a_profile(&state, &owner, "Designer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": { "profile": orchestrator, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+
+    let one = a_team_schedule(&state, &principal, &owner, "Morning sweep", &team).await;
+    let two = a_team_schedule(&state, &principal, &owner, "Evening sweep", &team).await;
+    let elsewhere = {
+        the_owners_subscription(&state, &owner).await;
+        let mut new = a_schedule("Unrelated", weekdays_at("09:30"));
+        new.profile = Some(designer.clone());
+        let made = create(&state, &principal, new).await.unwrap();
+        let Json(on) = super::schedules::approve_schedule(
+            State(state.clone()),
+            Extension(principal.clone()),
+            Path(made.id.as_str().to_string()),
+            Query(Default::default()),
+        )
+        .await
+        .unwrap();
+        on
+    };
+
+    // **Before Save**, which is the point: the number is on the team the
+    // editor already read to draw its map.
+    let before = state
+        .agent_teams
+        .one(&owner, &team, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .expect("the team");
+    assert_eq!(
+        before.schedules, 2,
+        "two approved schedules pin it — and the unrelated one does not"
+    );
+
+    // A seat added under the same lead: the reach changed, nothing else did.
+    resaved_team(
+        &state,
+        &principal,
+        &team,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": {
+                "profile": orchestrator,
+                "children": [{ "profile": engineer }, { "profile": designer }],
+            },
+        }),
+    )
+    .await;
+
+    for was in [&one, &two] {
+        let now = state.db.schedule(&was.id).await.unwrap().unwrap();
+        assert!(!now.active, "it is stopped");
+        assert!(now.approved_at.is_none(), "and the approval is gone");
+        assert_eq!(
+            now.paused_reason.as_deref(),
+            Some("team_changed"),
+            "and it says why, rather than looking like somebody paused it"
+        );
+        assert!(now.revision > was.revision, "a different approved text");
+        assert_eq!(
+            now.pins["team"]["positions"].as_u64(),
+            Some(3),
+            "the tree it holds is the tree the team now is"
+        );
+        let persona = now.pins["persona"].as_str().unwrap_or_default();
+        assert!(
+            persona.contains("Designer"),
+            "and the prompt describes the reach it was given: {persona}"
+        );
+        // Nothing runs on it until somebody turns it back on.
+        assert_eq!(
+            state
+                .db
+                .schedules_due(Utc::now() + chrono::Duration::days(7), 20)
+                .await
+                .unwrap()
+                .iter()
+                .filter(|d| d.schedule_id == was.id)
+                .count(),
+            0
+        );
+    }
+
+    // And a schedule that does not pin the team is untouched.
+    let other = state.db.schedule(&elsewhere.id).await.unwrap().unwrap();
+    assert!(other.active && other.approved_at.is_some());
+    assert_eq!(other.revision, elsewhere.revision);
+
+    // Turning one back on is the look, and it works: the live tree is now
+    // the pinned one.
+    let Json(again) = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(one.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect("a person may approve what the team became");
+    assert!(again.active);
+    assert_eq!(again.choices.team.map(|t| t.positions), Some(3));
+}
+
+/// **A team whose lead changed is not adopted, and the switch says so.**
+///
+/// The lead decides the engine, and the engine decides which permission mode
+/// and which sandbox are even words — so a new lead carries settings that
+/// were approved for something else, which is a whole `pins_for` rather than
+/// a re-pin. The pins stay as they were, the approval still goes, and
+/// approving again is refused with a sentence that sends somebody to the
+/// schedule rather than round the switch a second time.
+#[tokio::test]
+async fn a_team_whose_lead_changed_is_not_adopted_and_the_switch_says_so() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": { "profile": orchestrator, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+    let on = a_team_schedule(&state, &principal, &owner, "Morning sweep", &team).await;
+    let was = state.db.schedule(&on.id).await.unwrap().unwrap();
+
+    resaved_team(
+        &state,
+        &principal,
+        &team,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": { "profile": engineer, "children": [{ "profile": orchestrator }] },
+        }),
+    )
+    .await;
+
+    let now = state.db.schedule(&on.id).await.unwrap().unwrap();
+    assert!(!now.active && now.approved_at.is_none());
+    assert_eq!(
+        now.pins["team"]["fingerprint"], was.pins["team"]["fingerprint"],
+        "nothing was adopted — a different lead is a different engine"
+    );
+    assert_eq!(
+        now.pins["profile"], was.pins["profile"],
+        "and the profile it was approved as is untouched"
+    );
+
+    let refused = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(on.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect_err("the switch is not the way out of this one");
+    // **The whole sentence, not two fragments.** Two `contains` either side of
+    // a gap assert nothing about the gap, which is where twenty-two spaces sat
+    // unnoticed. Anything a person reads is asserted entire.
+    assert_eq!(
+        refused.message,
+        "The “Platform” agent team is not the one this was approved on, so turning it on would \
+         start something nobody has read. Open it and set what it runs as."
+    );
+}
+
+/// **A team deleted under a schedule stops it, and the next run is refused
+/// with the team's own name.**
+///
+/// The name only still exists in the pins, which is why the sentence is
+/// composed from them rather than from a read of a row that has gone.
+#[tokio::test]
+async fn deleting_a_team_stops_its_schedules_and_the_refusal_names_it() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": { "profile": orchestrator, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+    let on = a_team_schedule(&state, &principal, &owner, "Morning sweep", &team).await;
+
+    super::agent_teams::delete_agent_team(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(team.clone()),
+    )
+    .await
+    .expect("its writer may delete it");
+
+    let now = state.db.schedule(&on.id).await.unwrap().unwrap();
+    assert!(!now.active && now.approved_at.is_none());
+    assert_eq!(now.paused_reason.as_deref(), Some("team_changed"));
+    assert_eq!(
+        now.pins["team"]["name"].as_str(),
+        Some("Platform"),
+        "the pins still say what it was approved on, which is the only place that name is left"
+    );
+
+    let refused = super::schedules::approve_schedule(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(on.id.as_str().to_string()),
+        Query(Default::default()),
+    )
+    .await
+    .expect_err("there is nothing to approve it against");
+    assert!(refused.message.contains("Platform"), "{}", refused.message);
+}
+
+/// **The fingerprint is the half an edit hook cannot do.**
+///
+/// A team can change shape without anybody editing it: deleting a profile
+/// cascades onto its seats. Nothing passes through the team editor, so
+/// nothing clears the approval — and what the run would be allowed to hand
+/// work to has changed. The gate recomputes and refuses.
+#[tokio::test]
+async fn a_tree_that_changed_without_an_edit_is_refused_at_the_gate() {
+    let (state, principal, _, _, owner) = fixture().await;
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": { "profile": orchestrator, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+    let on = a_team_schedule(&state, &principal, &owner, "Morning sweep", &team).await;
+    let row = state.db.schedule(&on.id).await.unwrap().unwrap();
+    let approved = row.pins["team"]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // The report's profile is deleted, which takes its seat with it.
+    super::roles::delete_role(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(engineer.clone()),
+    )
+    .await
+    .expect("a profile its owner may delete");
+
+    let live = state
+        .agent_teams
+        .detail(&owner, &team, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .expect("the team is still there")
+        .positions;
+    assert_eq!(live.len(), 1, "the lead, alone");
+    assert_ne!(
+        super::schedules::team_fingerprint_of(&live),
+        approved,
+        "so the gate has something to refuse on"
+    );
+
+    // Nothing cleared the approval, because nothing edited the team.
+    let still = state.db.schedule(&on.id).await.unwrap().unwrap();
+    assert!(still.approved_at.is_some());
+
+    // **So the gate is the only thing standing in the way, and it is.** Driven
+    // through a real launch rather than inferred from the fingerprints
+    // differing: what this claims is that the run is refused and that the
+    // sentence names the team, and neither is observable from the hash.
+    let claim = state
+        .db
+        .claim_run(
+            &ft_core::ScheduleRunId::new(),
+            &on.id,
+            None,
+            Utc::now(),
+            still.revision,
+            "cron",
+            "claimed",
+            None,
+            false,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    crate::schedules::launch::start(&state, &still, &claim, crate::schedules::launch::Why::Clock)
+        .await
+        .expect("a refusal is an outcome");
+    let run = runs_of(&state, &on.id)
+        .await
+        .into_iter()
+        .find(|r| r.state.is_terminal())
+        .expect("it was recorded");
+    assert_eq!(run.state, ScheduleRunState::Failed);
+    // **The history line a person reads, entire** — `"Refused. "` and then the
+    // sentence, which is the shape `reason` gives every row. Asserting the
+    // whole of it is what makes the spacing part of the test.
+    assert_eq!(
+        run.detail.as_deref(),
+        Some(
+            "Refused. The “Platform” agent team has changed since this schedule was approved, \
+             so it will not run on it. Open the schedule, read what the team is now, and \
+             approve it again."
+        )
+    );
+}

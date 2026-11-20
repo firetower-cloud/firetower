@@ -70,6 +70,24 @@ export interface AgentTeam {
   /** How many positions it holds, the lead included. */
   positions: number;
   /**
+     * **How many approved schedules saving this team would stop.**
+     *
+     * A schedule that names a team pins its whole tree at approval, and
+     * changing the team clears that approval — so editing a team four
+     * schedules pin pauses four schedules. The editor has to be able to say
+     * that **before** Save rather than after, which is the whole reason this
+     * is on the row a person reads rather than behind a second request.
+     *
+     * Only the approved ones, because only those are running and only those
+     * are stopped. A draft that pins the team is re-pinned and has nothing
+     * to lose.
+     *
+     * Counted across every owner, for the reason
+     * `Db::schedules_pinning_team` gives: somebody else's schedule is no
+     * less stopped for being somebody else's.
+     */
+  schedules: number;
+  /**
      * Whether this team was **materialised from what its lead profile had
      * actually spawned**, rather than drawn by somebody.
      *

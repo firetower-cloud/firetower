@@ -2940,6 +2940,84 @@ impl Db {
         .map(schedule_from_row))
     }
 
+    /// Every schedule that pins one agent team, whoever owns it.
+    ///
+    /// **No owner predicate, deliberately.** Changing a team changes what
+    /// every schedule pinning it would do, and a schedule somebody else owns
+    /// is no less affected for being somebody else's — leaving theirs
+    /// approved on a tree that no longer exists is the unattended run this
+    /// whole mechanism exists to stop. Who may change the team is answered
+    /// where the team is changed; this is the consequence of that having
+    /// happened.
+    ///
+    /// `pins -> 'team' ->> 'id'` because the pinned team is an object: the
+    /// tree, its name and its size travel with the id, so a screen can say
+    /// what was approved without reading the team as it is now.
+    pub async fn schedules_pinning_team(&self, team: &str) -> Result<Vec<ScheduleRow>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {SCHEDULE_COLUMNS} FROM schedules s
+              WHERE s.pins -> 'team' ->> 'id' = $1
+              ORDER BY s.id"
+        ))
+        .bind(team)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(schedule_from_row)
+        .collect())
+    }
+
+    /// Re-pin one schedule's team and take its approval away.
+    ///
+    /// **Both halves, in one statement, because either on its own is a
+    /// mistake somebody has already made.** Keeping the old tree pinned means
+    /// a fix never reaches the schedule; adopting the new one without
+    /// clearing the approval is exactly what approval exists to prevent. So
+    /// the pins become what the team is *now* — which is what the schedule's
+    /// own page then draws — and nothing runs on it until a person turns it
+    /// back on.
+    ///
+    /// `active = false` as well as the cleared approval. The clock already
+    /// ignores an unapproved schedule (`schedules_due` requires both), so the
+    /// approval alone would be enough to stop it — but a row left `active`
+    /// with no approval draws a *Next run* that is never going to happen, and
+    /// a promise nothing keeps is worse than the plain word Stopped.
+    ///
+    /// `paused_reason` only where there was an approval to lose: a draft
+    /// nobody had turned on has not been stopped by this, and saying it was
+    /// would put it in *Waiting for you* with nothing to decide.
+    ///
+    /// **The revision moves even for that draft**, because `revision` means
+    /// *which approved text* and the text did change. `schedule_runs.revision`
+    /// is how "why did it do that" is answered after the fact, so two runs
+    /// carrying one revision must not be able to have run two different
+    /// trees. The cost is that a page opened before this sends a revision
+    /// that no longer matches and is told to read it again — which is the
+    /// right answer, and the same one an edit in another tab already gives.
+    pub async fn unapprove_for_team(
+        &self,
+        id: &ScheduleId,
+        pins: &serde_json::Value,
+        reason: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE schedules
+                SET pins = $2,
+                    revision = revision + 1,
+                    approved_by = NULL, approved_at = NULL, active = false,
+                    paused_reason = CASE WHEN approved_at IS NOT NULL
+                                         THEN $3 ELSE paused_reason END,
+                    updated_at = now()
+              WHERE id = $1",
+        )
+        .bind(id.as_str())
+        .bind(pins)
+        .bind(reason)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Write a schedule down. Inactive and unapproved: turning it on is a
     /// separate act, which is the whole of the propose-but-not-activate rule.
     #[allow(clippy::too_many_arguments)]

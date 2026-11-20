@@ -565,6 +565,7 @@ pub fn paused_reason(stored: Option<&str>) -> Option<PausedReason> {
         "five_runs" => Some(PausedReason::FiveRuns),
         "overran" => Some(PausedReason::Overran),
         "owner_disabled" => Some(PausedReason::OwnerDisabled),
+        "team_changed" => Some(PausedReason::TeamChanged),
         // A value a later build wrote. Reading it as "a person paused this"
         // would be wrong, and reading it as any particular rule would be a
         // guess, so it is dropped — the page then says the plainest true
@@ -580,6 +581,7 @@ pub fn reason_name(reason: PausedReason) -> &'static str {
         PausedReason::FiveRuns => "five_runs",
         PausedReason::Overran => "overran",
         PausedReason::OwnerDisabled => "owner_disabled",
+        PausedReason::TeamChanged => "team_changed",
     }
 }
 

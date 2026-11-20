@@ -60,6 +60,28 @@ export interface NewSchedule {
      */
   skills?: string[] | null;
   /**
+     * The agent team each run starts as, by id. Omit for a lone profile.
+     *
+     * **You never talk to a team — you talk to its lead, with its team behind
+     * it.** Naming one runs each occurrence as that team's lead, with the
+     * profiles reporting to its position reachable. Naming nothing, or naming
+     * a profile on its own, is a run that cannot hand work to anybody: a
+     * profile that happens to lead a team does not pick the team up by being
+     * named bare.
+     *
+     * A team and a different profile is a contradiction rather than two
+     * settings and is refused, which is the rule `NewSession` already
+     * follows.
+     *
+     * **The whole tree is pinned at approval**, not resolved at each run —
+     * for the reason the profile's revision is pinned: an edit must not be
+     * able to change what an unattended run does. Editing the team clears
+     * the approval instead, and the next run is refused until somebody
+     * looks.
+     * @nullable
+     */
+  team?: string | null;
+  /**
      * An IANA name. Required, and not defaulted to the server's own zone:
      * "09:00" means nothing without saying whose nine.
      */
