@@ -1598,6 +1598,13 @@ mod tests {
 
     /// The column, against the index that holds it: unique within the parent
     /// path, and every existing row's null colliding with nothing.
+    ///
+    /// Every row here is named after its own leaf, because a *name* is one
+    /// profile within one directory too (`roles_name_in_directory`) and these
+    /// all land in one. Four `Designer`s in `u.kevin` is what this fixture
+    /// used to insert, and the refusal asserted below has to be the key's own
+    /// index rather than whichever of the two answered first — so it is asked
+    /// for by name.
     #[tokio::test]
     async fn a_key_is_unique_within_its_parent_and_nulls_never_collide() {
         let (state, principal) = fixture().await;
@@ -1612,13 +1619,14 @@ mod tests {
         ) -> Result<sqlx::postgres::PgQueryResult, sqlx::Error> {
             sqlx::query(
                 "INSERT INTO roles (id, org_id, path, created_by, name, slug, does, author_key) \
-                 VALUES ($1, $2, $3::ltree, $4, 'Designer', $1, 'designs', $5)",
+                 VALUES ($1, $2, $3::ltree, $4, $6, $1, 'designs', $5)",
             )
             .bind(ft_core::RoleId::new().as_str())
             .bind(org)
             .bind(path)
             .bind(who)
             .bind(key)
+            .bind(ft_core::ResourcePath::from_stored(path).leaf())
             .execute(state.db.pool())
             .await
         }
@@ -1636,8 +1644,9 @@ mod tests {
         assert!(
             again.is_err_and(|e| e
                 .as_database_error()
-                .is_some_and(|db| db.is_unique_violation())),
-            "a second `designer` in one space has to be refused"
+                .is_some_and(|db| db.is_unique_violation()
+                    && db.constraint() == Some(crate::roles::KEY_IS_UNIQUE))),
+            "a second `designer` in one space has to be refused by the key's own index"
         );
         // Every row that predates the format is null, and nulls are distinct.
         mine("u.kevin.a_1", None).await.unwrap();
