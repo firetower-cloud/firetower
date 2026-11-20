@@ -63,6 +63,67 @@ export function Sheet({
 }
 
 /**
+ * Leaving a screen that is holding unsaved work.
+ *
+ * **One question, one wording, wherever it is asked.** It was written for a
+ * team's map, where Save being the only commit is the whole promise and
+ * navigating away dropped the draft in silence. The profile drawer has the
+ * identical question — somebody edits a profile and goes somewhere else — so
+ * it gets the identical answer rather than a second one phrased differently.
+ * Two engineers writing the same sentence twice is the failure this is being
+ * shared to avoid.
+ *
+ * Three answers, in the order somebody reads them: **Stay here**, which is
+ * the cautious one and so the quiet one; **Discard**, which is deliberate;
+ * and **Save and go**, which is what most people came to do.
+ *
+ * `says` is what would be lost, and it is the caller's because only the
+ * caller knows: a tree counts the cards that would go, a profile counts the
+ * fields that would.
+ */
+export function LeaveSheet({
+  what,
+  says,
+  saving,
+  problem,
+  onStay,
+  onDiscard,
+  onSave,
+}: {
+  /** What is holding the work, by name — the team, or the profile. */
+  what: string;
+  says: string;
+  saving?: boolean;
+  problem?: string | null;
+  onStay: () => void;
+  onDiscard: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <Sheet
+      title={`Save your changes to ${what}?`}
+      onClose={onStay}
+      foot={
+        <>
+          <span className="msg">{problem ?? ""}</span>
+          <Button variant="quiet" onClick={onStay}>
+            Stay here
+          </Button>
+          <Button variant="default" onClick={onDiscard}>
+            Discard
+          </Button>
+          <Button variant="primary" disabled={saving} onClick={onSave}>
+            {saving ? "Saving…" : "Save and go"}
+          </Button>
+        </>
+      }
+    >
+      <p className="max-w-[60ch] text-body leading-relaxed text-text">{says}</p>
+    </Sheet>
+  );
+}
+
+/**
  * Which engine a profile runs on, or nothing when it has not said.
  *
  * `Role.agent` is a string on the wire and one of four in fact, and the cast
@@ -219,16 +280,25 @@ export function ProfilePicker({
  */
 export function NewProfileSheet({
   under,
+  filing,
   onClose,
   onCreate,
 }: {
   /** What it will sit under, when it is being made from a card. */
   under?: string;
+  /**
+   * The directories it could be filed into, when the caller has a choice to
+   * offer. Absent on the map, where a profile made for a seat goes into the
+   * person's own space and is filed afterwards through the sharing sheet like
+   * anything else.
+   */
+  filing?: { id: string; name: string }[];
   onClose: () => void;
-  onCreate: (name: string, does: string) => Promise<void>;
+  onCreate: (name: string, does: string, directory?: string | null) => Promise<void>;
 }) {
   const [name, setName] = useState("");
   const [does, setDoes] = useState("");
+  const [where, setWhere] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const alive = useRef(true);
@@ -240,7 +310,7 @@ export function NewProfileSheet({
     setBusy(true);
     setProblem(null);
     try {
-      await onCreate(name.trim(), does.trim());
+      await onCreate(name.trim(), does.trim(), where);
     } catch (e) {
       if (alive.current) setProblem(e instanceof Error ? e.message : "That profile was not created.");
     } finally {
@@ -276,7 +346,41 @@ export function NewProfileSheet({
           className="w-full resize-y rounded-xl bg-ground px-3.5 py-2.5 text-ui leading-relaxed text-bone placeholder:text-mute focus:outline-none focus:ring-[1.5px] focus:ring-bone focus:ring-inset"
         />
       </Field>
-      <p className="mt-3 mb-1 text-meta text-dim">These are the only two fields a profile needs.</p>
+      {/* **Where it lives, at creation only.** A profile is filed from the
+          moment it exists rather than created and moved, which is what every
+          other Placed kind does; moving it afterwards is the sharing sheet's
+          job, and there is one place a thing changes hands. */}
+      {filing && filing.length > 0 && (
+        <Field label="Where it lives" hint="Keep it yours, or file it where your team can use it.">
+          <div className="pickrow">
+            <button
+              type="button"
+              aria-pressed={where === null}
+              onClick={() => setWhere(null)}
+              className="pk"
+            >
+              Yours
+              <span className="sub">only you, until you share it</span>
+            </button>
+            {filing.map((d) => (
+              <button
+                key={d.id}
+                type="button"
+                aria-pressed={where === d.id}
+                onClick={() => setWhere(d.id)}
+                className="pk"
+              >
+                {d.name}
+              </button>
+            ))}
+          </div>
+        </Field>
+      )}
+      <p className="mt-3 mb-1 text-meta text-dim">
+        {filing && filing.length > 0
+          ? "Name it and say what it does. Everything else has a sensible answer already, and the drawer is where you change any of it."
+          : "These are the only two fields a profile needs."}
+      </p>
     </Sheet>
   );
 }

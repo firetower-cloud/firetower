@@ -4103,6 +4103,52 @@
         }
       }
     },
+    "/api/v1/roles/{id}/positions": {
+      "get": {
+        "tags": [
+          "roles"
+        ],
+        "summary": "Where this profile sits: one entry per position it holds, in a team this\nperson can see.",
+        "description": "The drawer's *In teams* tab, and the confirmation before a delete. It\nanswers both in one request, which is the point: the alternative reads\nevery team's whole tree and filters it in the window, at a request a team,\nand moves the rules about withheld names there at the same time.\n\nA profile this person cannot see is **not found**, as every other read of\none is. What comes back is already narrowed to the teams they may see.",
+        "operationId": "role_positions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Role id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ProfilePosition"
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/schedule-runs": {
       "get": {
         "tags": [
@@ -15802,6 +15848,63 @@
           "text": {
             "type": "string",
             "description": "The file."
+          }
+        }
+      },
+      "ProfilePosition": {
+        "type": "object",
+        "description": "Where one profile sits in one team.\n\nThe answer to *is this the same Designer* — yes, and here is each seat it\nholds, with what sits above and below it in that team. #494's drawer reads\nits **In teams** tab off these, and so does the confirmation before a\nprofile is deleted: deleting one takes every position that references it\nand everything under those, so the teams and the count have to be on\nscreen before the press.\n\n**One request rather than one per team.** The alternative is reading every\nteam's whole tree and filtering it in the client, which is a request a team\nand puts the withholding rules in the client at the same time.",
+        "required": [
+          "team",
+          "teamName",
+          "position",
+          "leads",
+          "under",
+          "instructions",
+          "takes",
+          "mayWrite"
+        ],
+        "properties": {
+          "instructions": {
+            "type": "string",
+            "description": "This seat's own instructions."
+          },
+          "leads": {
+            "type": "boolean",
+            "description": "It is the team's lead, so deleting the profile empties the team."
+          },
+          "mayWrite": {
+            "type": "boolean",
+            "description": "Whether this person may change that team."
+          },
+          "position": {
+            "type": "string",
+            "description": "The seat itself."
+          },
+          "reportsTo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The profile it reports to, by name. Absent for a lead, and absent\nwhen that profile is one this person cannot see."
+          },
+          "takes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many positions go if this one goes: itself and everything under\nit. What the confirmation counts."
+          },
+          "team": {
+            "type": "string"
+          },
+          "teamName": {
+            "type": "string"
+          },
+          "under": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The profiles directly under it in this team, by name, in sibling\norder. A name this person cannot see is absent, as it is from\n[`AgentTeam::members`]."
           }
         }
       },

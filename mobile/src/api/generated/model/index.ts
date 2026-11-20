@@ -230,6 +230,7 @@ export * from './probeRequest';
 export * from './probeResponse';
 export * from './profileDrop';
 export * from './profileFile';
+export * from './profilePosition';
 export * from './proposal';
 export * from './proposalWhy';
 export * from './provenance';

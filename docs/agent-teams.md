@@ -359,7 +359,15 @@ compatibility window.
 ### What each refusal says
 
 An agent reads these and acts on them, so each one names a fix rather than a
-rule:
+rule. **A refusal that points at a position names it**: the rules are a pure
+function over ids, and `check` is handed the names the transaction about to
+write has already read, so a profile under itself and two of one profile under
+one seat read as *Engineer* rather than `role_01…`. It is resolved on the
+server rather than in the editor because this API, the YAML import and three
+generated clients all meet the same sentences. The one refusal that still
+prints ids is the one about profiles filed where the caller cannot reach them,
+where there is no name to read and reading one would disclose what the filing
+withholds.
 
 - *No team, not a Manager.* "This session holds no position in an agent team
   and its profile is not a Manager, so there is nobody for it to hand work to.
@@ -476,11 +484,54 @@ Save and Discard live in the map's own action row and not in a status strip:
 the desk has one control height, 30px, and 22px of window chrome cannot hold
 one.
 
+## The drawer
+
+**One editor, for a profile and for a position**, in the window's own right
+rail — the same rail `Workbench` opens beside a conversation, whose numbers
+are in `desktop/src/ui/right-rail.ts`. It opens from a row in **Agent
+profiles** and from a card on a map, and there is no second editor: the
+full-page profile form is gone, because two editors over one object is what
+this design removed.
+
+Five tabs, and they are questions rather than categories: **Custom · What it
+is · Skills · How it runs · In teams**. *Custom* comes first from a card,
+because what that seat says is what somebody pressed the card to change; from
+a library row there is no seat and the tab is not drawn.
+
+**A position adds and never replaces**, so *Custom* draws the profile's own
+instructions above the box somebody types in, in one frame with the join
+labelled. That is the rule as a control rather than as a caption, and it is
+why the tab is *Custom* and not *Overrides*.
+
+**One band under the tabs** says whether a change reaches this team or every
+team using the profile. It is there because the other team is not on screen,
+which is the one consequence nothing else can show.
+
+**Re-parenting is here and not on the map.** *Reports to* is a field of a
+position, the map draws no control for it, and the draft it edits is the
+map's — so a move joins the pending count and Discard puts it back. A seat's
+own instructions are part of that draft too.
+
+**Where the rail sits is measured on the pane, never on the window**, because
+the pane has the rail and the index beside it. Dock at 820 and over, float
+between 600 and 820, push below. The desk's pane measures 974, so it docks at
+370 and the screen keeps 604; a 669pt Duo inner display lays out at 607 and
+floats, which is the number the rule exists for.
+
+**A seat whose profile the reader cannot see** opens as the id and the seat's
+own instructions, and nothing else. The id is disclosed by design — a gap
+would misrepresent the team — and the drawer is *told* the name was withheld
+rather than working it out, because working it out means reading the profile
+list.
+
+**Deleting a profile cascades**, and the confirmation names every team and the
+positions each one loses first. `GET /api/v1/roles/{id}/positions` answers
+that and the *In teams* tab in one request.
+
 ## Not yet
 
 Each of these is its own ticket, and this one is what they are blocked on.
 
-- **The profile drawer** (#494), which opens from a card on the map.
 - **Read-only on mobile** (#495) and **YAML import and export** (#496).
   Starting work as a team is already on the phone; #495 is the teams *screen*.
 - **Dropping the old per-profile reach** (#497), which is the contract half.

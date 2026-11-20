@@ -17,7 +17,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Role } from "~/api/generated/model";
-import { filedIn, nameTakenBy, nameTakenSays } from "./Roles";
+import { filedIn, nameTakenBy, nameTakenSays } from "./profile-draft";
 
 const profile = (id: string, name: string, path: string): Role =>
   ({ id, name, path, does: "does a thing" }) as Role;

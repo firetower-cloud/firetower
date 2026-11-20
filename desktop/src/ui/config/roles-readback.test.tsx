@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { whatAChildGets } from "./Roles";
+import { whatAChildGets } from "./profile-draft";
 import type { NewRole } from "~/api/generated/model";
 
 const MACHINES = [{ id: "h_1", label: "build-01" }];
