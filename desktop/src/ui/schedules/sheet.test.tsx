@@ -468,7 +468,12 @@ describe("the menus those chips drop", () => {
 
   it("renders the composer's profile menu", () => {
     const html = renderToStaticMarkup(
-      <ProfileMenu profiles={[role("p_01", "Ada, the lead")]} profileId={null} onPick={() => {}} />,
+      <ProfileMenu
+        profiles={[role("p_01", "Ada, the lead")]}
+        teams={[]}
+        startAs={null}
+        onPick={() => {}}
+      />,
     );
     expect(html).toContain("Ada, the lead");
     expect(html).toContain("Just an agent");

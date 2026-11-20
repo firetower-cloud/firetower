@@ -43,7 +43,15 @@ import { Icon, IconButton } from "~/components/ui";
 import { AgentMark } from "~/components/AgentMark";
 import { Pop } from "~/ui/Pop";
 import { RunPicker } from "~/ui/RunPicker";
-import { defaultSkills, ProfileMenu, RepoMenu } from "~/ui/StartComposer";
+import {
+  consequence,
+  defaultSkills,
+  ProfileMenu,
+  RepoMenu,
+  startableIn,
+  startables,
+  type StartAs,
+} from "~/ui/StartComposer";
 import { Head, Menu, Opt, PickOne } from "~/ui/menus";
 import { canRun, NoMachine, resolve, type Where } from "~/components/WhereItRuns";
 import { Readout } from "~/components/HostReadiness";
@@ -52,6 +60,7 @@ import { usable } from "~/api/accounts";
 import { useAccounts, useAgents, useHosts, useRepos, useSkills } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 import { useListRoles } from "~/api/generated/roles/roles";
+import { useListAgentTeams } from "~/api/generated/agent-teams/agent-teams";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { getListSchedulesQueryKey, readCadence } from "~/api/generated/schedules/schedules";
 import { createAndTurnOn, saveEdits } from "./create";
@@ -125,6 +134,7 @@ export function NewSchedule({
   const { data: agents } = useAgents();
   const { data: accounts } = useAccounts();
   const profiles = useListRoles().data ?? [];
+  const teams = useListAgentTeams().data ?? [];
 
   /* What this sheet opens on. An edit and a copy fill in from the same
      place; only where Save goes differs. */
@@ -138,7 +148,18 @@ export function NewSchedule({
   const [checkouts, setCheckouts] = useState<Checkout[]>(
     like ? like.repos.map((r) => ({ id: r.id, slug: r.slug })) : [],
   );
-  const [profileId, setProfileId] = useState<string | null>(like?.choices.profile ?? null);
+  /* **The pinned team if it names one, else the pinned profile.** An edit
+     fills in from `choices`, and a schedule that runs as a team has both —
+     its lead's profile *and* the team — so reading the profile first would
+     reopen a team schedule as a lone profile and quietly take its reach away
+     on Save. The team is the more specific of the two and wins. */
+  const [startAs, setStartAs] = useState<StartAs>(() =>
+    like?.choices.team
+      ? { kind: "team", id: like.choices.team.id }
+      : like?.choices.profile
+        ? { kind: "profile", id: like.choices.profile }
+        : null,
+  );
   const [base, setBase] = useState(like?.base ?? "");
   // Open where there is something in it to see.
   const [advanced, setAdvanced] = useState(!!like?.base);
@@ -189,7 +210,14 @@ export function NewSchedule({
     setWhere((w) => ({ ...w, machine: its.key, hostId: named }));
   }, [all, like?.hostId]);
 
-  const profile = profiles.find((p) => p.id === profileId);
+  /* The profile that will actually run, whichever way it was chosen — a
+     team names its lead's profile too. The composer's own resolution. */
+  const everyStart = useMemo(() => startables(teams, profiles), [teams, profiles]);
+  const start = startableIn(everyStart, startAs);
+  const team = startAs?.kind === "team" ? teams.find((t) => t.id === startAs.id) : undefined;
+  const profile = profiles.find(
+    (p) => p.id === (startAs?.kind === "team" ? team?.lead : startAs?.id),
+  );
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
   const picked = agents.some((a) => a.kind === where.agent) ? (where.agent as Agent) : undefined;
   const kind = (pinned ||
@@ -359,7 +387,10 @@ export function NewSchedule({
         base: base || undefined,
         cadence,
         timezone: zone,
-        profile: profileId || undefined,
+        /* One of the two, never both: the server names the lead's profile
+           from the team and refuses a team beside a different one. */
+        profile: startAs?.kind === "profile" ? startAs.id : undefined,
+        team: startAs?.kind === "team" ? startAs.id : undefined,
         agent: kind,
         accountId: accountId || undefined,
         /* What this engine actually offers, at the value this sheet is
@@ -489,7 +520,7 @@ export function NewSchedule({
                     onClick={(e) => toggle("profile", e.currentTarget)}
                     data-set={!!profile}
                     className="chip"
-                    title="Which profile the agent wears"
+                    title={consequence(start) ?? "Which profile the agent wears"}
                   >
                     <span className="grid place-items-center text-mute">
                       {pinned ? (
@@ -499,6 +530,7 @@ export function NewSchedule({
                       )}
                     </span>
                     <span className="lbl">{profile ? profile.name : "Just an agent"}</span>
+                    {team && <span className="shrink-0 text-mute">in {team.name}</span>}
                     <Icon of={ChevronDown} size={12} className="text-mute" />
                   </button>
                   {/* The engine, the account, the model, the effort, the
@@ -863,9 +895,10 @@ export function NewSchedule({
         <Pop anchor={open.at} onClose={close} width={320}>
           <ProfileMenu
             profiles={profiles}
-            profileId={profileId}
-            onPick={(id) => {
-              setProfileId(id);
+            teams={teams}
+            startAs={startAs}
+            onPick={(next) => {
+              setStartAs(next);
               close();
             }}
           />

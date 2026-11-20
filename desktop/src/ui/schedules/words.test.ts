@@ -114,3 +114,41 @@ describe("a schedule somebody paused reads differently from one that gave up", (
     expect(pauseTag(schedule({ active: true, pausedReason: null }))).toBeNull();
   });
 });
+
+/**
+ * **A team changed under a schedule that pins it.**
+ *
+ * Not a streak rule and nothing to count: a schedule that runs as a team pins
+ * the whole tree at approval, so an edit to the team is a change to what the
+ * unattended run would do. It lands in *Waiting for you* beside the schedules
+ * Firetower stopped, because that is what it is — a decision waiting on
+ * somebody — and the sentence names the team, since "a team changed" with
+ * four of them in the library is not something anybody can act on.
+ */
+describe("a schedule stopped because its agent team changed", () => {
+  const changed = (team?: { id: string; name: string; positions: number }) =>
+    schedule({
+      pausedReason: "team_changed",
+      choices: { team } as Schedule["choices"],
+    });
+
+  test("says which thing changed, not that it is stopped", () => {
+    // *Stopped* is already in the Next run column; the tag is free to say why.
+    const s = changed({ id: "t_01", name: "Product", positions: 8 });
+    expect(pauseTag(s)).toBe("Team changed");
+    expect(offWord(s)).toBe("Stopped");
+    expect(stoppedByFiretower(s)).toBe(true);
+  });
+
+  test("names the team, and says what to do", () => {
+    const says = pauseSays(changed({ id: "t_01", name: "Product", positions: 8 }));
+    expect(says?.headline).toBe(
+      "Firetower stopped this schedule because the Product agent team changed.",
+    );
+    expect(says?.because).toContain("turn it on again");
+  });
+
+  test("and still says something true when the pinned team cannot be named", () => {
+    expect(pauseSays(changed())?.headline).toContain("the agent team it runs as changed");
+  });
+});

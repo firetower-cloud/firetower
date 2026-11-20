@@ -14,8 +14,10 @@
  * choose. Code that chooses is that deleted mechanism coming back.
  *
  * The three *Kept …* tags share a shape on purpose: they are one kind of
- * statement — your schedule is not working, and here is how. The fourth is
- * about the account rather than the schedule and keeps the plain sentence.
+ * statement — your schedule is not working, and here is how. The last two are
+ * not about the runs at all — `owner_disabled` is about the account and
+ * `team_changed` is about the agent team it runs as — so neither counts
+ * anything and both keep a plain sentence.
  */
 import type { PausedReason, Schedule, Streak } from "~/api/generated/model";
 
@@ -31,6 +33,11 @@ export function pauseTag(schedule: Schedule): string | null {
       return "Kept overrunning";
     case "owner_disabled":
       return "Firetower stopped it";
+    /* **Why, not what**, like the three above it: *Stopped* is already in
+       the *Next run* column, and the one thing somebody needs to know is
+       which thing changed under it. */
+    case "team_changed":
+      return "Team changed";
     /* Null is a person, and that is already said by the *Next run* column
        reading **Paused** rather than **Stopped**. A tag would be the same
        fact twice. */
@@ -130,6 +137,26 @@ export function pauseSays(schedule: Schedule, machine?: string | null): PauseSay
         headline: "Firetower stopped this schedule while your account was disabled.",
         because: "Nothing was wrong with the schedule. It will not run again until you turn it on.",
       };
+
+    /* **A schedule that runs as a team pins the whole tree**, so an edit to
+       the team is a change to what the unattended run would do. Neither easy
+       answer was acceptable — keeping the old shape means a fix never reaches
+       the schedule, adopting the new one is what approval exists to prevent —
+       so the tree it now holds *is* the team as it is, and this is the
+       sentence that says somebody has to look at it.
+
+       It names the team, because "a team changed" with four teams in the
+       library is not something anybody can act on. */
+    case "team_changed": {
+      const team = schedule.choices.team?.name;
+      return {
+        headline: team
+          ? `Firetower stopped this schedule because the ${team} agent team changed.`
+          : "Firetower stopped this schedule because the agent team it runs as changed.",
+        because:
+          "It runs as that team's lead, and the tree it was approved on is not the tree it would run now. Read what the team is, then turn it on again.",
+      };
+    }
 
     default:
       return null;
