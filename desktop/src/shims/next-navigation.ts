@@ -6,7 +6,7 @@
  * address, which is also what makes deep links (`firetower://…`) land somewhere
  * without a route table.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const listeners = new Set<() => void>();
 
@@ -54,7 +54,33 @@ function currentPath(): string {
   return h || "/";
 }
 
+/**
+ * A screen that would lose work if the address changed, and what to ask.
+ *
+ * **One at a time, and only while it would lose something.** A guard that
+ * outlives its screen breaks navigation everywhere, so `useLeaveGuard` clears
+ * it on unmount, and the screen itself decides per call whether there is
+ * anything to ask about.
+ *
+ * Consulted by `navigate` and not by `hashchange`: a rail row, a palette
+ * command and a back link all go through `navigate`, and the ones that do
+ * not — a deep link from outside the window, a reload — are not somebody
+ * choosing to leave a form.
+ */
+let askBeforeLeaving: ((resume: () => void) => boolean) | null = null;
+
 function go(to: string, replace = false) {
+  /* `true` means the guard has taken it: it has put a question on screen and
+     will call `resume` if the answer is to go, and `resume` does not ask
+     again. */
+  if (askBeforeLeaving) {
+    const ask = askBeforeLeaving;
+    const taken = ask(() => {
+      askBeforeLeaving = null;
+      go(to, replace);
+    });
+    if (taken) return;
+  }
   const next = `#${to.startsWith("/") ? to : `/${to}`}`;
   if (replace) window.history.replaceState(null, "", next);
   else window.location.hash = next;
@@ -64,6 +90,34 @@ function go(to: string, replace = false) {
 export function navigate(to: string) {
   go(to);
 }
+
+/**
+ * Ask before this screen is left.
+ *
+ * `ask` answers `true` when it has taken the navigation, and `false` to let
+ * it through — which is what a screen with nothing unsaved answers. It stays
+ * registered for as long as the component is mounted; the decision is `ask`'s,
+ * every time.
+ */
+export function useLeaveGuard(ask: (resume: () => void) => boolean) {
+  const latest = useRef(ask);
+  latest.current = ask;
+  useEffect(() => {
+    askBeforeLeaving = (resume) => latest.current(resume);
+    return () => {
+      askBeforeLeaving = null;
+    };
+  }, []);
+}
+
+/** For tests: what is registered, and clearing it. */
+export const leaveGuard = {
+  ask: (resume: () => void) => (askBeforeLeaving ? askBeforeLeaving(resume) : false),
+  armed: () => askBeforeLeaving !== null,
+  clear: () => {
+    askBeforeLeaving = null;
+  },
+};
 
 export function usePathname(): string {
   const [path, setPath] = useState(currentPath);

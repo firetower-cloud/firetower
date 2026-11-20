@@ -10011,6 +10011,8 @@
           "path",
           "name",
           "positions",
+          "depth",
+          "members",
           "autoAdded",
           "seeded",
           "mayWrite",
@@ -10027,6 +10029,11 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "depth": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many levels deep the tree goes, counting the lead. `0` when the\nteam holds no positions at all.\n\nHere rather than derived by the client, because the list draws it and\nthe list does not read the tree: a row that had to open a team to say\nhow deep it is would make the map the only way to see one."
           },
           "id": {
             "type": "string"
@@ -10052,6 +10059,13 @@
           "mayWrite": {
             "type": "boolean",
             "description": "Whether the person asking may edit or delete it."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Who else is in it, by profile name, without the lead and without\nrepeats, in alphabetical order.\n\nThe list row draws these and searches them, which is how somebody\nfinds the team a profile sits in without opening every map. Names the\nperson cannot see are **absent rather than blank**: this is a list\nrow, where the shape of the tree is not being described, so there is\nnothing a gap would misrepresent. The map is where a withheld seat\nstill has to be drawn."
           },
           "name": {
             "type": "string"

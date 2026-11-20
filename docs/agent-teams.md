@@ -340,14 +340,55 @@ and ask the agent to hand the work to the Engineer. `GET
 /api/v1/sessions/{id}/persona` is what it was told; the refusals above are what
 it gets if it names anything else.
 
+## The screen
+
+`/configuration/agent-teams`, under Customize, directly after Agent profiles.
+Two surfaces: every team, and one team's map.
+
+**The list** says who leads a team, who else is in it, how many positions it
+holds and how deep it goes — all four off `GET /api/v1/agent-teams`, in one
+request, so the map is never the only way to see a team. Its search matches a
+team, its lead, or **anybody in it**, which is how somebody finds the teams one
+profile sits in.
+
+**The map** draws the tree as **Hybrid**: the lead and its children spread
+horizontally with elbow connectors, and from the second level down, where the
+shape is a chain, it indents. This was measured. A full organigramme throughout
+came out at 4640px wide on the hardest lane — 3.9 screens — because an org
+chart gives each card one parent, so one profile under three managers becomes
+three cards; the width is the duplication, not the card. Hybrid came out at
+504px and complete. `desktop/src/ui/config/team-map.test.ts` asserts the two
+measured lanes still come out at 648 × 296 and 862 × 226, so the arrangement
+fails a test rather than drifting.
+
+**The map writes a draft and Save is the only commit.** Adding, removing and
+re-parenting change a tree held in the client; the action row says how many
+changes are waiting, and Discard is an assignment back to what the server
+answered — which is how a removed subtree comes back whole, the tree it was in
+never having been touched. Save sends the whole tree through
+`PUT /api/v1/agent-teams/{id}`, carrying each kept seat's id.
+
+Three things a card has to say that it would be easy to leave unsaid:
+
+- **What a removal takes.** A position owns its subtree, so the control states
+  the descendant count before it is pressed — *Take Engineer and the 3 under it
+  out of this team*. There is no confirmation, because a removal is a draft.
+- **A seat whose profile the reader cannot see** keeps its place and loses its
+  name: a dashed card with the profile's id, a thing that is there and
+  unreadable rather than an error. A gap would misrepresent the team.
+- **A seat a hand-off added rather than a person** is marked, and the map
+  offers a way to step through them. That visibility is the whole mitigation
+  for a team that can grow without anybody choosing.
+
+Save and Discard live in the map's own action row and not in a status strip:
+the desk has one control height, 30px, and 22px of window chrome cannot hold
+one.
+
 ## Not yet
 
 Each of these is its own ticket, and this one is what they are blocked on.
 
-- **The Agent teams screen and the map** (#492), and **the profile drawer**
-  (#494). The map is where an auto-added seat is *drawn* as marked: the server
-  reports `autoAddedAt` on the position and a count on the team, and nothing
-  yet draws either.
+- **The profile drawer** (#494), which opens from a card on the map.
 - **Starting work as a team from the composer, and scheduling one** (#493). A
   schedule that names a team has to pin the whole tree at approval; today an
   approved run is composed the way an unteamed profile is, so nothing can

@@ -21,6 +21,15 @@ export interface AgentTeam {
      */
   autoAdded: number;
   createdAt: string;
+  /**
+     * How many levels deep the tree goes, counting the lead. `0` when the
+     * team holds no positions at all.
+     *
+     * Here rather than derived by the client, because the list draws it and
+     * the list does not read the tree: a row that had to open a team to say
+     * how deep it is would make the map the only way to see one.
+     */
+  depth: number;
   id: string;
   /**
      * The profile that leads it, by id.
@@ -44,6 +53,18 @@ export interface AgentTeam {
   mayShare: boolean;
   /** Whether the person asking may edit or delete it. */
   mayWrite: boolean;
+  /**
+     * Who else is in it, by profile name, without the lead and without
+     * repeats, in alphabetical order.
+     *
+     * The list row draws these and searches them, which is how somebody
+     * finds the team a profile sits in without opening every map. Names the
+     * person cannot see are **absent rather than blank**: this is a list
+     * row, where the shape of the tree is not being described, so there is
+     * nothing a gap would misrepresent. The map is where a withheld seat
+     * still has to be drawn.
+     */
+  members: string[];
   name: string;
   path: string;
   /** How many positions it holds, the lead included. */

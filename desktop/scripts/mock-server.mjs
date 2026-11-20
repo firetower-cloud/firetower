@@ -603,6 +603,14 @@ const json = (res, body, status = 200) => {
   res.end(JSON.stringify(body));
 };
 
+/** What a request carried, as JSON. The same four lines five handlers inline. */
+const sent = (req) =>
+  new Promise((done) => {
+    let raw = "";
+    req.on("data", (c) => (raw += c));
+    req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+  });
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname;
@@ -613,6 +621,7 @@ const server = createServer(async (req, res) => {
   if (path === "/__reset") {
     scene = url.searchParams.get("scene") ?? "default";
     checkouts = START();
+    AGENT_TEAMS = SEED_TEAMS();
     pinned = null;
     repoDefaults = {};
     return json(res, { detail: `back to three, playing ${scene}` });
@@ -643,6 +652,51 @@ const server = createServer(async (req, res) => {
      the right path answering with the wrong shape. */
   if (path === "/api/v1/skills" && scene === "skills-error") {
     return json(res, { code: "ActionFailed", message: "the control plane refused: upstream timed out" }, 500);
+  }
+
+  /* A profile, as the inline *Create a profile for this seat* makes one.
+     `roles` is a read in the table below, so without this a create answered
+     200 with the whole library. */
+  if (req.method === "POST" && path === "/api/v1/roles") {
+    const body = await sent(req);
+    const made = role({
+      id: `r_${++positionSeq}`,
+      name: body.name ?? "Untitled",
+      does: body.does ?? "",
+      instructions: body.instructions ?? "",
+      placement: body.placement ?? "lead",
+      agent: body.agent ?? null,
+      skillScope: body.skillScope ?? [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    ROLES.push(made);
+    return json(res, made);
+  }
+
+  /* One agent team, its whole tree, and the save that replaces it. The save
+     is the only commit the map makes, so this is the one write. */
+  const team_of = /^\/api\/v1\/agent-teams\/(at_[^/]+)$/.exec(path);
+  if (team_of) {
+    const team = AGENT_TEAMS.find((t) => t.id === team_of[1]);
+    if (!team) return json(res, { code: "NotFound", message: "no such team" }, 404);
+    if (req.method === "PUT") {
+      const body = await sent(req);
+      team.name = body.name ?? team.name;
+      team.root = adoptPosition(body.lead);
+      return json(res, teamDetail(team));
+    }
+    if (req.method === "DELETE") {
+      AGENT_TEAMS = AGENT_TEAMS.filter((t) => t.id !== team.id);
+      return json(res, {});
+    }
+    return json(res, teamDetail(team));
+  }
+  if (req.method === "POST" && path === "/api/v1/agent-teams") {
+    const body = await sent(req);
+    const made = { id: `at_${++positionSeq}`, name: body.name, root: adoptPosition(body.lead) };
+    AGENT_TEAMS.push(made);
+    return json(res, teamDetail(made));
   }
 
   if (req.method === "POST" && path === "/api/v1/updates/plan") return json(res, PLAN);
@@ -984,6 +1038,8 @@ const server = createServer(async (req, res) => {
     "/api/v1/directories": scene === "no-dirs" ? [] : DIRECTORIES,
     "/api/v1/secrets": scene === "no-secrets" ? { ...SECRETS, held: [], access: [] } : SECRETS,
     "/api/v1/roles": scene === "no-roles" ? [] : ROLES,
+    "/api/v1/agent-teams": scene === "no-agent-teams" ? [] : AGENT_TEAMS.map(teamRow),
+    "/api/v1/agent-teams/limits": { maxDepth: 6, maxPositions: 64 },
     "/api/v1/provider-kinds": PROVIDER_KINDS,
     /* **The catalogue, for `assert-connected.mjs`.** Not an API route — a
        harness one, under a name no client asks for. The connectedness check
@@ -1042,7 +1098,33 @@ const server = createServer(async (req, res) => {
     "/api/v1/events": [],
   };
 
-  if (path in routes) return json(res, routes[path]);
+  /**
+   * The read table, and **only for reads**.
+   *
+   * It used to answer `path in routes` with no method in it, so a `POST` to a
+   * path with no write handler fell through to the GET body and came back
+   * **200 with the list**. Eleven paths in this table are also write
+   * endpoints in the real contract — roles, skills, sessions, repos, hosts,
+   * directories, providers, teams, agent accounts, update runs — and every
+   * one of them looked like it worked. A client that then read `made.id` off
+   * an array got `undefined` and carried on.
+   *
+   * That is worse than no mock: it turns a route nobody implemented into a
+   * test that passes. A write with nowhere to go says so now.
+   */
+  if (path in routes) {
+    if (req.method !== "GET") {
+      return json(
+        res,
+        {
+          code: "NotImplemented",
+          message: `the mock has no ${req.method} for ${path} — add a handler above the read table`,
+        },
+        501,
+      );
+    }
+    return json(res, routes[path]);
+  }
   /* The file itself. `useFileText` reads the body as bytes and decides for
      itself whether it is text, a picture or too big — so this answers with
      the text and nothing around it. */
@@ -1483,9 +1565,9 @@ const role = (over) => ({
   mayShare: true, mayWrite: true, settings: { model: null, effort: null, mode: null, sandbox: null },
   createdAt: minutesAgo(20000), updatedAt: minutesAgo(400), ...over,
 });
-const ROLES = [
+let ROLES = [
   role({
-    id: "r_1", name: "Reviewer", isDefault: true,
+    id: "r_1", name: "Reviewer", isDefault: true, skillScope: ["sk_3", "sk_4"],
     does: "Reads a change and says what is wrong with it. Never writes.",
     instructions: "Read the diff. Report defects with a file and a line. Do not edit anything.",
     settings: { model: "claude-opus-5", effort: "high", mode: "read-only", sandbox: null },
@@ -1503,7 +1585,7 @@ const ROLES = [
        no subscription — the owner's default for whatever engine it ends up on.
        Without one of these the editor's open states could only be photographed
        on a profile that does not exist yet. */
-    id: "r_4", name: "Documentation reviewer",
+    id: "r_4", name: "Documentation reviewer", skillScope: ["sk_2"],
     placement: "lead", agent: null, machine: null, account: null, canDelegate: true,
     does: "Turns a change into words somebody outside can read, then checks the words against the diff.",
     instructions: "Read the diff, then the docs. Say which sentences are now wrong.",
@@ -1512,7 +1594,10 @@ const ROLES = [
     /* An open *machine* under a committed engine and placement: the state the
        Machines screen's cleanup block is about, and the row that reads
        "new workspace, any machine". */
-    id: "r_5", name: "Load tester", path: "u/kevin",
+    /* **Pinned skills, so the chip strip is reachable.** No profile here had
+       any, which meant the editor's Skills tab and the team map's skills
+       switch could only ever be photographed drawing nothing. */
+    id: "r_5", name: "Load tester", path: "u/kevin", skillScope: ["sk_1", "sk_2", "sk_3", "sk_4"],
     placement: "new", machine: null, agent: "Codex",
     does: "Hammers a branch until something gives, on whatever is free.",
     instructions: "Ramp until it breaks. Report the shape of the failure, not just the number.",
@@ -1527,6 +1612,136 @@ const ROLES = [
     settings: { model: "claude-haiku-4-5", effort: null, mode: null, sandbox: null },
   }),
 ];
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Agent teams
+
+   A team is a name and a tree of positions, and a position references a
+   profile — so the same profile sits in several teams with different children
+   in each, which is the whole of what moved off the profile. The three below
+   are shaped like the ones `agent-studio` measured, drawn with this mock's
+   own profiles: a four-deep lane, a lane with one profile in two seats told
+   apart by what each is told, and a flat one.
+
+   `agent-teams-review` is the scene for the states that are otherwise
+   unreachable: two seats added by a hand-off rather than by a person,
+   approved schedules that a save would pause, and a seat whose profile this
+   reader cannot see.
+   ────────────────────────────────────────────────────────────────────────── */
+let positionSeq = 0;
+const at = (profile, children = [], instructions = "") => ({
+  id: `atp_${++positionSeq}`,
+  profile,
+  instructions,
+  children,
+});
+
+/** Lead first, then depth-first in sibling order — the order the API reads. */
+function flatPositions(root, parent = null, out = []) {
+  out.push({ id: root.id, profile: root.profile, parent, instructions: root.instructions, order: out.length });
+  root.children.forEach((k) => flatPositions(k, root.id, out));
+  return out;
+}
+
+const deepest = (node) => 1 + Math.max(0, ...node.children.map(deepest));
+
+/** The three, rebuilt on every `/__reset` so a run does not inherit the last
+    one's new teams. `positionSeq` goes back with them, so ids are stable. */
+const SEED_TEAMS = () => {
+  positionSeq = 0;
+  return [
+  {
+    id: "at_platform",
+    name: "Platform",
+    root: at("r_2", [
+      at("r_4", [at("r_1"), at("r_5", [at("r_1")])]),
+      at("r_1"),
+      at("r_3"),
+    ]),
+  },
+  {
+    id: "at_product",
+    name: "Product",
+    root: at("r_4", [
+      at("r_1", [at("r_3")]),
+      at("r_5", [at("r_1")], "Owns the web client."),
+      at("r_5", [at("r_1")], "Owns the API and the migrations."),
+      at("r_3"),
+    ]),
+  },
+  { id: "at_research", name: "Research", root: at("r_3", [at("r_1"), at("r_5"), at("r_4")]) },
+  ];
+};
+let AGENT_TEAMS = SEED_TEAMS();
+
+/** What the reader may not see, in the scene that has one. */
+const HIDDEN_PROFILE = "r_3";
+
+function teamRow(team) {
+  const flat = flatPositions(team.root);
+  const members = [
+    ...new Set(
+      flat
+        .filter((p) => p.parent)
+        .map((p) => ROLES.find((r) => r.id === p.profile))
+        .filter((r) => r && !(scene === "agent-teams-review" && r.id === HIDDEN_PROFILE))
+        .map((r) => r.name),
+    ),
+  ].sort();
+  const lead = ROLES.find((r) => r.id === team.root.profile);
+  return {
+    id: team.id,
+    name: team.name,
+    path: "u/kevin",
+    lead: lead?.id ?? null,
+    leadName: lead?.name ?? null,
+    positions: flat.length,
+    depth: deepest(team.root),
+    members,
+    mayWrite: true,
+    mayShare: true,
+    createdAt: minutesAgo(20000),
+    updatedAt: minutesAgo(300),
+    /* Two fields another branch owns, answered here so the states they drive
+       can be looked at. See `ui/config/team-elsewhere.ts`. */
+    ...(scene === "agent-teams-review" && team.id === "at_product"
+      ? { schedules: 3, autoAdded: 2 }
+      : { schedules: 0, autoAdded: 0 }),
+  };
+}
+
+function teamDetail(team) {
+  const review = scene === "agent-teams-review" && team.id === "at_product";
+  const positions = flatPositions(team.root).map((p, i) => {
+    const profile = ROLES.find((r) => r.id === p.profile);
+    /* A seat whose profile this person cannot reach keeps its place and
+       loses its name: the shape belongs to the team, the name to the
+       profile. */
+    const hidden = review && p.profile === HIDDEN_PROFILE;
+    return {
+      id: p.id,
+      profile: p.profile,
+      profileName: hidden ? undefined : profile?.name,
+      profileDoes: hidden ? undefined : profile?.does,
+      parent: p.parent ?? undefined,
+      instructions: p.instructions,
+      order: p.order,
+      ...(review && (i === 5 || i === 7) ? { autoAddedAt: minutesAgo(2000) } : {}),
+    };
+  });
+  return { ...teamRow(team), positions };
+}
+
+/** A nested write, back into the shape this file holds teams in. */
+function adoptPosition(node) {
+  return {
+    id: node.id ?? `atp_${++positionSeq}`,
+    profile: node.profile,
+    instructions: node.instructions ?? "",
+    children: (node.children ?? []).map(adoptPosition),
+  };
+}
 
 /* Enough to list; the kinds page is what the git-host picker offers. */
 /**
