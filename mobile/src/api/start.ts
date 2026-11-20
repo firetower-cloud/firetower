@@ -150,12 +150,17 @@ export type Startable = {
 /**
  * Everything the sheet offers, in the order it offers it.
  *
- * **Teams above profiles**, and alphabetical within each — the desk's
- * `startables`, to the same rules, because a picker that orders two ways
- * within one release is two pickers. This replaces `orderProfiles`: that
- * floated the delegating profiles to the top, and reach has moved off the
- * profile and onto the team, so the position it held moves with it rather
- * than being a second preference.
+ * **Teams above profiles** — the desk's `startables`, to the same rules,
+ * because a picker that orders two ways within one release is two pickers.
+ * This replaces `orderProfiles`: that floated the delegating profiles to the
+ * top, and reach has moved off the profile and onto the team, so the position
+ * it held moves with it rather than being a second preference.
+ *
+ * **Within the profiles, `orderProfiles`' sort survives for as long as the
+ * old reach does**, which is the correction the desk carries too: during the
+ * compatibility window a Manager started bare genuinely still hands work out,
+ * which is the same fact that earns it a chip and its own sentence. It dies
+ * with `roles.can_delegate` in #497, alongside that sentence.
  *
  * **A profile that leads a team appears twice**, once bare and once as the
  * team, because the two start completely different things: one agent that
@@ -165,6 +170,11 @@ export type Startable = {
  */
 export function startables(teams: AgentTeam[], profiles: Role[]): Startable[] {
   const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
+  /* Delegating profiles first while any of them still delegate, then by name.
+     `Number(…)` because `canDelegate` is a boolean and a comparator needs a
+     number. Goes with #497. */
+  const byReach = (a: Role, b: Role) =>
+    Number(b.canDelegate) - Number(a.canDelegate) || byName(a, b);
   return [
     ...[...teams].sort(byName).map((t): Startable => {
       const lead = t.lead ? profiles.find((p) => p.id === t.lead) : undefined;
@@ -186,7 +196,7 @@ export function startables(teams: AgentTeam[], profiles: Role[]): Startable[] {
             : "Its lead isn't a profile you can use",
       };
     }),
-    ...[...profiles].sort(byName).map(
+    ...[...profiles].sort(byReach).map(
       (p): Startable => ({
         kind: "profile",
         id: p.id,

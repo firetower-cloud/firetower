@@ -197,6 +197,27 @@ describe("what the picker offers", () => {
     ]);
   });
 
+  it("keeps `orderProfiles`' sort among profiles while the old reach is live", () => {
+    // Teams took the top; they did not take this. A Manager started bare
+    // still hands work out during the window, which is the same fact that
+    // earns it a chip and its own sentence. Dies with #497.
+    const all = startables(
+      [],
+      [
+        role({ id: "1", name: "Zoe the QA" }),
+        role({ id: "2", name: "Engineer" }),
+        role({ id: "3", name: "Board lead", canDelegate: true }),
+        role({ id: "4", name: "Another lead", canDelegate: true }),
+      ],
+    );
+    expect(all.map((s) => s.name)).toEqual([
+      "Another lead",
+      "Board lead",
+      "Engineer",
+      "Zoe the QA",
+    ]);
+  });
+
   it("names a team's lead and its size", () => {
     const [product] = startables([team()], [role()]);
     expect(product.does).toBe("Led by Engineer");
