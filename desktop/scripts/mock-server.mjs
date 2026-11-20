@@ -699,6 +699,76 @@ const server = createServer(async (req, res) => {
     return json(res, teamDetail(made));
   }
 
+  /* ── Profiles, written ────────────────────────────────────────────────
+     The three writes the profile drawer makes. **Above the route table**,
+     which answers every method from a lookup keyed on the path alone — the
+     create above is there for the same reason.
+
+     `ROLES` is a `const` array of mutable objects, so a save assigns onto the
+     row the list already holds and every reader sees it. */
+  const role_of = /^\/api\/v1\/roles\/(r_[^/]+)$/.exec(path);
+  if (role_of && (req.method === "PUT" || req.method === "DELETE")) {
+    const at = ROLES.findIndex((r) => r.id === role_of[1]);
+    if (at < 0) return json(res, { code: "NotFound", message: "no such profile" }, 404);
+    if (req.method === "DELETE") {
+      /* **The cascade, which is what the drawer's confirmation promises.**
+         `agent_team_positions.profile_id` is `on delete cascade` and so is
+         `parent_id`, so a seat referencing a deleted profile goes and takes
+         its subtree with it. A mock that only dropped the row would make the
+         confirmation a sentence nothing honours. */
+      const gone = ROLES.splice(at, 1)[0];
+      AGENT_TEAMS = AGENT_TEAMS.map((t) => ({ ...t, root: prune(t.root, gone.id) })).filter(
+        (t) => t.root !== null,
+      );
+      return json(res, {});
+    }
+    const body = await sent(req);
+    ROLES[at] = { ...ROLES[at], ...body, id: ROLES[at].id, path: ROLES[at].path, updatedAt: minutesAgo(0) };
+    return json(res, ROLES[at]);
+  }
+  const default_of = /^\/api\/v1\/roles\/(r_[^/]+)\/default$/.exec(path);
+  if (req.method === "POST" && default_of) {
+    const body = await sent(req);
+    for (const r of ROLES) r.isDefault = body.on === true && r.id === default_of[1];
+    return json(res, {});
+  }
+
+  /* Where one profile sits: a seat per team, with what is above and below it.
+     The drawer's *In teams* tab and the confirmation before a delete both
+     read this, and both read the *same* answer, which is why it is one route
+     rather than a filter over every team's tree. */
+  const places_of = /^\/api\/v1\/roles\/(r_[^/]+)\/positions$/.exec(path);
+  if (places_of) {
+    const who = places_of[1];
+    const out = [];
+    for (const team of AGENT_TEAMS) {
+      const flat = flatPositions(team.root);
+      const nameOf = (id) => {
+        const hidden =
+          scene === "agent-teams-review" && team.id === "at_product" && id === HIDDEN_PROFILE;
+        return hidden ? null : (ROLES.find((r) => r.id === id)?.name ?? null);
+      };
+      for (const p of flat.filter((x) => x.profile === who)) {
+        const above = p.parent ? flat.find((x) => x.id === p.parent) : null;
+        out.push({
+          team: team.id,
+          teamName: team.name,
+          position: p.id,
+          leads: !p.parent,
+          reportsTo: above ? (nameOf(above.profile) ?? undefined) : undefined,
+          under: flat
+            .filter((x) => x.parent === p.id)
+            .map((x) => nameOf(x.profile))
+            .filter((n) => n !== null),
+          instructions: p.instructions,
+          takes: subtree(team.root, p.id),
+          mayWrite: true,
+        });
+      }
+    }
+    return json(res, out);
+  }
+
   if (req.method === "POST" && path === "/api/v1/updates/plan") return json(res, PLAN);
 
   /* Signing in, so the first-run flow can be walked end to end rather than
@@ -1731,6 +1801,26 @@ function teamDetail(team) {
     };
   });
   return { ...teamRow(team), positions };
+}
+
+/** How many positions a seat takes with it: itself, and everything under it. */
+function subtree(root, id) {
+  const find = (node) => (node.id === id ? node : (node.children.map(find).find(Boolean) ?? null));
+  const size = (node) => 1 + node.children.reduce((n, k) => n + size(k), 0);
+  const seat = find(root);
+  return seat ? size(seat) : 0;
+}
+
+/**
+ * A tree with every seat of one profile taken out, subtrees and all.
+ *
+ * `null` when the lead was the one that went — a team whose lead profile is
+ * deleted holds no positions at all, which the contract calls a real state
+ * rather than a broken one.
+ */
+function prune(node, profile) {
+  if (node.profile === profile) return null;
+  return { ...node, children: node.children.map((k) => prune(k, profile)).filter(Boolean) };
 }
 
 /** A nested write, back into the shape this file holds teams in. */

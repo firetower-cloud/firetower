@@ -28,7 +28,7 @@
  * `team-elsewhere.ts` reads the first two off responses this screen already
  * fetches, so none of them costs a request.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronLeft, Plus, SquarePen, Trash2, UserRoundPlus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -46,6 +46,7 @@ import { Button, Icon } from "~/components/ui";
 import { Note, Trouble, WhereTo } from "~/ui/config/bits";
 import {
   EngineMark,
+  LeaveSheet,
   NewProfileSheet,
   ProfilePicker,
   Sheet,
@@ -58,18 +59,28 @@ import {
   addChild,
   changes,
   chipRows,
+  couldReportTo,
   countUnder,
   depthOf,
   find,
   flatten,
   fromPositions,
   layout,
+  moveSeat,
+  parentKeyOf,
   removeSeat,
+  say,
   toNewPosition,
   type Card,
   type Change,
   type Seat,
 } from "~/ui/config/team-map";
+import {
+  ProfileDrawer,
+  WithRail,
+  getRolePositionsQueryKey,
+  type SeatHandle,
+} from "~/ui/config/ProfileDrawer";
 
 /**
  * What a card hands to whatever opens beside it.
@@ -134,6 +145,21 @@ export function TeamMap({
   /** Where somebody was going when the draft stopped them. */
   const [leaving, setLeaving] = useState<{ resume: () => void } | null>(null);
   const surface = useRef<HTMLDivElement>(null);
+  /**
+   * The seat the drawer is holding, by this window's own key.
+   *
+   * **The drawer is mounted here rather than above**, because a position's
+   * fields are the draft's: its instructions and who it reports to are edited
+   * in the drawer and committed by this screen's Save. A drawer above the map
+   * would need the tree lifted out of it, and the tree is what makes Save the
+   * only commit. `onOpenSeat` is still called, so a caller that wants to
+   * follow along — an address carrying the open card, later — still can.
+   */
+  const [drawer, setDrawer] = useState<string | null>(null);
+  /** The drawer asked to let go, when it may be holding an unsaved profile. */
+  const [drawerWant, setDrawerWant] = useState<{ to: string | null } | null>(null);
+  /** How much of the pane the drawer is taking, or 0 when it is not docked. */
+  const [beside, setBeside] = useState(0);
 
   /* ── What the cards read from ─────────────────────────────────────── */
 
@@ -207,12 +233,21 @@ export function TeamMap({
   const take = (key: string) => {
     setDraft((d) => (d ? removeSeat(d, key) : d));
     if (selected === key) setSelected(null);
+    if (drawer === key) setDrawer(null);
   };
+
+  /* The two edits the drawer makes to this draft. Both are drafts like
+     everything else: they join the pending count and Discard puts them back. */
+  const brief = (key: string, text: string) =>
+    setDraft((d) => (d ? say(d, key, text) : d));
+  const reparent = (key: string, parentKey: string) =>
+    setDraft((d) => (d ? moveSeat(d, key, parentKey) : d));
 
   const discard = () => {
     setDraft(original);
     setProblem(null);
     setSelected(null);
+    setDrawer(null);
   };
 
   const save = async (): Promise<boolean> => {
@@ -224,6 +259,11 @@ export function TeamMap({
       await Promise.all([
         cache.invalidateQueries({ queryKey: getGetAgentTeamQueryKey(id) }),
         cache.invalidateQueries({ queryKey: getListAgentTeamsQueryKey() }),
+        /* The drawer's *In teams* tab reads where each profile sits, and a
+           save has just changed that for every profile in this tree. */
+        ...flatten(draft).map((s) =>
+          cache.invalidateQueries({ queryKey: getRolePositionsQueryKey(s.profile) }),
+        ),
       ]);
       /* The refetch re-seeds both, because its ids are the ones a second save
          has to carry back. Until it lands, what is on screen is what was
@@ -269,21 +309,38 @@ export function TeamMap({
    */
   const open = (card: Card) => {
     setSelected(card.seat.key);
+    /* A drawer already holding a seat may be holding an unsaved profile with
+       it, so it is asked rather than swapped. */
+    if (drawer && drawer !== card.seat.key) setDrawerWant({ to: card.seat.key });
+    else setDrawer(card.seat.key);
     onOpenSeat?.({
       team: id,
       position: card.seat.id,
       key: card.seat.key,
       profile: card.seat.profile,
     });
+  };
+
+  /**
+   * Keep the open card on screen, **after** the drawer has taken its width.
+   *
+   * This was written in the press handler, where it could only read the
+   * canvas as it was *before* the drawer narrowed it: a card near the right
+   * edge was scrolled clear of nothing and then hidden. It belongs in a
+   * layout effect keyed on the card and on the width beside it, which is also
+   * what makes dragging the drawer wider keep the card visible.
+   */
+  useLayoutEffect(() => {
     const box = surface.current;
-    if (!box) return;
+    const card = laid.cards.find((c) => c.seat.key === selected);
+    if (!box || !card) return;
     const right = card.x + CARD_W + 24;
     if (right > box.scrollLeft + box.clientWidth) box.scrollLeft = right - box.clientWidth;
     if (card.x < box.scrollLeft) box.scrollLeft = Math.max(0, card.x - 24);
     const below = card.y + card.h + 24;
     if (below > box.scrollTop + box.clientHeight) box.scrollTop = below - box.clientHeight;
     if (card.y < box.scrollTop) box.scrollTop = Math.max(0, card.y - 24);
-  };
+  }, [selected, laid, beside]);
 
   /* ── Drawing ──────────────────────────────────────────────────────── */
 
@@ -313,7 +370,82 @@ export function TeamMap({
   const atMost = limits.data;
   const may = team.mayWrite;
 
+  /**
+   * What the drawer edits, derived from the draft.
+   *
+   * Derived rather than held, for the reason everything else on this screen
+   * is: the tree is the one piece of state, and a copy of a seat's
+   * instructions beside it would be a second answer to what this seat says.
+   */
+  const held = drawer ? find(draft, drawer) : null;
+  const handle: SeatHandle | null =
+    held && drawer
+      ? {
+          team: id,
+          teamName: team.name,
+          position: held.id,
+          key: drawer,
+          instructions: held.instructions,
+          leads: draft?.key === drawer,
+          under: parentKeyOf(draft, drawer),
+          underName: (() => {
+            const key = parentKeyOf(draft, drawer);
+            const above = key ? find(draft, key) : null;
+            return above ? (nameOf(above) ?? above.profile) : null;
+          })(),
+          /* Not itself and not anything below it — the model refuses both,
+             and offering a press that does nothing is worse than not
+             offering it. **Where it already reports is in the list and
+             pressed**, so the control reads as a picker with a current
+             answer rather than a row of equal choices.
+
+             Two seats of one profile are told apart the way the map tells
+             them apart: by what each one says. Without that the picker is
+             two buttons reading *Reviewer* and no way to choose between
+             them. */
+          elsewhere: distinguish(
+            couldReportTo(draft, drawer).map((s) => ({
+              key: s.key,
+              name: nameOf(s) ?? s.profile,
+              says: s.instructions.trim().replace(/\s+/g, " "),
+            })),
+          ),
+          mayWrite: may,
+          onInstructions: (text) => brief(drawer, text),
+          onReparent: (parentKey) => reparent(drawer, parentKey),
+        }
+      : null;
+
   return (
+    <WithRail
+      onDismiss={() => setDrawerWant({ to: null })}
+      rail={
+        held && handle
+          ? (band, width) => (
+              <Beside width={band === "dock" ? width : 0} onWidth={setBeside}>
+                <ProfileDrawer
+                  key={drawer}
+                  profile={held.profile}
+                  seat={handle}
+                  want={drawerWant ?? undefined}
+                  /* **The name the team read, not the one the library holds.**
+                     A seat whose profile this reader cannot see keeps its
+                     place and loses its name, and the drawer reads a profile
+                     *by id* — so without this it would fetch back exactly
+                     what the team declined to give. #492 fixed this once on
+                     the card; a tab with a profile object to hand is how it
+                     gets back in. */
+                  withheld={!nameOf(held)}
+                  onClose={(to) => {
+                    setDrawerWant(null);
+                    setDrawer(to ?? null);
+                  }}
+                />
+              </Beside>
+            )
+          : null
+      }
+    >
     <section data-wide className="pcol">
       <Back onClose={onClose} />
       <div className="pg-head mt-3">
@@ -383,7 +515,11 @@ export function TeamMap({
         {laid.repeats > 0 && (
           <span className="mm">{count(laid.repeats, "profile")} in more than one position</span>
         )}
-        <span className="ml-auto flex flex-none items-center gap-3">
+        {/* `min-w-0` rather than `flex-none`: the drawer docks beside this
+            pane and takes 370px with it, and a group that refuses to shrink
+            clipped the schedules notice at the drawer's edge instead of
+            wrapping its sentence. */}
+        <span className="ml-auto flex min-w-0 items-center gap-3">
           {/* **Whenever the map is open, not once something has been
               edited.** The whole point is that it is read before anybody
               decides to change anything — `schedules/Pinned.tsx` says so,
@@ -477,41 +613,25 @@ export function TeamMap({
         />
       )}
 
+      {/* **The question, in one place.** `LeaveSheet` is this sheet, moved
+          into `TeamSheet.tsx` so the profile drawer asks it in the same
+          words rather than in its own. */}
       {leaving && (
-        <Sheet
-          title={`Save your changes to ${team.name}?`}
-          onClose={() => setLeaving(null)}
-          foot={
-            <>
-              <span className="msg">{problem ?? ""}</span>
-              <Button variant="quiet" onClick={() => setLeaving(null)}>
-                Stay here
-              </Button>
-              <Button
-                variant="default"
-                onClick={() => {
-                  discard();
-                  andGo();
-                }}
-              >
-                Discard
-              </Button>
-              <Button
-                variant="primary"
-                disabled={saving}
-                onClick={() => void save().then((wrote) => wrote && andGo())}
-              >
-                {saving ? "Saving…" : "Save and go"}
-              </Button>
-            </>
-          }
-        >
-          <p className="max-w-[60ch] text-body leading-relaxed text-text">
-            {describeChanges(pending)} The map is showing them until you decide.
-          </p>
-        </Sheet>
+        <LeaveSheet
+          what={team.name}
+          says={`${describeChanges(pending)} The map is showing them until you decide.`}
+          saving={saving}
+          problem={problem}
+          onStay={() => setLeaving(null)}
+          onDiscard={() => {
+            discard();
+            andGo();
+          }}
+          onSave={() => void save().then((wrote) => wrote && andGo())}
+        />
       )}
     </section>
+    </WithRail>
   );
 }
 
@@ -530,10 +650,36 @@ export function describeChanges(pending: Change[]): string {
   if (added) parts.push(added === 1 ? "one position added" : `${added} positions added`);
   if (removed.length) parts.push(gone === 1 ? "one taken out" : `${gone} taken out`);
   if (moved) parts.push(moved === 1 ? "one moved" : `${moved} moved`);
+  const reworded = pending.filter((c) => c.kind === "said").length;
+  if (reworded) parts.push(reworded === 1 ? "one reworded" : `${reworded} reworded`);
   if (!parts.length) return "Nothing is saved yet.";
   const said =
     parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
   return `Not saved yet: ${said}.`;
+}
+
+/**
+ * The drawer, with the width it took reported back to the map.
+ *
+ * The rail is drawn from a render function, which cannot hold an effect, and
+ * the map needs the number: an open card has to be scrolled clear of whatever
+ * is beside it, and *whatever is beside it* is this. One component, one
+ * effect, and the layout effect above gets something to key on.
+ */
+function Beside({
+  width,
+  onWidth,
+  children,
+}: {
+  width: number;
+  onWidth: (w: number) => void;
+  children: React.ReactNode;
+}) {
+  useEffect(() => {
+    onWidth(width);
+    return () => onWidth(0);
+  }, [width, onWidth]);
+  return <>{children}</>;
 }
 
 /* ── The card ────────────────────────────────────────────────────────────── */
@@ -834,6 +980,32 @@ function leadLine(draft: Seat | null, nameOf: (seat: Seat) => string | null): st
   if (!draft) return "This team holds no positions.";
   const name = nameOf(draft);
   return name ? `Led by ${name}.` : "Led by a profile you cannot see.";
+}
+
+/**
+ * Seats of the same profile, told apart by what each of them says.
+ *
+ * A name is only a name here: the Product team has two Load tester seats and
+ * a picker offering *Load tester* twice is a picker nobody can answer. The
+ * map draws the seat's own instruction as its second line for exactly this
+ * reason, so the picker borrows the same fact — and a seat that carries
+ * nothing says so, because the two really are alike and pretending otherwise
+ * would be inventing a difference.
+ *
+ * Only where there is a clash: a name that appears once is left alone.
+ */
+export function distinguish(
+  seats: { key: string; name: string; says: string }[],
+): { key: string; name: string }[] {
+  const seen = new Map<string, number>();
+  for (const s of seats) seen.set(s.name, (seen.get(s.name) ?? 0) + 1);
+  return seats.map((s) => ({
+    key: s.key,
+    name:
+      (seen.get(s.name) ?? 0) > 1
+        ? `${s.name} — ${s.says || "nothing extra said"}`
+        : s.name,
+  }));
 }
 
 /** `1 position` / `4 positions`. */

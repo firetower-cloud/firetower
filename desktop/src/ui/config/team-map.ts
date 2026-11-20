@@ -117,6 +117,11 @@ function parentOf(root: Seat | null, key: string): Seat | null {
   return null;
 }
 
+/** Who this seat reports to, by key. `null` for the lead. */
+export function parentKeyOf(root: Seat | null, key: string): string | null {
+  return parentOf(root, key)?.key ?? null;
+}
+
 /* ── Editing a draft ─────────────────────────────────────────────────────── */
 
 /* Each returns a new tree. Nothing below mutates what it was given: the
@@ -159,12 +164,37 @@ export function removeSeat(root: Seat, key: string): Seat {
 }
 
 /**
+ * What this seat says, which applies here and nowhere else.
+ *
+ * **Part of the draft**, so it joins the pending count and Discard puts it
+ * back — the map holds one tree and Save is the only commit, and a field that
+ * wrote as it was typed would be a second commit on a screen whose whole
+ * design note is that there is one. The drawer's *Custom* tab calls this.
+ */
+export function say(root: Seat, key: string, instructions: string): Seat {
+  const put = (s: Seat): Seat =>
+    s.key === key
+      ? { ...s, instructions, children: s.children.map(copy) }
+      : { ...s, children: s.children.map(put) };
+  return put(root);
+}
+
+/** Every seat this one could be moved under: not itself, and not below it. */
+export function couldReportTo(root: Seat | null, key: string): Seat[] {
+  const seat = find(root, key);
+  if (!root || !seat || root.key === key) return [];
+  const below = new Set(flatten(seat).map((s) => s.key));
+  return flatten(root).filter((s) => !below.has(s.key));
+}
+
+/**
  * Re-parent a seat, with its subtree.
  *
- * Nothing on the map calls this yet — the prototype draws no control for it,
- * and inventing one is not this ticket's to do. It is here because the draft
- * is what #494's drawer edits: a *reports to* picker there is this function,
- * and the pending diff below already counts what it does.
+ * **The map draws no control for this and the drawer does.** The prototype
+ * draws none either, so #492 would have had to invent one; the drawer is
+ * where a position is edited, and *reports to* is a field of a position. The
+ * draft is the map's, so a move joins the pending count and Discard puts it
+ * back.
  */
 export function moveSeat(root: Seat, key: string, parentKey: string): Seat {
   const seat = find(root, key);
@@ -185,10 +215,17 @@ export function moveSeat(root: Seat, key: string, parentKey: string): Seat {
 export type Change =
   | { kind: "add"; key: string; profile: string }
   | { kind: "remove"; id: string; profile: string; under: number }
-  | { kind: "move"; id: string; profile: string };
+  | { kind: "move"; id: string; profile: string }
+  | { kind: "said"; id: string; profile: string };
 
 /**
  * What the draft would do, derived rather than logged.
+ *
+ * Four kinds: a seat added, a seat taken out, a seat moved, and a seat whose
+ * own instructions were changed. The last three only ever apply to a seat the
+ * server already knows about; a seat that does not exist yet carries its
+ * instructions and its place with it, and counting those separately would say
+ * somebody pressed three things to add one card.
  *
  * **One entry per gesture, not per card.** Taking out a position with three
  * under it is one change and not four — the three went because the one did,
@@ -214,6 +251,17 @@ export function changes(original: Seat | null, draft: Seat | null): Change[] {
     const was = parentOf(original, s.key);
     const now = parentOf(draft, s.key);
     if (s.id && was?.key !== now?.key) out.push({ kind: "move", id: s.id, profile: s.profile });
+    /* **What a seat says is part of the draft too**, and it was not in this
+       diff: the drawer's *Custom* tab wrote straight into the tree, the map
+       redrew with the new line on the card, and the pending count stayed at
+       nothing — so Save was never offered and the words went when the screen
+       did. A tree-shape diff is not the whole of a tree. One entry per seat,
+       however many characters were typed into it. */
+    /* Not an `else`: moving a card and rewording it are two gestures on one
+       card, and the count beside Save says how many decisions are waiting. */
+    if (s.id && before.get(s.key)?.instructions !== s.instructions) {
+      out.push({ kind: "said", id: s.id, profile: s.profile });
+    }
   }
 
   for (const s of flatten(original)) {

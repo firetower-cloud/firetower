@@ -57,26 +57,34 @@ function currentPath(): string {
 /**
  * A screen that would lose work if the address changed, and what to ask.
  *
- * **One at a time, and only while it would lose something.** A guard that
- * outlives its screen breaks navigation everywhere, so `useLeaveGuard` clears
- * it on unmount, and the screen itself decides per call whether there is
- * anything to ask about.
+ * **Only while it would lose something**, and the screen decides that per
+ * call. A guard that outlives its screen breaks navigation everywhere, so
+ * `useLeaveGuard` drops it on unmount.
+ *
+ * **More than one can be registered**, because more than one can be on
+ * screen: a team's map holds a draft of the tree, and the profile drawer
+ * docked beside it holds a draft of a profile. They are two commit
+ * boundaries and two questions, so each asks its own and the second is asked
+ * once the first has been answered. It was a single slot, and a second
+ * screen registering one silently took the first's place — the shape that
+ * drops exactly the work this exists to protect.
  *
  * Consulted by `navigate` and not by `hashchange`: a rail row, a palette
  * command and a back link all go through `navigate`, and the ones that do
  * not — a deep link from outside the window, a reload — are not somebody
  * choosing to leave a form.
  */
-let askBeforeLeaving: ((resume: () => void) => boolean) | null = null;
+type Guard = (resume: () => void) => boolean;
+const guards = new Set<Guard>();
 
 function go(to: string, replace = false) {
-  /* `true` means the guard has taken it: it has put a question on screen and
-     will call `resume` if the answer is to go, and `resume` does not ask
-     again. */
-  if (askBeforeLeaving) {
-    const ask = askBeforeLeaving;
-    const taken = ask(() => {
-      askBeforeLeaving = null;
+  /* `true` means a guard has taken it: it has put a question on screen and
+     will call `resume` if the answer is to go. `resume` drops that guard and
+     tries again, so a second one still gets its turn and the one already
+     answered does not ask twice. */
+  for (const guard of [...guards]) {
+    const taken = guard(() => {
+      guards.delete(guard);
       go(to, replace);
     });
     if (taken) return;
@@ -103,20 +111,19 @@ export function useLeaveGuard(ask: (resume: () => void) => boolean) {
   const latest = useRef(ask);
   latest.current = ask;
   useEffect(() => {
-    askBeforeLeaving = (resume) => latest.current(resume);
+    const guard: Guard = (resume) => latest.current(resume);
+    guards.add(guard);
     return () => {
-      askBeforeLeaving = null;
+      guards.delete(guard);
     };
   }, []);
 }
 
 /** For tests: what is registered, and clearing it. */
 export const leaveGuard = {
-  ask: (resume: () => void) => (askBeforeLeaving ? askBeforeLeaving(resume) : false),
-  armed: () => askBeforeLeaving !== null,
-  clear: () => {
-    askBeforeLeaving = null;
-  },
+  ask: (resume: () => void) => [...guards].some((g) => g(resume)),
+  armed: () => guards.size > 0,
+  clear: () => guards.clear(),
 };
 
 export function usePathname(): string {

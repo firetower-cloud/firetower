@@ -19,7 +19,7 @@
  * cold open is, is `answered: false`.
  */
 import { describe, expect, it } from "vitest";
-import { pinnedAccountFits } from "./Roles";
+import { pinnedAccountFits } from "./profile-draft";
 import type { Account } from "~/api/accounts";
 
 const account = (over: Partial<Account> = {}): Account =>
