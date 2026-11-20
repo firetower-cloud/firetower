@@ -2986,6 +2986,14 @@ impl Db {
     /// `paused_reason` only where there was an approval to lose: a draft
     /// nobody had turned on has not been stopped by this, and saying it was
     /// would put it in *Waiting for you* with nothing to decide.
+    ///
+    /// **The revision moves even for that draft**, because `revision` means
+    /// *which approved text* and the text did change. `schedule_runs.revision`
+    /// is how "why did it do that" is answered after the fact, so two runs
+    /// carrying one revision must not be able to have run two different
+    /// trees. The cost is that a page opened before this sends a revision
+    /// that no longer matches and is told to read it again — which is the
+    /// right answer, and the same one an edit in another tab already gives.
     pub async fn unapprove_for_team(
         &self,
         id: &ScheduleId,
