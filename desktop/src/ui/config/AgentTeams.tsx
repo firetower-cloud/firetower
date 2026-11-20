@@ -133,7 +133,7 @@ export function AgentTeams({ open }: { open: string | null }) {
     <>
       <Section
         title="Agent teams"
-        note="A team is a lead and the profiles under it. Only a team says who may hand work to whom."
+        note="A team is a lead and the profiles under it. Its tree is what decides who may hand work to whom."
         action={blank ? undefined : newTeam}
         controls={
           teams.length > 0 ? (
@@ -173,13 +173,10 @@ export function AgentTeams({ open }: { open: string | null }) {
               </Note>
             ) : (
               <Blank icon={Network} title="No agent teams yet" action={newTeam}>
-                A profile on its own cannot hand work to anybody. Make a team to give one
-                reports.
+                A team gives a profile reports. Make one to say who hands work to whom.
               </Blank>
             )
           }
-          note="A profile on its own cannot hand work to anybody. A team is what gives one reports."
-          action={newTeam}
         >
           <Rowset>
             {shown.map((team) => (
@@ -248,8 +245,8 @@ export function AgentTeams({ open }: { open: string | null }) {
             )}
           </Field>
           <p className="mt-3 mb-1 max-w-[60ch] text-meta leading-relaxed text-dim">
-            Any profile can lead a team, and there is no setting to turn on first. A position
-            either has profiles under it or it does not, and this one starts with none.
+            Any profile can lead a team, and there is no setting to turn on first. This one
+            starts with nothing under it. Add the rest on the map.
           </p>
         </Sheet>
       )}
@@ -290,7 +287,7 @@ function TeamRow({ team, onOpen }: { team: AgentTeam; onOpen: () => void }) {
 /** Who leads it, and who else is in it. */
 function who(team: AgentTeam): string {
   const lead = team.leadName ?? (team.lead ? "a profile you cannot see" : null);
-  if (!lead) return "No lead yet. Its lead’s profile was deleted.";
+  if (!lead) return "No lead. The profile that led it was deleted.";
   const members = team.members ?? [];
   if (members.length === 0) return `Led by ${lead}, with nobody under it yet.`;
   const first = members.slice(0, 3);

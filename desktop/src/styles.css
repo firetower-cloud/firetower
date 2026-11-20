@@ -6569,7 +6569,6 @@ html:not([data-platform="macos"]) {
   /* The pending group: the count, then the two ways out of it. Sage,
      because what it marks is work in hand rather than anything wrong. */
   .mapbar .pend {
-    margin-left: auto;
     display: flex;
     align-items: center;
     gap: 6px;

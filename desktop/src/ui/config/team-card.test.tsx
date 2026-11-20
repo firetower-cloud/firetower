@@ -166,7 +166,7 @@ describe("a seat nobody placed", () => {
     const arrived = draw(tree, (c) => c.findIndex((x) => x.depth === 1), { seat: auto });
     expect(placed).toContain('data-auto="false"');
     expect(arrived).toContain('data-auto="true"');
-    expect(arrived).toContain("Added automatically by a hand-off");
+    expect(arrived).toContain("Added automatically, when work was handed to it");
     expect(arrived).not.toEqual(placed);
   });
 });

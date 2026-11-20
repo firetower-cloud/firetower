@@ -15,7 +15,8 @@
  * Three facts belong to other tickets and have nowhere else to appear:
  *
  * - **A save pauses the schedules that pin this team** (#493). Said beside
- *   Save, before the commit.
+ *   Save, before the commit, in #493's own words — `schedules/Pinned.tsx` is
+ *   theirs and is mounted here unchanged, because one fact wants one wording.
  * - **A seat can arrive without anybody placing it** (#491), during the
  *   compatibility window. The mitigation for a team that grows on its own is
  *   that those seats are visible, so they are marked and there is a way to
@@ -49,7 +50,7 @@ import {
   Sheet,
   blankProfile,
 } from "~/ui/config/TeamSheet";
-import { SchedulesPaused } from "~/ui/config/SchedulesPaused";
+import { SchedulesPinned } from "~/ui/schedules/Pinned";
 import { arrivedOnItsOwn, schedulesPinning } from "~/ui/config/team-elsewhere";
 import {
   CARD_W,
@@ -292,8 +293,8 @@ export function TeamMap({
 
       {!may && (
         <WhereTo>
-          You can read this team and not change it. Whoever it is filed under decides;{" "}
-          <span className="font-mono">{team.path}</span> is where it lives.
+          You can read this team, not change it. It is filed at{" "}
+          <span className="font-mono">{team.path}</span>, and whoever holds that decides.
         </WhereTo>
       )}
 
@@ -311,9 +312,9 @@ export function TeamMap({
             }
           >
             {automatic.length === 1
-              ? "One position was added automatically, by a hand-off to a profile with no seat here. "
-              : `${automatic.length} positions were added automatically, by hand-offs to profiles with no seat here. `}
-            Keep each one, or take it out.
+              ? "One position was added automatically, when this team handed work to a profile with no seat here. "
+              : `${automatic.length} positions were added automatically, when this team handed work to profiles with no seat here. `}
+            Check each one, then keep it or take it out.
             {reviewing >= 0 && ` Showing ${reviewing + 1} of ${automatic.length}.`}
           </Note>
         </div>
@@ -347,21 +348,27 @@ export function TeamMap({
         {laid.repeats > 0 && (
           <span className="mm">{count(laid.repeats, "profile")} in more than one position</span>
         )}
-        {pending.length > 0 && (
-          <span className="pend" role="status">
-            <span className="n">
-              <Icon of={SquarePen} size={12} />
-              {pending.length} unsaved
+        <span className="ml-auto flex flex-none items-center gap-3">
+          {/* **Whenever the map is open, not once something has been
+              edited.** The whole point is that it is read before anybody
+              decides to change anything — `schedules/Pinned.tsx` says so,
+              and owns the sentence. */}
+          <SchedulesPinned count={paused} />
+          {pending.length > 0 && (
+            <span className="pend" role="status">
+              <span className="n">
+                <Icon of={SquarePen} size={12} />
+                {pending.length} unsaved
+              </span>
+              <Button variant="quiet" size="sm" onClick={discard} disabled={saving}>
+                Discard
+              </Button>
+              <Button variant="primary" size="sm" onClick={() => void save()} disabled={saving}>
+                {saving ? "Saving…" : "Save team"}
+              </Button>
             </span>
-            <SchedulesPaused count={paused} />
-            <Button variant="quiet" size="sm" onClick={discard} disabled={saving}>
-              Discard
-            </Button>
-            <Button variant="primary" size="sm" onClick={() => void save()} disabled={saving}>
-              {saving ? "Saving…" : "Save team"}
-            </Button>
-          </span>
-        )}
+          )}
+        </span>
       </div>
 
       {problem && (
@@ -371,8 +378,8 @@ export function TeamMap({
       <div ref={surface} className="mapsurface">
         {seats.length === 0 ? (
           <p className="px-6 py-10 text-ui text-dim">
-            This team holds no positions. Its lead’s profile was deleted, and naming a lead is
-            what repairs it.
+            This team has no positions. The profile that led it was deleted, which took the
+            tree with it.
           </p>
         ) : (
           <div
@@ -604,10 +611,14 @@ function describe(
   withheld: boolean,
   auto: boolean,
 ): string {
-  const lines = [withheld ? `${name}. You cannot see this profile.` : `${name}. ${role?.does ?? ""}`];
+  const lines = [
+    withheld
+      ? `${name}. You cannot see this profile. Its seat is in the team; its name and description are filed somewhere you cannot reach.`
+      : `${name}. ${role?.does ?? ""}`,
+  ];
   if (brief) lines.push(`In this team: ${brief}`);
   if (skills.length) lines.push(`Skills: ${skills.join(", ")}`);
-  if (auto) lines.push("Added automatically by a hand-off. Keep it, or take it out.");
+  if (auto) lines.push("Added automatically, when work was handed to it. Keep it, or take it out.");
   return lines.join("\n\n").trim();
 }
 
@@ -646,7 +657,7 @@ function AddUnder({
     : positions >= limits.maxPositions
       ? `This team holds ${limits.maxPositions} positions, which is the most one can hold. Take one out to add another.`
       : here >= limits.maxDepth
-        ? `A team goes ${limits.maxDepth} levels deep, counting the lead, and ${parentName} is on the last one. A hand-off goes down one level each time, so this is also how long a chain of agents can get.`
+        ? `A team goes ${limits.maxDepth} levels deep, counting the lead, and ${parentName} is on the last one. Put this profile under something higher up.`
         : null;
 
   /* One profile at most once among one position's children: a lead hands
