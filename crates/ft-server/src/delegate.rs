@@ -500,6 +500,17 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         return Ok(started(&existing, shares));
     }
 
+    /* **The compatibility window**, for a seeded team that is still
+    learning. Open only at the lead seat of a team nobody drew, for a
+    session a person started, whose profile could delegate — and it admits
+    from exactly what the old path would have resolved against, so it
+    grants no reach that was not already granted. Closed, and this is
+    `None` and everything below is what it was.
+    `crate::agent_teams::window` is the whole argument. */
+    let window =
+        crate::agent_teams::window::open_for(state, &lead, manager.as_ref(), standing.as_ref())
+            .await?;
+
     /* What this session may hand work to, and nothing else.
     **Intersected with what its owner can actually see on both paths** —
     that intersection is load-bearing security rather than tidiness, and is
@@ -517,7 +528,14 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
                 .agent_teams
                 .reports(lead.owner.as_str(), &standing.position)
                 .await?;
-            if reports.is_empty() {
+            /* **A seeded team with nothing under its lead is the empty
+            case, and it is the one that most needs the window.** A profile
+            that never spawned anything got a team with a name and nobody
+            in it; refusing here would take away a reach it had the day
+            before, which is the break this is here to avoid. So while the
+            window is open the refusal is held back and the name resolves
+            against the old path instead. */
+            if reports.is_empty() && window.is_none() {
                 bail!(
                     "nothing reports to your position in the \"{}\" team, so this work is yours \
                      to do rather than hand on. Add a position under it on Configuration → \
@@ -613,85 +631,118 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         })? {
             Some(found) => Some(found.clone()),
             None => {
-                /* **An agent naming anything above it gets its own
-                sentence.** Falling through to "no subagent called that"
-                would tell an agent a profile does not exist when it
-                plainly does — it is one of the ones it reports up
-                through — and the agent would waste its turn working out
-                which of them was wrong. Work goes down the tree; handing
-                back is how it goes up, and that is the thing to say.
+                /* **A name the seat does not hold, while the window is
+                open: add it and carry on.** This is what makes the
+                deprecation silent — a profile reaching something its
+                seeded team never recorded gets the seat now, out of real
+                use, rather than a refusal about a team it never asked
+                for. The seat is marked and counted, which is what keeps
+                this from being the old behaviour with extra steps.
 
-                **The whole chain, not only the parent.** The immediate
-                lead was the first case anybody hit, and a grandparent has
-                exactly the same problem: with six levels permitted, a
-                chain long enough to reach one is ordinary. So the sentence
-                says *where* the named profile sits, and the agent learns
-                the shape rather than doubting the name. */
-                if let Some(standing) = &standing {
-                    let chain = state
-                        .agent_teams
-                        .above(lead.owner.as_str(), &standing.position)
-                        .await?;
-                    if let Some(found) = chain
-                        .iter()
-                        .find(|a| a.name.eq_ignore_ascii_case(wanted.trim()))
-                    {
-                        let mine: Vec<&str> =
-                            reach.iter().map(|r| r.profile.name.as_str()).collect();
-                        // The nearest one is the only one a hand-back
-                        // reaches directly, so it is what the sentence
-                        // points at whichever ancestor was named.
-                        bail!(
-                            "\"{}\" is {} in the \"{}\" team, so it is not yours to start. Work \
-                             goes down the tree, not back up: finish your turn and what you say \
-                             is delivered to {}. The profiles you can start are the ones \
-                             reporting to you: {}.",
-                            found.name,
-                            where_it_sits(found.steps),
-                            standing.team_name,
-                            match found.steps {
-                                1 => "it".to_string(),
-                                _ => "your own lead, which is what carries it further".to_string(),
-                            },
-                            mine.join(", ")
-                        );
+                Tried before the chain above is read, and the two cannot
+                collide: the window is only ever open at a team's **lead**
+                seat, which has nothing above it. */
+                let admitted = match (&standing, &window) {
+                    (Some(standing), Some(window)) => {
+                        crate::agent_teams::window::admit(
+                            state,
+                            lead.owner.as_str(),
+                            standing,
+                            window,
+                            wanted.trim(),
+                        )
+                        .await?
                     }
-                }
-                /* One entry per name, with a collision marked rather than
-                printed twice. `Engineer, Engineer` is the truth and reads
-                as a bug, which costs the reader more than it tells them;
-                de-duplicating in silence would hide a thing a lead can
-                act on. Marked says both, and the refusal above carries
-                the consequence if they name it anyway. Grouped the way
-                the resolution matches, so what is listed once is what
-                resolves once. */
-                let mut counted: Vec<(String, usize)> = Vec::new();
-                for r in &reach {
-                    match counted
-                        .iter_mut()
-                        .find(|(n, _)| n.eq_ignore_ascii_case(&r.profile.name))
-                    {
-                        Some((_, seen)) => *seen += 1,
-                        None => counted.push((r.profile.name.clone(), 1)),
-                    }
-                }
-                let names: Vec<String> = counted
-                    .into_iter()
-                    .map(|(name, seen)| match seen {
-                        1 => name,
-                        seen => format!("{name} ({seen} profiles share this name)"),
+                    _ => None,
+                };
+                if let Some(report) = admitted {
+                    Some(Reachable {
+                        position: Some(report.position),
+                        instructions: report.instructions,
+                        profile: report.profile,
                     })
-                    .collect();
-                bail!(
-                    "no subagent called \"{wanted}\". {}",
-                    if names.is_empty() {
-                        "No subagents are on this profile's team — widen its scope, or make one \
+                } else {
+                    /* **An agent naming anything above it gets its own
+                    sentence.** Falling through to "no subagent called that"
+                    would tell an agent a profile does not exist when it
+                    plainly does — it is one of the ones it reports up
+                    through — and the agent would waste its turn working out
+                    which of them was wrong. Work goes down the tree; handing
+                    back is how it goes up, and that is the thing to say.
+
+                    **The whole chain, not only the parent.** The immediate
+                    lead was the first case anybody hit, and a grandparent has
+                    exactly the same problem: with six levels permitted, a
+                    chain long enough to reach one is ordinary. So the sentence
+                    says *where* the named profile sits, and the agent learns
+                    the shape rather than doubting the name. */
+                    if let Some(standing) = &standing {
+                        let chain = state
+                            .agent_teams
+                            .above(lead.owner.as_str(), &standing.position)
+                            .await?;
+                        if let Some(found) = chain
+                            .iter()
+                            .find(|a| a.name.eq_ignore_ascii_case(wanted.trim()))
+                        {
+                            let mine: Vec<&str> =
+                                reach.iter().map(|r| r.profile.name.as_str()).collect();
+                            // The nearest one is the only one a hand-back
+                            // reaches directly, so it is what the sentence
+                            // points at whichever ancestor was named.
+                            bail!(
+                                "\"{}\" is {} in the \"{}\" team, so it is not yours to start. \
+                                 Work goes down the tree, not back up: finish your turn and what \
+                                 you say is delivered to {}. The profiles you can start are the \
+                                 ones reporting to you: {}.",
+                                found.name,
+                                where_it_sits(found.steps),
+                                standing.team_name,
+                                match found.steps {
+                                    1 => "it".to_string(),
+                                    _ => "your own lead, which is what carries it further"
+                                        .to_string(),
+                                },
+                                mine.join(", ")
+                            );
+                        }
+                    }
+                    /* One entry per name, with a collision marked rather than
+                    printed twice. `Engineer, Engineer` is the truth and reads
+                    as a bug, which costs the reader more than it tells them;
+                    de-duplicating in silence would hide a thing a lead can
+                    act on. Marked says both, and the refusal above carries
+                    the consequence if they name it anyway. Grouped the way
+                    the resolution matches, so what is listed once is what
+                    resolves once. */
+                    let mut counted: Vec<(String, usize)> = Vec::new();
+                    for r in &reach {
+                        match counted
+                            .iter_mut()
+                            .find(|(n, _)| n.eq_ignore_ascii_case(&r.profile.name))
+                        {
+                            Some((_, seen)) => *seen += 1,
+                            None => counted.push((r.profile.name.clone(), 1)),
+                        }
+                    }
+                    let names: Vec<String> = counted
+                        .into_iter()
+                        .map(|(name, seen)| match seen {
+                            1 => name,
+                            seen => format!("{name} ({seen} profiles share this name)"),
+                        })
+                        .collect();
+                    bail!(
+                        "no subagent called \"{wanted}\". {}",
+                        if names.is_empty() {
+                            "No subagents are on this profile's team — widen its scope, or make one \
                          under Configuration → Profiles."
                             .to_string()
-                    } else {
-                        format!("Subagents you can use: {}.", names.join(", "))
-                    }
-                );
+                        } else {
+                            format!("Subagents you can use: {}.", names.join(", "))
+                        }
+                    );
+                }
             }
         },
         None => None,
@@ -1702,7 +1753,7 @@ fn names(input: &Value, key: &str) -> Option<Vec<String>> {
 /// a profile that silently does less than was asked for. On `skill_scope`
 /// that is a skill not loaded, invisible until something behaves oddly much
 /// later.
-fn at_most_one<'a, T>(
+pub(crate) fn at_most_one<'a, T>(
     kind: &str,
     name: &str,
     among: &'a [T],

@@ -261,6 +261,13 @@ pub async fn run(config: Config) -> Result<()> {
     // rather than awaited because a control plane that will not start over a
     // missing skill has traded a product for a paragraph.
     tokio::spawn(seed_builtin_skills(state.clone()));
+    /* **Teams, from what profiles have actually spawned** (#491). Once per
+    installation, recorded so a restart does not re-assert it, and spawned
+    rather than awaited for the reason the skills above are: every session
+    that exists holds no position, so nothing already running is waiting on
+    this, and a control plane that would not start over a backfill has traded
+    a product for a paragraph. */
+    tokio::spawn(agent_teams::seed::run(state.clone()));
     // Whether a release is out, every few hours; and whatever upgrade was in
     // progress when this process was last replaced — which, for the run that
     // recreates the control plane, is the ordinary way it ends.

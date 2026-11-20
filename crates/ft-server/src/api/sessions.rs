@@ -1583,7 +1583,7 @@ pub(super) async fn persona_for(
 
     // Who this session may hand work to, resolved from its position when it
     // has one and from the profile's own list when it does not.
-    let reach = match standing {
+    let mut reach = match standing {
         Some(standing) => state
             .agent_teams
             .reports(owner, &standing.position)
@@ -1608,6 +1608,32 @@ pub(super) async fn persona_for(
         }
         None => Vec::new(),
     };
+
+    /* **While the compatibility window is open, the prompt says what the
+    window will actually allow.** A seeded team's lead can hand work to
+    anything its profile's old reach held — a spawn of one of those
+    succeeds and adds the seat (`agent_teams::window`) — so a prompt
+    listing only the seats would understate it, and for a profile that
+    never spawned it would say "nobody" to a session that can still
+    delegate to everything it could yesterday. Which is the break this
+    whole seeding exists to avoid, restated one layer up.
+
+    The seats come first and in their own order; what the window adds is
+    whatever the old reach held and the team does not, alphabetically,
+    because that is the order `roles::visible` reads them in. */
+    let learning =
+        match crate::agent_teams::window::open_at(state, owner, Some(profile), standing).await? {
+            Some(window) => {
+                let before = reach.len();
+                for candidate in window.reach {
+                    if !reach.iter().any(|r| r.id == candidate.id) {
+                        reach.push(candidate);
+                    }
+                }
+                reach.len() > before
+            }
+            None => false,
+        };
 
     /* **A position with nothing under it is told so, and told why.** The
     alternative is an agent that reads nothing about delegating, tries
@@ -1654,9 +1680,18 @@ pub(super) async fn persona_for(
     // A profile off this list is never named here, so the agent cannot ask
     // for it — the reach is enforced by what the prompt does and does not
     // contain, as well as by the refusal at spawn.
-    text.push_str(match standing {
-        Some(_) => "\n\nThe profiles reporting to your position — pass the name as `role`:\n",
-        None => "\n\nThe profiles you can hand work to — pass the name as `role`:\n",
+    /* The heading has to be *true*. "The profiles reporting to your
+    position" is right for a team as drawn, and wrong for a list the window
+    has widened — so a session the window is holding open gets the sentence
+    it had before any of this existed, which is also the honest description
+    of what it can reach. No mention of a migration: an agent cannot act on
+    one, and a prompt that explained the window would be teaching every
+    agent about a mechanism that is going away. */
+    text.push_str(match (standing, learning) {
+        (Some(_), false) => {
+            "\n\nThe profiles reporting to your position — pass the name as `role`:\n"
+        }
+        _ => "\n\nThe profiles you can hand work to — pass the name as `role`:\n",
     });
     for r in &reach {
         text.push_str(&format!(

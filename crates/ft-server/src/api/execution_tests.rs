@@ -10815,3 +10815,833 @@ async fn starting_work_as_a_team_stands_the_session_in_its_leads_seat() {
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+// ── The compatibility window (#491) ─────────────────────────────────────
+//
+// Teams are seeded from what profiles actually spawned, which is a reading of
+// history and therefore a guess. For a bounded period a spawn of a profile a
+// seeded team does not hold succeeds and adds it, so teams converge on real
+// use — and every seat that arrives that way is marked, because a learning
+// phase nobody can audit is the old unbounded reach with extra steps.
+//
+// `crate::agent_teams::window` is the argument; these are the behaviour.
+
+/// A profile that could hand work off, with an optional reach of its own.
+///
+/// `canDelegate` and `delegateScope` are the old arrangement, and the window
+/// admits from exactly what they say — so a test about the window is a test
+/// about these two columns, read through a team.
+async fn a_manager(state: &AppState, owner: &str, name: &str, scope: Vec<String>) -> String {
+    saved_profile(
+        state,
+        owner,
+        serde_json::json!({
+            "name": name,
+            "does": format!("{name}, and when to reach for it"),
+            "placement": "here",
+            "canDelegate": true,
+            "delegateScope": scope,
+        }),
+    )
+    .await
+}
+
+/// A team as the seeding leaves one, with the installation's cut at `days_ago`.
+///
+/// Two rows, because the window needs both: `agent_teams.seeded_at` says this
+/// team is one nobody drew, and `agent_team_seeding.seeded_at` is the clock the
+/// window runs from. Backdating the cut past [`WINDOW_DAYS`] is how a test gets
+/// to the other side of it without waiting a month.
+async fn as_if_seeded(state: &AppState, team: &str, days_ago: i64) {
+    let cut = chrono::Utc::now() - chrono::Duration::days(days_ago);
+    let org = state.db.org().await.unwrap();
+    sqlx::query("UPDATE agent_teams SET seeded_at = $2 WHERE id = $1")
+        .bind(team)
+        .bind(cut)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO agent_team_seeding (org_id, seeded_at, teams, positions) \
+         VALUES ($1, $2, 1, 2) \
+         ON CONFLICT (org_id) DO UPDATE SET seeded_at = $2",
+    )
+    .bind(&org)
+    .bind(cut)
+    .execute(state.db.pool())
+    .await
+    .unwrap();
+}
+
+/// What a team holds and how much of it nobody chose.
+async fn team_now(state: &AppState, owner: &str, team: &str) -> crate::agent_teams::AgentTeam {
+    state
+        .agent_teams
+        .one(owner, team, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .expect("the team")
+}
+
+/// **The window's whole purpose: a spawn the seeded team never recorded
+/// succeeds, and the seat it adds is marked.**
+///
+/// A profile that handed work to a Reviewer once a quarter has no Reviewer in
+/// its seeded team. Refusing that spawn would be a break caused by a migration
+/// nobody asked for. So it succeeds — and the team says one seat arrived
+/// without anybody choosing it, which is what makes this a migration aid
+/// rather than a reprieve.
+#[tokio::test]
+async fn a_spawn_a_seeded_team_never_recorded_succeeds_during_the_window() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![]).await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let reviewer = a_profile(&state, &owner, "Reviewer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "lead": { "profile": orchestrator, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+    as_if_seeded(&state, &team, 0).await;
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "w1",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect("the window admits what this profile could already reach");
+
+    let child = child_of(&state, &lead, "w1").await;
+    assert_eq!(child.profile_id.as_deref(), Some(reviewer.as_str()));
+    // **And it stands in the seat the window just made**, so it is in the team
+    // rather than beside it, and the next save sees it.
+    let seat = child
+        .position_id
+        .clone()
+        .expect("the child holds the new seat");
+    let standing = state
+        .agent_teams
+        .standing(&owner, &seat)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(standing.profile, reviewer);
+    assert_eq!(standing.team, team);
+
+    let now = team_now(&state, &owner, &team).await;
+    assert_eq!(
+        now.positions, 3,
+        "the lead, the seat it had, and the new one"
+    );
+    assert_eq!(
+        now.auto_added, 1,
+        "and a list row can say one seat is waiting to be reviewed"
+    );
+    assert!(now.seeded, "on a team that still says it was materialised");
+    let seats = state.agent_teams.positions(&owner, &team).await.unwrap();
+    let marked = seats.iter().find(|p| p.id == seat).unwrap();
+    assert!(
+        marked.auto_added_at.is_some(),
+        "the seat says when it arrived"
+    );
+    assert!(
+        seats
+            .iter()
+            .find(|p| p.profile == engineer)
+            .unwrap()
+            .auto_added_at
+            .is_none(),
+        "and the one that came across at the cut does not claim the window put it there"
+    );
+
+    // The same name again resolves against the seat, rather than adding a
+    // second one — a lead hands work off by name, so two seats of one profile
+    // under one position would be a name that does not say which is meant.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "w2",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it again" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let again = team_now(&state, &owner, &team).await;
+    assert_eq!(again.positions, 3, "one seat, however often it is named");
+    assert_eq!(again.auto_added, 1);
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **After the window the same spawn is refused**, with the sentence it will
+/// be refused with forever.
+///
+/// The refusal is #490's, unchanged and deliberately so: out of reach reads as
+/// *does not exist* and lists what does report here, which is the rule the old
+/// path already followed. It does not mention the window — an agent cannot act
+/// on a date, and naming a mechanism that has closed would send it looking for
+/// a way back in.
+#[tokio::test]
+async fn after_the_window_the_same_spawn_is_refused_with_a_sentence() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![]).await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let _reviewer = a_profile(&state, &owner, "Reviewer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "lead": { "profile": orchestrator, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+    as_if_seeded(&state, &team, crate::agent_teams::window::WINDOW_DAYS + 1).await;
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "c1",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect_err("the window has closed");
+    let said = format!("{refused:#}");
+    assert!(said.contains("no subagent called"), "{said}");
+    assert!(
+        said.contains("Engineer"),
+        "and it lists the one that does report here: {said}"
+    );
+
+    let now = team_now(&state, &owner, &team).await;
+    assert_eq!(now.positions, 2, "and nothing was added");
+    assert_eq!(now.auto_added, 0);
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **The window never grants reach the old path did not already grant.**
+///
+/// This is the security of the whole arrangement. What it admits from is that
+/// session's own old answer — `delegate_scope` intersected with what its owner
+/// can see — so a profile somebody had already narrowed stays narrowed, and a
+/// profile that was never a Manager acquires nothing by leading a seeded team.
+#[tokio::test]
+async fn the_window_never_widens_what_a_profile_could_already_reach() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let _off_scope = a_profile(&state, &owner, "Reviewer").await;
+    // Narrowed by hand, before any of this existed: the Engineer and nobody
+    // else.
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![engineer.clone()]).await;
+    let narrow = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "lead": { "profile": orchestrator, "children": [] },
+        }),
+    )
+    .await;
+    as_if_seeded(&state, &narrow, 0).await;
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &narrow).await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "n1",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect_err("outside the scope this profile already had");
+    assert!(format!("{refused:#}").contains("no subagent called"));
+    assert_eq!(team_now(&state, &owner, &narrow).await.positions, 1);
+
+    // What the scope does hold is admitted, which is the other half of the
+    // same sentence.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "n2",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "write it" }),
+        ),
+    )
+    .await
+    .expect("inside the scope it already had");
+    assert_eq!(team_now(&state, &owner, &narrow).await.auto_added, 1);
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A profile that could never delegate does not start now**, however empty
+/// the team it leads.
+///
+/// The other half of "the window grants nothing new": `can_delegate` was the
+/// old path's gate, so an Operator with a seeded team of its own is told the
+/// work is its own — the refusal a position with nothing under it gets, which
+/// is also what it will be told after the window.
+#[tokio::test]
+async fn a_profile_that_could_never_delegate_does_not_start_now() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let _engineer = a_profile(&state, &owner, "Engineer").await;
+    let operator = a_profile(&state, &owner, "Operator").await;
+    let theirs = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Operator",
+            "lead": { "profile": operator, "children": [] },
+        }),
+    )
+    .await;
+    as_if_seeded(&state, &theirs, 0).await;
+    let not_a_manager =
+        lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &theirs).await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &not_a_manager,
+            "p1",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "write it" }),
+        ),
+    )
+    .await
+    .expect_err("an Operator could not delegate before, and does not now");
+    assert!(
+        format!("{refused:#}").contains("nothing reports to your position"),
+        "{refused:#}"
+    );
+    assert_eq!(team_now(&state, &owner, &theirs).await.positions, 1);
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A team somebody drew does not learn, ever.**
+///
+/// The window repairs a gap left by a migration nobody asked for. A team
+/// authored after the cut has no such gap, so growing it behind somebody's
+/// back would have no justification at all — it would just be the old
+/// unbounded reach, running slower.
+#[tokio::test]
+async fn a_team_somebody_drew_does_not_learn() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![]).await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let _reviewer = a_profile(&state, &owner, "Reviewer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": { "profile": orchestrator, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+    // The installation was seeded — the window is open for the teams the cut
+    // made — and this team is not one of them.
+    as_if_seeded(&state, &team, 0).await;
+    sqlx::query("UPDATE agent_teams SET seeded_at = NULL WHERE id = $1")
+        .bind(&team)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "h1",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect_err("a team as drawn is exactly what was drawn");
+    assert!(format!("{refused:#}").contains("no subagent called"));
+    let now = team_now(&state, &owner, &team).await;
+    assert_eq!(now.positions, 2);
+    assert_eq!(now.auto_added, 0);
+    assert!(!now.seeded);
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **The empty case, which is the one that most needs the window.**
+///
+/// A profile that never spawned anything got a team with a name and nobody in
+/// it. Refusing there would take away a reach it had the day before — so while
+/// the window is open it delegates, the prompt says what it can actually
+/// reach, and the seat arrives out of real use. After the window it is told the
+/// work is its own, which is what an empty team means from then on.
+#[tokio::test]
+async fn an_empty_seeded_team_still_delegates_while_the_window_is_open() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![]).await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "lead": { "profile": orchestrator, "children": [] },
+        }),
+    )
+    .await;
+    as_if_seeded(&state, &team, 0).await;
+    let standing = state
+        .agent_teams
+        .lead_of(&owner, &team)
+        .await
+        .unwrap()
+        .unwrap();
+    let profile = state
+        .roles
+        .one(&owner, &orchestrator, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+
+    /* **The prompt has to be true.** "Nothing reports to your position" is
+    what an empty team says, and while the window is open it is false — the
+    session can hand work to everything its profile could yesterday. So it
+    gets the sentence it had before any of this existed, and no mention of
+    a migration it cannot act on. */
+    let open = super::sessions::persona_for(&state, &owner, &profile, Some(&standing))
+        .await
+        .unwrap();
+    assert!(
+        !open.contains("Nothing reports to your position"),
+        "an empty seeded team is not a dead end while the window is open: {open}"
+    );
+    assert!(
+        open.contains("The profiles you can hand work to"),
+        "it gets the heading that is true of it: {open}"
+    );
+    assert!(open.contains("Engineer"), "{open}");
+
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "e1",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "write it" }),
+        ),
+    )
+    .await
+    .expect("a team with nobody in it still delegates while the window is open");
+    let now = team_now(&state, &owner, &team).await;
+    assert_eq!(now.positions, 2);
+    assert_eq!(now.auto_added, 1);
+    let child = child_of(&state, &lead, "e1").await;
+    assert_eq!(child.profile_id.as_deref(), Some(engineer.as_str()));
+
+    // Past the window, an empty team is what it will be from then on.
+    as_if_seeded(&state, &team, crate::agent_teams::window::WINDOW_DAYS + 1).await;
+    let empty = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Quiet",
+            "lead": { "profile": orchestrator, "children": [] },
+        }),
+    )
+    .await;
+    sqlx::query("UPDATE agent_teams SET seeded_at = now() WHERE id = $1")
+        .bind(&empty)
+        .execute(state.db.pool())
+        .await
+        .unwrap();
+    let quiet = state
+        .agent_teams
+        .lead_of(&owner, &empty)
+        .await
+        .unwrap()
+        .unwrap();
+    let closed = super::sessions::persona_for(&state, &owner, &profile, Some(&quiet))
+        .await
+        .unwrap();
+    assert!(
+        closed.contains("Nothing reports to your position"),
+        "and once it has closed, an empty team says so up front: {closed}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **The flag, which the whole feature sits behind for the window's
+/// duration.**
+///
+/// Turned off, an installation is one with no teams: nothing is visible,
+/// nothing is standing anywhere, and every session delegates by its profile's
+/// own reach — which still works, because this is the expand half and nothing
+/// has been dropped. It is the way out of a feature that has gone wrong, not
+/// the way into one.
+#[tokio::test]
+async fn turning_agent_teams_off_puts_every_session_back_on_the_old_path() {
+    let (mut state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![]).await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let stranger = a_profile(&state, &owner, "Stranger").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": { "profile": orchestrator, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+
+    state.agent_teams = state.agent_teams.turned_off();
+    assert!(
+        state
+            .agent_teams
+            .visible(&owner, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .is_empty(),
+        "no team is visible"
+    );
+    assert!(
+        state
+            .agent_teams
+            .standing(&owner, "pos_anything")
+            .await
+            .unwrap()
+            .is_none(),
+        "and no session is standing anywhere, so the old path is the only one"
+    );
+
+    // The profile is a Manager with no scope, which is what it was before any
+    // of this: it reaches everything its owner can see, seat or no seat.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "o1",
+            "spawn",
+            serde_json::json!({ "role": "Stranger", "goal": "anything" }),
+        ),
+    )
+    .await
+    .expect("the old reach, exactly as it was");
+    let child = child_of(&state, &lead, "o1").await;
+    assert_eq!(child.profile_id.as_deref(), Some(stranger.as_str()));
+    assert!(
+        child.position_id.is_none(),
+        "and it inherits no seat, because there are no teams"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **The cut, end to end, over lineage a real spawn left behind — and the
+/// sessions that were running when it happened.**
+///
+/// The seeding is the only thing in this effort that reads history rather than
+/// intent, so the history it reads here is the genuine article: an old-path
+/// Manager hands work to an Engineer through `delegate::handle`, and *that* is
+/// what the team comes out holding.
+///
+/// Then the other half of the promise. A session that was already running when
+/// the teams were seeded holds no position — nothing is backfilled onto a
+/// session, because a session's seat is where it was *started*, not where its
+/// profile now sits — so it finishes on the old path exactly as it began, and
+/// its children inherit no seat either.
+#[tokio::test]
+async fn the_cut_reads_real_lineage_and_leaves_running_sessions_on_the_old_path() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![]).await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let stranger = a_profile(&state, &owner, "Stranger").await;
+
+    ready.store(true, Ordering::SeqCst);
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let lead = lead_running(&state, &host, &owner, Agent::ClaudeCode, &orchestrator).await;
+
+    // The old arrangement, working: a Manager with the default reach hands
+    // work to a profile nobody put in a team, because there are no teams.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "l1",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "write it" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let before = child_of(&state, &lead, "l1").await;
+    assert!(before.position_id.is_none(), "there is no team to stand in");
+
+    // The cut.
+    let org = state.db.org().await.unwrap();
+    let done = crate::agent_teams::seed::seed(&state.agent_teams, &org)
+        .await
+        .unwrap()
+        .expect("the cut happened");
+    assert_eq!(done.teams, 1, "one profile could delegate");
+    assert_eq!(
+        done.positions, 2,
+        "its lead, and the Engineer it reached for"
+    );
+
+    let team = state
+        .agent_teams
+        .visible(&owner, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .pop()
+        .expect("a team");
+    assert_eq!(team.name, "Orchestrator", "named after its lead profile");
+    assert!(team.seeded);
+    assert_eq!(team.auto_added, 0);
+    let seats = state.agent_teams.positions(&owner, &team.id).await.unwrap();
+    assert_eq!(
+        seats.iter().map(|p| p.profile.as_str()).collect::<Vec<_>>(),
+        vec![orchestrator.as_str(), engineer.as_str()],
+        "the lead, and what it actually spawned — not the Stranger it could have"
+    );
+
+    /* **And the session that was already running is untouched.** Its
+    `position_id` is still null, so it resolves the old way: the whole of
+    what its owner can see, Stranger included, and the child it starts
+    inherits no seat. A spawn that had quietly started resolving through the
+    new team would be the break at the cut. */
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "l2",
+            "spawn",
+            serde_json::json!({ "role": "Stranger", "goal": "anything" }),
+        ),
+    )
+    .await
+    .expect("a session running at the cut finishes the way it started");
+    let after = child_of(&state, &lead, "l2").await;
+    assert_eq!(after.profile_id.as_deref(), Some(stranger.as_str()));
+    assert!(after.position_id.is_none());
+    assert_eq!(
+        state
+            .agent_teams
+            .one(&owner, &team.id, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap()
+            .positions,
+        2,
+        "and nothing was added to the team it is not standing in"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **Two spawns at once add one seat, not two** — the defect QA reproduced
+/// against the real table, and the constraint that makes it impossible.
+///
+/// The window's insert used to read `WHERE NOT EXISTS` and then write, which is
+/// a check and a write with a gap between them. Two spawns naming one profile
+/// at the same moment both saw no seat and both added one, and what that
+/// produced was worse than a duplicate row: `check` forbids two sibling seats
+/// of one profile, so the team could no longer be **saved**, and the profile
+/// could no longer be **spawned by name**, because the name no longer said
+/// which seat was meant. A lead dispatching two children at once is the
+/// ordinary shape of parallel work, so it was likeliest exactly when the window
+/// was doing its job.
+///
+/// **This races it rather than asserting the index exists.** Four concurrent
+/// `admit` calls, which is the function that raced, through the real pool
+/// against the real table — a test that only read `pg_indexes` would not have
+/// caught the original bug and would not catch its return. The direct insert at
+/// the end is the invariant underneath: whatever order the four happened to
+/// take, the database would have refused the second seat.
+#[tokio::test]
+async fn two_spawns_naming_one_profile_at_once_add_one_seat() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![]).await;
+    let reviewer = a_profile(&state, &owner, "Reviewer").await;
+    // A lead and nobody under it, so the count afterwards is unambiguous.
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "lead": { "profile": orchestrator, "children": [] },
+        }),
+    )
+    .await;
+    as_if_seeded(&state, &team, 0).await;
+
+    let standing = state
+        .agent_teams
+        .lead_of(&owner, &team)
+        .await
+        .unwrap()
+        .unwrap();
+    let profile = state
+        .roles
+        .one(&owner, &orchestrator, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    let window =
+        crate::agent_teams::window::open_at(&state, &owner, Some(&profile), Some(&standing))
+            .await
+            .unwrap()
+            .expect("the window is open");
+
+    // All four at once, each on its own task so the pool hands them real
+    // concurrent connections rather than interleaving one.
+    let mut racing = Vec::new();
+    for _ in 0..4 {
+        let (state, owner, standing, window) = (
+            state.clone(),
+            owner.clone(),
+            standing.clone(),
+            window.clone(),
+        );
+        racing.push(tokio::spawn(async move {
+            crate::agent_teams::window::admit(&state, &owner, &standing, &window, "Reviewer").await
+        }));
+    }
+    let mut seats = Vec::new();
+    for one in racing {
+        let admitted = one
+            .await
+            .expect("no task panicked")
+            .expect("losing the race is not a refusal — the seat is there either way")
+            .expect("and every one of them resolved the name");
+        assert_eq!(admitted.profile.id, reviewer);
+        seats.push(admitted.position);
+    }
+    assert!(
+        seats.windows(2).all(|p| p[0] == p[1]),
+        "every spawn stands in the same seat: {seats:?}"
+    );
+
+    let now = team_now(&state, &owner, &team).await;
+    assert_eq!(now.positions, 2, "the lead, and one Reviewer — not four");
+    assert_eq!(now.auto_added, 1);
+    let held = state.agent_teams.positions(&owner, &team).await.unwrap();
+    assert_eq!(
+        held.iter().filter(|p| p.profile == reviewer).count(),
+        1,
+        "one seat for one profile under one position"
+    );
+
+    // **And the team is still saveable and still spawnable**, which is what
+    // the duplicate took away. The `PUT` keeps the seat the window added,
+    // which is also what reviewing one means.
+    assert!(state
+        .agent_teams
+        .write(
+            &owner,
+            &team,
+            &serde_json::from_value(serde_json::json!({
+                "name": "Orchestrator",
+                "lead": {
+                    "id": standing.position,
+                    "profile": orchestrator,
+                    "children": [{ "id": held[1].id, "profile": reviewer }],
+                },
+            }))
+            .unwrap()
+        )
+        .await
+        .unwrap());
+    assert_eq!(
+        team_now(&state, &owner, &team).await.auto_added,
+        0,
+        "and the save is the review"
+    );
+
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "r1",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect("one seat, so the name says which one is meant");
+
+    /* The invariant the four above rest on, asserted where no scheduler
+    can hide it: the database itself refuses a second seat for one profile
+    under one position. Remove `agent_team_one_profile_per_parent` and this
+    line fails on its own. */
+    let refused = sqlx::query(
+        "INSERT INTO agent_team_positions (id, team_id, profile_id, parent_id, ord) \
+         VALUES ($1, $2, $3, $4, 9)",
+    )
+    .bind(ft_core::PositionId::new().as_str())
+    .bind(&team)
+    .bind(&reviewer)
+    .bind(&standing.position)
+    .execute(state.db.pool())
+    .await
+    .expect_err("two sibling seats of one profile are not a state this table can hold");
+    assert_eq!(
+        refused
+            .as_database_error()
+            .and_then(|e| e.constraint())
+            .unwrap_or_default(),
+        "agent_team_one_profile_per_parent",
+        "and it is that index which refused it: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}

@@ -40,6 +40,10 @@ Which profiles a lead may name is decided by **where that lead stands**. A
 session started as an agent team reaches the profiles reporting to its position
 in that team; one started as a lone profile reaches what that profile's own
 settings allow, which is the older arrangement and is on its way out (#497).
+A team that was *seeded* from this lineage rather than drawn by somebody keeps
+learning for a bounded window — a spawn it does not hold yet succeeds and adds
+the seat, marked for review — which is what makes the old arrangement's
+removal silent.
 Either way the list is intersected with what the owner can actually see, and
 a name off it is refused exactly as a name that was never defined.
 [Agent teams](./agent-teams.md) is that in full, including what each refusal
@@ -85,6 +89,9 @@ Every check a person starting a session meets, a lead meets.
   occupies, when it occupies one. Null for everything a person started without
   naming a team. Inherited at spawn: the child's position is the child of the
   lead's.
+- `agent_team_positions.auto_added_at` — that the compatibility window put
+  this seat there rather than a person, and when. Null is a seat somebody
+  chose; saving the team clears it.
 - `sessions.spawn_reason` — what the lead said the child was for, shown on
   the child.
 - `sessions.spawn_req` — the lead's id for the call that asked. A worker that

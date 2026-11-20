@@ -9,6 +9,7 @@ import * as zod from 'zod';
 
 
 export const ListAgentTeamsResponseItem = zod.object({
+  "autoAdded": zod.int().describe('How many of those positions **nobody chose** — added by a spawn during\nthe compatibility window.\n\nHere rather than only on the tree so a list row can say *2 added\nautomatically* without reading it. Zero for every team somebody drew,\nand zero again for a seeded one the moment somebody saves it, because a\nsave is what reviewing a team means. See `agent_teams/window.rs`.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "id": zod.string(),
   "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
@@ -18,6 +19,7 @@ export const ListAgentTeamsResponseItem = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
+  "seeded": zod.boolean().describe('Whether this team was **materialised from what its lead profile had\nactually spawned**, rather than drawn by somebody.\n\nTrue for the teams #491\'s seeding produced at the cut, and the reason\nto say so on the wire is that a team nobody authored deserves a look\nbefore it is trusted — it is a reading of history, not a decision.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A team, as a list row reads it.')
 export const ListAgentTeamsResponse = zod.array(ListAgentTeamsResponseItem)
@@ -34,6 +36,7 @@ export const CreateAgentTeamBody = zod.object({
 }).describe('What the API accepts to create a team or to replace its tree.\n\nOne type for both, so the shape a client sends does not depend on which\nverb it is sending. `directory` is honoured at creation only, exactly as a\nprofile\'s is: moving one afterwards is the sharing endpoints\' job, and\nthere is one place a thing changes hands.')
 
 export const CreateAgentTeamResponse = zod.object({
+  "autoAdded": zod.int().describe('How many of those positions **nobody chose** — added by a spawn during\nthe compatibility window.\n\nHere rather than only on the tree so a list row can say *2 added\nautomatically* without reading it. Zero for every team somebody drew,\nand zero again for a seeded one the moment somebody saves it, because a\nsave is what reviewing a team means. See `agent_teams/window.rs`.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "id": zod.string(),
   "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
@@ -43,9 +46,11 @@ export const CreateAgentTeamResponse = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
+  "seeded": zod.boolean().describe('Whether this team was **materialised from what its lead profile had\nactually spawned**, rather than drawn by somebody.\n\nTrue for the teams #491\'s seeding produced at the cut, and the reason\nto say so on the wire is that a team nobody authored deserves a look\nbefore it is trusted — it is a reading of history, not a decision.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A team, as a list row reads it.').and(zod.object({
   "positions": zod.array(zod.object({
+  "autoAddedAt": zod.iso.datetime({"offset":true}).nullish().describe('When the compatibility window added this seat, if it did — **absent\nfor a seat a person chose.**\n\nThe mark the map draws, and the whole mitigation for a learning phase\nthat grows a team without anybody deciding. Saving the team clears it:\na save sends the whole tree with the whole tree on screen, so a marked\nseat kept through one is a seat somebody has now chosen.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Instructions that apply in this seat and nowhere else. **Added to the\nprofile\'s, never in place of them.**'),
   "order": zod.int().describe('Its place among its siblings, from zero.'),
@@ -79,6 +84,7 @@ export const GetAgentTeamParams = zod.object({
 })
 
 export const GetAgentTeamResponse = zod.object({
+  "autoAdded": zod.int().describe('How many of those positions **nobody chose** — added by a spawn during\nthe compatibility window.\n\nHere rather than only on the tree so a list row can say *2 added\nautomatically* without reading it. Zero for every team somebody drew,\nand zero again for a seeded one the moment somebody saves it, because a\nsave is what reviewing a team means. See `agent_teams/window.rs`.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "id": zod.string(),
   "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
@@ -88,9 +94,11 @@ export const GetAgentTeamResponse = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
+  "seeded": zod.boolean().describe('Whether this team was **materialised from what its lead profile had\nactually spawned**, rather than drawn by somebody.\n\nTrue for the teams #491\'s seeding produced at the cut, and the reason\nto say so on the wire is that a team nobody authored deserves a look\nbefore it is trusted — it is a reading of history, not a decision.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A team, as a list row reads it.').and(zod.object({
   "positions": zod.array(zod.object({
+  "autoAddedAt": zod.iso.datetime({"offset":true}).nullish().describe('When the compatibility window added this seat, if it did — **absent\nfor a seat a person chose.**\n\nThe mark the map draws, and the whole mitigation for a learning phase\nthat grows a team without anybody deciding. Saving the team clears it:\na save sends the whole tree with the whole tree on screen, so a marked\nseat kept through one is a seat somebody has now chosen.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Instructions that apply in this seat and nowhere else. **Added to the\nprofile\'s, never in place of them.**'),
   "order": zod.int().describe('Its place among its siblings, from zero.'),
@@ -117,6 +125,7 @@ export const UpdateAgentTeamBody = zod.object({
 }).describe('What the API accepts to create a team or to replace its tree.\n\nOne type for both, so the shape a client sends does not depend on which\nverb it is sending. `directory` is honoured at creation only, exactly as a\nprofile\'s is: moving one afterwards is the sharing endpoints\' job, and\nthere is one place a thing changes hands.')
 
 export const UpdateAgentTeamResponse = zod.object({
+  "autoAdded": zod.int().describe('How many of those positions **nobody chose** — added by a spawn during\nthe compatibility window.\n\nHere rather than only on the tree so a list row can say *2 added\nautomatically* without reading it. Zero for every team somebody drew,\nand zero again for a seeded one the moment somebody saves it, because a\nsave is what reviewing a team means. See `agent_teams/window.rs`.'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "id": zod.string(),
   "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
@@ -126,9 +135,11 @@ export const UpdateAgentTeamResponse = zod.object({
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
+  "seeded": zod.boolean().describe('Whether this team was **materialised from what its lead profile had\nactually spawned**, rather than drawn by somebody.\n\nTrue for the teams #491\'s seeding produced at the cut, and the reason\nto say so on the wire is that a team nobody authored deserves a look\nbefore it is trusted — it is a reading of history, not a decision.'),
   "updatedAt": zod.iso.datetime({"offset":true})
 }).describe('A team, as a list row reads it.').and(zod.object({
   "positions": zod.array(zod.object({
+  "autoAddedAt": zod.iso.datetime({"offset":true}).nullish().describe('When the compatibility window added this seat, if it did — **absent\nfor a seat a person chose.**\n\nThe mark the map draws, and the whole mitigation for a learning phase\nthat grows a team without anybody deciding. Saving the team clears it:\na save sends the whole tree with the whole tree on screen, so a marked\nseat kept through one is a seat somebody has now chosen.'),
   "id": zod.string(),
   "instructions": zod.string().describe('Instructions that apply in this seat and nowhere else. **Added to the\nprofile\'s, never in place of them.**'),
   "order": zod.int().describe('Its place among its siblings, from zero.'),
