@@ -191,12 +191,12 @@ pub async fn seed(teams: &AgentTeams, org: &str) -> Result<Option<Seeded>> {
         make a team nobody could ever save. It is a narrow break in the old
         behaviour and the only one here. */
         let spawned = sqlx::query(
-            "SELECT c.profile_id, max(c.created_at) AS last_spawn \
+            "SELECT c.profile_id, q.name, max(c.created_at) AS last_spawn \
                FROM sessions l \
                JOIN sessions c ON c.parent_id = l.id \
                JOIN roles q ON q.id = c.profile_id \
               WHERE l.profile_id = $1 AND c.profile_id <> $1 AND q.org_id = $2 \
-              GROUP BY c.profile_id \
+              GROUP BY c.profile_id, q.name \
               ORDER BY max(c.created_at) DESC, c.profile_id",
         )
         .bind(&profile)
@@ -259,7 +259,20 @@ pub async fn seed(teams: &AgentTeams, org: &str) -> Result<Option<Seeded>> {
             },
             directory: None,
         };
-        if let Err(no) = check(&shape) {
+        /* `check` reads a profile's name off what the caller already has, so
+        that a refusal says *Engineer* rather than a `role_01…` (#494). The
+        names are in the rows this loop just read: the lead's, and one per
+        profile it has spawned. Grouping by `q.name` beside `c.profile_id`
+        changes no group — a name is a function of the id it hangs on. */
+        let names: super::ProfileNames = std::iter::once((profile.clone(), name.clone()))
+            .chain(spawned.iter().map(|row| {
+                (
+                    row.get::<String, _>("profile_id"),
+                    row.get::<String, _>("name"),
+                )
+            }))
+            .collect();
+        if let Err(no) = check(&shape, &names) {
             tracing::error!(
                 profile = %profile,
                 "not seeding a team for \"{name}\": {no}. Its profile keeps the reach it has."
