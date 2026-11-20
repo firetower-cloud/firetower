@@ -40,7 +40,7 @@ import {
 } from "~/api/generated/agent-teams/agent-teams";
 import { createRole, getListRolesQueryKey, useListRoles } from "~/api/generated/roles/roles";
 import type { Position, Role } from "~/api/generated/model";
-import { useSkills, why } from "~/data";
+import { trouble, useSkills, why } from "~/data";
 import { Button, Icon } from "~/components/ui";
 import { Note, Trouble, WhereTo } from "~/ui/config/bits";
 import {
@@ -261,11 +261,19 @@ export function TeamMap({
   /* ── Drawing ──────────────────────────────────────────────────────── */
 
   if (feed.isLoading || !team) {
+    /* Through `trouble`, so a team somebody may not see says that rather than
+       offering a Try again that will say the same thing. The same three
+       answers every list on this pane gives. */
+    const bad = feed.error ? (trouble(feed.error) ?? "error") : null;
     return (
       <section data-wide className="pcol">
         <Back onClose={onClose} />
-        {feed.error ? (
-          <Trouble kind="error" error={why(feed.error)} onRetry={() => void feed.refetch()} />
+        {bad ? (
+          <Trouble
+            kind={bad}
+            error={why(feed.error)}
+            onRetry={bad === "error" ? () => void feed.refetch() : undefined}
+          />
         ) : (
           <p className="mt-6 text-ui text-dim">Reading the team…</p>
         )}
