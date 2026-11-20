@@ -30,6 +30,48 @@
 # rejected on that last point: it needs a second person, or self-approval
 # turned on, which is friction without much benefit.
 #
+# ## Why that confirmation is conditional, and not weakened
+#
+# `version` is optional. Left empty — which is the normal case — the gate
+# resolves the package's own `beta` pin out of the published manifest and
+# promotes that. Beta is continuous, so the beta pin is the newest thing there
+# is to promote, and typing it in was transcription from the very document the
+# run then checks the typed value against.
+#
+# The confirmation then follows the failure it was written for rather than
+# following the form field. Read the paragraph above literally: what the
+# retyping defends against is a *typed* version being the wrong one — "a
+# mis-click, or a stale browser tab offering a version that has since been
+# superseded". Both are properties of a value chosen in a browser, at some
+# earlier moment, from a list that may have moved since. So:
+#
+#   * **a version was typed** — the stale tab is exactly as possible as it ever
+#     was, so the rule is exactly what it was: `confirm` must be given and must
+#     equal it, answered before the first network call.
+#   * **nothing was typed** — there is no earlier moment and no list. The
+#     version is read server-side, during the run, from the one document that
+#     decides what beta means, so a tab open since last week resolves to
+#     whatever beta is *now* rather than to what it was then. The accident the
+#     retyping defends against cannot be reached, so `confirm` may be left
+#     empty too.
+#   * **nothing typed, but `confirm` filled in anyway** — a deliberate
+#     double-check, and honoured as one: the resolved version has to equal it
+#     or the run refuses. An operator who knows which version they expect can
+#     say so without typing it into two fields, and a beta pin that has moved
+#     under them is then a refusal rather than a surprise.
+#
+# Nothing else is relaxed, and a resolved version is not privileged: it is the
+# same string a typed one would have been, and it goes through the format
+# check, the release-exists check and the manifest preflight in that order, as
+# a typed one does. A beta pin that is malformed, or whose release is missing,
+# refuses this run — resolving a version does not vouch for it.
+#
+# The one question with no answer is the first promotion of a repository that
+# has never promoted: there is no manifest, so there is no beta pin to default
+# to. That refuses and says to name a version, rather than resolving to an
+# empty string and promoting it — which would move nothing while every job
+# below acted as though something had moved.
+#
 # ## The order: each package's last write is the one its own readers consult
 #
 #   control plane   re-tag the images onto `stable`  →  write the channel
@@ -86,12 +128,18 @@ on:
         type: choice
         options: [control_plane, desktop]
       version:
-        description: The version to move general access to, without a leading v.
-        required: true
+        description: >-
+          The version to move general access to, without a leading v. Leave it
+          empty to promote whatever this package is on beta right now.
+        required: false
         type: string
       confirm:
-        description: Type the same version again. Promotion cannot be undone.
-        required: true
+        description: >-
+          Type the same version again — required when you typed one, because
+          promotion cannot be undone. Leave both empty to promote the beta pin;
+          fill in only this one to refuse unless the beta pin is what you
+          expect.
+        required: false
         type: string
 
 permissions:
@@ -116,6 +164,12 @@ jobs:
     outputs:
       tag: ${{ steps.refuse.outputs.tag }}
       held: ${{ steps.refuse.outputs.held }}
+      # The version this run promotes, typed or resolved. **Every job below
+      # acts on this and none on `inputs.version`**, which is the empty string
+      # whenever the version was resolved rather than typed — a leg left
+      # reading the input would act on nothing while the rest of the run
+      # promoted something.
+      version: ${{ steps.refuse.outputs.version }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -126,24 +180,109 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PACKAGE: ${{ inputs.package }}
+          # The version **as it was typed**, which is empty on the normal path.
+          # By the time the checks below run, `$VERSION` is the version this run
+          # promotes — resolved from the beta pin when nothing was typed — and
+          # it leaves here as this job's `version` output.
+          #
+          # This is the only `inputs.version` in the file, and it is here
+          # because this is the one step that can tell "nothing was typed" from
+          # a version. Anywhere else it would be the empty string.
           VERSION: ${{ inputs.version }}
           CONFIRM: ${{ inputs.confirm }}
         run: |
           set -euo pipefail
 
-          # The confirmation, first and on its own. A mis-click is the failure
-          # this exists for, so it is answered before any network call — if the
-          # two fields disagree, nothing should even be looked up.
-          if [ "$CONFIRM" != "$VERSION" ]; then
+          # The confirmation, first and on its own — **when there is a typed
+          # version for it to catch.** A mis-click is the failure this exists
+          # for, so it is answered before any network call: if the two fields
+          # disagree, nothing should even be looked up.
+          #
+          # Conditional on something having been typed, and the header says why
+          # at length: the accident this answers is a version chosen in a
+          # browser earlier and wrong by the time it is dispatched, which is not
+          # reachable by a version the next block reads out of the manifest
+          # during the run. Where it *is* reachable, the rule is unchanged — the
+          # field must be given and must match, or this refuses.
+          if [ -n "$VERSION" ] && [ "$CONFIRM" != "$VERSION" ]; then
             echo "::error::The confirmation says '$CONFIRM' and the version says '$VERSION'." \
                  "Nothing has been promoted. Promotion cannot be undone, so the two have to match."
             exit 1
           fi
+
+          # **Where the version comes from when nobody typed one: the package's
+          # own `beta` pin, read now rather than transcribed earlier.**
+          #
+          # Through `read-channel-manifest.sh`, which is the same fetch the
+          # `preflight` further down needs — done once here and reused, not a
+          # second copy of it — and parsed by the manifest script's own parser
+          # rather than by `jq`, for the two reasons written out at that call.
+          # `$state` carries which outcome that read had so the bottom of this
+          # script does not ask twice; empty means it has not been asked yet,
+          # which is deliberately not one of the read's own answers.
+          state=
+          if [ -z "$VERSION" ]; then
+            # Captured on its own line, never inside a condition: a read that
+            # cannot be done exits non-zero and stops the run here, which is
+            # exactly what a `$(...)` inside an `if` would have swallowed.
+            state=$(.github/scripts/read-channel-manifest.sh "$RUNNER_TEMP/held.json")
+
+            # The one case with nothing to default to. A repository that has
+            # never promoted has no beta pin, and resolving that to an empty
+            # string would promote nothing while every job below acted as
+            # though it had.
+            if [ "$state" = absent ]; then
+              echo "::error::No channel manifest is published, so $PACKAGE has no beta pin to promote." \
+                   "The first promotion of a repository has to name its version explicitly." \
+                   "Nothing has been promoted."
+              exit 1
+            fi
+
+            # `read` is `preflight` with nothing to decide: the same parser and
+            # the same `held <package>.<channel>=` lines, for a caller that has
+            # no version yet and so cannot name a `--set`. A document it does
+            # not understand — a `false` pin, a schema from the future — stops
+            # the run here rather than handing over something to promote.
+            held_pins=$(node .github/scripts/channel-manifest.mjs read --held "$RUNNER_TEMP/held.json")
+            printf '%s\n' "$held_pins"
+            VERSION=$(printf '%s\n' "$held_pins" | sed -n "s/^held $PACKAGE\.beta=//p")
+
+            # A document that reads but has no pin for this package: the other
+            # package has promoted and this one never has. Nothing to default
+            # to, same as absence.
+            if [ -z "$VERSION" ]; then
+              echo "::error::The published channel manifest has no beta pin for $PACKAGE," \
+                   "so there is nothing to promote by default. Give the version explicitly." \
+                   "Nothing has been promoted."
+              exit 1
+            fi
+            echo "::notice::No version was given, so this promotes $PACKAGE's beta pin: $VERSION."
+
+            # **The deliberate double-check.** The field is optional here
+            # because a stale tab cannot decide this version — but an operator
+            # who knows which version they expect may still say so, and a beta
+            # pin that has moved under them is then a refusal rather than a
+            # surprise. Empty is "promote whatever beta holds", which is what
+            # leaving both fields empty asked for.
+            if [ -n "$CONFIRM" ] && [ "$CONFIRM" != "$VERSION" ]; then
+              echo "::error::$PACKAGE is on $VERSION on beta, and the confirmation says '$CONFIRM'." \
+                   "Nothing has been promoted. Leave the confirmation empty to promote whatever beta" \
+                   "holds, or type the version itself if $CONFIRM is what you meant to promote."
+              exit 1
+            fi
+          fi
+
           # Three numeric parts and nothing else. A `case` glob would let
           # `1.2.3.4` and a leading `v` through, and while both would be caught
           # further down — as a release that does not exist, or by the manifest
           # writer refusing them — they would be caught *after* the tags had
           # moved, and with an error naming the wrong thing.
+          #
+          # A resolved version comes through here too, and is not exempted. It
+          # cannot realistically fail — the parser that handed it over refuses
+          # a pin that is not a version — but "it came out of the manifest" is
+          # the sort of reason that stops being true after an edit, and this
+          # costs one `grep`.
           if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::'$VERSION' is not a three-part version, so there is nothing to promote." \
                  "Give it without a leading v. Nothing has been promoted."
@@ -156,6 +295,12 @@ jobs:
             *) echo "::error::'$PACKAGE' is not a package with channels."; exit 1 ;;
           esac
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+          # The version every job below acts on, published here next to the tag
+          # rather than left for each of them to work out — `inputs.version` is
+          # empty whenever this was resolved, and a leg still reading it would
+          # act on an empty string while the rest of the run promoted something.
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
           # Published at all. Promotion can only promote something that exists,
           # and the release is what carries the bundles the desktop leg rewrites
@@ -187,7 +332,14 @@ jobs:
           # Absence is allowed here only because the very first promotion of a
           # repository that has never promoted has nothing to compare against —
           # and it still cannot get past the release check above.
-          state=$(.github/scripts/read-channel-manifest.sh "$RUNNER_TEMP/held.json")
+          # Read now unless resolving already did it above. The typed path
+          # therefore keeps the ordering it had — the format check and the
+          # release check still come before the first network call, so `v0.57.0`
+          # is answered as a malformed version rather than as whatever a
+          # comparison makes of it.
+          if [ -z "$state" ]; then
+            state=$(.github/scripts/read-channel-manifest.sh "$RUNNER_TEMP/held.json")
+          fi
           held=""
           if [ "$state" = absent ]; then
             echo "::warning::No channel manifest is published yet, so this promotion creates it."
@@ -237,7 +389,7 @@ jobs:
         env:
           COUNTS: ${{ vars.TELEMETRY_COUNTS_URL }}
           PACKAGE: ${{ inputs.package }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ steps.refuse.outputs.version }}
         run: |
           set -uo pipefail
           say() { echo "$1"; echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
@@ -293,7 +445,7 @@ jobs:
         name: [firetower, firetower-updater]
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/${{ matrix.name }}
-      VERSION: ${{ inputs.version }}
+      VERSION: ${{ needs.check.outputs.version }}
       PACKAGE: ${{ inputs.package }}
       # Not a channel, and deliberately not one: nothing in `CHANNEL_TAGS`,
       # nothing in `deploy/firetower.yml`, and the updater floats it harmlessly
@@ -373,7 +525,7 @@ jobs:
       # written to `:stable` **by digest** — not by tag, so nothing can have
       # moved under it in between. `:stable` is therefore only ever written
       # from an index that has already passed every check.
-      - name: stage ${{ matrix.name }} ${{ inputs.version }} and check it
+      - name: stage ${{ matrix.name }} ${{ needs.check.outputs.version }} and check it
         id: stage
         run: |
           set -euo pipefail
@@ -472,7 +624,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           PACKAGE: ${{ inputs.package }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: .github/scripts/publish-channel-pin.sh "$PACKAGE:general=$VERSION"
 
   # The desktop's live addresses, last: the same publish job a release runs, in
@@ -507,7 +659,7 @@ jobs:
     # because it was never passed down. Asserted in promote-shape.test.mjs.
     with:
       tag: ${{ needs.check.outputs.tag }}
-      version: ${{ inputs.version }}
+      version: ${{ needs.check.outputs.version }}
       # **The current commit, not the tag being promoted, and that is not an
       # oversight.** The checkout supplies two things: `latest-json.mjs`, and
       # the signing public key it verifies against. The bundles come off the
@@ -542,7 +694,7 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
           PACKAGE: ${{ inputs.package }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: .github/scripts/publish-channel-pin.sh "$PACKAGE:general=$VERSION"
 
   # **The rolling worker release, last of all — and that order is the whole
@@ -594,7 +746,7 @@ jobs:
       - name: the rolling worker release holds what general access holds
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: .github/scripts/publish-worker-rolling.sh "$VERSION"
 
       # **The published one-liner, run as a person runs it.**
@@ -618,7 +770,7 @@ jobs:
       # red and says so rather than reporting a promotion that works.
       - name: the published one-liner installs the promoted worker
         env:
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.check.outputs.version }}
         run: |
           set -euo pipefail
           export FIRETOWER_WORKER_ROOT="$RUNNER_TEMP/worker-smoke"
@@ -646,7 +798,7 @@ jobs:
     steps:
       - env:
           PACKAGE: ${{ inputs.package }}
-          VERSION: ${{ inputs.version }}
+          VERSION: ${{ needs.check.outputs.version }}
           HELD: ${{ needs.check.outputs.held }}
         run: |
           {

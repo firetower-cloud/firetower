@@ -204,13 +204,33 @@ backwards, so this converges and both survive.
 
 ## Promoting
 
-`promote.yml`, dispatched by hand, taking a package, a version, and a
-confirmation field that has to match the version.
+`promote.yml`, dispatched by hand, taking a package and — optionally — a
+version and a confirmation.
+
+**Left empty, the version is the package's own beta pin**, read out of the
+published manifest during the run. That is the normal case: beta is continuous,
+so the beta pin is the newest thing there is to promote, and typing it in was
+transcription from the very document the run then checks it against. Typed, it
+promotes exactly what it says, as before.
 
 The confirmation is there because promotion cannot be undone. Moving a pin
 backwards is refused by design, so the irreversible accident is promoting a
 *newer* version than intended — and the other refusals are all silent on exactly
 that. A mis-click or a stale browser tab is what the retyped version addresses.
+
+**So the confirmation is required exactly where that accident is reachable.**
+Type a version and it has to be given and has to match, answered before the
+first network call, unchanged. Leave the version empty and there is nothing a
+stale tab could have got wrong — the version is resolved server-side during the
+run, so a tab open since last week resolves to whatever beta is *now* rather
+than to what it was then — so the confirmation may be left empty too. Fill it in
+anyway and it is a deliberate double-check: the resolved version has to equal
+it, and the run refuses if the pin has moved since you looked.
+
+A resolved version is not an exempt version. It is read with the manifest
+script's own parser rather than with `jq`, and it then goes through the format
+check, the release check and the manifest preflight exactly as a typed one does
+— a malformed beta pin, or one whose release is missing, refuses the run.
 
 **The order is per package, and so is the point of no return.** There is no
 single commit point across both, and the rule is the same one in each case: the
@@ -270,7 +290,14 @@ unpinned line gets, which is the whole of #459.
 
 It refuses, and moves nothing, on:
 
-* a confirmation that does not match the version;
+* a typed version with a confirmation that does not match it, or with no
+  confirmation at all;
+* an empty version whose resolved beta pin does not match a confirmation that
+  was filled in anyway;
+* an empty version with no beta pin to resolve — no published manifest at all,
+  or a document with no pin for that package. The first promotion has to name
+  its version, and resolving to an empty string and promoting it is the one
+  outcome this must not have;
 * a version older than the channel already holds;
 * a version that is not published, or not on beta;
 * any read of the current manifest that fails for a reason other than "there is

@@ -17,12 +17,30 @@
  *
  *   node channel-manifest.mjs preflight [--held <file>] --set control_plane:general=0.57.0
  *
+ *   node channel-manifest.mjs read --held <file>
+ *
  * `preflight` is `pin` without the write: same parser, same refusals, same
  * messages, no document produced. It exists so that a caller can ask "would
  * this be refused?" *before* it moves anything, and get the same answer the
  * commit point will give — rather than a second, looser copy of the rule in
  * shell. A gate that validated differently from the writer would be a gate
  * that passes things the writer then refuses, after the tags have moved.
+ *
+ * `read` is that same parser with nothing to decide: it prints the pins the
+ * held document holds, in `preflight`'s own `held <package>.<channel>=<pin>`
+ * lines, and writes nothing. It is here for the caller that does not yet know
+ * which version it is asking about — a promotion given no version promotes
+ * whatever the package's `beta` pin says, and a caller in that position cannot
+ * name a `--set`, so it cannot ask `preflight`. Asking *here* rather than with
+ * `jq` is the rule above for the reason above: `jq '// empty'` cannot tell a
+ * missing pin from a `false` one, and a caller that is about to *default* to a
+ * pin has to be told "this is not a document we understand" rather than handed
+ * an empty string to promote.
+ *
+ * `read` requires `--held`, deliberately. Absence is a question with no answer
+ * here: a document that does not exist holds no pins, so what absence means is
+ * the caller's to decide before it asks — for a promotion it means the first
+ * one, which has to name its version rather than default to nothing.
  *
  * `--held` absent means *there is no document yet* — the bootstrap case, and
  * the only absence that is allowed to be one. A caller that could not tell
@@ -32,7 +50,7 @@
  * sees them, and "it refused" and "it could not read it" are not the same
  * event:
  *
- *   0  a document was written to --out
+ *   0  a document was written to --out, or the question asked was answered
  *   2  the held document cannot be used — not JSON, no schema version, a
  *      schema this script does not understand, or a pin that is not a version.
  *      Stop and move nothing.
@@ -206,6 +224,26 @@ export function pin(held, pins, now) {
   return { manifest: next, moved };
 }
 
+/**
+ * What is published, as the shared parser read it — not as `jq` guessed it.
+ * `jq '// empty'` cannot tell a missing pin from a `false` one, and a caller
+ * that cannot tell those apart treats a document it does not understand as
+ * "nothing is pinned yet".
+ *
+ * One line per channel, including the ones that hold nothing, so a caller can
+ * tell "this package has no beta pin" from "this package is not in the
+ * document" without a second question.
+ */
+function sayHeld(held) {
+  for (const pkg of PACKAGES) {
+    const entry = held[pkg];
+    if (!entry) continue;
+    for (const channel of CHANNELS) {
+      console.log(`held ${pkg}.${channel}=${entry[channel] ?? ""}`);
+    }
+  }
+}
+
 /** `control_plane:beta=0.57.0` */
 function parseSet(text) {
   const match = /^([a-z_]+):([a-z]+)=(.+)$/.exec(text);
@@ -215,8 +253,8 @@ function parseSet(text) {
 
 function main(argv) {
   const command = argv[0];
-  if (command !== "pin" && command !== "preflight") {
-    throw new Refused(64, "the commands are `pin` and `preflight`");
+  if (command !== "pin" && command !== "preflight" && command !== "read") {
+    throw new Refused(64, "the commands are `pin`, `preflight` and `read`");
   }
   const args = argv.slice(1);
   const pins = [];
@@ -248,23 +286,24 @@ function main(argv) {
     }
   }
   if (command === "pin" && !out) throw new Refused(64, "--out is required");
+  if (command === "read") {
+    // Nothing is decided here, so there is nothing to decide it from: a
+    // `--set` would be a pin nobody asked to write, and the caller is asking
+    // what is held precisely because it does not have a version yet.
+    if (pins.length > 0) throw new Refused(64, "`read` answers what is held and writes nothing, so it takes no --set");
+    if (heldPath === undefined) throw new Refused(64, "--held is required: a document that does not exist holds no pins");
+    sayHeld(parseHeld(readFileSync(heldPath, "utf8")));
+    return;
+  }
   if (pins.length === 0) throw new Refused(64, "at least one --set is required");
 
   const held = parseHeld(heldPath === undefined ? undefined : readFileSync(heldPath, "utf8"));
   const { manifest, moved } = pin(held, pins, now);
 
   if (command === "preflight") {
-    // What is published, as the shared parser read it — not as `jq` guessed
-    // it. `jq '// empty'` cannot tell a missing pin from a `false` one, and a
-    // gate that cannot tell those apart treats a document it does not
-    // understand as "nothing is pinned yet".
-    for (const pkg of PACKAGES) {
-      const entry = held[pkg];
-      if (!entry) continue;
-      for (const channel of CHANNELS) {
-        console.log(`held ${pkg}.${channel}=${entry[channel] ?? ""}`);
-      }
-    }
+    // The same lines `read` prints, from the same parser — one format, so a
+    // caller that asks both questions parses one answer.
+    sayHeld(held);
     for (const line of moved) console.log(`would move ${line}`);
     if (moved.length === 0) console.log("would move nothing; it is already where it was asked to be");
     return;
