@@ -1193,9 +1193,20 @@ export type Startable = {
  * **Teams group above profiles**, and that is not a new preference: the picker
  * already floated the delegating profiles to the top, because the lead you
  * would start a board as is the one you reach for most. Reach has moved off
- * the profile and onto the team, so that position moves with it. Within each
- * group it is alphabetical, `localeCompare` so an accented name files where a
- * person would look for it.
+ * the profile and onto the team, so that position moves with it.
+ *
+ * **And within the profiles, the old sort survives for as long as the old
+ * reach does.** That is the correction: moving the preference onto teams is
+ * right *after* the compatibility window, and during it a Manager profile
+ * started bare genuinely still hands work out — which is the same fact that
+ * earns it a chip and its own sentence in [`consequence`]. Three things
+ * saying *this one delegates* and a sort saying nothing is one of them
+ * wrong. So a profile that can still reach somebody still files with the
+ * ones that can, and the guard dies with `roles.can_delegate` in #497
+ * alongside the sentence — one field, one removal, one story.
+ *
+ * Then alphabetical, `localeCompare` so an accented name files where a person
+ * would look for it.
  *
  * **A profile that leads a team appears twice** — once bare and once as the
  * team — and that is deliberate. The two start completely different things:
@@ -1210,6 +1221,11 @@ export type Startable = {
  */
 export function startables(teams: AgentTeam[], profiles: Role[]): Startable[] {
   const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
+  /* Delegating profiles first while any of them still delegate, then by name.
+     `Number(…)` because `canDelegate` is a boolean and a comparator needs a
+     number. Goes with #497. */
+  const byReach = (a: Role, b: Role) =>
+    Number(b.canDelegate) - Number(a.canDelegate) || byName(a, b);
 
   const asTeam = (t: AgentTeam): Startable => {
     const lead = t.lead ? profiles.find((p) => p.id === t.lead) : undefined;
@@ -1238,7 +1254,7 @@ export function startables(teams: AgentTeam[], profiles: Role[]): Startable[] {
 
   return [
     ...[...teams].sort(byName).map(asTeam),
-    ...[...profiles].sort(byName).map((p) => ({
+    ...[...profiles].sort(byReach).map((p) => ({
       kind: "profile" as const,
       id: p.id,
       name: p.name,

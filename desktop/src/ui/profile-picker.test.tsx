@@ -100,6 +100,34 @@ describe("what the picker offers", () => {
     ]);
   });
 
+  it("keeps the old sort among profiles while the old reach is still live", () => {
+    // Teams took the top; they did not take this. During the compatibility
+    // window a Manager started bare still hands work out — the same fact that
+    // earns it a chip and its own sentence — so it still files with the ones
+    // that can. Dies with `roles.can_delegate` in #497.
+    const manager = role("p_09", "Orchestrator", true);
+    const all = startables([product], [ada, bo, manager]);
+    expect(all.map((s) => s.name)).toEqual([
+      "Product",
+      "Orchestrator",
+      "Designer",
+      "Engineering Manager",
+    ]);
+  });
+
+  it("and with no teams at all the order is exactly what it was", () => {
+    // The claim this PR made and QA disproved, now a test rather than a
+    // sentence: an install with no teams sees the picker it saw before.
+    const manager = role("p_09", "Orchestrator", true);
+    const second = role("p_10", "Another lead", true);
+    expect(startables([], [bo, ada, manager, second]).map((s) => s.name)).toEqual([
+      "Another lead",
+      "Orchestrator",
+      "Designer",
+      "Engineering Manager",
+    ]);
+  });
+
   it("names a team's lead and its size before it is picked", () => {
     const html = draw([ada, bo], [product]);
     expect(html).toContain("Product");
