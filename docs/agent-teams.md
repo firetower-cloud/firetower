@@ -105,7 +105,12 @@ The composer's picker is where that is either made plain or papered over, so:
 
 - A team is a row, **banded above the profiles**. That is not a new
   preference: the picker already floated the delegating profiles to the top,
-  and reach has moved onto the team, so the position moves with it.
+  and reach has moved onto the team, so the position moves with it. **Among
+  the profiles that sort survives for as long as the old reach does** — a
+  Manager started bare still hands work out during the window, which is the
+  same fact that earns it a chip and its own sentence, and three things saying
+  *this one delegates* beside a sort saying nothing would be one of them
+  wrong. An install with no teams therefore sees the picker it saw before.
 - A team row **names its lead and its size before it is picked**. If the
   picker says *Growth* and the conversation opens with the Orchestrator, the
   row misled somebody about the one thing it was for.
@@ -316,5 +321,7 @@ Each of these is its own ticket, and this one is what they are blocked on.
 - **Read-only on mobile** (#495) and **YAML import and export** (#496).
   Starting work as a team is already on the phone; #495 is the teams *screen*.
 - **Dropping the old per-profile reach** (#497), which is the contract half.
-  The picker's third sentence — a Manager profile that still hands work out
-  through its own settings — goes with it.
+  Three things in the picker go with it, and all three read `canDelegate`: the
+  *can delegate* chip, the third sentence — a Manager profile that still hands
+  work out through its own settings — and the delegating-first sort among the
+  profiles. One field, one removal.
