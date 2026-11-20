@@ -62,6 +62,8 @@ import {
 } from "~/api/generated/roles/roles";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { useAccounts, useAgents, useDirectories, useHosts, useSkills, why } from "~/data";
+import { useMe } from "~/api/generated/auth/auth";
+import { where } from "~/filing";
 import { quota, usable, type Account } from "~/api/accounts";
 import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
@@ -958,6 +960,69 @@ export function pinnedAccountFits(
   return accounts.some((a) => a.id === account && a.kind === agent && usable(a));
 }
 
+/**
+ * The directory something is filed in, off its path: the first two labels.
+ *
+ * `u/kevin`, `d/platform` — the permission root, which is what "filed in"
+ * means (`docs/paths-and-ownership.md` §1) and the scope a profile's name has
+ * to be free in (`roles_name_in_directory`).
+ */
+export function filedIn(path: string): string {
+  return path.split("/").slice(0, 2).join("/");
+}
+
+/**
+ * Whichever profile already has this name where this one would be filed, by
+ * the name it carries.
+ *
+ * **The server is what enforces this** — `roles_name_in_directory`, and the
+ * sentences `crate::roles` reads off it — and this is here so that Save is not
+ * a button that looks live and comes back refused. The same division
+ * `filing.ts` keeps for `mayMove`: one question, asked on both sides, and the
+ * two have to agree.
+ *
+ * `where` is `null` when the destination is not known yet — `useMe()` has not
+ * answered, so the person's own root cannot be spelled. No opinion rather than
+ * a guess: an unanswered query is not an answer (`pinnedAccountFits` says the
+ * same about an account list), and the server still refuses what this cannot
+ * see.
+ *
+ * It can only ever name a profile this person already has in front of them,
+ * which is the whole reason the rule is scoped to a directory: a check across
+ * the installation would have to answer out of rows they cannot see, and "that
+ * name is taken" would then be a way to find out what exists in somebody
+ * else's space.
+ */
+export function nameTakenBy(
+  name: string,
+  where: string | null,
+  self: string | undefined,
+  all: Role[],
+): string | null {
+  const wanted = name.trim().toLowerCase();
+  if (!wanted || !where) return null;
+  return (
+    all.find(
+      (r) => r.id !== self && filedIn(r.path) === where && r.name.trim().toLowerCase() === wanted,
+    )?.name ?? null
+  );
+}
+
+/**
+ * What a taken name says, in the chip language the rest of the app uses.
+ *
+ * `where` is `yours` or `d/platform` (`filing.ts`), and the two read as
+ * different sentences: *you already have one* is the personal case, and the
+ * directory is worth naming in the other because somebody else may be the one
+ * who filed it there.
+ */
+export function nameTakenSays(held: string, chip: string): string {
+  const clash = "Two profiles filed together can’t share a name.";
+  return chip === "yours"
+    ? `You already have a profile called “${held}”. ${clash}`
+    : `“${held}” is already filed in ${chip}. ${clash}`;
+}
+
 function Editor({
   state,
   all,
@@ -1121,6 +1186,29 @@ function Editor({
   const shared = existing ? !!state.path?.startsWith("d/") : !!draft.directory;
   const skills = useSkillSources(draft, shared);
 
+  /* Where this profile would be filed, and whether its name is free there.
+
+     A name is one profile within one directory, and the destination is what
+     decides — not where a create passes through, which is the distinction the
+     server had to be changed for too (`Roles::create_filed`). So an existing
+     profile is judged where it is filed, a new one where it is being filed,
+     and a new one in your own space needs your own root spelled out: `all`
+     holds somebody else's `u/ana/…` profiles as readily as yours, and reading
+     a `u/` prefix as *mine* is a mistake this repository has already made four
+     times (`docs/paths-and-ownership.md` §8). */
+  const me = useMe();
+  const destination = existing
+    ? (state.path ? filedIn(state.path) : null)
+    : draft.directory
+      ? (() => {
+          const slug = dirs.find((d) => d.id === draft.directory)?.slug;
+          return slug ? `d/${slug}` : null;
+        })()
+      : me.data?.user?.slug
+        ? `u/${me.data.user.slug}`
+        : null;
+  const taken = nameTakenBy(draft.name, destination, state.id, all);
+
   const set = <K extends keyof NewRole>(k: K, v: NewRole[K]) => setDraft((d) => ({ ...d, [k]: v }));
   // Pin one run control, or clear it back to the engine's default (null).
   const setSetting = (kind: ControlKind, v: string | null) =>
@@ -1202,7 +1290,7 @@ function Editor({
      legal as absent — the subscription always was (`api/roles.rs:25`: "Absent
      is fine — it means the owner's default at launch"), which made Save dead
      with nothing on screen saying which field was holding it. */
-  const valid = draft.name.trim().length > 0 && draft.does.trim().length > 0;
+  const valid = draft.name.trim().length > 0 && draft.does.trim().length > 0 && !taken;
 
   const save = async () => {
     setBusy(true);
@@ -1273,6 +1361,15 @@ function Editor({
             placeholder="reviewer"
             className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
           />
+          {/* Said here rather than at the foot, because the field at fault is
+              the one above it — and before Save rather than after, which is
+              what makes it worth saying at all: the server refuses this
+              either way. */}
+          {taken && (
+            <p className="text-meta text-brick">
+              {nameTakenSays(taken, where(destination, me.data?.user))}
+            </p>
+          )}
         </Field>
 
         <Field
