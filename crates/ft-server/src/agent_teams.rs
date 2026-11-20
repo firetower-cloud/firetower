@@ -951,32 +951,48 @@ impl AgentTeams {
             reason it is caught here rather than left to surface as a 500.
 
             `agent_team_one_profile_per_parent` is checked per statement,
-            and the updates above go one at a time — so two seats under one
-            position that **trade** profiles collide halfway through: the
-            first takes the second's profile while the second is still
-            holding it. The tree being saved is legal, `check` passes it,
-            and the save still cannot be done in one pass.
+            and the writes above go one at a time, so the condition is:
+            **a kept seat taking a profile that any other row under the
+            same parent still holds.** The tree being saved is legal,
+            `check` passes it, and the save still cannot be done in one
+            pass.
 
-            There is no ordering that fixes a two-cycle and no partial
-            deferrable constraint in Postgres to defer it with, so the
-            honest answer is a sentence that says what to do instead.
-            Everything else that index refuses, `check` has already
-            refused with a better message.
+            **"Still holds" includes a row this save is removing**, and
+            that case is probably the commoner one: the `DELETE` is last on
+            purpose — a departing seat with a kept child under it would
+            cascade the child away before the write re-parents it — so
+            somebody who removes a seat and points another at the profile
+            it was holding collides with a row that is on its way out.
+            Nothing is trading there, which is why the sentence cannot say
+            "trade": on #492's map, remove-and-reassign is ordinary
+            housekeeping and an actual swap is rare.
 
-            **And the advice has to be advice that works.** "Change one and
-            then the other" does not: with only the two profiles between
-            the two seats, either half on its own is the same collision.
-            Removing a seat and adding it back is two saves that each hold,
-            because by the second one nothing is still holding the profile
-            being taken. The test walks exactly that path. */
+            A true swap is the other shape, and neither has an ordering
+            that fixes it — a cycle has no safe first write, and Postgres
+            has no partial deferrable constraint to defer the check with.
+            So the honest answer is a sentence that states its own
+            condition and names a next step. Everything else that index
+            refuses, `check` has already refused with a better message.
+
+            **And the step has to be one that works, and to say when it
+            needs repeating.** "Change one and then the other" does not
+            work on a swap: with only two profiles between two seats,
+            either half on its own is the same collision. Giving the
+            profile up first does work, in both shapes — and a longer chain
+            of reassignments needs that step more than once, which is worth
+            saying rather than leaving somebody to meet the same sentence
+            twice and think nothing is happening. */
             if let Err(e) = write_tree(&mut tx, id, &new.lead, true, &mut kept).await {
-                return Err(if traded_profiles(&e) {
+                return Err(if held_twice_under_one_parent(&e) {
                     Refused(
-                        "two of these positions report to the same one and would trade \
-                         profiles, which cannot be done in a single save — for a moment both \
-                         seats would hold the same profile, and a lead hands work off by name. \
-                         Remove one of the two and save, then add it back with the other's \
-                         profile."
+                        "a position this save keeps would take a profile that another position \
+                         reporting to the same one still holds, so for a moment two seats there \
+                         would hold it — and a lead hands work off by name, so which of them was \
+                         meant would have no answer. That includes a position this save removes: \
+                         changes are written before removals. Save it in two steps — first the \
+                         change that gives the profile up, which is either removing that \
+                         position or pointing it at something else, then the change that takes \
+                         it. A longer chain of reassignments needs that step more than once."
                             .into(),
                     )
                     .into()
@@ -1073,13 +1089,18 @@ impl AgentTeams {
     }
 }
 
-/// Whether a failed write is two sibling seats trading profiles mid-save.
+/// Whether a failed write is a kept seat taking a profile another row under
+/// the same parent still holds.
+///
+/// Named for the condition rather than for the first case anybody hit: a swap
+/// is one shape of it, and a seat removed in the same save as its profile is
+/// reassigned is the other, probably commoner, one.
 ///
 /// Read off the constraint the database names rather than matched in the
 /// message text, so it stays true if the wording of either moves. Every other
 /// way to reach `agent_team_one_profile_per_parent` is one [`check`] has
 /// already refused by the time anything is written.
-fn traded_profiles(e: &anyhow::Error) -> bool {
+fn held_twice_under_one_parent(e: &anyhow::Error) -> bool {
     e.downcast_ref::<sqlx::Error>()
         .and_then(|e| e.as_database_error())
         .and_then(|e| e.constraint())
@@ -2636,16 +2657,25 @@ mod tests {
     }
 
     /// **The one cost of `agent_team_one_profile_per_parent`**, pinned so it
-    /// is a known sentence rather than a 500 somebody discovers.
+    /// is a known sentence rather than a 500 somebody discovers — and pinned
+    /// in **both** shapes it takes, because the sentence has to describe its
+    /// own condition rather than the first case anybody hit.
     ///
-    /// Two seats under one position cannot *trade* profiles in a single save:
-    /// the updates go one statement at a time, so the first takes the second's
-    /// profile while the second is still holding it. The tree asked for is
-    /// legal — `check` passes it — and the save is still refused, because
-    /// there is no ordering that fixes a two-cycle and no partial deferrable
-    /// constraint to defer it with.
+    /// The condition is a kept seat taking a profile that any other row under
+    /// the same parent still holds. Two of those:
+    ///
+    /// * two seats **trading** profiles, where the first takes the second's
+    ///   while the second is still holding it;
+    /// * a seat **removed in the same save** as its profile is given to
+    ///   another, which collides because the `DELETE` is last on purpose — a
+    ///   departing seat with a kept child under it would cascade the child
+    ///   away before the write re-parents it. Nothing is trading there, and on
+    ///   #492's map it is the likelier edit of the two.
+    ///
+    /// Both trees are legal; `check` passes them. Both are refused, and the
+    /// step the sentence names gets each of them done.
     #[tokio::test]
-    async fn two_seats_under_one_position_cannot_trade_profiles_in_one_save() {
+    async fn a_kept_seat_cannot_take_a_profile_another_row_still_holds() {
         let w = world().await;
         let lead = w.profile("Orchestrator").await;
         let (a, b) = (w.profile("Engineer").await, w.profile("Reviewer").await);
@@ -2699,10 +2729,22 @@ mod tests {
             no.downcast_ref::<Refused>().is_some(),
             "a sentence rather than a 500: {said}"
         );
-        assert!(said.contains("trade"), "{said}");
         assert!(
-            said.contains("Remove one of the two and save"),
-            "and what to do instead — advice that works: {said}"
+            said.contains("still holds"),
+            "it states its own condition rather than one shape of it: {said}"
+        );
+        assert!(
+            said.contains("includes a position this save removes"),
+            "including the shape where nothing is trading: {said}"
+        );
+        assert!(
+            said.contains("gives the profile up"),
+            "and the step that works: {said}"
+        );
+        assert!(
+            said.contains("more than once"),
+            "and that a longer chain needs it repeated, so nobody meets this twice and \
+             thinks nothing is happening: {said}"
         );
 
         // Nothing moved — the transaction took the whole save with it.
@@ -2757,7 +2799,7 @@ mod tests {
         let now = w.teams.positions(&w.me, id.as_str()).await.unwrap();
         assert_eq!(
             now.iter().map(|p| p.profile.clone()).collect::<Vec<_>>(),
-            vec![lead, b, a],
+            vec![lead.clone(), b.clone(), a.clone()],
             "the two have traded"
         );
         assert_eq!(
@@ -2767,6 +2809,64 @@ mod tests {
         assert_ne!(
             now[2].id, seats[2].id,
             "and the one removed and added back is a new seat, which is what it is"
+        );
+
+        /* **The other shape, where nothing is trading at all.** One seat is
+        removed and another is pointed at the profile it was holding — which
+        on #492's map is ordinary housekeeping rather than an exotic edit, and
+        is the likelier of the two to be met. It collides because the `DELETE`
+        is last: the departing seat still holds the profile when the kept one
+        takes it.
+
+        The team is `[b, a]` here, with `now[1]` the seat that stayed. Drop
+        `now[2]` (holding `a`) and point `now[1]` at `a` in the same save. */
+        let no = w
+            .teams
+            .write(
+                &w.me,
+                id.as_str(),
+                &saved(vec![child(Some(&now[1].id), &a)]),
+            )
+            .await
+            .expect_err("the removal is written after the change, so they collide");
+        assert!(
+            no.downcast_ref::<Refused>().is_some(),
+            "and it is the same sentence rather than a 500: {no:#}"
+        );
+        assert!(
+            format!("{no:#}").contains("includes a position this save removes"),
+            "which says so, because nothing here is trading: {no:#}"
+        );
+
+        // And the step the sentence names gets it done: give the profile up
+        // first — the removal on its own — then take it.
+        assert!(w
+            .teams
+            .write(
+                &w.me,
+                id.as_str(),
+                &saved(vec![child(Some(&now[1].id), &b)])
+            )
+            .await
+            .unwrap());
+        assert!(w
+            .teams
+            .write(
+                &w.me,
+                id.as_str(),
+                &saved(vec![child(Some(&now[1].id), &a)])
+            )
+            .await
+            .unwrap());
+        let end = w.teams.positions(&w.me, id.as_str()).await.unwrap();
+        assert_eq!(
+            end.iter().map(|p| p.profile.clone()).collect::<Vec<_>>(),
+            vec![lead, a.clone()],
+            "one seat, holding the profile the removed one had"
+        );
+        assert_eq!(
+            end[1].id, seats[1].id,
+            "and it is still the seat it always was"
         );
     }
 }

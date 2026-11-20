@@ -135,12 +135,19 @@ rather than at a spawn that cannot be answered:
   then be neither saved nor spawned into by name. The constraint belongs to
   this rule and landed with #491 because branches were stacked on this one.
 
-  One cost, and it is the index's: two existing seats under one position
-  cannot **trade** profiles in a single save, because the updates go one
-  statement at a time and the first half of a swap collides with the second
-  half before it has moved. The save is refused with a sentence that says to
-  remove one of the two, save, and add it back with the other's profile —
-  which works where "change one and then the other" does not.
+  One cost, and it is the index's. The constraint is checked per statement and
+  a save writes kept seats one at a time, so **a kept seat cannot take a
+  profile that any other row under the same parent still holds** — including a
+  row the same save is removing, because the `DELETE` is last on purpose (a
+  departing seat with a kept child under it would cascade the child away
+  before the write re-parents it). Two shapes reach it: two seats *trading*
+  profiles, and — likelier on the map — one seat removed while another is
+  pointed at the profile it was holding, where nothing is trading at all.
+
+  Both are refused with a sentence that states that condition and names the
+  step: save the change that gives the profile up first, then the change that
+  takes it. A longer chain of reassignments needs that step more than once,
+  and the sentence says so.
 
 `GET /api/v1/agent-teams/limits` reports both, so an editor can refuse a
 twelfth level where it was drawn.
