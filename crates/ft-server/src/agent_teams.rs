@@ -935,7 +935,43 @@ impl AgentTeams {
             // still hangs off a seat that is going, so the cascade takes only
             // the subtrees that were actually removed.
             let mut kept = Vec::new();
-            write_tree(&mut tx, id, &new.lead, true, &mut kept).await?;
+            /* **The one collision a legal tree can produce**, and the
+            reason it is caught here rather than left to surface as a 500.
+
+            `agent_team_one_profile_per_parent` is checked per statement,
+            and the updates above go one at a time — so two seats under one
+            position that **trade** profiles collide halfway through: the
+            first takes the second's profile while the second is still
+            holding it. The tree being saved is legal, `check` passes it,
+            and the save still cannot be done in one pass.
+
+            There is no ordering that fixes a two-cycle and no partial
+            deferrable constraint in Postgres to defer it with, so the
+            honest answer is a sentence that says what to do instead.
+            Everything else that index refuses, `check` has already
+            refused with a better message.
+
+            **And the advice has to be advice that works.** "Change one and
+            then the other" does not: with only the two profiles between
+            the two seats, either half on its own is the same collision.
+            Removing a seat and adding it back is two saves that each hold,
+            because by the second one nothing is still holding the profile
+            being taken. The test walks exactly that path. */
+            if let Err(e) = write_tree(&mut tx, id, &new.lead, true, &mut kept).await {
+                return Err(if traded_profiles(&e) {
+                    Refused(
+                        "two of these positions report to the same one and would trade \
+                         profiles, which cannot be done in a single save — for a moment both \
+                         seats would hold the same profile, and a lead hands work off by name. \
+                         Remove one of the two and save, then add it back with the other's \
+                         profile."
+                            .into(),
+                    )
+                    .into()
+                } else {
+                    e
+                });
+            }
             sqlx::query(
                 "DELETE FROM agent_team_positions WHERE team_id = $1 AND NOT (id = ANY($2))",
             )
@@ -1023,6 +1059,19 @@ impl AgentTeams {
         }
         Ok(())
     }
+}
+
+/// Whether a failed write is two sibling seats trading profiles mid-save.
+///
+/// Read off the constraint the database names rather than matched in the
+/// message text, so it stays true if the wording of either moves. Every other
+/// way to reach `agent_team_one_profile_per_parent` is one [`check`] has
+/// already refused by the time anything is written.
+fn traded_profiles(e: &anyhow::Error) -> bool {
+    e.downcast_ref::<sqlx::Error>()
+        .and_then(|e| e.as_database_error())
+        .and_then(|e| e.constraint())
+        == Some("agent_team_one_profile_per_parent")
 }
 
 /// Write a whole tree, parents before children.
@@ -2556,5 +2605,140 @@ mod tests {
             .unwrap();
         assert_eq!(after.positions, 2, "the seat is still there");
         assert_eq!(after.auto_added, 0, "and nobody has to review it again");
+    }
+
+    /// **The one cost of `agent_team_one_profile_per_parent`**, pinned so it
+    /// is a known sentence rather than a 500 somebody discovers.
+    ///
+    /// Two seats under one position cannot *trade* profiles in a single save:
+    /// the updates go one statement at a time, so the first takes the second's
+    /// profile while the second is still holding it. The tree asked for is
+    /// legal — `check` passes it — and the save is still refused, because
+    /// there is no ordering that fixes a two-cycle and no partial deferrable
+    /// constraint to defer it with.
+    #[tokio::test]
+    async fn two_seats_under_one_position_cannot_trade_profiles_in_one_save() {
+        let w = world().await;
+        let lead = w.profile("Orchestrator").await;
+        let (a, b) = (w.profile("Engineer").await, w.profile("Reviewer").await);
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named(
+                    "Platform",
+                    seat(&lead, vec![seat(&a, vec![]), seat(&b, vec![])]),
+                ),
+            )
+            .await
+            .unwrap();
+        let seats = w.teams.positions(&w.me, id.as_str()).await.unwrap();
+        let swapped = NewAgentTeam {
+            name: "Platform".into(),
+            lead: NewPosition {
+                id: Some(seats[0].id.clone()),
+                profile: lead.clone(),
+                instructions: String::new(),
+                children: vec![
+                    NewPosition {
+                        id: Some(seats[1].id.clone()),
+                        profile: b.clone(),
+                        instructions: String::new(),
+                        children: vec![],
+                    },
+                    NewPosition {
+                        id: Some(seats[2].id.clone()),
+                        profile: a.clone(),
+                        instructions: String::new(),
+                        children: vec![],
+                    },
+                ],
+            },
+            directory: None,
+        };
+        assert!(check(&swapped).is_ok(), "the tree asked for is a legal one");
+
+        let no = w
+            .teams
+            .write(&w.me, id.as_str(), &swapped)
+            .await
+            .expect_err("but not in one pass");
+        let said = format!("{no:#}");
+        assert!(
+            no.downcast_ref::<Refused>().is_some(),
+            "a sentence rather than a 500: {said}"
+        );
+        assert!(said.contains("trade"), "{said}");
+        assert!(
+            said.contains("Remove one of the two and save"),
+            "and what to do instead — advice that works: {said}"
+        );
+
+        // Nothing moved — the transaction took the whole save with it.
+        let after = w.teams.positions(&w.me, id.as_str()).await.unwrap();
+        assert_eq!(
+            after.iter().map(|p| p.profile.clone()).collect::<Vec<_>>(),
+            vec![lead.clone(), a.clone(), b.clone()],
+            "and the team is exactly as it was"
+        );
+
+        /* **The path the refusal names, walked.** Remove one of the two and
+        save; then add it back with the other's profile. Both saves hold,
+        because by the second one nothing is still holding the profile being
+        taken — which is the whole reason this is the advice and "change one
+        and then the other" is not: either half of a straight swap is the
+        same collision again. */
+        let child = |seat: Option<&str>, profile: &str| NewPosition {
+            id: seat.map(str::to_string),
+            profile: profile.to_string(),
+            instructions: String::new(),
+            children: vec![],
+        };
+        let saved = |children: Vec<NewPosition>| NewAgentTeam {
+            name: "Platform".into(),
+            lead: NewPosition {
+                id: Some(seats[0].id.clone()),
+                profile: lead.clone(),
+                instructions: String::new(),
+                children,
+            },
+            directory: None,
+        };
+        assert!(w
+            .teams
+            .write(
+                &w.me,
+                id.as_str(),
+                &saved(vec![child(Some(&seats[1].id), &a)])
+            )
+            .await
+            .unwrap());
+        assert!(w
+            .teams
+            .write(
+                &w.me,
+                id.as_str(),
+                &saved(vec![child(Some(&seats[1].id), &b), child(None, &a)])
+            )
+            .await
+            .unwrap());
+
+        let now = w.teams.positions(&w.me, id.as_str()).await.unwrap();
+        assert_eq!(
+            now.iter().map(|p| p.profile.clone()).collect::<Vec<_>>(),
+            vec![lead, b, a],
+            "the two have traded"
+        );
+        assert_eq!(
+            now[1].id, seats[1].id,
+            "the seat that stayed kept its id, so a session standing in it still is"
+        );
+        assert_ne!(
+            now[2].id, seats[2].id,
+            "and the one removed and added back is a new seat, which is what it is"
+        );
     }
 }

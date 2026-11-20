@@ -115,3 +115,56 @@ comment on table agent_team_seeding is
   'That teams were seeded from session lineage for this organisation, when, and how many. The row is the idempotency and the start of the compatibility window.';
 comment on column agent_team_seeding.seeded_at is
   'When the cut happened. The compatibility window runs from here, so an installation that upgrades late still gets a whole one.';
+
+-- **One profile at most once among one position's children**, held by the
+-- database rather than only by the server.
+--
+-- **The rule is #490's, not #491's.** `docs/agent-teams.md` states it there —
+-- *a lead hands work off by name, so two sibling seats of one profile would be
+-- a name that does not say which is meant* — and `agent_teams::check` enforces
+-- it on every write. What was missing is a constraint, and the compatibility
+-- window above is what found that out: its insert read `WHERE NOT EXISTS` and
+-- then wrote, which is two statements' worth of racing in one. **Two spawns
+-- naming the same profile at the same moment both saw no seat and both added
+-- one** — and a lead dispatching two children at once is the ordinary shape of
+-- parallel work, so it is likeliest exactly when the window is doing its job.
+--
+-- The state that produced is worse than a duplicate row. `check` forbids it, so
+-- the team can no longer be **saved**; and the profile can no longer be
+-- **spawned by name**, because the name does not say which seat is meant. A
+-- race during the window could brick delegation to a profile and lock editing
+-- of the team holding it, with nothing to say why.
+--
+-- So the invariant moves to where no interleaving can get past it. A
+-- check-then-write cannot be made safe by widening the transaction or by
+-- retrying; it is made safe by the database refusing the second write.
+--
+-- **Partial, and that is load-bearing.** A lead's `parent_id` is null, and a
+-- unique index treats nulls as distinct — so an unqualified index would not
+-- constrain leads at all and the `where` clause only says so out loud. Leads
+-- are already covered, and better: `agent_team_one_lead` allows exactly one per
+-- team.
+--
+-- **It is in #491's migration because of the stacking, not because it belongs
+-- here.** Three branches now sit on `agent/team-management-eng-teams`;
+-- amending its schema underneath them would invalidate work in flight, which
+-- is a worse trade than an index one file further down the ordering. The two
+-- have no functional dependency — this constrains a table that one created —
+-- so only the order has to be distinct.
+--
+-- Nothing can already violate it: `agent_team_positions` is new in this
+-- unreleased effort and `check` has refused the shape since the table existed,
+-- so there is no installation whose rows this could fail to apply against.
+--
+-- One cost, named rather than discovered: two existing seats under one parent
+-- can no longer **trade** profiles in a single save. `write_tree` updates kept
+-- rows one statement at a time, so the first half of a swap collides with the
+-- second half before it has moved. The final tree is legal and the save is
+-- refused anyway — `AgentTeams::write` turns that collision into a sentence
+-- rather than a 500, and says to do it in two steps.
+create unique index agent_team_one_profile_per_parent
+    on agent_team_positions (parent_id, profile_id)
+    where parent_id is not null;
+
+comment on index agent_team_one_profile_per_parent is
+  'One profile at most once among one position''s children, so a lead handing work off by name always names one seat. #490''s rule; the constraint landed with #491 because branches were stacked on it.';

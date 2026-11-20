@@ -192,6 +192,7 @@ async fn closes_at(state: &AppState, team: &str) -> Result<Option<DateTime<Utc>>
 /// name resolves and the seat still cannot exist.
 pub async fn admit(
     state: &AppState,
+    owner: &str,
     standing: &Standing,
     window: &Window,
     wanted: &str,
@@ -239,13 +240,26 @@ pub async fn admit(
         );
     }
 
-    /* **One profile at most once among one position's children.** The
-    insert is conditional rather than checked-then-written, so two spawns
-    naming the same profile at the same moment cannot both add a seat. No
-    row inserted means a seat already exists — which happens when the seat
-    references a profile the *owner* cannot see, so `reports` dropped it and
-    the name never resolved. Falling through to the ordinary not-found is
-    right: the fix is the profile's filing, not the team's shape. */
+    /* **One profile at most once among one position's children, arbitrated
+    by the database.**
+
+    This read `WHERE NOT EXISTS` and then wrote, which is a check and a
+    write with a gap between them — and the gap is where two spawns at once
+    both saw no seat and both added one. **A lead dispatching two children
+    at the same time is the ordinary shape of parallel work**, so it was
+    likeliest exactly when the window was doing its job, and what it
+    produced was worse than a duplicate row: `check` forbids two sibling
+    seats of one profile, so the team could no longer be saved, and the
+    profile could no longer be spawned by name, because the name no longer
+    said which seat was meant.
+
+    A check-then-write cannot be made safe by widening the transaction or
+    by retrying. `agent_team_one_profile_per_parent` is what makes it safe,
+    and this is `ON CONFLICT DO NOTHING` against it: the loser writes
+    nothing instead of raising.
+
+    The conflict target names the index's own predicate, which is what lets
+    Postgres infer a *partial* unique index as the arbiter. */
     let seat = ft_core::PositionId::new();
     let written = sqlx::query(
         "INSERT INTO agent_team_positions \
@@ -254,8 +268,8 @@ pub async fn admit(
                 coalesce((SELECT max(ord) + 1 FROM agent_team_positions \
                            WHERE parent_id = $4), 0), \
                 now() \
-          WHERE NOT EXISTS (SELECT 1 FROM agent_team_positions \
-                             WHERE parent_id = $4 AND profile_id = $3)",
+         ON CONFLICT (parent_id, profile_id) WHERE parent_id IS NOT NULL \
+         DO NOTHING",
     )
     .bind(seat.as_str())
     .bind(&standing.team)
@@ -263,8 +277,25 @@ pub async fn admit(
     .bind(&standing.position)
     .execute(state.db.pool())
     .await?;
+
+    /* **Losing the race is not a refusal — the seat is there, so carry
+    on.** Somebody else's spawn added it a moment ago, which is the answer
+    this one wanted; telling the agent its profile does not exist because
+    another agent got to the same conclusion first would be a flake it
+    could do nothing about.
+
+    Read back through `reports` rather than by the id just minted: that is
+    the same double intersection every other read makes — the team and the
+    profile, each through `filed_where` — so what comes back has passed the
+    check that makes a seat a report. `None` if it somehow has not, which
+    falls through to the ordinary not-found. Fail closed. */
     if written.rows_affected() == 0 {
-        return Ok(None);
+        return Ok(state
+            .agent_teams
+            .reports(owner, &standing.position)
+            .await?
+            .into_iter()
+            .find(|r| r.profile.id == found.id));
     }
 
     tracing::info!(

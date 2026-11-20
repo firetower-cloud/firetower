@@ -11485,3 +11485,163 @@ async fn the_cut_reads_real_lineage_and_leaves_running_sessions_on_the_old_path(
 
     state.fleet.stop_supervising(&host.id).await;
 }
+
+/// **Two spawns at once add one seat, not two** — the defect QA reproduced
+/// against the real table, and the constraint that makes it impossible.
+///
+/// The window's insert used to read `WHERE NOT EXISTS` and then write, which is
+/// a check and a write with a gap between them. Two spawns naming one profile
+/// at the same moment both saw no seat and both added one, and what that
+/// produced was worse than a duplicate row: `check` forbids two sibling seats
+/// of one profile, so the team could no longer be **saved**, and the profile
+/// could no longer be **spawned by name**, because the name no longer said
+/// which seat was meant. A lead dispatching two children at once is the
+/// ordinary shape of parallel work, so it was likeliest exactly when the window
+/// was doing its job.
+///
+/// **This races it rather than asserting the index exists.** Four concurrent
+/// `admit` calls, which is the function that raced, through the real pool
+/// against the real table — a test that only read `pg_indexes` would not have
+/// caught the original bug and would not catch its return. The direct insert at
+/// the end is the invariant underneath: whatever order the four happened to
+/// take, the database would have refused the second seat.
+#[tokio::test]
+async fn two_spawns_naming_one_profile_at_once_add_one_seat() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![]).await;
+    let reviewer = a_profile(&state, &owner, "Reviewer").await;
+    // A lead and nobody under it, so the count afterwards is unambiguous.
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "lead": { "profile": orchestrator, "children": [] },
+        }),
+    )
+    .await;
+    as_if_seeded(&state, &team, 0).await;
+
+    let standing = state
+        .agent_teams
+        .lead_of(&owner, &team)
+        .await
+        .unwrap()
+        .unwrap();
+    let profile = state
+        .roles
+        .one(&owner, &orchestrator, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    let window =
+        crate::agent_teams::window::open_at(&state, &owner, Some(&profile), Some(&standing))
+            .await
+            .unwrap()
+            .expect("the window is open");
+
+    // All four at once, each on its own task so the pool hands them real
+    // concurrent connections rather than interleaving one.
+    let mut racing = Vec::new();
+    for _ in 0..4 {
+        let (state, owner, standing, window) = (
+            state.clone(),
+            owner.clone(),
+            standing.clone(),
+            window.clone(),
+        );
+        racing.push(tokio::spawn(async move {
+            crate::agent_teams::window::admit(&state, &owner, &standing, &window, "Reviewer").await
+        }));
+    }
+    let mut seats = Vec::new();
+    for one in racing {
+        let admitted = one
+            .await
+            .expect("no task panicked")
+            .expect("losing the race is not a refusal — the seat is there either way")
+            .expect("and every one of them resolved the name");
+        assert_eq!(admitted.profile.id, reviewer);
+        seats.push(admitted.position);
+    }
+    assert!(
+        seats.windows(2).all(|p| p[0] == p[1]),
+        "every spawn stands in the same seat: {seats:?}"
+    );
+
+    let now = team_now(&state, &owner, &team).await;
+    assert_eq!(now.positions, 2, "the lead, and one Reviewer — not four");
+    assert_eq!(now.auto_added, 1);
+    let held = state.agent_teams.positions(&owner, &team).await.unwrap();
+    assert_eq!(
+        held.iter().filter(|p| p.profile == reviewer).count(),
+        1,
+        "one seat for one profile under one position"
+    );
+
+    // **And the team is still saveable and still spawnable**, which is what
+    // the duplicate took away. The `PUT` keeps the seat the window added,
+    // which is also what reviewing one means.
+    assert!(state
+        .agent_teams
+        .write(
+            &owner,
+            &team,
+            &serde_json::from_value(serde_json::json!({
+                "name": "Orchestrator",
+                "lead": {
+                    "id": standing.position,
+                    "profile": orchestrator,
+                    "children": [{ "id": held[1].id, "profile": reviewer }],
+                },
+            }))
+            .unwrap()
+        )
+        .await
+        .unwrap());
+    assert_eq!(
+        team_now(&state, &owner, &team).await.auto_added,
+        0,
+        "and the save is the review"
+    );
+
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "r1",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect("one seat, so the name says which one is meant");
+
+    /* The invariant the four above rest on, asserted where no scheduler
+    can hide it: the database itself refuses a second seat for one profile
+    under one position. Remove `agent_team_one_profile_per_parent` and this
+    line fails on its own. */
+    let refused = sqlx::query(
+        "INSERT INTO agent_team_positions (id, team_id, profile_id, parent_id, ord) \
+         VALUES ($1, $2, $3, $4, 9)",
+    )
+    .bind(ft_core::PositionId::new().as_str())
+    .bind(&team)
+    .bind(&reviewer)
+    .bind(&standing.position)
+    .execute(state.db.pool())
+    .await
+    .expect_err("two sibling seats of one profile are not a state this table can hold");
+    assert_eq!(
+        refused
+            .as_database_error()
+            .and_then(|e| e.constraint())
+            .unwrap_or_default(),
+        "agent_team_one_profile_per_parent",
+        "and it is that index which refused it: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}

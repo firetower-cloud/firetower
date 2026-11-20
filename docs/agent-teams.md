@@ -126,7 +126,21 @@ rather than at a spawn that cannot be answered:
 - **One profile at most once among one position's children.** A lead hands work
   off by name, so two sibling seats of one profile would be a name that does
   not say which is meant. The same rule profile names get within a directory,
-  one level down.
+  one level down. **The database holds this one too** —
+  `agent_team_one_profile_per_parent`, a partial unique index on
+  `(parent_id, profile_id)` — because a check in the server is a check with a
+  gap after it, and the compatibility window's insert raced that gap: two
+  spawns naming one profile at the same moment both saw no seat and both added
+  one. What that produced was worse than a duplicate row, since the team could
+  then be neither saved nor spawned into by name. The constraint belongs to
+  this rule and landed with #491 because branches were stacked on this one.
+
+  One cost, and it is the index's: two existing seats under one position
+  cannot **trade** profiles in a single save, because the updates go one
+  statement at a time and the first half of a swap collides with the second
+  half before it has moved. The save is refused with a sentence that says to
+  remove one of the two, save, and add it back with the other's profile —
+  which works where "change one and then the other" does not.
 
 `GET /api/v1/agent-teams/limits` reports both, so an editor can refuse a
 twelfth level where it was drawn.

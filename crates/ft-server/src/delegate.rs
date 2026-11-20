@@ -644,8 +644,14 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
                 seat, which has nothing above it. */
                 let admitted = match (&standing, &window) {
                     (Some(standing), Some(window)) => {
-                        crate::agent_teams::window::admit(state, standing, window, wanted.trim())
-                            .await?
+                        crate::agent_teams::window::admit(
+                            state,
+                            lead.owner.as_str(),
+                            standing,
+                            window,
+                            wanted.trim(),
+                        )
+                        .await?
                     }
                     _ => None,
                 };
