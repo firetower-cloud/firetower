@@ -10011,12 +10011,19 @@
           "path",
           "name",
           "positions",
+          "autoAdded",
+          "seeded",
           "mayWrite",
           "mayShare",
           "createdAt",
           "updatedAt"
         ],
         "properties": {
+          "autoAdded": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many of those positions **nobody chose** — added by a spawn during\nthe compatibility window.\n\nHere rather than only on the tree so a list row can say *2 added\nautomatically* without reading it. Zero for every team somebody drew,\nand zero again for a seeded one the moment somebody saves it, because a\nsave is what reviewing a team means. See `agent_teams/window.rs`."
+          },
           "createdAt": {
             "type": "string",
             "format": "date-time"
@@ -10056,6 +10063,10 @@
             "type": "integer",
             "format": "int64",
             "description": "How many positions it holds, the lead included."
+          },
+          "seeded": {
+            "type": "boolean",
+            "description": "Whether this team was **materialised from what its lead profile had\nactually spawned**, rather than drawn by somebody.\n\nTrue for the teams #491's seeding produced at the cut, and the reason\nto say so on the wire is that a team nobody authored deserves a look\nbefore it is trusted — it is a reading of history, not a decision."
           },
           "updatedAt": {
             "type": "string",
@@ -15448,6 +15459,14 @@
           "order"
         ],
         "properties": {
+          "autoAddedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the compatibility window added this seat, if it did — **absent\nfor a seat a person chose.**\n\nThe mark the map draws, and the whole mitigation for a learning phase\nthat grows a team without anybody deciding. Saving the team clears it:\na save sends the whole tree with the whole tree on screen, so a marked\nseat kept through one is a seat somebody has now chosen."
+          },
           "id": {
             "type": "string"
           },

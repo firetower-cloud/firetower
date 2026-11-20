@@ -10,6 +10,16 @@
  * A team, as a list row reads it.
  */
 export interface AgentTeam {
+  /**
+     * How many of those positions **nobody chose** — added by a spawn during
+     * the compatibility window.
+     *
+     * Here rather than only on the tree so a list row can say *2 added
+     * automatically* without reading it. Zero for every team somebody drew,
+     * and zero again for a seeded one the moment somebody saves it, because a
+     * save is what reviewing a team means. See `agent_teams/window.rs`.
+     */
+  autoAdded: number;
   createdAt: string;
   id: string;
   /**
@@ -38,5 +48,14 @@ export interface AgentTeam {
   path: string;
   /** How many positions it holds, the lead included. */
   positions: number;
+  /**
+     * Whether this team was **materialised from what its lead profile had
+     * actually spawned**, rather than drawn by somebody.
+     *
+     * True for the teams #491's seeding produced at the cut, and the reason
+     * to say so on the wire is that a team nobody authored deserves a look
+     * before it is trusted — it is a reading of history, not a decision.
+     */
+  seeded: boolean;
   updatedAt: string;
 }

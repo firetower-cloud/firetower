@@ -1,9 +1,14 @@
 # Agent teams
 
 **Status:** built, first slice — the expand half of an expand/contract.
-`20261120130000_agent_teams.sql`, `crates/ft-server/src/agent_teams.rs`,
+`20261120130000_agent_teams.sql`, `20261120140000_agent_team_seeding.sql`,
+`crates/ft-server/src/agent_teams.rs` and `agent_teams/{seed,window}.rs`,
 `crates/ft-server/src/api/agent_teams.rs`, and the position-aware halves of
 `crates/ft-server/src/delegate.rs` and `api/sessions.rs`.
+
+Behind one flag for the compatibility window's duration —
+`FIRETOWER_AGENT_TEAMS`, on unless it is set to `off`. See
+[the window](#the-compatibility-window).
 
 An **agent team** is a name and the profile that leads it. It holds a tree of
 **positions**; a position references a profile, reports to another position,
@@ -121,10 +126,129 @@ rather than at a spawn that cannot be answered:
 - **One profile at most once among one position's children.** A lead hands work
   off by name, so two sibling seats of one profile would be a name that does
   not say which is meant. The same rule profile names get within a directory,
-  one level down.
+  one level down. **The database holds this one too** —
+  `agent_team_one_profile_per_parent`, a partial unique index on
+  `(parent_id, profile_id)` — because a check in the server is a check with a
+  gap after it, and the compatibility window's insert raced that gap: two
+  spawns naming one profile at the same moment both saw no seat and both added
+  one. What that produced was worse than a duplicate row, since the team could
+  then be neither saved nor spawned into by name. The constraint belongs to
+  this rule and landed with #491 because branches were stacked on this one.
+
+  One cost, and it is the index's. The constraint is checked per statement and
+  a save writes kept seats one at a time, so **a kept seat cannot take a
+  profile that any other row under the same parent still holds** — including a
+  row the same save is removing, because the `DELETE` is last on purpose (a
+  departing seat with a kept child under it would cascade the child away
+  before the write re-parents it). Two shapes reach it: two seats *trading*
+  profiles, and — likelier on the map — one seat removed while another is
+  pointed at the profile it was holding, where nothing is trading at all.
+
+  Both are refused with a sentence that states that condition and names the
+  step: save the change that gives the profile up first, then the change that
+  takes it. A longer chain of reassignments needs that step more than once,
+  and the sentence says so.
 
 `GET /api/v1/agent-teams/limits` reports both, so an editor can refuse a
 twelfth level where it was drawn.
+
+## Where the teams came from
+
+Nobody drew the teams that exist on the morning after the upgrade. They were
+**seeded from what each profile had actually spawned**, read out of session
+lineage: a session running profile P, a child session of it running profile Q,
+is one position — Q reporting to P.
+
+That is the only non-arbitrary materialisation available. A profile used to
+carry its own list of profiles it could hand work to, and the default for that
+list was empty, which meant *anything the owner can see, including profiles
+created later*. **That default cannot become a tree** — it is not a set of
+rows, it is a standing subscription to a set. A snapshot of everything visible
+would have handed somebody a fourteen-seat team on day one for a profile that
+only ever used three, and every one of those seats would be something nobody
+chose.
+
+Reading history has the property the deprecation needs instead: **anybody
+whose patterns continue sees no change at all.**
+
+| | |
+| --- | --- |
+| Which profiles get a team | every one with `can_delegate`, named after itself |
+| What a team holds | the profiles it has spawned, most recently first |
+| How deep | **one level**, because a delegated child cannot spawn today, so no deeper lineage exists to read |
+| A profile that never spawned | an **empty** team — a name, a lead, nothing under it. Not a missing one: the team is where reach is authored now |
+| A profile that cannot delegate | no team. It had no reach to preserve |
+| A profile that only spawned *itself* | an empty team. A profile may not report to itself, so seeding that would make a team nobody could save |
+| More than 64 spawned | the **63 most recently spawned**, with the rest left out and said in the log. Refusing the team would cost the profile all of its reach; raising the limit for migrated teams would make the limit a suggestion |
+| Where the team is filed | wherever its lead profile is filed, so exactly the people who can use the profile can see the team |
+
+Past 64, the 63 most recently spawned come across — the lead takes the
+sixty-fourth seat — and the rest are named in the log rather than dropped
+silently.
+
+`roles.delegate_scope` is deliberately not read: a profile that never spawned
+gets an empty team even when somebody had narrowed its scope, because a scope
+that was never exercised is a guess about intent the same way a visibility
+snapshot is. The scope is not lost — it is exactly what the window below
+admits from.
+
+The cut happens **once per installation**, recorded in `agent_team_seeding`:
+how many teams, how many positions, and when. A team deleted afterwards stays
+deleted, because a migration that keeps re-asserting itself is worse than one
+that was wrong once.
+
+## The compatibility window
+
+Seeding reads what a profile has done, which is still a guess. Somebody whose
+Manager handed work to a Reviewer once a quarter has a team with no Reviewer in
+it, and the first time that quarter comes round their setup would refuse — a
+break caused by a migration they did not ask for.
+
+So for **30 days after that installation's own cut**, a spawn of a profile a
+*seeded* team does not hold **succeeds and adds it**. Teams converge on real
+use rather than on a reading of history.
+
+A learning phase grows a team without anybody choosing, which *is* the
+unbounded reach this work removes, only slower. Four properties are what make
+it a migration aid rather than a reprieve:
+
+1. **It never grants reach the old path did not already grant.** What it
+   admits from is that session's own old answer — the profile's
+   `delegate_scope` intersected with what its owner can see, for a session a
+   person started whose profile is a Manager. Not "any profile".
+2. **Every seat it adds is marked**, with the time: `auto_added_at` on the
+   position, and a count on the team so a list row can say *2 added
+   automatically*. **Saving the team clears the marks**, which is what
+   reviewing one means — a save carries the whole tree, with the whole tree on
+   screen. There is deliberately no accept-this-seat endpoint.
+3. **Only a team nobody drew learns.** `agent_teams.seeded_at` is the
+   condition. A team authored after the cut is exactly what was authored, from
+   its first spawn onwards.
+4. **It closes.** `agent_teams::window::WINDOW_DAYS`, measured from
+   `agent_team_seeding.seeded_at` rather than from a date in the binary, so an
+   installation that upgrades late gets a whole window instead of one that
+   expired before it arrived.
+
+Where it does **not** reach, each being the old path's own boundary rather
+than a new rule: a delegated child (which could never spawn at all), a seat
+below the lead, a profile that was not a Manager, and a team somebody drew.
+
+Past the limit the refusal names the number and the screen. Past the window
+the refusal is the ordinary not-found, unchanged — out of reach reads as *does
+not exist* and lists what does report there. It says nothing about the window:
+an agent cannot act on a date, and naming a mechanism that has closed would
+send it looking for a way back in.
+
+**The flag.** `FIRETOWER_AGENT_TEAMS=off` turns the whole feature off for the
+window's duration — as do `0`, `no`, `false` and **an empty value**, which are
+`ft_cli`'s falsey spellings rather than a set invented here. Setting the
+variable to nothing is somebody turning something off, so it reads that way;
+leaving it unset is not, and leaves the feature on. What off does: no team is visible, no session is standing anywhere, and
+every session delegates by its profile's own reach — which still works,
+because this is the expand half and nothing has been dropped. It is the way
+*out* of a feature that has gone wrong, not the way in, which is why the
+default is on: a deprecation meant to be silent cannot be opt-in. It goes with
+#497.
 
 ## The two paths, during the window
 
@@ -220,10 +344,10 @@ it gets if it names anything else.
 
 Each of these is its own ticket, and this one is what they are blocked on.
 
-- **Teams seeded from what profiles have actually spawned** (#491), so nobody
-  rebuilds by hand what they already had.
 - **The Agent teams screen and the map** (#492), and **the profile drawer**
-  (#494).
+  (#494). The map is where an auto-added seat is *drawn* as marked: the server
+  reports `autoAddedAt` on the position and a count on the team, and nothing
+  yet draws either.
 - **Starting work as a team from the composer, and scheduling one** (#493). A
   schedule that names a team has to pin the whole tree at approval; today an
   approved run is composed the way an unteamed profile is, so nothing can

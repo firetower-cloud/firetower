@@ -14,6 +14,17 @@
  * what a test can assert on a position of without walking.
  */
 export interface Position {
+  /**
+     * When the compatibility window added this seat, if it did — **absent
+     * for a seat a person chose.**
+     *
+     * The mark the map draws, and the whole mitigation for a learning phase
+     * that grows a team without anybody deciding. Saving the team clears it:
+     * a save sends the whole tree with the whole tree on screen, so a marked
+     * seat kept through one is a seat somebody has now chosen.
+     * @nullable
+     */
+  autoAddedAt?: string | null;
   id: string;
   /**
      * Instructions that apply in this seat and nowhere else. **Added to the
