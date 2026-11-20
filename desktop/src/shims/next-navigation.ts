@@ -61,13 +61,24 @@ function currentPath(): string {
  * call. A guard that outlives its screen breaks navigation everywhere, so
  * `useLeaveGuard` drops it on unmount.
  *
- * **More than one can be registered**, because more than one can be on
- * screen: a team's map holds a draft of the tree, and the profile drawer
- * docked beside it holds a draft of a profile. They are two commit
- * boundaries and two questions, so each asks its own and the second is asked
- * once the first has been answered. It was a single slot, and a second
- * screen registering one silently took the first's place — the shape that
- * drops exactly the work this exists to protect.
+ * **More than one can be registered, and they are asked in turn**, because
+ * more than one can be on screen: a team's map holds a draft of the tree, and
+ * the profile drawer docked beside it holds a draft of a profile. Two commit
+ * boundaries, two questions, and each sheet speaks only for its own draft —
+ * so none of them can understate what leaving costs.
+ *
+ * **The most recently mounted is asked first.** The drawer opens beside the
+ * map rather than the other way round, so it is the thing somebody was last
+ * working in, and it is the one whose sheet should come up first. It also
+ * matters for a harder reason: the map's Discard closes the drawer, and with
+ * the map asked first a person could press Discard on a sentence counting
+ * only the map's changes and lose the drawer's edit with no second question.
+ * The sentence was right about what it counted and wrong about what went,
+ * which is worse than the silent loss this exists to prevent.
+ *
+ * **An answered guard is skipped for the rest of one navigation, not
+ * dropped.** It was deleted, so cancelling at the second sheet left the first
+ * screen unguarded for the rest of its life.
  *
  * Consulted by `navigate` and not by `hashchange`: a rail row, a palette
  * command and a back link all go through `navigate`, and the ones that do
@@ -77,22 +88,34 @@ function currentPath(): string {
 type Guard = (resume: () => void) => boolean;
 const guards = new Set<Guard>();
 
-function go(to: string, replace = false) {
-  /* `true` means a guard has taken it: it has put a question on screen and
-     will call `resume` if the answer is to go. `resume` drops that guard and
-     tries again, so a second one still gets its turn and the one already
-     answered does not ask twice. */
-  for (const guard of [...guards]) {
+/**
+ * Ask whoever is holding unsaved work, and chain.
+ *
+ * `true` means a guard has taken it: it has put a question on screen and will
+ * call its `resume` if the answer is to go. That resume asks the *rest* of
+ * them, and only runs `proceed` once nobody is left with something to say.
+ */
+function askBeforeLeaving(proceed: () => void, asked: Set<Guard>): boolean {
+  for (const guard of [...guards].reverse()) {
+    if (asked.has(guard)) continue;
     const taken = guard(() => {
-      guards.delete(guard);
-      go(to, replace);
+      const next = new Set(asked).add(guard);
+      if (!askBeforeLeaving(proceed, next)) proceed();
     });
-    if (taken) return;
+    if (taken) return true;
   }
-  const next = `#${to.startsWith("/") ? to : `/${to}`}`;
-  if (replace) window.history.replaceState(null, "", next);
-  else window.location.hash = next;
-  listeners.forEach((l) => l());
+  return false;
+}
+
+function go(to: string, replace = false) {
+  const commit = () => {
+    const next = `#${to.startsWith("/") ? to : `/${to}`}`;
+    if (replace) window.history.replaceState(null, "", next);
+    else window.location.hash = next;
+    listeners.forEach((l) => l());
+  };
+  if (askBeforeLeaving(commit, new Set())) return;
+  commit();
 }
 
 export function navigate(to: string) {
@@ -119,9 +142,18 @@ export function useLeaveGuard(ask: (resume: () => void) => boolean) {
   }, []);
 }
 
-/** For tests: what is registered, and clearing it. */
+/**
+ * For tests: what is registered, asking exactly as `navigate` asks, and
+ * clearing it.
+ *
+ * `ask` is the real path rather than a simplified one, because the order the
+ * guards are asked in and the chain between them are the whole of what there
+ * is to get wrong.
+ */
 export const leaveGuard = {
-  ask: (resume: () => void) => [...guards].some((g) => g(resume)),
+  ask: (resume: () => void) => askBeforeLeaving(resume, new Set()),
+  /** Register one, the way a mounted component does. Order is mount order. */
+  add: (ask: Guard) => guards.add(ask),
   armed: () => guards.size > 0,
   clear: () => guards.clear(),
 };

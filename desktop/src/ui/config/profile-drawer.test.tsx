@@ -19,7 +19,18 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ProfilePosition, Role } from "~/api/generated/model";
-import { Blast, ProfileDrawer, diffOf, notSaved, willSave, type SeatHandle } from "./ProfileDrawer";
+import {
+  Blast,
+  InTeams,
+  PROFILE_TABS,
+  ProfileDrawer,
+  SEAT_TABS,
+  SHARED,
+  diffOf,
+  notSaved,
+  willSave,
+  type SeatHandle,
+} from "./ProfileDrawer";
 import { toDraft } from "./profile-draft";
 
 const REVIEWER: Role = {
@@ -165,6 +176,109 @@ describe("which fields a save would write", () => {
     const draft = { ...toDraft(REVIEWER), skillScope: ["sk_b", "sk_a"] };
     expect(diffOf({ ...REVIEWER, skillScope: ["sk_a", "sk_b"] }, draft)).toEqual([]);
     expect(diffOf(REVIEWER, draft)).toEqual(["skillScope"]);
+  });
+});
+
+/* ── The band, and the foot it has to agree with ───────────────────────── */
+
+/**
+ * **The band is the one explanatory note this design keeps**, so it has to be
+ * right.
+ *
+ * It was not. `SHARED` was written beside the tab list rather than derived
+ * from it and left *In teams* out, so from a card that tab's band read *This
+ * applies in Product only. It does not change the profile* while the foot of
+ * the same pane read *Will save 1 change to the profile, in both teams that
+ * use it*. A band that states the wrong scope is worse than no band: it
+ * reassures somebody immediately before they change something everywhere.
+ *
+ * The two are generated separately, which is how they drifted, so what is
+ * pinned here is the thing that makes drift impossible — one list — and the
+ * fact behind it: every tab but *Custom* can change a profile field.
+ */
+describe("which tabs say they change the profile", () => {
+  test("Custom is the only one that does not, and it is the first from a card", () => {
+    expect(SEAT_TABS[0]![0]).toBe("custom");
+    expect(SHARED.custom).toBeUndefined();
+    expect(SEAT_TABS.filter(([id]) => !SHARED[id]).map(([id]) => id)).toEqual(["custom"]);
+  });
+
+  /* Derived rather than listed twice, which is the fix: a tab added to the
+     list is shared by construction. */
+  test("every tab a library row opens is shared", () => {
+    expect(Object.keys(SHARED).sort()).toEqual(PROFILE_TABS.map(([id]) => id).sort());
+  });
+
+  /**
+   * And the fact the marking rests on. *In teams* holds the reach a profile
+   * carries on its own, which is live for the whole compatibility window — so
+   * it writes profile fields, and a band saying otherwise is false.
+   */
+  test("In teams writes profile fields, which is why it is shared", () => {
+    const written: string[] = [];
+    const drawn = renderToStaticMarkup(
+      <InTeams
+        role={REVIEWER}
+        draft={{ ...toDraft(REVIEWER), canDelegate: true }}
+        set={(k) => written.push(k as string)}
+        all={[REVIEWER]}
+        places={[]}
+        loading={false}
+        here={null}
+      />,
+    );
+    expect(SHARED.where).toBe(true);
+    expect(drawn).toContain("Hands work off");
+    expect(drawn).toContain("When a child runs out");
+    expect(written).toEqual([]);
+  });
+});
+
+/* ── In teams, where each row is a destination ─────────────────────────── */
+
+/**
+ * **A card that renders as pressable and does nothing is worse than a plain
+ * one.**
+ *
+ * `onGoToSeat` was declared, threaded down to here and read — and neither
+ * screen passed it, so every row rendered disabled from both entry points.
+ * That is criterion B4 and the issue's own *each is a destination*. Two
+ * halves are pinned: the row obeys the prop, and both callers hand one over.
+ */
+describe("the In teams rows", () => {
+  const places = [sits({ teamName: "Product", takes: 2, under: ["Designer"] })];
+  const draw = (onGoToSeat?: (team: string, position: string) => void) =>
+    renderToStaticMarkup(
+      <InTeams
+        role={REVIEWER}
+        draft={toDraft(REVIEWER)}
+        set={() => {}}
+        all={[REVIEWER]}
+        places={places}
+        loading={false}
+        here={null}
+        onGoToSeat={onGoToSeat}
+      />,
+    );
+
+  test("a row is pressable when there is somewhere to go", () => {
+    expect(draw(() => {})).not.toContain("disabled");
+  });
+
+  /* And honest when there is not, rather than drawn as a control that does
+     nothing. Nothing reaches this state today; it is what the prop means. */
+  test("and plainly not when there is not", () => {
+    expect(draw(undefined)).toContain("disabled");
+  });
+
+  test("both screens that open the drawer hand it one", () => {
+    const here = (name: string) =>
+      readFileSync(fileURLToPath(new URL(name, import.meta.url)), "utf8");
+    // The library opens the map at that team, at that seat.
+    expect(here("./Roles.tsx")).toMatch(/onGoToSeat=\{\(team, position\) =>/);
+    expect(here("./Roles.tsx")).toContain("/configuration/agent-teams/${team}/${position}");
+    // The map is already on screen, so a seat in this team is a selection.
+    expect(here("./TeamMap.tsx")).toMatch(/onGoToSeat=\{\(team, position\) =>/);
   });
 });
 

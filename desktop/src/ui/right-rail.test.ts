@@ -24,20 +24,37 @@ import {
   railWidth,
 } from "./right-rail";
 
-/** The pane, given a window: the rail is 62 and the index 252. */
-const paneIn = (window: number) => window - 62 - 252;
+/**
+ * The pane a window of this width actually has.
+ *
+ * **322, measured, not the 314 the design assumed.** The prototype's
+ * arithmetic was 62 of rail plus 252 of index; the built chrome spends eight
+ * more. So the desk's pane is **974** rather than 982, and with the drawer
+ * docked the screen keeps **604** rather than the published 612. Both dock,
+ * so the rule is unaffected — but the figure in the design is two steps off
+ * its own assumption and this is where that is written down rather than in a
+ * sentence nobody checks.
+ */
+const CHROME = 322;
+const paneIn = (window: number) => window - CHROME;
 
 describe("the bands", () => {
-  test("the desk docks, and the screen keeps what the measurement said", () => {
-    expect(paneIn(1296)).toBe(982);
-    expect(bandAt(982)).toBe("dock");
-    /* **370, and the screen keeps 612.** The design measured the drawer at
-       368 plus a border; this spends the same 370 as 368 of rail and 2 of
-       grip, so the number on the other side of it is the one that was
-       published. A grip that cost three would quietly make it 611. */
+  test("the desk docks, and the rail takes exactly what it was measured at", () => {
+    expect(paneIn(1296)).toBe(974);
+    expect(bandAt(974)).toBe("dock");
+    /* **370**, as 368 of rail and 2 of grip from a 4px target — `Workbench`'s
+       own trick. A grip that cost three would make this 369 and nothing would
+       say so. */
     expect(railCost(RAIL_DEFAULT)).toBe(370);
-    expect(982 - railCost(RAIL_DEFAULT)).toBe(612);
     expect(GRIP).toBe(2);
+    expect(paneIn(1296) - railCost(RAIL_DEFAULT)).toBe(604);
+  });
+
+  /* The design's own arithmetic, kept because its band is the thing that
+     matters and is unchanged by the eight pixels. */
+  test("the pane the design measured docks too", () => {
+    expect(bandAt(982)).toBe("dock");
+    expect(982 - railCost(RAIL_DEFAULT)).toBe(612);
   });
 
   /**

@@ -44,7 +44,7 @@ import { TeamMap, count } from "~/ui/config/TeamMap";
 
 const HOME = "/configuration/agent-teams";
 
-export function AgentTeams({ open }: { open: string | null }) {
+export function AgentTeams({ open, at }: { open: string | null; at?: string | null }) {
   const [opened, setOpened] = useOpened(open);
   const cache = useQueryClient();
   const feed = useListAgentTeams();
@@ -78,6 +78,8 @@ export function AgentTeams({ open }: { open: string | null }) {
      team here as well would unmount the map before the leave guard could put
      its question on screen, which is the one moment the draft still exists. */
   const go = (id: string) => navigate(`${HOME}/${id}`);
+  /** One seat, in one team: where a row of the drawer's *In teams* tab goes. */
+  const goToSeat = (team: string, position: string) => navigate(`${HOME}/${team}/${position}`);
 
   const make = async () => {
     if (!naming?.lead || !naming.name.trim() || busy) return;
@@ -108,7 +110,14 @@ export function AgentTeams({ open }: { open: string | null }) {
 
   if (opened) {
     return (
-      <TeamMap id={opened} onClose={() => navigate(HOME)} />
+      <TeamMap
+        id={opened}
+        /* The seat the address names, so a link from the drawer's *In teams*
+           tab opens the card rather than the tree it is in. */
+        at={at ?? null}
+        onClose={() => navigate(HOME)}
+        onGoToSeat={goToSeat}
+      />
     );
   }
 

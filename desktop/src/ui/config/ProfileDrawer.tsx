@@ -144,9 +144,9 @@ export type SeatHandle = {
   onReparent: (parentKey: string) => void;
 };
 
-type TabId = "custom" | "is" | "skills" | "runs" | "where";
+export type TabId = "custom" | "is" | "skills" | "runs" | "where";
 
-const PROFILE_TABS: [TabId, string][] = [
+export const PROFILE_TABS: [TabId, string][] = [
   ["is", "What it is"],
   ["skills", "Skills"],
   ["runs", "How it runs"],
@@ -161,10 +161,26 @@ const PROFILE_TABS: [TabId, string][] = [
  * says **added to** rather than **instead of**, which is the whole of what a
  * position does to a profile.
  */
-const SEAT_TABS: [TabId, string][] = [["custom", "Custom"], ...PROFILE_TABS];
+export const SEAT_TABS: [TabId, string][] = [["custom", "Custom"], ...PROFILE_TABS];
 
-/** The three that edit the profile, which every team shares. */
-const SHARED: Record<string, true> = { is: true, skills: true, runs: true };
+/**
+ * Which tabs change the profile, which every team shares.
+ *
+ * **Derived from the tab list rather than written beside it**, because the two
+ * drifted: this was `{ is, skills, runs }` with *In teams* left out, so from a
+ * card that tab's band read *This applies in Product only. It does not change
+ * the profile* while the foot of the same pane read *Will save 1 change to
+ * the profile, in both teams that use it*. The band is the one explanatory
+ * note this design keeps, and it was reassuring somebody before they changed
+ * something everywhere.
+ *
+ * *In teams* does edit the profile: during the compatibility window it holds
+ * the reach a profile carries on its own. Every tab but *Custom* does, which
+ * is what this now says in one place instead of two.
+ */
+export const SHARED: Record<string, true> = Object.fromEntries(
+  PROFILE_TABS.map(([id]) => [id, true]),
+);
 
 /* ── The rail it opens in ────────────────────────────────────────────────── */
 
@@ -1727,7 +1743,7 @@ function HowItRuns({
  * them. A field with nowhere to be edited is a field that quietly stops
  * working, so it is here, labelled as the thing being replaced.
  */
-function InTeams({
+export function InTeams({
   role,
   draft,
   set,

@@ -10,12 +10,13 @@
  *
  * **The pane, never the window.** A configuration pane sits inside the window
  * with the rail and the pane index beside it, so the window's width says
- * nothing about the room the pane has. On the desk at 1296 the pane is
- * 1296 − 62 rail − 252 index = **982**, which docks and leaves the screen 612.
- * The Duo's inner display is 669pt and lays out at **607** once the 62pt rail
- * is off: docking there would leave the screen 237, narrower than the drawer
+ * nothing about the room the pane has. On the desk at 1296 the pane measures
+ * **974** — the design's arithmetic was 62 of rail plus 252 of index and the
+ * built chrome spends eight more — so it docks and the screen keeps 604. The
+ * Duo's inner display is 669pt and lays out at **607** once the 62pt rail is
+ * off: docking there would leave the screen 237, narrower than the drawer
  * itself, so it floats. That one number is why this is a function of the pane
- * and not of `window.innerWidth`.
+ * and not of `window.innerWidth`, and `right-rail.test.ts` holds both.
  */
 
 /** The rail can be dragged between these. `Workbench` opens at the default. */

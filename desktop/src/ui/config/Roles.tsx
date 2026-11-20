@@ -62,6 +62,7 @@ import { ImportProfiles } from "~/ui/config/ImportProfiles";
 import type { Selection } from "~/ui/config/import-plan";
 import { readProfileDrop, readProfileFiles, type Dropped } from "~/profiles";
 import { useConfirm } from "~/ui/Confirm";
+import { navigate } from "~/shims/next-navigation";
 import { Badge, IconButton } from "~/components/ui";
 import { Blast, ProfileDrawer, WithRail } from "~/ui/config/ProfileDrawer";
 import { NewProfileSheet, blankProfile } from "~/ui/config/TeamSheet";
@@ -330,6 +331,13 @@ export function Roles() {
                 key={opened}
                 profile={opened}
                 want={want ?? undefined}
+                /* **Each position in *In teams* is a destination.** It opens
+                   that team's map with that card selected — the address
+                   carries both, so the link can be shared and the back
+                   control returns here. */
+                onGoToSeat={(team, position) =>
+                  navigate(`/configuration/agent-teams/${team}/${position}`)
+                }
                 onClose={letGo}
               />
             )

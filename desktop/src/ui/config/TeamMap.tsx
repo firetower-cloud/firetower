@@ -101,13 +101,26 @@ export type OpenedSeat = {
 
 export function TeamMap({
   id,
+  at,
   onClose,
   onOpenSeat,
+  onGoToSeat,
 }: {
   id: string;
+  /**
+   * A position in this team to open, named by the address.
+   *
+   * A link from the drawer's *In teams* tab carries it, so landing here from
+   * the library opens the card rather than the tree it is in. A seat's key is
+   * its id once it is saved, which is what makes this a selection rather than
+   * a search.
+   */
+  at?: string | null;
   onClose: () => void;
   /** Where a card opens. Absent until #494 docks something beside the map. */
   onOpenSeat?: (seat: OpenedSeat) => void;
+  /** Where a row of the drawer's *In teams* tab goes. */
+  onGoToSeat?: (team: string, position: string) => void;
 }) {
   const cache = useQueryClient();
   const feed = useGetAgentTeam(id);
@@ -132,6 +145,22 @@ export function TeamMap({
     setOriginal(tree);
     setDraft(tree);
   }, [team]);
+
+  /**
+   * The seat the address named, opened once the tree it is in has arrived.
+   *
+   * Once per address rather than on every draft: re-running it would reopen
+   * the card after somebody closed the drawer, and would fight a selection
+   * they made themselves.
+   */
+  const landed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!at || !draft || landed.current === at) return;
+    if (!find(draft, at)) return;
+    landed.current = at;
+    setSelected(at);
+    setDrawer(at);
+  }, [at, draft]);
 
   /** Off by default: a map opens showing the team. */
   const [showSkills, setShowSkills] = useState(false);
@@ -243,11 +272,20 @@ export function TeamMap({
   const reparent = (key: string, parentKey: string) =>
     setDraft((d) => (d ? moveSeat(d, key, parentKey) : d));
 
+  /**
+   * Put the tree back.
+   *
+   * **It does not close the drawer**, which it used to: the tree and the
+   * profile the drawer is editing are different objects with different
+   * commit boundaries, and closing one to discard the other threw away an
+   * unsaved profile without a word. A seat that only existed in the draft
+   * goes with it, and the rail unmounts on its own because there is no longer
+   * a seat for it to hold.
+   */
   const discard = () => {
     setDraft(original);
     setProblem(null);
     setSelected(null);
-    setDrawer(null);
   };
 
   const save = async (): Promise<boolean> => {
@@ -319,6 +357,12 @@ export function TeamMap({
       key: card.seat.key,
       profile: card.seat.profile,
     });
+  };
+
+  /** Open a seat by key, which for a saved one is its position id. */
+  const openKey = (key: string) => {
+    const card = laid.cards.find((c) => c.seat.key === key);
+    if (card) open(card);
   };
 
   /**
@@ -436,6 +480,13 @@ export function TeamMap({
                      the card; a tab with a profile object to hand is how it
                      gets back in. */
                   withheld={!nameOf(held)}
+                  /* A seat in **this** team is a selection rather than a
+                     navigation: the map is already on screen and the card is
+                     already drawn, so it opens rather than reloading the pane
+                     it is in. */
+                  onGoToSeat={(team, position) =>
+                    team === id ? openKey(position) : onGoToSeat?.(team, position)
+                  }
                   onClose={(to) => {
                     setDrawerWant(null);
                     setDrawer(to ?? null);

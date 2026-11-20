@@ -54,7 +54,13 @@ export function Configuration({ backend, onForgot }: { backend: Backend; onForgo
        panes had been rebuilt and the 48rem column was drawing a 770px page
        inside a 1120px one. */
     <div className="scroll-slim flex h-full min-h-0 flex-col overflow-y-auto">
-      <Pane at={paneAt(path)} open={askedFor(path, 2)} backend={backend} onForgot={onForgot} />
+      <Pane
+        at={paneAt(path)}
+        open={askedFor(path, 2)}
+        path={path}
+        backend={backend}
+        onForgot={onForgot}
+      />
     </div>
   );
 }
@@ -62,7 +68,7 @@ export function Configuration({ backend, onForgot }: { backend: Backend; onForgo
 /* `open` is the id after the pane's own segment — `/configuration/skills/sk_1`.
    The panes keep their own "which is open" state because most of the time it
    is opened by clicking a row; this is how an address gets a word in. */
-function Pane({ at, open, backend, onForgot }: { at: string; open: string | null; backend: Backend; onForgot: () => void }) {
+function Pane({ at, open, path, backend, onForgot }: { at: string; open: string | null; path: string; backend: Backend; onForgot: () => void }) {
   switch (at) {
     case "repositories":
       return <Repos live open={open} />;
@@ -79,9 +85,12 @@ function Pane({ at, open, backend, onForgot }: { at: string; open: string | null
     case "roles":
       return <Roles />;
     case "agent-teams":
-      /* `open` is a team id, and the pane draws that team's map. The address
-         is what a link into one map carries. */
-      return <AgentTeams open={open} />;
+      /* `open` is a team id and the pane draws that team's map. A fourth
+         segment names a **position** in it, which is what a link from the
+         drawer's *In teams* tab carries: *this profile, in that team, in that
+         seat*. Without it a link out of the library lands on a tree with
+         nothing selected and leaves somebody to find the card again. */
+      return <AgentTeams open={open} at={askedFor(path, 3)} />;
     case "people":
       return <People backend={backend} />;
     case "teams":
