@@ -35,6 +35,7 @@ use crate::access::{filed_where, Level};
 use crate::roles::Role;
 
 pub mod seed;
+pub mod window;
 
 /// The flag the whole feature sits behind, for the compatibility window's
 /// duration.
