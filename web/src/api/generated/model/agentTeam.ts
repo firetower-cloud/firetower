@@ -13,9 +13,14 @@ export interface AgentTeam {
   createdAt: string;
   id: string;
   /**
-     * The profile that leads it, by id. Absent only for a team whose lead
-     * profile was deleted, which the cascade makes impossible — kept
-     * `Option` so a reader never panics over a row it did not expect.
+     * The profile that leads it, by id.
+     *
+     * **Absent for a team whose lead profile was deleted**, which is a real
+     * state rather than an impossible one: deleting a profile cascades onto
+     * its positions, and when the position was the root that takes the whole
+     * tree with it. The team is then an empty team with a name, and a save
+     * that names a lead is what repairs it. #494's confirmation is what tells
+     * somebody that is about to happen.
      * @nullable
      */
   lead?: string | null;

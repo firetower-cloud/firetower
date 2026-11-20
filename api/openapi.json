@@ -10029,7 +10029,7 @@
               "string",
               "null"
             ],
-            "description": "The profile that leads it, by id. Absent only for a team whose lead\nprofile was deleted, which the cascade makes impossible — kept\n`Option` so a reader never panics over a row it did not expect."
+            "description": "The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494's confirmation is what tells\nsomebody that is about to happen."
           },
           "leadName": {
             "type": [

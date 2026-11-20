@@ -11,7 +11,7 @@ import * as zod from 'zod';
 export const ListAgentTeamsResponseItem = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
   "id": zod.string(),
-  "lead": zod.string().nullish().describe('The profile that leads it, by id. Absent only for a team whose lead\nprofile was deleted, which the cascade makes impossible — kept\n`Option` so a reader never panics over a row it did not expect.'),
+  "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
   "leadName": zod.string().nullish().describe('What that profile is called, or absent when it is filed somewhere this\nperson cannot reach. See [`Position::profile_name`].'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
@@ -36,7 +36,7 @@ export const CreateAgentTeamBody = zod.object({
 export const CreateAgentTeamResponse = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
   "id": zod.string(),
-  "lead": zod.string().nullish().describe('The profile that leads it, by id. Absent only for a team whose lead\nprofile was deleted, which the cascade makes impossible — kept\n`Option` so a reader never panics over a row it did not expect.'),
+  "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
   "leadName": zod.string().nullish().describe('What that profile is called, or absent when it is filed somewhere this\nperson cannot reach. See [`Position::profile_name`].'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
@@ -81,7 +81,7 @@ export const GetAgentTeamParams = zod.object({
 export const GetAgentTeamResponse = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
   "id": zod.string(),
-  "lead": zod.string().nullish().describe('The profile that leads it, by id. Absent only for a team whose lead\nprofile was deleted, which the cascade makes impossible — kept\n`Option` so a reader never panics over a row it did not expect.'),
+  "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
   "leadName": zod.string().nullish().describe('What that profile is called, or absent when it is filed somewhere this\nperson cannot reach. See [`Position::profile_name`].'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
@@ -119,7 +119,7 @@ export const UpdateAgentTeamBody = zod.object({
 export const UpdateAgentTeamResponse = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
   "id": zod.string(),
-  "lead": zod.string().nullish().describe('The profile that leads it, by id. Absent only for a team whose lead\nprofile was deleted, which the cascade makes impossible — kept\n`Option` so a reader never panics over a row it did not expect.'),
+  "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
   "leadName": zod.string().nullish().describe('What that profile is called, or absent when it is filed somewhere this\nperson cannot reach. See [`Position::profile_name`].'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
