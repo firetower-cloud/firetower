@@ -298,8 +298,8 @@ own instructions are part of that draft too.
 
 **Where the rail sits is measured on the pane, never on the window**, because
 the pane has the rail and the index beside it. Dock at 820 and over, float
-between 600 and 820, push below. The desk's pane is 982, so it docks at 370
-and the screen keeps 612; a 669pt Duo inner display lays out at 607 and
+between 600 and 820, push below. The desk's pane measures 974, so it docks at
+370 and the screen keeps 604; a 669pt Duo inner display lays out at 607 and
 floats, which is the number the rule exists for.
 
 **A seat whose profile the reader cannot see** opens as the id and the seat's
