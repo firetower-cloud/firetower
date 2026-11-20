@@ -175,6 +175,10 @@ whose patterns continue sees no change at all.**
 | More than 64 spawned | the **63 most recently spawned**, with the rest left out and said in the log. Refusing the team would cost the profile all of its reach; raising the limit for migrated teams would make the limit a suggestion |
 | Where the team is filed | wherever its lead profile is filed, so exactly the people who can use the profile can see the team |
 
+Past 64, the 63 most recently spawned come across — the lead takes the
+sixty-fourth seat — and the rest are named in the log rather than dropped
+silently.
+
 `roles.delegate_scope` is deliberately not read: a profile that never spawned
 gets an empty team even when somebody had narrowed its scope, because a scope
 that was never exercised is a guess about intent the same way a visibility
@@ -229,7 +233,10 @@ an agent cannot act on a date, and naming a mechanism that has closed would
 send it looking for a way back in.
 
 **The flag.** `FIRETOWER_AGENT_TEAMS=off` turns the whole feature off for the
-window's duration: no team is visible, no session is standing anywhere, and
+window's duration — as do `0`, `no`, `false` and **an empty value**, which are
+`ft_cli`'s falsey spellings rather than a set invented here. Setting the
+variable to nothing is somebody turning something off, so it reads that way;
+leaving it unset is not, and leaves the feature on. What off does: no team is visible, no session is standing anywhere, and
 every session delegates by its profile's own reach — which still works,
 because this is the expand half and nothing has been dropped. It is the way
 *out* of a feature that has gone wrong, not the way in, which is why the

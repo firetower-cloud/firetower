@@ -48,15 +48,27 @@ pub mod window;
 /// session is back on `can_delegate`/`delegate_scope` with nothing lost,
 /// because this is the expand half and nothing has been dropped yet.
 ///
-/// `off`, `0`, `no` and `false` turn it off; anything else, including unset,
-/// leaves it on. It goes away with #497, which is what makes the old path
-/// impossible to fall back to.
+/// `off`, `0`, `no`, `false` and **empty** turn it off; anything else,
+/// including unset, leaves it on. It goes away with #497, which is what makes
+/// the old path impossible to fall back to.
 pub const ENABLED_ENV: &str = "FIRETOWER_AGENT_TEAMS";
 
+/// The falsey spellings, which are `ft_cli`'s `truthy` and not a set invented
+/// here.
+///
+/// **Empty is off**, which is the one worth saying out loud. `FIRETOWER_AGENT_TEAMS=`
+/// in a `.env` is somebody turning something off — a line they commented the
+/// value out of, or a variable another tool left blank — and reading it as *on*
+/// gives them the opposite of what they asked for, in the one direction that
+/// costs an afternoon to work out. `ft_cli` has always read it this way; this
+/// matches rather than differs.
+///
+/// Unset is a different thing and stays on: nobody who has not heard of this
+/// variable should lose the teams the seeding made for them.
 fn reads_as_off(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
-        "off" | "0" | "no" | "false"
+        "off" | "0" | "no" | "false" | ""
     )
 }
 
@@ -1305,6 +1317,22 @@ mod tests {
             "the refusal says what the shape was: {}",
             refused.0
         );
+    }
+
+    /// **Every falsey spelling an operator might write turns it off**, empty
+    /// among them, and unset is not one of them.
+    ///
+    /// The set is `ft_cli`'s `truthy`, which has read an empty value as false
+    /// since it existed. A flag that read `FIRETOWER_AGENT_TEAMS=` as *on*
+    /// would hand somebody the opposite of what they asked for.
+    #[test]
+    fn an_empty_flag_is_off_like_every_other_way_of_saying_no() {
+        for no in ["off", "OFF", "0", "no", "false", "False", "", "  ", " off "] {
+            assert!(reads_as_off(no), "{no:?} is somebody turning it off");
+        }
+        for yes in ["on", "1", "true", "yes", "anything"] {
+            assert!(!reads_as_off(yes), "{yes:?} is not");
+        }
     }
 
     /// Reading order is the lead, then each subtree in full, left to right —

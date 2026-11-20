@@ -98,11 +98,18 @@ pub async fn run(state: AppState) {
                     "seeded agent teams from session lineage"
                 );
                 for cut in &done.truncated {
+                    /* **The lead takes one of the seats**, so the number
+                    this compares against is `MAX_POSITIONS - 1` and not
+                    `MAX_POSITIONS`. Saying "64 is more than the 64 a team
+                    holds" was true of nothing and wrong at exactly the
+                    boundary — in the one sentence somebody reads when they
+                    are already wondering where a seat went. */
                     tracing::warn!(
                         profile = %cut.profile,
-                        "\"{}\" had spawned {} different profiles, which is more than the {} a \
-                         team holds. Its team was seeded with the {} most recently spawned; the \
-                         rest can be added on Configuration → Agent teams.",
+                        "\"{}\" had spawned {} different profiles, and a team holds {} positions \
+                         with its lead among them — so its team was seeded with the {} most \
+                         recently spawned and the rest were left out. They can be added on \
+                         Configuration → Agent teams.",
                         cut.name,
                         cut.spawned,
                         MAX_POSITIONS,
