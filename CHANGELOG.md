@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.57.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.3...firetower-v0.57.0) (2026-11-20)
+
+
+### Features
+
+* **release:** promote the beta pin without typing a version ([#487](https://github.com/firetower-cloud/firetower/issues/487)) ([513173c](https://github.com/firetower-cloud/firetower/commit/513173ce058cdd3d9e129a9ca0b79af4677b2d9d))
+
 ## [0.56.3](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.2...firetower-v0.56.3) (2026-11-19)
 
 
