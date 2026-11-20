@@ -114,6 +114,23 @@ pub struct AgentTeam {
     pub lead_name: Option<String>,
     /// How many positions it holds, the lead included.
     pub positions: i64,
+    /// How many levels deep the tree goes, counting the lead. `0` when the
+    /// team holds no positions at all.
+    ///
+    /// Here rather than derived by the client, because the list draws it and
+    /// the list does not read the tree: a row that had to open a team to say
+    /// how deep it is would make the map the only way to see one.
+    pub depth: i64,
+    /// Who else is in it, by profile name, without the lead and without
+    /// repeats, in alphabetical order.
+    ///
+    /// The list row draws these and searches them, which is how somebody
+    /// finds the team a profile sits in without opening every map. Names the
+    /// person cannot see are **absent rather than blank**: this is a list
+    /// row, where the shape of the tree is not being described, so there is
+    /// nothing a gap would misrepresent. The map is where a withheld seat
+    /// still has to be drawn.
+    pub members: Vec<String>,
     /// Whether the person asking may edit or delete it.
     pub may_write: bool,
     /// Whether they may move it into a directory, or out of one.
@@ -396,17 +413,51 @@ fn slug_of(name: &str, id: &str) -> String {
     format!("{base}_{}", &id[id.len().saturating_sub(8)..])
 }
 
-const TEAM_FIELDS: &str = "t.id, t.path::text AS path, t.name, t.created_at, t.updated_at, \
-     lead.profile_id AS lead_profile, lr.name AS lead_name, \
-     (SELECT count(*) FROM agent_team_positions c WHERE c.team_id = t.id) AS positions";
+/// Everything a list row draws, and the one subquery it needs for each.
+///
+/// `members` names the profiles under the lead, **intersected with what this
+/// person can see** by the same predicate as everything else: a name they
+/// cannot reach is absent from a list row rather than blank, because a row is
+/// not describing the shape of the tree and so has nothing to misrepresent.
+/// The map is where a withheld seat still has to be drawn.
+fn team_fields(person: usize) -> String {
+    format!(
+        "t.id, t.path::text AS path, t.name, t.created_at, t.updated_at, \
+         lead.profile_id AS lead_profile, lr.name AS lead_name, \
+         coalesce(td.depth, 0) AS depth, \
+         (SELECT count(*) FROM agent_team_positions c WHERE c.team_id = t.id) AS positions, \
+         ARRAY(SELECT DISTINCT mr.name \
+                 FROM agent_team_positions mp \
+                 JOIN roles mr ON mr.id = mp.profile_id AND {visible} \
+                WHERE mp.team_id = t.id AND mp.parent_id IS NOT NULL \
+                ORDER BY mr.name) AS members",
+        visible = filed_where("mr", person, Level::Viewer),
+    )
+}
 
-/// The joins `TEAM_FIELDS` reads from: the team's lead position, and the lead's
-/// profile **only when this person can see it**.
+/// Every team's longest chain, in one walk.
+///
+/// Joined rather than correlated per row: a recursive descent inside a scalar
+/// subquery would run once a team, and the list is the one place every team is
+/// read at once. The walk starts at each team's root, which
+/// `agent_team_one_lead` makes exactly one of.
+const TEAM_DEPTH: &str = "LEFT JOIN ( \
+     WITH RECURSIVE chain AS ( \
+         SELECT id, team_id, 1 AS level FROM agent_team_positions WHERE parent_id IS NULL \
+       UNION ALL \
+         SELECT c.id, c.team_id, chain.level + 1 \
+           FROM agent_team_positions c JOIN chain ON c.parent_id = chain.id) \
+     SELECT team_id, max(level)::bigint AS depth FROM chain GROUP BY team_id \
+   ) td ON td.team_id = t.id";
+
+/// The joins `team_fields` reads from: the team's lead position, the lead's
+/// profile **only when this person can see it**, and how deep the tree goes.
 fn team_joins(person: usize) -> String {
     format!(
         "LEFT JOIN agent_team_positions lead \
                 ON lead.team_id = t.id AND lead.parent_id IS NULL \
-         LEFT JOIN roles lr ON lr.id = lead.profile_id AND {visible}",
+         LEFT JOIN roles lr ON lr.id = lead.profile_id AND {visible} \
+         {TEAM_DEPTH}",
         visible = filed_where("lr", person, Level::Viewer),
     )
 }
@@ -421,6 +472,8 @@ fn read_team(row: &sqlx::postgres::PgRow) -> AgentTeam {
         lead: row.get("lead_profile"),
         lead_name: row.get("lead_name"),
         positions: row.get("positions"),
+        depth: row.get("depth"),
+        members: row.get("members"),
         may_write: row.get("may_write"),
         may_share: row.get("may_share"),
         created_at: row.get("created_at"),
@@ -441,8 +494,9 @@ impl AgentTeams {
     /// Every team this person may see, at the given level or better.
     pub async fn visible(&self, person: &str, at_least: Level) -> Result<Vec<AgentTeam>> {
         let sql = format!(
-            "SELECT {TEAM_FIELDS}, {writable} AS may_write, {shareable} AS may_share \
+            "SELECT {fields}, {writable} AS may_write, {shareable} AS may_share \
                FROM agent_teams t {joins} WHERE {visible} ORDER BY t.name",
+            fields = team_fields(1),
             joins = team_joins(1),
             visible = filed_where("t", 1, at_least),
             writable = filed_where("t", 1, Level::Writer),
@@ -459,8 +513,9 @@ impl AgentTeams {
     /// One team, if this person may see it.
     pub async fn one(&self, person: &str, id: &str, at_least: Level) -> Result<Option<AgentTeam>> {
         let sql = format!(
-            "SELECT {TEAM_FIELDS}, {writable} AS may_write, {shareable} AS may_share \
+            "SELECT {fields}, {writable} AS may_write, {shareable} AS may_share \
                FROM agent_teams t {joins} WHERE t.id = $2 AND {visible}",
+            fields = team_fields(1),
             joins = team_joins(1),
             visible = filed_where("t", 1, at_least),
             writable = filed_where("t", 1, Level::Writer),
@@ -1402,6 +1457,79 @@ mod tests {
             row.delegate_scope.is_empty(),
             "nothing about reach is written onto the profile"
         );
+    }
+
+    /// A list row says how big a team is without reading its tree.
+    ///
+    /// The screen's list draws the lead, the number of positions and how deep
+    /// it goes, so that the map is not the only way to see a team. All three
+    /// come off `visible`, in one query, for every team at once.
+    #[tokio::test]
+    async fn a_list_row_says_how_many_positions_and_how_deep_without_the_tree() {
+        let w = world().await;
+        let lead = w.profile("Lead").await;
+        let middle = w.profile("Middle").await;
+        let bottom = w.profile("Bottom").await;
+
+        // lead → middle → bottom, and a second report on the top level.
+        w.teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named(
+                    "Deep",
+                    seat(
+                        &lead,
+                        vec![
+                            seat(&middle, vec![seat(&bottom, vec![])]),
+                            seat(&bottom, vec![]),
+                        ],
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+        // And one that is only its lead.
+        w.teams
+            .create(
+                &w.org,
+                &w.me,
+                &w.my_slug,
+                None,
+                &named("Flat", seat(&lead, vec![])),
+            )
+            .await
+            .unwrap();
+
+        let rows = w.teams.visible(&w.me, Level::Viewer).await.unwrap();
+        let of = |name: &str| rows.iter().find(|t| t.name == name).unwrap().clone();
+
+        let deep = of("Deep");
+        assert_eq!(deep.positions, 4, "the lead included");
+        assert_eq!(deep.depth, 3, "the longest chain, counting the lead");
+        assert_eq!(deep.lead_name.as_deref(), Some("Lead"));
+        assert_eq!(
+            deep.members,
+            vec!["Bottom".to_string(), "Middle".to_string()],
+            "who else is in it, once each and in order, without the lead"
+        );
+
+        let flat = of("Flat");
+        assert_eq!(flat.positions, 1);
+        assert_eq!(flat.depth, 1, "a team of one is one level deep, not none");
+        assert!(flat.members.is_empty(), "nobody is under its lead");
+
+        // The same numbers when one team is read on its own.
+        let one = w
+            .teams
+            .one(&w.me, &deep.id, Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!((one.positions, one.depth), (4, 3));
+        assert_eq!(one.members, deep.members);
     }
 
     /// Adding a profile that leads another team creates a position with no

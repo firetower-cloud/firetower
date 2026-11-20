@@ -10,11 +10,13 @@ import * as zod from 'zod';
 
 export const ListAgentTeamsResponseItem = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
+  "depth": zod.int().describe('How many levels deep the tree goes, counting the lead. `0` when the\nteam holds no positions at all.\n\nHere rather than derived by the client, because the list draws it and\nthe list does not read the tree: a row that had to open a team to say\nhow deep it is would make the map the only way to see one.'),
   "id": zod.string(),
   "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
   "leadName": zod.string().nullish().describe('What that profile is called, or absent when it is filed somewhere this\nperson cannot reach. See [`Position::profile_name`].'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
+  "members": zod.array(zod.string()).describe('Who else is in it, by profile name, without the lead and without\nrepeats, in alphabetical order.\n\nThe list row draws these and searches them, which is how somebody\nfinds the team a profile sits in without opening every map. Names the\nperson cannot see are **absent rather than blank**: this is a list\nrow, where the shape of the tree is not being described, so there is\nnothing a gap would misrepresent. The map is where a withheld seat\nstill has to be drawn.'),
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
@@ -35,11 +37,13 @@ export const CreateAgentTeamBody = zod.object({
 
 export const CreateAgentTeamResponse = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
+  "depth": zod.int().describe('How many levels deep the tree goes, counting the lead. `0` when the\nteam holds no positions at all.\n\nHere rather than derived by the client, because the list draws it and\nthe list does not read the tree: a row that had to open a team to say\nhow deep it is would make the map the only way to see one.'),
   "id": zod.string(),
   "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
   "leadName": zod.string().nullish().describe('What that profile is called, or absent when it is filed somewhere this\nperson cannot reach. See [`Position::profile_name`].'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
+  "members": zod.array(zod.string()).describe('Who else is in it, by profile name, without the lead and without\nrepeats, in alphabetical order.\n\nThe list row draws these and searches them, which is how somebody\nfinds the team a profile sits in without opening every map. Names the\nperson cannot see are **absent rather than blank**: this is a list\nrow, where the shape of the tree is not being described, so there is\nnothing a gap would misrepresent. The map is where a withheld seat\nstill has to be drawn.'),
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
@@ -80,11 +84,13 @@ export const GetAgentTeamParams = zod.object({
 
 export const GetAgentTeamResponse = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
+  "depth": zod.int().describe('How many levels deep the tree goes, counting the lead. `0` when the\nteam holds no positions at all.\n\nHere rather than derived by the client, because the list draws it and\nthe list does not read the tree: a row that had to open a team to say\nhow deep it is would make the map the only way to see one.'),
   "id": zod.string(),
   "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
   "leadName": zod.string().nullish().describe('What that profile is called, or absent when it is filed somewhere this\nperson cannot reach. See [`Position::profile_name`].'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
+  "members": zod.array(zod.string()).describe('Who else is in it, by profile name, without the lead and without\nrepeats, in alphabetical order.\n\nThe list row draws these and searches them, which is how somebody\nfinds the team a profile sits in without opening every map. Names the\nperson cannot see are **absent rather than blank**: this is a list\nrow, where the shape of the tree is not being described, so there is\nnothing a gap would misrepresent. The map is where a withheld seat\nstill has to be drawn.'),
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),
@@ -118,11 +124,13 @@ export const UpdateAgentTeamBody = zod.object({
 
 export const UpdateAgentTeamResponse = zod.object({
   "createdAt": zod.iso.datetime({"offset":true}),
+  "depth": zod.int().describe('How many levels deep the tree goes, counting the lead. `0` when the\nteam holds no positions at all.\n\nHere rather than derived by the client, because the list draws it and\nthe list does not read the tree: a row that had to open a team to say\nhow deep it is would make the map the only way to see one.'),
   "id": zod.string(),
   "lead": zod.string().nullish().describe('The profile that leads it, by id.\n\n**Absent for a team whose lead profile was deleted**, which is a real\nstate rather than an impossible one: deleting a profile cascades onto\nits positions, and when the position was the root that takes the whole\ntree with it. The team is then an empty team with a name, and a save\nthat names a lead is what repairs it. #494\'s confirmation is what tells\nsomebody that is about to happen.'),
   "leadName": zod.string().nullish().describe('What that profile is called, or absent when it is filed somewhere this\nperson cannot reach. See [`Position::profile_name`].'),
   "mayShare": zod.boolean().describe('Whether they may move it into a directory, or out of one.'),
   "mayWrite": zod.boolean().describe('Whether the person asking may edit or delete it.'),
+  "members": zod.array(zod.string()).describe('Who else is in it, by profile name, without the lead and without\nrepeats, in alphabetical order.\n\nThe list row draws these and searches them, which is how somebody\nfinds the team a profile sits in without opening every map. Names the\nperson cannot see are **absent rather than blank**: this is a list\nrow, where the shape of the tree is not being described, so there is\nnothing a gap would misrepresent. The map is where a withheld seat\nstill has to be drawn.'),
   "name": zod.string(),
   "path": zod.string(),
   "positions": zod.int().describe('How many positions it holds, the lead included.'),

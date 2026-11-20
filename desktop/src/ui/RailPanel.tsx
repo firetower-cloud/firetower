@@ -26,6 +26,7 @@ import {
   GitBranch,
   Inbox,
   Monitor,
+  Network,
   PanelLeftClose,
   Pencil,
   Puzzle,
@@ -495,6 +496,14 @@ function Customize() {
     <>
       <Row label="Skills" icon={Puzzle} on={pane(path) === "skills"} to="/configuration/skills" />
       <Row label="Agent profiles" icon={UsersRound} on={pane(path) === "roles"} to="/configuration/roles" />
+      {/* **Directly under Agent profiles, because they are the pair.** One
+          says what an agent is; the other says who it works with. */}
+      <Row
+        label="Agent teams"
+        icon={Network}
+        on={pane(path) === "agent-teams"}
+        to="/configuration/agent-teams"
+      />
       <Row label="Agents" icon={Blocks} on={pane(path) === "agents"} to="/configuration/agents" />
       {skills.data.length > 0 && (
         <>
