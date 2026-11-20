@@ -22,6 +22,7 @@ import {
   FolderOpen,
   FolderPlus,
   KeyRound,
+  Network,
   Pencil,
   Search,
   Server,
@@ -103,6 +104,9 @@ const KINDS: Record<FiledKind, { one: string; many: string; icon: typeof FolderO
   skill: { one: "Skill", many: "Skills", icon: Diamond },
   artifact: { one: "Artifact", many: "Artifacts", icon: Shapes },
   role: { one: "Profile", many: "Profiles", icon: UsersRound },
+  // An *agent* team, which is a tree of positions — not a team of people,
+  // which is a principal and is never filed anywhere.
+  agentTeam: { one: "Agent team", many: "Agent teams", icon: Network },
   // Never in a directory — a repository is opened by the token of whoever
   // connected it, so there is nowhere to file one. Named here because this map
   // covers every kind the server can name, and what somebody owns is drawn

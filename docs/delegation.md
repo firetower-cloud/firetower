@@ -29,11 +29,21 @@ not `HandedBack`: nothing is for the person yet.
 The person's inbox stays what it was. A child's hand-back never notifies
 anybody — that is the lead's to hear. A child that needs a **permission**
 still reaches the person, because a lead may not approve on anybody's behalf.
-A child cannot `spawn`, cannot ask the person, and is told so.
+A child cannot ask the person, and is told so. Whether it may `spawn` in turn
+depends on where it stands — see [agent teams](./agent-teams.md).
 
 Ending a lead ends its children. A branch a child pushed stays on the remote.
 
-### Profiles
+### Profiles and teams
+
+Which profiles a lead may name is decided by **where that lead stands**. A
+session started as an agent team reaches the profiles reporting to its position
+in that team; one started as a lone profile reaches what that profile's own
+settings allow, which is the older arrangement and is on its way out (#497).
+Either way the list is intersected with what the owner can actually see, and
+a name off it is refused exactly as a name that was never defined.
+[Agent teams](./agent-teams.md) is that in full, including what each refusal
+says.
 
 A lead names a saved profile with `role: "<name>"` and gets its instructions,
 its team and its skills rather than describing a child inline. A profile says
@@ -71,6 +81,10 @@ Every check a person starting a session meets, a lead meets.
 - `sessions.parent_id` — the edge. Null for every session a person started,
   which is every session there was. `on delete set null`, because a child's
   branch may be work somebody wants.
+- `sessions.position_id` — which position in an agent team the session
+  occupies, when it occupies one. Null for everything a person started without
+  naming a team. Inherited at spawn: the child's position is the child of the
+  lead's.
 - `sessions.spawn_reason` — what the lead said the child was for, shown on
   the child.
 - `sessions.spawn_req` — the lead's id for the call that asked. A worker that
@@ -82,7 +96,17 @@ Every check a person starting a session meets, a lead meets.
 
 ## Limits
 
-Flat: a child cannot spawn — the only limit left. There is no cap on how many
+**Two shapes, depending on where the session stands.**
+
+A session that holds a position in an **agent team** is bounded by its tree:
+it may hand work to the profiles its position's children reference and to
+nothing else, and since a child inherits the seat below its lead's, a chain of
+agents can never be longer than the team is deep — six levels, with at most 64
+positions in a team. That is the only structural guardrail delegation has, and
+it is deliberately the whole of it. See [agent teams](./agent-teams.md).
+
+A session that holds **no** position is flat, as every session was: a child
+cannot spawn, which was the only limit there was. There is no cap on how many
 children a lead starts, nor on how many of them run at once; the spawn tool
 says so, and asks the agent to dispatch what the work needs rather than what it
 is allowed. A refusal is a sentence the agent reads: which rule, and why.

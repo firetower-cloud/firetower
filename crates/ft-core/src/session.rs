@@ -289,6 +289,19 @@ pub struct Session {
     /// rail reads to say which kind of agent a workspace holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
+    /// The position in an agent team this session occupies, by id, when it
+    /// occupies one.
+    ///
+    /// **What it may hand work to, when it has one**: the profiles its
+    /// position's children reference, and nothing else. Inherited down the
+    /// lineage — a lead's child occupies the child of the lead's position — so
+    /// the chain of sessions walks the chain of positions.
+    ///
+    /// Absent for every session a person started without naming a team, which
+    /// is every session there was. Absent means the old path: a Manager
+    /// profile's own `delegate_scope`, or no delegation at all.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position_id: Option<String>,
     /// What the lead said this child was for, in its own words.
     ///
     /// Carried so the child's own screen can say why it exists — the first
@@ -403,6 +416,23 @@ pub struct NewSession {
     /// Operator does the work itself.
     #[serde(default)]
     pub profile: Option<String>,
+    /// The agent team to start as, by id. Omit for a lone profile.
+    ///
+    /// **You never talk to a team — you talk to its lead, with its team behind
+    /// it.** Naming one starts the session in that team's lead position, which
+    /// is what gives it a reach: the profiles reporting to that position are
+    /// the ones it may hand work to, and a child it starts inherits the seat
+    /// below its own.
+    ///
+    /// It decides the profile too, because the lead *is* a profile: naming a
+    /// team and a different profile is a contradiction rather than two
+    /// settings, and is refused.
+    ///
+    /// Omitting it is the whole of the compatibility story. A profile named on
+    /// its own holds no position and delegates the way it always did — through
+    /// its own `can_delegate` and `delegate_scope` — or not at all.
+    #[serde(default)]
+    pub team: Option<String>,
     /// Model, effort, permissions and sandbox to start with, overriding what
     /// this person last used. What the New page's picker sends; once the
     /// session has run a turn, its own choices are what a restart remembers.

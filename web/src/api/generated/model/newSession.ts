@@ -104,5 +104,24 @@ export interface NewSession {
   taskKey?: string | null;
   /** @nullable */
   taskUrl?: string | null;
+  /**
+     * The agent team to start as, by id. Omit for a lone profile.
+     *
+     * **You never talk to a team — you talk to its lead, with its team behind
+     * it.** Naming one starts the session in that team's lead position, which
+     * is what gives it a reach: the profiles reporting to that position are
+     * the ones it may hand work to, and a child it starts inherits the seat
+     * below its own.
+     *
+     * It decides the profile too, because the lead *is* a profile: naming a
+     * team and a different profile is a contradiction rather than two
+     * settings, and is refused.
+     *
+     * Omitting it is the whole of the compatibility story. A profile named on
+     * its own holds no position and delegates the way it always did — through
+     * its own `can_delegate` and `delegate_scope` — or not at all.
+     * @nullable
+     */
+  team?: string | null;
   workspaceId?: null | WorkspaceId;
 }

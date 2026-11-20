@@ -410,6 +410,7 @@ async fn frames_fixture() -> (
         access: crate::access::Access::new(db.pool().clone()),
         skills: crate::skills::Skills::new(db.pool().clone()),
         roles: crate::roles::Roles::new(db.pool().clone()),
+        agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
         connections,
         db,
         accounts,
@@ -526,6 +527,7 @@ async fn watched_fixture() -> (
         access: crate::access::Access::new(db.pool().clone()),
         skills: crate::skills::Skills::new(db.pool().clone()),
         roles: crate::roles::Roles::new(db.pool().clone()),
+        agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
         connections,
         db,
         accounts,
@@ -4884,7 +4886,7 @@ async fn a_team_list_says_which_profiles_leave_a_field_open() {
         .unwrap();
 
     // The persona's own list, which is what a Manager reads before it spawns.
-    let persona = super::sessions::persona_for(&state, &owner, &profile)
+    let persona = super::sessions::persona_for(&state, &owner, &profile, None)
         .await
         .unwrap();
     assert!(
@@ -10111,4 +10113,705 @@ async fn an_agent_may_stop_a_schedule_and_not_start_one() {
         row.paused_reason.is_none(),
         "somebody paused this, which reads differently from a schedule that gave up"
     );
+}
+
+// ── Agent teams: where a session stands, and what that lets it reach ─────
+//
+// The database-level behaviour of teams and positions is in
+// `crate::agent_teams`. Everything here is the other half: what `spawn`
+// resolves, what a child inherits, and what each refusal says — driven through
+// `delegate::handle` exactly as the fleet drives it.
+
+/// A team, through the same `check` the API applies.
+///
+/// The body is the API's own shape, so a test that passes here is a request a
+/// client can send.
+async fn saved_team(state: &AppState, owner: &str, fields: serde_json::Value) -> String {
+    let new: crate::agent_teams::NewAgentTeam = serde_json::from_value(fields).unwrap();
+    crate::agent_teams::check(&new).expect("a team the server accepts");
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(owner).await.unwrap();
+    state
+        .agent_teams
+        .create(&org, owner, &slug, None, &new)
+        .await
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
+/// A session standing in a team's lead position, on a machine that can take
+/// work.
+///
+/// The profile is the team's lead, because the lead *is* a profile — the same
+/// thing `NewSession::team` resolves, written here without a whole launch so a
+/// spawn test is about the spawn.
+async fn lead_of_a_team(
+    state: &AppState,
+    host: &Host,
+    ready: &Arc<AtomicBool>,
+    owner: &str,
+    agent: Agent,
+    team: &str,
+) -> ft_core::SessionId {
+    ready.store(true, Ordering::SeqCst);
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let standing = state
+        .agent_teams
+        .lead_of(owner, team)
+        .await
+        .unwrap()
+        .expect("the team's lead position");
+    let id = lead_running(state, host, owner, agent, &standing.profile).await;
+    state
+        .db
+        .set_position(&id, &standing.position)
+        .await
+        .unwrap();
+    id
+}
+
+/// A profile, with only what a team needs of it.
+async fn a_profile(state: &AppState, owner: &str, name: &str) -> String {
+    saved_profile(
+        state,
+        owner,
+        serde_json::json!({
+            "name": name,
+            "does": format!("{name}, and when to reach for it"),
+            "placement": "here",
+        }),
+    )
+    .await
+}
+
+/// **The ticket's own sentence, end to end.** A lead hands work to the
+/// profiles its position's children reference, and to nothing else.
+///
+/// The profile it is started as says nothing about reach — no `canDelegate`,
+/// no `delegateScope` — so what it can reach comes from where it stands and
+/// from nowhere else. A profile that exists and is perfectly visible but holds
+/// no seat under this position is refused exactly as a name that was never
+/// defined: out of reach reads as *does not exist* rather than as *not
+/// allowed*, which is the rule the old path already followed.
+#[tokio::test]
+async fn a_lead_hands_work_to_the_profiles_reporting_to_its_position() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let reviewer = a_profile(&state, &owner, "Reviewer").await;
+    let stranger = a_profile(&state, &owner, "Stranger").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": {
+                "profile": orchestrator,
+                "children": [{ "profile": engineer }, { "profile": reviewer }],
+            },
+        }),
+    )
+    .await;
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "t1",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "write the limiter" }),
+        ),
+    )
+    .await
+    .expect("a profile reporting to this position");
+    let child = child_of(&state, &lead, "t1").await;
+    assert_eq!(child.profile_id.as_deref(), Some(engineer.as_str()));
+
+    // **The inheritance.** The child stands in the seat under the lead's, not
+    // in the lead's own and not nowhere.
+    let seat = child.position_id.clone().expect("the child holds a seat");
+    let standing = state
+        .agent_teams
+        .standing(&owner, &seat)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(standing.profile, engineer);
+    assert_eq!(standing.team_name, "Platform");
+    let above = state.agent_teams.lead_above(&owner, &seat).await.unwrap();
+    assert_eq!(
+        above.as_deref(),
+        Some("Orchestrator"),
+        "and it reports to the one that started it"
+    );
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "t2",
+            "spawn",
+            serde_json::json!({ "role": "Stranger", "goal": "anything" }),
+        ),
+    )
+    .await
+    .expect_err("a profile with no seat under this position");
+    let said = format!("{refused:#}");
+    assert!(said.contains("no subagent called"), "{said}");
+    assert!(
+        said.contains("Engineer") && said.contains("Reviewer"),
+        "and it lists the ones that do report here: {said}"
+    );
+    assert!(
+        !said.contains("Stranger, "),
+        "without naming the one it refused as available: {said}"
+    );
+    let _ = stranger;
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **Delegation is as deep as the tree and no deeper.**
+///
+/// The flat rule — a child cannot spawn — was the only bound there was, and it
+/// is kept for exactly the sessions that still have nothing else: one that
+/// holds no position. A child that *does* hold one is bounded by its tree
+/// instead, so it hands work on down its own branch. A one-off with no profile
+/// named holds no seat, is a leaf, and is refused in those words.
+#[tokio::test]
+async fn a_child_in_a_position_hands_work_on_and_a_one_off_cannot() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead_profile = a_profile(&state, &owner, "Orchestrator").await;
+    let mid = a_profile(&state, &owner, "Engineer").await;
+    let leaf = a_profile(&state, &owner, "Reviewer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": {
+                "profile": lead_profile,
+                "children": [{
+                    "profile": mid,
+                    "children": [{ "profile": leaf }],
+                }],
+            },
+        }),
+    )
+    .await;
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "d1",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "write it" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let engineer = child_of(&state, &lead, "d1").await;
+    assert!(engineer.parent_id.is_some(), "it is a child");
+    /* **And it is told it is a lead.** A delegated child carries its
+    persona in its brief rather than in a composed `persona`, so if the
+    brief did not say this the child would hold the `spawn` tool, hold a
+    seat with somebody under it, and have no idea who — it would guess a
+    name and spend a turn being refused. */
+    assert!(
+        engineer
+            .prompt
+            .contains("The profiles reporting to your position"),
+        "{}",
+        engineer.prompt
+    );
+    assert!(
+        engineer.prompt.contains("**Reviewer**"),
+        "and names them: {}",
+        engineer.prompt
+    );
+
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &engineer.id,
+            "d2",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it" }),
+        ),
+    )
+    .await
+    .expect("a child that holds a position hands work on down its own branch");
+    let reviewer = child_of(&state, &engineer.id, "d2").await;
+    assert_eq!(reviewer.profile_id.as_deref(), Some(leaf.as_str()));
+    assert!(
+        reviewer.position_id.is_some(),
+        "and stands in the seat below"
+    );
+
+    // Nothing reports to the Reviewer's seat, so that is where the chain ends
+    // — and it says so rather than reading as a missing profile.
+    let end = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &reviewer.id,
+            "d3",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "more" }),
+        ),
+    )
+    .await
+    .expect_err("the bottom of the tree");
+    assert!(
+        format!("{end:#}").contains("nothing reports to your position"),
+        "{end:#}"
+    );
+
+    // A one-off: no profile named, so no seat, so a leaf whatever the tree
+    // says.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "d4",
+            "spawn",
+            serde_json::json!({ "goal": "look something up" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let one_off = child_of(&state, &lead, "d4").await;
+    assert!(one_off.position_id.is_none(), "a one-off holds no seat");
+    assert!(
+        !one_off.prompt.contains("reporting to your position"),
+        "and is not told it can hand work on, because it cannot: {}",
+        one_off.prompt
+    );
+    let flat = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &one_off.id,
+            "d5",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it" }),
+        ),
+    )
+    .await
+    .expect_err("a leaf with no seat");
+    assert!(
+        format!("{flat:#}").contains("children cannot spawn"),
+        "{flat:#}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A profile started with no team cannot delegate, **and the refusal says
+/// why** — in a sentence that names the fix rather than the rule.
+///
+/// Two reasons are live during the compatibility window and the sentence names
+/// both, because one that mentioned only the team would send somebody who
+/// meant to tick Manager to the wrong screen.
+#[tokio::test]
+async fn a_profile_started_with_no_team_cannot_delegate_and_says_why() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let alone = a_profile(&state, &owner, "Operator").await;
+    let session = lead_running(&state, &host, &owner, Agent::ClaudeCode, &alone).await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &session,
+            "n1",
+            "spawn",
+            serde_json::json!({ "goal": "hand this off" }),
+        ),
+    )
+    .await
+    .expect_err("no team, and not a Manager");
+    let said = format!("{refused:#}");
+    assert!(said.contains("no position in an agent team"), "{said}");
+    assert!(said.contains("Agent teams"), "and names the fix: {said}");
+
+    // And it is told that first, rather than told to name a `goal` it would
+    // then be refused for anyway. Both are true of this call; only one of
+    // them is worth a turn.
+    let bare = crate::delegate::handle(
+        &state,
+        &asks(&host, &session, "n2", "spawn", serde_json::json!({})),
+    )
+    .await
+    .expect_err("no team, and no goal either");
+    assert!(
+        format!("{bare:#}").contains("no position in an agent team"),
+        "{bare:#}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **An agent naming anything above it gets its own sentence.**
+///
+/// Falling through to "no subagent called that" would tell an agent a profile
+/// does not exist when it is one of the ones it reports up through, and the
+/// agent would spend its turn working out which of them was wrong.
+///
+/// **A grandparent has exactly the same problem as a parent**, which is the
+/// half this originally missed: the generic not-found is wrong for the same
+/// reason at any distance, and with six levels permitted a chain long enough
+/// to reach one is ordinary. So the chain is four deep here and the sentence
+/// is asked for from two rungs down as well as one.
+#[tokio::test]
+async fn an_agent_naming_anything_above_it_gets_its_own_refusal() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let reviewer = a_profile(&state, &owner, "Reviewer").await;
+    let builder = a_profile(&state, &owner, "Builder").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": {
+                "profile": orchestrator,
+                "children": [{
+                    "profile": engineer,
+                    "children": [{
+                        "profile": reviewer,
+                        // So the Reviewer has somebody to hand to, and its
+                        // `spawn` reaches the name resolution rather than
+                        // being refused for having no reports.
+                        "children": [{ "profile": builder }],
+                    }],
+                }],
+            },
+        }),
+    )
+    .await;
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "u1",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "write it" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let child = child_of(&state, &lead, "u1").await;
+
+    // One rung up: its own lead.
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &child.id,
+            "u2",
+            "spawn",
+            serde_json::json!({ "role": "Orchestrator", "goal": "take this back" }),
+        ),
+    )
+    .await
+    .expect_err("its own lead");
+    let said = format!("{refused:#}");
+    assert!(said.contains("your own lead"), "{said}");
+    assert!(
+        !said.contains("no subagent called"),
+        "never the sentence that says a profile does not exist: {said}"
+    );
+    assert!(
+        said.contains("Reviewer"),
+        "and it says what this one can start instead: {said}"
+    );
+
+    // Two rungs up: the same problem, and until QA found it the same generic
+    // not-found.
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &child.id,
+            "u3",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read it" }),
+        ),
+    )
+    .await
+    .unwrap();
+    let grandchild = child_of(&state, &child.id, "u3").await;
+
+    let far = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &grandchild.id,
+            "u4",
+            "spawn",
+            serde_json::json!({ "role": "Orchestrator", "goal": "take this back" }),
+        ),
+    )
+    .await
+    .expect_err("its lead's own lead");
+    let said = format!("{far:#}");
+    assert!(
+        !said.contains("no subagent called"),
+        "a grandparent is not a profile that does not exist: {said}"
+    );
+    assert!(
+        said.contains("Orchestrator") && said.contains("two positions above yours"),
+        "it names the profile and says where it sits: {said}"
+    );
+    assert!(
+        said.contains("your lead's own lead"),
+        "in a shape rather than a number: {said}"
+    );
+    assert!(
+        said.contains("delivered to your own lead"),
+        "and points the hand-back at the one rung a hand-back reaches: {said}"
+    );
+    assert!(
+        said.contains("Builder"),
+        "and still says what this one can start: {said}"
+    );
+
+    // And the rung in between is still the nearer sentence.
+    let near = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &grandchild.id,
+            "u5",
+            "spawn",
+            serde_json::json!({ "role": "Engineer", "goal": "back to you" }),
+        ),
+    )
+    .await
+    .expect_err("its own lead, from one rung further down");
+    assert!(format!("{near:#}").contains("your own lead"), "{near:#}");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Composing a lead's prompt lists its position's children, resolved against
+/// what the owner can see — and nothing else.
+///
+/// The seat's own instructions are in it too, under a heading that says which
+/// seat: the same profile in another team is told something else, and an agent
+/// that cannot tell which it is reading cannot act on either.
+#[tokio::test]
+async fn a_leads_prompt_lists_the_profiles_reporting_to_its_position() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let stranger = a_profile(&state, &owner, "Stranger").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": {
+                "profile": orchestrator,
+                "instructions": "In Platform, the console is the only surface.",
+                "children": [{ "profile": engineer }],
+            },
+        }),
+    )
+    .await;
+    let standing = state
+        .agent_teams
+        .lead_of(&owner, &team)
+        .await
+        .unwrap()
+        .unwrap();
+    let profile = state
+        .roles
+        .one(&owner, &orchestrator, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let persona = super::sessions::persona_for(&state, &owner, &profile, Some(&standing))
+        .await
+        .unwrap();
+    assert!(
+        persona.contains("The profiles reporting to your position"),
+        "{persona}"
+    );
+    assert!(persona.contains("**Engineer**"), "{persona}");
+    assert!(
+        !persona.contains("Stranger"),
+        "a profile with no seat here is never named, so it cannot be asked for: {persona}"
+    );
+    assert!(
+        persona.contains("In the \"Platform\" team"),
+        "the seat's own instructions, said to be the seat's: {persona}"
+    );
+    assert!(
+        persona.contains("the console is the only surface"),
+        "{persona}"
+    );
+
+    // And a seat with nothing under it is told so, rather than left to find
+    // out by spending a turn on `spawn`.
+    let alone = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({ "name": "Solo", "lead": { "profile": stranger } }),
+    )
+    .await;
+    let solo = state
+        .agent_teams
+        .lead_of(&owner, &alone)
+        .await
+        .unwrap()
+        .unwrap();
+    let only = state
+        .roles
+        .one(&owner, &stranger, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    let quiet = super::sessions::persona_for(&state, &owner, &only, Some(&solo))
+        .await
+        .unwrap();
+    assert!(
+        quiet.contains("Nothing reports to your position"),
+        "{quiet}"
+    );
+    assert!(
+        !quiet.contains("pass the name as `role`"),
+        "and it is not told how to delegate: {quiet}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A whole launch, as a person starting work as a team: `NewSession::team`
+/// stands the session in that team's lead seat and runs the lead's profile.
+///
+/// **Naming a team and a different profile is a contradiction**, not two
+/// settings, so it is refused rather than answered either way.
+#[tokio::test]
+async fn starting_work_as_a_team_stands_the_session_in_its_leads_seat() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": {
+                "profile": orchestrator,
+                "children": [{ "profile": engineer }],
+            },
+        }),
+    )
+    .await;
+
+    let started = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        owner.clone(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "break this up",
+            "agent": "ClaudeCode",
+            "name": "Platform work",
+            "team": team,
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a person can start work as a team");
+    let row = state.db.session(&started.id).await.unwrap().unwrap();
+    assert_eq!(
+        row.profile_id.as_deref(),
+        Some(orchestrator.as_str()),
+        "the lead is a profile, and naming the team names it"
+    );
+    let seat = row.position_id.clone().expect("it stands somewhere");
+    assert_eq!(
+        state
+            .agent_teams
+            .reports(&owner, &seat)
+            .await
+            .unwrap()
+            .len(),
+        1,
+        "with its team behind it"
+    );
+    let persona = state
+        .db
+        .persona(&started.id)
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    assert!(
+        persona.contains("The profiles reporting to your position"),
+        "{persona}"
+    );
+
+    let contradiction = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        owner.clone(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "break this up",
+            "agent": "ClaudeCode",
+            "name": "Confused",
+            "team": team,
+            "profile": engineer,
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect_err("a team and a profile that does not lead it");
+    assert!(
+        contradiction.message.contains("led by a different profile"),
+        "{}",
+        contradiction.message
+    );
+    let _ = principal;
+
+    state.fleet.stop_supervising(&host.id).await;
 }
