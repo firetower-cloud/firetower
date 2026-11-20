@@ -621,6 +621,7 @@ const server = createServer(async (req, res) => {
   if (path === "/__reset") {
     scene = url.searchParams.get("scene") ?? "default";
     checkouts = START();
+    AGENT_TEAMS = SEED_TEAMS();
     pinned = null;
     repoDefaults = {};
     return json(res, { detail: `back to three, playing ${scene}` });
@@ -1599,7 +1600,11 @@ function flatPositions(root, parent = null, out = []) {
 
 const deepest = (node) => 1 + Math.max(0, ...node.children.map(deepest));
 
-let AGENT_TEAMS = [
+/** The three, rebuilt on every `/__reset` so a run does not inherit the last
+    one's new teams. `positionSeq` goes back with them, so ids are stable. */
+const SEED_TEAMS = () => {
+  positionSeq = 0;
+  return [
   {
     id: "at_platform",
     name: "Platform",
@@ -1620,7 +1625,9 @@ let AGENT_TEAMS = [
     ]),
   },
   { id: "at_research", name: "Research", root: at("r_3", [at("r_1"), at("r_5"), at("r_4")]) },
-];
+  ];
+};
+let AGENT_TEAMS = SEED_TEAMS();
 
 /** What the reader may not see, in the scene that has one. */
 const HIDDEN_PROFILE = "r_3";
