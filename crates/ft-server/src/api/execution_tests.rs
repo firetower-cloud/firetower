@@ -10122,13 +10122,14 @@ async fn an_agent_may_stop_a_schedule_and_not_start_one() {
 // resolves, what a child inherits, and what each refusal says — driven through
 // `delegate::handle` exactly as the fleet drives it.
 
-/// A team, through the same `check` the API applies.
+/// A team, through the same write the API calls.
 ///
 /// The body is the API's own shape, so a test that passes here is a request a
-/// client can send.
+/// client can send. `create` applies the rules itself — it is the only place
+/// they are applied, because the two that point at a profile need the names it
+/// reads inside its own transaction.
 async fn saved_team(state: &AppState, owner: &str, fields: serde_json::Value) -> String {
     let new: crate::agent_teams::NewAgentTeam = serde_json::from_value(fields).unwrap();
-    crate::agent_teams::check(&new).expect("a team the server accepts");
     let org = state.db.org().await.unwrap();
     let slug = state.access.personal_root(owner).await.unwrap();
     state

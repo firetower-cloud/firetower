@@ -17,6 +17,7 @@ import {
   addChild,
   changes,
   chipRows,
+  couldReportTo,
   countUnder,
   depthOf,
   find,
@@ -25,6 +26,7 @@ import {
   layout,
   moveSeat,
   removeSeat,
+  say,
   toNewPosition,
   type Seat,
 } from "./team-map";
@@ -327,5 +329,79 @@ describe("what is pending, and what Discard puts back", () => {
     const before = product();
     const engineer = before.children[1];
     expect(moveSeat(before, engineer.key, engineer.children[0].key)).toBe(before);
+  });
+
+  /**
+   * **What a seat says is part of the draft too, and it was not in the diff.**
+   *
+   * The drawer's *Custom* tab writes straight into this tree. With only the
+   * three shape changes counted, typing into it redrew the card with its new
+   * line and left the pending count at nothing — so Save was never offered
+   * and the words went when the screen did. Found by driving a real control
+   * plane, where the tree came back without them.
+   */
+  test("rewording a seat is a change, and reads as one", () => {
+    const before = product();
+    const designer = before.children[0];
+    const after = say(before, designer.key, "Only the console here.");
+    expect(changes(before, after)).toEqual([
+      { kind: "said", id: designer.id, profile: "designer" },
+    ]);
+    expect(find(after, designer.key)?.instructions).toBe("Only the console here.");
+    /* Nothing else moved, so Discard is still an assignment — and the tree it
+       was derived from was not touched. */
+    expect(flatten(after)).toHaveLength(flatten(before).length);
+    expect(find(before, designer.key)?.instructions).toBe("");
+  });
+
+  test("typing into a seat and typing it back out leaves nothing pending", () => {
+    const before = product();
+    const key = before.children[0].key;
+    expect(changes(before, say(say(before, key, "something"), key, ""))).toEqual([]);
+  });
+
+  /* Two gestures on one card are two entries: the count beside Save says how
+     many decisions are waiting, and moving a card is not the same decision as
+     rewording it. */
+  test("a seat both moved and reworded counts as two", () => {
+    const before = product();
+    const designer = before.children[0];
+    const after = say(
+      moveSeat(before, designer.key, before.children[3].key),
+      designer.key,
+      "Only the console here.",
+    );
+    expect(
+      changes(before, after)
+        .map((c) => c.kind)
+        .sort(),
+    ).toEqual(["move", "said"]);
+  });
+
+  /**
+   * Where a seat may be moved to, which is what the drawer's *Reports to*
+   * offers. Not itself and nothing below it — the two the model refuses — and
+   * **the seat it already reports to is in the list**, so the control reads
+   * as a picker with a current answer rather than a row of equal choices.
+   *
+   * By key rather than by profile: Product holds two Engineer seats, and a
+   * test that asked by name could not tell which one it had.
+   */
+  test("a seat may report to anything that is not itself or under it", () => {
+    const before = product();
+    const engineer = before.children[1];
+    const may = couldReportTo(before, engineer.key).map((s) => s.key);
+    expect(may).not.toContain(engineer.key);
+    for (const below of flatten(engineer).slice(1)) expect(may).not.toContain(below.key);
+    /* The lead, its siblings and their children — and where it already is. */
+    expect(may).toContain(before.key);
+    expect(may).toContain(before.children[0].key);
+    expect(may).toContain(before.children[2].key);
+    expect(may).toHaveLength(flatten(before).length - flatten(engineer).length);
+  });
+
+  test("the lead reports to nothing, so it is offered nothing", () => {
+    const before = product();
+    expect(couldReportTo(before, before.key)).toEqual([]);
   });
 });

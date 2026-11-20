@@ -34,6 +34,112 @@ describe("the router's leave guard", () => {
   });
 });
 
+/**
+ * **Two screens, two drafts, two questions.**
+ *
+ * A team's map holds a draft of the tree and the profile drawer docked beside
+ * it holds a draft of a profile. They are two commit boundaries, so each asks
+ * its own and the sheets come up in turn. The failure this pins is a real one
+ * that shipped: with the map asked first, pressing Discard on a sentence
+ * counting only the map's changes closed the drawer and took the profile edit
+ * with it — a prompt that appeared, said what was being lost, and was wrong
+ * about it. Worse than the silent loss the guard exists to prevent.
+ */
+describe("more than one screen holding unsaved work", () => {
+  /** A guard that always takes it, and remembers how to let go. */
+  const holding = () => {
+    const it = { asked: 0, resume: null as null | (() => void) };
+    const guard = (resume: () => void) => {
+      it.asked++;
+      it.resume = resume;
+      return true;
+    };
+    return { it, guard };
+  };
+
+  /**
+   * **The most recently mounted asks first.** The drawer opens beside the map
+   * rather than the other way round, so it is what somebody was last working
+   * in — and it is the one the map's own Discard would otherwise close.
+   */
+  test("the one that mounted last is asked first", () => {
+    const first = holding();
+    const last = holding();
+    register(first.guard, last.guard);
+
+    expect(leaveGuard.ask(() => {})).toBe(true);
+    expect(last.it.asked).toBe(1);
+    expect(first.it.asked).toBe(0);
+  });
+
+  test("answering the first asks the second, and only then does it go", () => {
+    const first = holding();
+    const last = holding();
+    register(first.guard, last.guard);
+    const went = vi.fn();
+
+    expect(leaveGuard.ask(went)).toBe(true);
+    expect(went).not.toHaveBeenCalled();
+
+    // The drawer's sheet is answered: the map's comes up, and nothing has
+    // navigated yet.
+    last.it.resume!();
+    expect(first.it.asked).toBe(1);
+    expect(went).not.toHaveBeenCalled();
+
+    // And the map's.
+    first.it.resume!();
+    expect(went).toHaveBeenCalledOnce();
+  });
+
+  /**
+   * **An answered guard is skipped for that navigation, not dropped.**
+   *
+   * It used to be deleted, so staying at the second sheet left the first
+   * screen unguarded for the rest of its life — it would never ask again.
+   */
+  test("cancelling at the second sheet leaves both still armed", () => {
+    const first = holding();
+    const last = holding();
+    register(first.guard, last.guard);
+
+    leaveGuard.ask(() => {});
+    last.it.resume!(); // answered the drawer's
+    // …and stayed at the map's, which is simply not calling its resume.
+    expect(leaveGuard.armed()).toBe(true);
+
+    const went = vi.fn();
+    expect(leaveGuard.ask(went)).toBe(true);
+    expect(last.it.asked).toBe(2);
+    expect(went).not.toHaveBeenCalled();
+  });
+
+  test("one that has nothing to say is passed over rather than asked twice", () => {
+    const quiet = { asked: 0 };
+    const last = holding();
+    register(() => {
+      quiet.asked++;
+      return false;
+    }, last.guard);
+
+    const went = vi.fn();
+    leaveGuard.ask(went);
+    last.it.resume!();
+    expect(quiet.asked).toBe(1);
+    expect(went).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * Register guards in mount order, the way two mounted components would.
+ *
+ * `useLeaveGuard` is a hook and these tests have no renderer, so they go in
+ * through the same door the hook uses.
+ */
+function register(...asks: ((resume: () => void) => boolean)[]) {
+  for (const ask of asks) leaveGuard.add(ask);
+}
+
 describe("what the question says is at stake", () => {
   const add = (n: number): Change[] =>
     Array.from({ length: n }, (_, i) => ({ kind: "add", key: `new-${i}`, profile: "r_1" }));

@@ -34,7 +34,7 @@ import { parseDestination, reachedTheMachine, stateLabel, waitForOnline } from "
 import { useAgents, useHosts, useRepos, useSessions } from "~/data";
 import { getListRolesQueryKey, useListRoles, useUpdateRole } from "~/api/generated/roles/roles";
 import { STATUS_LABEL } from "~/api/view";
-import { toDraft } from "~/ui/config/Roles";
+import { toDraft } from "~/ui/config/profile-draft";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { Group, Rows, Section, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";

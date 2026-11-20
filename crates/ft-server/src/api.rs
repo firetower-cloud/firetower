@@ -442,6 +442,7 @@ async fn credential_on(
         crate::agent_teams::Position,
         crate::agent_teams::TeamWithPositions,
         crate::agent_teams::Limits,
+        crate::agent_teams::ProfilePosition,
         crate::roles::import::ProfileDrop,
         crate::roles::import::ImportPlan,
         crate::db::Bucket,
@@ -671,6 +672,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(roles::list_roles, roles::create_role))
         .routes(routes!(roles::update_role, roles::delete_role))
         .routes(routes!(roles::set_default_role))
+        .routes(routes!(roles::role_positions))
         .routes(routes!(roles::export_role))
         .routes(routes!(roles::role_import_limits))
         .routes(routes!(roles::plan_role_import))

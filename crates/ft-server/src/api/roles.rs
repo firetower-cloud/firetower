@@ -303,6 +303,46 @@ pub(super) async fn delete_role(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Where this profile sits: one entry per position it holds, in a team this
+/// person can see.
+///
+/// The drawer's *In teams* tab, and the confirmation before a delete. It
+/// answers both in one request, which is the point: the alternative reads
+/// every team's whole tree and filters it in the window, at a request a team,
+/// and moves the rules about withheld names there at the same time.
+///
+/// A profile this person cannot see is **not found**, as every other read of
+/// one is. What comes back is already narrowed to the teams they may see.
+#[utoipa::path(
+    get, path = "/api/v1/roles/{id}/positions", tag = "roles",
+    params(("id" = String, Path, description = "Role id")),
+    responses(
+        (status = 200, body = Vec<crate::agent_teams::ProfilePosition>),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub(super) async fn role_positions(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<crate::agent_teams::ProfilePosition>>> {
+    let me = whoever(&principal)?;
+    if state
+        .roles
+        .one(me.id.as_str(), &id, Level::Viewer)
+        .await?
+        .is_none()
+    {
+        return Err(ApiError::not_found("role"));
+    }
+    Ok(Json(
+        state
+            .agent_teams
+            .profile_positions(me.id.as_str(), &id)
+            .await?,
+    ))
+}
+
 /// A profile as the file that describes it, ready to be written into a
 /// repository.
 ///

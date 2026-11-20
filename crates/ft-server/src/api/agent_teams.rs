@@ -34,6 +34,15 @@ fn refused(e: crate::agent_teams::Refused) -> ApiError {
 /// this team's and a tree over the limits as a [`crate::agent_teams::Refused`],
 /// which arrives here as an `anyhow::Error` like any other. Anything else is
 /// still the 500 it was.
+///
+/// **Neither of these endpoints checks the tree itself.** It used to be
+/// checked here and again inside the write, and the copy here could only ever
+/// refuse by id: the two rules that point at a position — a profile under
+/// itself, and two of one profile reporting to one seat — need the names, and
+/// the names are read inside the transaction that writes. So
+/// `crate::agent_teams::check` is called in exactly one place per verb, where
+/// it can say *Engineer* rather than `role_01…`, and every caller of this API
+/// gets the same sentence.
 fn wrote(e: anyhow::Error) -> ApiError {
     match e.downcast::<crate::agent_teams::Refused>() {
         Ok(no) => refused(no),
@@ -105,7 +114,6 @@ pub(super) async fn create_agent_team(
     Json(new): Json<NewAgentTeam>,
 ) -> ApiResult<(StatusCode, Json<TeamWithPositions>)> {
     let me = whoever(&principal)?;
-    crate::agent_teams::check(&new).map_err(refused)?;
 
     // A directory it is filed in from the first insert, rather than a create
     // and then a move: a team should never exist for a moment in the wrong
@@ -168,7 +176,6 @@ pub(super) async fn update_agent_team(
     Json(new): Json<NewAgentTeam>,
 ) -> ApiResult<Json<TeamWithPositions>> {
     let me = whoever(&principal)?;
-    crate::agent_teams::check(&new).map_err(refused)?;
     if !state
         .agent_teams
         .write(me.id.as_str(), &id, &new)

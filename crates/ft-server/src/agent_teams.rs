@@ -285,14 +285,74 @@ pub struct Report {
     pub profile: Role,
 }
 
+/// Where one profile sits in one team.
+///
+/// The answer to *is this the same Designer* — yes, and here is each seat it
+/// holds, with what sits above and below it in that team. #494's drawer reads
+/// its **In teams** tab off these, and so does the confirmation before a
+/// profile is deleted: deleting one takes every position that references it
+/// and everything under those, so the teams and the count have to be on
+/// screen before the press.
+///
+/// **One request rather than one per team.** The alternative is reading every
+/// team's whole tree and filtering it in the client, which is a request a team
+/// and puts the withholding rules in the client at the same time.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfilePosition {
+    pub team: String,
+    pub team_name: String,
+    /// The seat itself.
+    pub position: String,
+    /// It is the team's lead, so deleting the profile empties the team.
+    pub leads: bool,
+    /// The profile it reports to, by name. Absent for a lead, and absent
+    /// when that profile is one this person cannot see.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reports_to: Option<String>,
+    /// The profiles directly under it in this team, by name, in sibling
+    /// order. A name this person cannot see is absent, as it is from
+    /// [`AgentTeam::members`].
+    pub under: Vec<String>,
+    /// This seat's own instructions.
+    pub instructions: String,
+    /// How many positions go if this one goes: itself and everything under
+    /// it. What the confirmation counts.
+    pub takes: i64,
+    /// Whether this person may change that team.
+    pub may_write: bool,
+}
+
+/// What the profiles a tree names are called, by id.
+///
+/// **Two of the refusals below point at a position, and a refusal has to
+/// point at it the way the screen does.** The rules are a pure function over
+/// ids, so the names are handed to it rather than looked up by it: read inside
+/// the transaction that is about to write, from the same query that decides
+/// which profiles this person may see at all.
+///
+/// Resolved **on the server, not in the editor**, and that is a decision with
+/// three callers behind it: the HTTP API, the YAML import and three clients
+/// all meet these sentences, and a map held in one window would fix one of
+/// them. A profile absent from this map is one whose name could not be read,
+/// and the refusal falls back to its id rather than inventing a word.
+pub type ProfileNames = std::collections::HashMap<String, String>;
+
+/// How a refusal names a profile: its name, or its id when no name was read.
+fn called<'a>(names: &'a ProfileNames, id: &'a str) -> &'a str {
+    names.get(id).map(String::as_str).unwrap_or(id)
+}
+
 /// Everything about a tree a write has to be right about before anything is
 /// written: its size, its depth, and that nothing reports to itself.
 ///
 /// **Pure, so the limits are testable without a database.** The three it
 /// cannot answer — that each profile is one this person can see, that each id
 /// belongs to this team, and that the name is free — need rows, and are asked
-/// inside the transaction that writes.
-pub fn check(new: &NewAgentTeam) -> Result<(), Refused> {
+/// inside the transaction that writes. `names` is what that same transaction
+/// already read, so that the two refusals naming a profile read as sentences;
+/// see [`ProfileNames`].
+pub fn check(new: &NewAgentTeam, names: &ProfileNames) -> Result<(), Refused> {
     let name = new.name.trim();
     if name.is_empty() {
         return Err(Refused("a team needs a name".into()));
@@ -302,7 +362,7 @@ pub fn check(new: &NewAgentTeam) -> Result<(), Refused> {
     }
 
     let mut counted = 0usize;
-    walk(&new.lead, 1, &mut Vec::new(), &mut counted)?;
+    walk(&new.lead, 1, &mut Vec::new(), &mut counted, names)?;
     Ok(())
 }
 
@@ -312,6 +372,7 @@ fn walk(
     depth: usize,
     ancestors: &mut Vec<String>,
     counted: &mut usize,
+    names: &ProfileNames,
 ) -> Result<(), Refused> {
     if node.profile.trim().is_empty() {
         return Err(Refused("every position has to name a profile".into()));
@@ -339,9 +400,9 @@ fn walk(
     instructions (#494). */
     if ancestors.iter().any(|a| a == &node.profile) {
         return Err(Refused(format!(
-            "`{}` already sits above this position, so it would report to itself. A profile can \
+            "{} already sits above this position, so it would report to itself. A profile can \
              be in a team twice, but not under itself.",
-            node.profile
+            called(names, &node.profile)
         )));
     }
     /* **One profile at most once among one position's children.** A lead
@@ -360,16 +421,16 @@ fn walk(
             .any(|c| c.profile == child.profile)
         {
             return Err(Refused(format!(
-                "`{}` is already a direct report of this position. A lead hands work off by \
+                "{} is already a direct report of this position. A lead hands work off by \
                  name, so two of one profile reporting to one position would not say which is \
                  meant. The same profile can sit elsewhere in the team.",
-                child.profile
+                called(names, &child.profile)
             )));
         }
     }
     ancestors.push(node.profile.clone());
     for child in &node.children {
-        walk(child, depth + 1, ancestors, counted)?;
+        walk(child, depth + 1, ancestors, counted, names)?;
     }
     ancestors.pop();
     Ok(())
@@ -580,6 +641,80 @@ impl AgentTeams {
         Ok(in_reading_order(flat))
     }
 
+    /// Where one profile sits, team by team, with what is above and below it
+    /// in each.
+    ///
+    /// **One request, not one per team.** The drawer's *In teams* tab and the
+    /// confirmation before a profile is deleted both want the same reading,
+    /// and the alternative is fetching every team's whole tree and filtering
+    /// it in the client — a request a team, and the withholding rules moved
+    /// into a window.
+    ///
+    /// Teams are filtered by `filed_where` as every read is, so a team this
+    /// person cannot see is absent. The names above and below are joined
+    /// through it too: a profile they cannot reach is **absent from the
+    /// list** rather than blank, which is [`AgentTeam::members`]' rule. A
+    /// reading of where one profile sits is not drawing the shape of a tree,
+    /// so there is nothing a gap would misrepresent — the map is where a
+    /// withheld seat still has to be drawn.
+    ///
+    /// `takes` is each seat's own subtree, counted in one walk from every
+    /// position this profile holds rather than once per row.
+    pub async fn profile_positions(
+        &self,
+        person: &str,
+        profile: &str,
+    ) -> Result<Vec<ProfilePosition>> {
+        let sql = format!(
+            "WITH RECURSIVE descend AS ( \
+                 SELECT p.id AS root, p.id AS node \
+                   FROM agent_team_positions p WHERE p.profile_id = $2 \
+               UNION ALL \
+                 SELECT d.root, c.id \
+                   FROM agent_team_positions c JOIN descend d ON c.parent_id = d.node), \
+             sized AS (SELECT root, count(*)::bigint AS takes FROM descend GROUP BY root) \
+             SELECT p.id, p.team_id, t.name AS team_name, p.instructions, \
+                    (p.parent_id IS NULL) AS leads, above.name AS reports_to, \
+                    sized.takes, {writable} AS may_write, \
+                    ARRAY(SELECT kr.name \
+                            FROM agent_team_positions k \
+                            JOIN roles kr ON kr.id = k.profile_id AND {kid_visible} \
+                           WHERE k.parent_id = p.id \
+                           ORDER BY k.ord, k.id) AS under \
+               FROM agent_team_positions p \
+               JOIN agent_teams t ON t.id = p.team_id \
+               JOIN sized ON sized.root = p.id \
+               LEFT JOIN agent_team_positions par ON par.id = p.parent_id \
+               LEFT JOIN roles above ON above.id = par.profile_id AND {above_visible} \
+              WHERE p.profile_id = $2 AND {visible} \
+              ORDER BY t.name, p.ord, p.id",
+            writable = filed_where("t", 1, Level::Writer),
+            kid_visible = filed_where("kr", 1, Level::Viewer),
+            above_visible = filed_where("above", 1, Level::Viewer),
+            visible = filed_where("t", 1, Level::Viewer),
+        );
+        let rows = sqlx::query(&sql)
+            .bind(person)
+            .bind(profile)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading where a profile sits")?;
+        Ok(rows
+            .iter()
+            .map(|row| ProfilePosition {
+                team: row.get("team_id"),
+                team_name: row.get("team_name"),
+                position: row.get("id"),
+                leads: row.get("leads"),
+                reports_to: row.get("reports_to"),
+                under: row.get("under"),
+                instructions: row.get("instructions"),
+                takes: row.get("takes"),
+                may_write: row.get("may_write"),
+            })
+            .collect())
+    }
+
     /// The position a session occupies, if its owner may still see the team.
     ///
     /// **Fails closed.** A team filed somewhere its owner can no longer reach
@@ -755,7 +890,6 @@ impl AgentTeams {
         directory: Option<&str>,
         new: &NewAgentTeam,
     ) -> Result<ft_core::AgentTeamId> {
-        check(new)?;
         let id = ft_core::AgentTeamId::new();
         let slug = slug_of(&new.name, id.as_str());
         let path = match directory {
@@ -766,8 +900,10 @@ impl AgentTeams {
         let mut tx = self.pool.begin().await?;
         // Every profile named has to be one this person can actually see.
         // Asked inside the transaction so the answer cannot change between the
-        // check and the write.
-        self.must_see(&mut tx, person, new).await?;
+        // check and the write — and it is what names the profiles the rules
+        // below refuse by name rather than by id.
+        let names = self.must_see(&mut tx, person, new).await?;
+        check(new, &names)?;
         sqlx::query(
             "INSERT INTO agent_teams (id, org_id, path, created_by, name, slug) \
              VALUES ($1, $2, $3::ltree, $4, $5, $6)",
@@ -800,7 +936,6 @@ impl AgentTeams {
     /// different lead is not the same tree and pretending otherwise would be
     /// the one case where in-place updates lie.
     pub async fn write(&self, person: &str, id: &str, new: &NewAgentTeam) -> Result<bool> {
-        check(new)?;
         let mut tx = self.pool.begin().await?;
 
         let sql = format!(
@@ -817,7 +952,8 @@ impl AgentTeams {
             return Ok(false);
         }
 
-        self.must_see(&mut tx, person, new).await?;
+        let names = self.must_see(&mut tx, person, new).await?;
+        check(new, &names)?;
 
         // Which positions exist now, and which the write asks to keep. An id
         // that is not this team's is refused rather than ignored: it is either
@@ -903,7 +1039,8 @@ impl AgentTeams {
         Ok(true)
     }
 
-    /// Every profile a tree names has to be one this person can see.
+    /// Every profile a tree names has to be one this person can see — and
+    /// what each of them is called, for the refusals that name one.
     ///
     /// Refused rather than quietly dropped, which is what `api::roles`'
     /// `check_skills` decided for the same question and for the same reason: a
@@ -912,27 +1049,39 @@ impl AgentTeams {
     /// what the person was told it does. The *reads* filter as well — that is
     /// what makes an id whose profile is later filed away harmless — and this
     /// is the half that can explain itself to somebody.
+    ///
+    /// **The one refusal that still prints an id is this one**, and that is
+    /// not an oversight: it is about profiles filed where this person cannot
+    /// reach them, so there is no name to read and reading one would disclose
+    /// what the filing withholds. Every other refusal gets its names from the
+    /// map this returns.
     async fn must_see(
         &self,
         tx: &mut Transaction<'_, Postgres>,
         person: &str,
         new: &NewAgentTeam,
-    ) -> Result<()> {
+    ) -> Result<ProfileNames> {
         let mut named = Vec::new();
         profiles_named(&new.lead, &mut named);
+        // A seat naming no profile at all is `check`'s refusal to make, not a
+        // profile nobody can see.
+        named.retain(|id| !id.trim().is_empty());
         let sql = format!(
-            "SELECT r.id FROM roles r WHERE r.id = ANY($2) AND {visible}",
+            "SELECT r.id, r.name FROM roles r WHERE r.id = ANY($2) AND {visible}",
             visible = filed_where("r", 1, Level::Viewer),
         );
-        let seen: Vec<String> = sqlx::query_scalar(&sql)
+        let seen: ProfileNames = sqlx::query(&sql)
             .bind(person)
             .bind(&named)
             .fetch_all(&mut **tx)
             .await
-            .context("reading which of a team's profiles somebody can see")?;
+            .context("reading which of a team's profiles somebody can see")?
+            .into_iter()
+            .map(|row| (row.get("id"), row.get("name")))
+            .collect();
         let missing: Vec<&str> = named
             .iter()
-            .filter(|id| !seen.iter().any(|ok| ok == *id))
+            .filter(|id| !seen.contains_key(id.as_str()))
             .map(String::as_str)
             .collect();
         if !missing.is_empty() {
@@ -944,7 +1093,7 @@ impl AgentTeams {
             ))
             .into());
         }
-        Ok(())
+        Ok(seen)
     }
 }
 
@@ -1077,6 +1226,20 @@ mod tests {
         }
     }
 
+    /// The rules, with no names read — which is what every refusal that does
+    /// not point at a profile is unaffected by.
+    fn check(new: &NewAgentTeam) -> Result<(), Refused> {
+        super::check(new, &ProfileNames::new())
+    }
+
+    /// Ids to names, as `must_see` hands them over.
+    fn names_of(pairs: &[(&str, &str)]) -> ProfileNames {
+        pairs
+            .iter()
+            .map(|(id, name)| (id.to_string(), name.to_string()))
+            .collect()
+    }
+
     #[test]
     fn a_team_needs_a_name_and_a_lead_with_a_profile() {
         let mut no_name = team(seat("role_a", vec![]));
@@ -1174,6 +1337,54 @@ mod tests {
 
     /// Reading order is the lead, then each subtree in full, left to right —
     /// not every sibling of one depth before the next.
+    /// **A refusal that points at a position names it.**
+    ///
+    /// The depth and count refusals read as sentences and these two printed a
+    /// `role_…` id, for the same class of mistake and on the same screen. The
+    /// rules stay a pure function over ids; the names come from the
+    /// transaction that is about to write, so the API, the YAML import and all
+    /// three clients get one wording instead of each mapping ids themselves.
+    #[test]
+    fn a_refusal_that_points_at_a_profile_says_its_name() {
+        let names = names_of(&[
+            ("role_eng", "Engineer"),
+            ("role_lead", "Engineering Manager"),
+        ]);
+
+        let ambiguous = team(seat(
+            "role_lead",
+            vec![seat("role_eng", vec![]), seat("role_eng", vec![])],
+        ));
+        let refused = super::check(&ambiguous, &names).expect_err("two siblings of one profile");
+        assert!(
+            refused.0.starts_with("Engineer is already a direct report"),
+            "the refusal reads as a sentence: {}",
+            refused.0
+        );
+        assert!(!refused.0.contains("role_eng"), "and not as an id");
+
+        let under_itself = team(seat("role_lead", vec![seat("role_lead", vec![])]));
+        let refused = super::check(&under_itself, &names).expect_err("a profile under itself");
+        assert!(
+            refused
+                .0
+                .starts_with("Engineering Manager already sits above"),
+            "the refusal reads as a sentence: {}",
+            refused.0
+        );
+
+        // No name read for it, so the id stands rather than a word being
+        // invented. `must_see` refuses an unreadable profile before this runs,
+        // so in practice the fallback is for a caller holding the rules on
+        // their own.
+        let refused = check(&under_itself).expect_err("a profile under itself");
+        assert!(
+            refused.0.starts_with("role_lead already sits above"),
+            "the id is the fallback: {}",
+            refused.0
+        );
+    }
+
     #[test]
     fn reading_order_is_depth_first_from_the_lead() {
         let p = |id: &str, parent: Option<&str>, order: i32| Position {
@@ -1881,6 +2092,110 @@ mod tests {
             "the seat and the one under it went with it"
         );
     }
+    /// **Where one profile sits, in one request.**
+    ///
+    /// The drawer's *In teams* tab and the confirmation before a delete both
+    /// read this. Three things are asserted together because each is a way of
+    /// getting it wrong: the count is the seat *and its subtree*, so the
+    /// confirmation is a true statement about what the cascade takes; a lead
+    /// says so, because deleting it empties the team rather than pruning it;
+    /// and the names above and below are **absent** for a reader who cannot
+    /// see those profiles, rather than recovered from somewhere else. #490's
+    /// own finding was a map doing exactly that.
+    #[tokio::test]
+    async fn where_a_profile_sits_counts_its_subtree_and_withholds_what_it_must() {
+        let w = world().await;
+        let (ana, ana_slug) = w.colleague("ana").await;
+        let designer = w.profile_of(&ana, &ana_slug, "Designer").await;
+        let writer = w.profile_of(&ana, &ana_slug, "Writer").await;
+        let archivist = w.profile_of(&ana, &ana_slug, "Archivist").await;
+
+        // Ana's team: Designer leads, Writer under it, Archivist under Writer.
+        let studio = w
+            .teams
+            .create(
+                &w.org,
+                &ana,
+                &ana_slug,
+                None,
+                &named(
+                    "Studio",
+                    seat(
+                        &designer,
+                        vec![seat(&writer, vec![seat(&archivist, vec![])])],
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+
+        // Ana sees the whole of it.
+        let hers = w.teams.profile_positions(&ana, &writer).await.unwrap();
+        assert_eq!(hers.len(), 1, "one seat, in one team");
+        let it = &hers[0];
+        assert_eq!(it.team, studio.as_str());
+        assert_eq!(it.team_name, "Studio");
+        assert!(!it.leads, "Writer does not lead Studio");
+        assert_eq!(it.reports_to.as_deref(), Some("Designer"));
+        assert_eq!(it.under, vec!["Archivist".to_string()]);
+        assert_eq!(it.takes, 2, "the seat and the one under it");
+
+        // The lead's own seat takes the whole tree, and says it leads.
+        let at_the_top = &w.teams.profile_positions(&ana, &designer).await.unwrap()[0];
+        assert!(at_the_top.leads);
+        assert_eq!(at_the_top.takes, 3, "the whole tree");
+        assert_eq!(at_the_top.reports_to, None, "a lead reports to nobody");
+        assert!(at_the_top.may_write, "hers to change");
+
+        // She shares the team with me, and none of the profiles. The shape of
+        // the tree is the team's and I see it; every name around the seat is a
+        // profile's and is withheld.
+        crate::access::Access::new(w.db.pool().clone())
+            .set_exception(
+                crate::access::FiledKind::AgentTeam,
+                studio.as_str(),
+                &w.me,
+                Level::Viewer,
+            )
+            .await
+            .unwrap();
+        let mine = w.teams.profile_positions(&w.me, &writer).await.unwrap();
+        assert_eq!(mine.len(), 1, "the seat is in a team I can see");
+        assert_eq!(mine[0].takes, 2, "the count is the team's shape");
+        assert_eq!(mine[0].reports_to, None, "and the name above it is not");
+        assert!(
+            mine[0].under.is_empty(),
+            "a name I cannot see is absent, not blank: {:?}",
+            mine[0].under
+        );
+
+        // And a team nobody shared with me is not in the answer at all.
+        let unshared = w
+            .teams
+            .create(
+                &w.org,
+                &ana,
+                &ana_slug,
+                None,
+                &named("Quiet", seat(&writer, vec![])),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            w.teams
+                .profile_positions(&ana, &writer)
+                .await
+                .unwrap()
+                .len(),
+            2
+        );
+        let mine = w.teams.profile_positions(&w.me, &writer).await.unwrap();
+        assert!(
+            mine.iter().all(|x| x.team != unshared.as_str()),
+            "a team I cannot see is absent"
+        );
+    }
+
     /// Filed into a directory through the one operation that moves anything,
     /// and reachable there by whoever the directory is granted to.
     ///

@@ -43,10 +43,11 @@ import { useEndAgent, useEndWorkspace } from "~/ui/end";
 import { useConfirm } from "~/ui/Confirm";
 import { drag } from "~/drag";
 import { isGlobalMod, isLocalMod, key } from "~/platform";
+/* The rail's own numbers. Here rather than in this file because the profile
+   drawer opens the same rail in a configuration pane, and one rail wants one
+   set of measurements. */
+import { RAIL_DEFAULT, RAIL_MIN } from "~/ui/right-rail";
 
-/** The rail can be dragged between these. */
-const RAIL_MIN = 288;
-const RAIL_DEFAULT = 368;
 /** And the shell panel, top to bottom. */
 const TERM_MIN = 120;
 const TERM_DEFAULT = 256;

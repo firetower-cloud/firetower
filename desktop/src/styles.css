@@ -7064,4 +7064,627 @@ html:not([data-platform="macos"]) {
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  /* ══════════════════════════════════════════════════════════════════
+     THE PROFILE DRAWER
+     The right rail, opened in a configuration pane — from a row in Agent
+     profiles and from a card on a team's map. `right-rail.ts` holds the
+     widths and the three bands; this is what each one looks like.
+
+     **Every name below is new to this sheet, and that is checked.**
+     `profile-drawer.test.ts` fails if the drawer writes a class the sheet
+     already styles on its own, which is the collision #492 shipped and found
+     by looking at a 9px pill. What it borrows on purpose — `.fld`, `.pk`,
+     `.pickrow`, `.pickrows`, `.ladder`, `.inform`, `.itabs`, `.btn`,
+     `.find`, `.whereto`, `.sheetcard` — is listed there as borrowed.
+     ══════════════════════════════════════════════════════════════════ */
+
+  /* The pane and the rail, side by side. The pane scrolls on its own, so the
+     rail is full height and keeps its own scroll — which is what makes it the
+     window's rail rather than a box drawn inside a page.
+
+     The column is here whether or not the rail is, so opening it never
+     changes which element is scrolling and never drops a scroll position. */
+  .pdock {
+    position: relative;
+    display: flex;
+    min-height: 0;
+    flex: 1;
+  }
+  .pdockmain {
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    container-type: inline-size;
+  }
+  /* **A squeezed row sheds columns, right to left, rather than crushing the
+     name.** Docking the drawer takes 370px off the pane: on the desk that
+     leaves the screen 612, and at 612 a `.r` row gave its name seven
+     characters — *Documen…* over *Turns a ch…* — while the path and the
+     placement kept their full width. The name is the one column nobody can
+     do without, so it is the last to go and the others go first. The numbers
+     are the prototype's own, plus `.pg`'s 44px of padding each side. */
+  @container (max-width: 790px) {
+    .pdockmain .r .path {
+      display: none;
+    }
+  }
+  @container (max-width: 650px) {
+    .pdockmain .r .said {
+      display: none;
+    }
+  }
+  .pdockrail {
+    display: flex;
+    min-height: 0;
+    flex: none;
+    flex-direction: column;
+    background: var(--color-panel);
+    border-left: 1px solid var(--color-line-soft);
+  }
+  /* Floated and pushed: over the pane, with the ground behind it dismissing.
+     Inside the pane rather than the window, because the band was measured on
+     the pane and a scrim over the rail index would be answering a different
+     question. */
+  .pdockover {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    justify-content: flex-end;
+    background: var(--color-scrim);
+  }
+  .pdockover .pdockrail {
+    box-shadow: var(--float);
+  }
+  /* The grip, which is `Workbench`'s: a 4px target with a hairline in it. */
+  /* **A four-pixel target that costs two.** `Workbench` grips its own rail
+     the same way: the strip somebody has to hit is wider than the gap it
+     takes out of the layout, because a two-pixel target is one nobody can
+     find. Two rather than three so the rail and its grip come to exactly the
+     370 the drawer was measured at. `right-rail.ts`'s `GRIP` is this number
+     and `right-rail.test.ts` holds them together. */
+  .pdockgrip {
+    position: relative;
+    z-index: 10;
+    margin-right: -2px;
+    width: 4px;
+    flex: none;
+    cursor: col-resize;
+  }
+  .pdockgrip span {
+    position: absolute;
+    inset-block: 0;
+    left: 0;
+    width: 1px;
+    background: transparent;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .pdockgrip:hover span,
+  .pdockgrip:active span {
+    background: var(--color-slate);
+  }
+
+  .pdrawer {
+    display: flex;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+  }
+  .pdrawer .dnav {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: none;
+    padding: 8px 10px 0;
+  }
+  .pdrawer .crumb {
+    flex: 1;
+    min-width: 0;
+    padding-left: 6px;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .pdrawer .dnav .right {
+    margin-left: auto;
+    display: flex;
+    flex: none;
+    gap: 2px;
+  }
+  /* **What you opened, said at the top.** A profile and a position have the
+     same name and different consequences. */
+  .pdrawer .dhead {
+    flex: none;
+    padding: 6px 18px 0;
+  }
+  .pdrawer .dhead .top {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .pdrawer .dhead .g {
+    flex: none;
+    margin-top: 3px;
+    color: var(--color-dim);
+  }
+  .pdrawer .dhead h2 {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-lede);
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.012em;
+    line-height: 1.3;
+    color: var(--color-bone);
+  }
+  .pdrawer .dchips {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 0 10px;
+  }
+  .pdrawer .dchips.wrap {
+    flex-wrap: wrap;
+    margin: 2px 0 0;
+  }
+  .pdrawer .dchips .none {
+    font-size: var(--text-meta);
+    font-style: italic;
+    color: var(--color-mute);
+  }
+  .pdrawer .dchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 25px;
+    padding: 0 9px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+    white-space: nowrap;
+  }
+  .pdrawer .dchip.mono {
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+  }
+  .pdrawer .dchip.on {
+    background: var(--color-slate-tint);
+    color: var(--color-slate);
+    box-shadow: inset 0 0 0 1px var(--color-slate-deep);
+  }
+  .pdrawer .dchip .x {
+    display: grid;
+    place-items: center;
+    width: 14px;
+    height: 14px;
+    margin-left: 2px;
+    border-radius: 99px;
+    color: var(--color-mute);
+  }
+  .pdrawer .dchip .x:hover {
+    background: var(--color-overlay);
+    color: var(--color-text);
+  }
+  /* The tabs are `.itabs`, which is the right rail's own index — 52px, plain
+     text with a 2px underline. At drawer width five of them have to fit, so
+     the gap closes and the row scrolls rather than wrapping: a tab row on two
+     lines moves the panel under it every time the tab changes. */
+  .pdrawer .itabs {
+    gap: 13px;
+    height: 46px;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--color-line-soft);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .pdrawer .itabs::-webkit-scrollbar {
+    display: none;
+  }
+  .pdrawer .itab {
+    flex: none;
+  }
+
+  /* **A pill that does not fit the rail wraps instead of being cut off.**
+     `.pk` is `flex: none` at a fixed 38px, which is right in a 640px form and
+     wrong in a 334px column: *Let the lead choose · here, unless the lead says
+     otherwise* ran past the drawer's edge and lost its last four words. The
+     pill keeps its shape and gains a second line only when it needs one. */
+  .pdrawer .pickrow .pk,
+  .pdrawer .ladder .pk {
+    max-width: 100%;
+    min-width: 0;
+    height: auto;
+    min-height: 38px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+    flex-wrap: wrap;
+    text-align: left;
+  }
+  .pdrawer .pk .sub {
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  /* The machine rows the same, where the label and its figures share a line
+     the drawer does not have room for. */
+  .pdrawer .pr2 {
+    min-width: 0;
+  }
+  .pdrawer .pr2 .tx {
+    min-width: 0;
+  }
+  .pdrawer .pr2 .tx b,
+  .pdrawer .pr2 .tx s {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    display: block;
+  }
+
+  /* **The band.** One note, under the tabs, in one place — rather than a
+     warning repeated inside each panel that happens to edit the profile. The
+     consequence it carries is that the other team is not on screen. */
+  .dshared {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    flex: none;
+    padding: 7px 18px;
+    font-size: var(--text-micro);
+    line-height: 1.45;
+    color: var(--color-amber);
+    background: var(--color-amber-tint);
+    box-shadow: inset 0 -1px 0 var(--color-amber-deep);
+  }
+  .dshared svg {
+    flex: none;
+  }
+  .dshared b {
+    font-weight: 500;
+  }
+  .dshared.only {
+    color: var(--color-slate);
+    background: var(--color-slate-tint);
+    box-shadow: inset 0 -1px 0 var(--color-slate-deep);
+  }
+
+  .pdrawer .dbody {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding: 16px 18px 22px;
+  }
+  .pdrawer .dlede {
+    margin: 0;
+    font-size: var(--text-meta);
+    line-height: 1.6;
+    color: var(--color-dim);
+  }
+  .pdrawer .dread {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  /* The action row. `--control` is 30px and a status strip is 22, so the
+     controls are in a row of their own — which is where #492's map puts Save
+     and Discard, for the same reason. */
+  .pdrawer .dfoot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    min-height: var(--row-tight);
+    padding: 10px 18px;
+    border-top: 1px solid var(--color-line-soft);
+  }
+  .pdrawer .dfoot .msg {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-meta);
+    line-height: 1.45;
+    color: var(--color-text);
+  }
+  .pdrawer .dfoot .msg.quiet {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--color-dim);
+  }
+
+  /* **The profile's instructions, then this seat's, in one frame.** The join
+     is the thing being read: a position adds and never replaces, and two
+     fields of the same shape side by side would say nothing about which is
+     which. */
+  .joinbox {
+    border-radius: 12px;
+    background: var(--color-ground);
+    box-shadow: inset 0 0 0 1px var(--color-line-soft);
+    overflow: hidden;
+  }
+  [data-theme="light"] .joinbox {
+    background: var(--color-overlay);
+  }
+  .joinbox .jh {
+    padding: 8px 12px 3px;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+  }
+  .joinbox .jh.and {
+    margin-top: 3px;
+    border-top: 1px dashed var(--color-line);
+    color: var(--color-slate);
+  }
+  .joinbox .jsaid {
+    padding: 0 12px 9px;
+    font-size: var(--text-meta);
+    line-height: 1.55;
+    color: var(--color-dim);
+    white-space: pre-wrap;
+  }
+  .joinbox .jsaid.none {
+    font-style: italic;
+    color: var(--color-mute);
+  }
+  .joinbox textarea,
+  .instrbox textarea,
+  .bigedit textarea {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: none;
+    resize: vertical;
+    font: inherit;
+    color: var(--color-bone);
+  }
+  .joinbox textarea {
+    padding: 2px 12px 10px;
+    font-size: var(--text-meta);
+    line-height: 1.55;
+  }
+  .joinbox textarea:focus,
+  .instrbox textarea:focus,
+  .bigedit textarea:focus {
+    outline: none;
+  }
+  .joinbox textarea::placeholder,
+  .instrbox textarea::placeholder,
+  .bigedit textarea::placeholder {
+    color: var(--color-mute);
+  }
+  .joinbox:focus-within,
+  .instrbox:focus-within {
+    box-shadow: inset 0 0 0 1px var(--color-dim);
+  }
+  .joinbox .bar,
+  .instrbox .bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-top: 1px solid var(--color-line-soft);
+    background: var(--color-raise);
+  }
+  .joinbox .bar .msg,
+  .instrbox .bar .msg {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+  }
+  .instrbox {
+    border-radius: 12px;
+    background: var(--color-ground);
+    box-shadow: inset 0 0 0 1px var(--color-line);
+    overflow: hidden;
+  }
+  .instrbox textarea {
+    padding: 9px 12px;
+    font-size: var(--text-meta);
+    line-height: 1.55;
+  }
+  /* The same field, with room — over the screen rather than squeezed into a
+     column that is about forty-five characters wide. */
+  .bigedit {
+    margin-top: 12px;
+    border-radius: 12px;
+    background: var(--color-ground);
+    box-shadow: inset 0 0 0 1px var(--color-line-soft);
+    overflow: hidden;
+  }
+  [data-theme="light"] .bigedit {
+    background: var(--color-overlay);
+  }
+  .bigedit textarea {
+    padding: 13px 15px;
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    line-height: 1.65;
+  }
+  .bigedit:focus-within {
+    box-shadow: inset 0 0 0 1px var(--color-dim);
+  }
+
+  /* *Pin a skill*, **above** its list: a control under a list moves every
+     time the list grows, and this one has to be in the same place on a
+     profile that pins two and one that pins twenty. */
+  .fld .addsk {
+    align-self: flex-start;
+    margin: 1px 0 6px;
+  }
+
+  /* Where it sits, team by team. Each one is a destination. */
+  .places {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .place {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    width: 100%;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--color-ground);
+    box-shadow: inset 0 0 0 1px var(--color-line-soft);
+    text-align: left;
+    transition: box-shadow var(--dur-native) var(--ease-swift);
+  }
+  [data-theme="light"] .place {
+    background: var(--color-overlay);
+  }
+  .place:not(:disabled):hover {
+    box-shadow: inset 0 0 0 1px var(--color-dim);
+  }
+  .place[data-here="true"] {
+    box-shadow: inset 0 0 0 1px var(--color-sage-deep);
+  }
+  .place .ph {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font-size: var(--text-ui);
+  }
+  .place .ph b {
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .place .ph .g {
+    margin-left: auto;
+    flex: none;
+    color: var(--color-mute);
+  }
+  .place .ptree {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .place .pr {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .place .pr svg {
+    flex: none;
+    color: var(--color-mute);
+  }
+  .place .pr.self {
+    color: var(--color-text);
+  }
+  .place .pr.self em {
+    min-width: 0;
+    font-style: normal;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .place .pr.kid,
+  .place .pr.up {
+    padding-left: 10px;
+  }
+  .place .pr.none {
+    padding-left: 10px;
+    font-style: italic;
+    color: var(--color-mute);
+  }
+
+  /* What a delete takes with it, in the dialog that asks. The same shape the
+     map card's destructive control has: the blast radius, with the count,
+     where the press is. */
+  .takes {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 10px 0;
+    border-radius: 12px;
+    background: var(--color-ground);
+    box-shadow: inset 0 0 0 1px var(--color-line-soft);
+    padding: 9px 12px;
+  }
+  [data-theme="light"] .takes {
+    background: var(--color-overlay);
+  }
+  .takes li {
+    display: flex;
+    align-items: baseline;
+    gap: 9px;
+    font-size: var(--text-meta);
+  }
+  .takes li b {
+    flex: none;
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .takes li span {
+    min-width: 0;
+    color: var(--color-dim);
+  }
+
+  /* The sheet's tick list, which the skills picker reads in. */
+  .scopebox {
+    max-height: 260px;
+    border-radius: 12px;
+    border: 1px solid var(--color-line);
+    background: var(--color-ground);
+    overflow: auto;
+  }
+  .scopebox .sr {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 7px 11px;
+    border-bottom: 1px solid var(--color-line-soft);
+    text-align: left;
+  }
+  .scopebox .sr:last-child {
+    border-bottom: 0;
+  }
+  .scopebox .sr:hover {
+    background: var(--color-raise);
+  }
+  .scopebox .sr .nm {
+    flex: none;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+  .scopebox .sr .nm.mono {
+    font-family: var(--font-mono);
+    font-size: var(--text-meta);
+  }
+  .scopebox .sr .ds {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tick2 {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    height: 16px;
+    flex: none;
+    border-radius: 4px;
+    border: 1px solid var(--color-mute);
+    color: var(--color-ground);
+  }
+  .tick2[data-on="true"] {
+    border-color: var(--color-sage);
+    background: var(--color-sage);
+  }
 }
