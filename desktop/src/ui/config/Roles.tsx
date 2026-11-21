@@ -47,6 +47,7 @@ import {
   planRoleImport,
   applyRoleImport,
   rolePositions,
+  setDefaultRole,
   useRoleImportLimits,
 } from "~/api/generated/roles/roles";
 import { useDirectories, why } from "~/data";
@@ -552,6 +553,8 @@ function RoleRow({
      An open machine is said and a pinned one is not. Committed is the ordinary
      case and spends no words; open is the exception, and the exception is the
      only thing worth a word on a list that is mostly read. */
+  const cache = useQueryClient();
+  const [busy, setBusy] = useState(false);
   const place =
     role.placement === "here"
       ? "same workspace"
@@ -569,6 +572,20 @@ function RoleRow({
      mark is the only thing carrying them. */
   const engine = agent ? `Engine: ${AGENT_LABEL[agent] ?? agent}` : "Engine: whichever the lead is running";
 
+  /* **Its own write, the moment it is pressed.** It is a fact about this
+     person rather than a field of the profile, and setting one unsets
+     another — so it has no draft to join and nothing to discard. Carried
+     across from the drawer unchanged, except for where it lives. */
+  const toggleDefault = async () => {
+    setBusy(true);
+    try {
+      await setDefaultRole(role.id, { on: !role.isDefault });
+      await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     /* One row, as every other pane draws one: the mark, the name over what it
        does, then the quiet facts on the right. The chips were three coloured
@@ -584,12 +601,33 @@ function RoleRow({
         </span>
       </button>
       {role.canDelegate && <Badge>can delegate</Badge>}
-      {role.isDefault && (
-        <span className="said flex items-center gap-1">
-          <Star className="h-3 w-3" strokeWidth={1.75} />
-          default
-        </span>
-      )}
+      {/* **The star is the control.** It was the drawer's, under a sentence
+          saying only one profile can hold it — a sentence that was only
+          needed because a drawer shows one profile at a time. Here the rule
+          is the drawing: press one and the star moves off the other, in
+          front of somebody looking at both. The row already drew it; what it
+          did not have was the press. */}
+      <button
+        type="button"
+        aria-pressed={role.isDefault}
+        disabled={busy}
+        onClick={() => void toggleDefault()}
+        title={
+          role.isDefault
+            ? "Stop starting new workspaces as this"
+            : "Start new workspaces as this profile"
+        }
+        className={`said flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors hover:bg-overlay hover:text-bone disabled:opacity-60${
+          role.isDefault ? "" : " hov"
+        }`}
+      >
+        <Star
+          className="h-3 w-3"
+          strokeWidth={1.75}
+          fill={role.isDefault ? "currentColor" : "none"}
+        />
+        {role.isDefault ? "default" : "make default"}
+      </button>
       <span className="said">{place}</span>
       {/* Where it is filed, which is also who else has it. "Only you" is the
           same fact said the way a person would say it. */}

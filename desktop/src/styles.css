@@ -2118,6 +2118,10 @@ html:not([data-platform="macos"]) {
     opacity: 0;
     transition: opacity var(--dur-native) var(--ease-swift);
   }
+  /* **And on focus**, or the keyboard is told less than the mouse. */
+  .r .hov:focus-visible {
+    opacity: 1;
+  }
   .r .g {
     display: grid;
     place-items: center;
@@ -4392,36 +4396,51 @@ html:not([data-platform="macos"]) {
     background: var(--color-overlay);
     color: var(--color-bone);
   }
+  /* **A chosen thing, not a thing that acts.** This filled with
+     `--color-bone` — byte for byte `.btn.primary`'s ink — so the selected
+     choice was the heaviest object in the pane and *Save changes*, the one
+     control that does anything, wore the same weight further down it. The
+     answer was already in this sheet twice: `.row[data-on]` and
+     `.pr2[aria-pressed]` below both take the raised overlay, and the machine
+     list on the same tab as these pills does it correctly. A brightness step,
+     which is what the style guide says to reach for when colour is spent. */
   .pk[aria-pressed="true"] {
-    background: var(--color-bone);
-    color: var(--color-panel);
+    background: var(--color-overlay);
+    color: var(--color-bone);
+    box-shadow: var(--shadow-raise);
   }
   .pk .ic {
     display: grid;
     place-items: center;
     color: var(--color-dim);
   }
-  .pk[aria-pressed="true"] .ic {
-    color: var(--color-panel);
-  }
   .pk .sub {
     font-size: 0.84375rem;
     color: var(--color-mute);
   }
-  .pk[aria-pressed="true"] .sub {
-    color: color-mix(in srgb, var(--color-panel) 70%, transparent);
+  /* A brightness step alone is a weak signal for anybody who cannot see one,
+     and hover lands on the same fill — so the tick is what says *chosen*.
+     `aria-pressed` was already right and is untouched. */
+  .pk .tick {
+    display: none;
+    place-items: center;
+    margin-left: auto;
+    padding-left: 4px;
   }
-  /* **A pressed pill needs a focus ring of its own.** The global
-     `:focus-visible` outline is `--color-bone`, and a pressed pill's background
-     is also bone — so keyboard focus on the selected choice was invisible, on
-     the one control in the row somebody is most likely to be sitting on. An
-     inset ring in the pill's own ink, which reads on both states. */
+  .pk[aria-pressed="true"] .ic,
+  .pk[aria-pressed="true"] .tick {
+    color: var(--color-bone);
+  }
+  .pk[aria-pressed="true"] .tick {
+    display: grid;
+  }
+  /* One ring, both states. The pressed pill needed its own while it was
+     filled with bone and the global `:focus-visible` outline is also bone;
+     off the bone fill, the inset ring reads on every pill again and the
+     special case is gone. */
   .pk:focus-visible {
     outline: none;
     box-shadow: inset 0 0 0 2px var(--color-bone);
-  }
-  .pk[aria-pressed="true"]:focus-visible {
-    box-shadow: inset 0 0 0 2px var(--color-panel);
   }
 
   /* ── The same pills, read down ──────────────────────────────────────
@@ -7275,6 +7294,61 @@ html:not([data-platform="macos"]) {
     font-family: var(--font-mono);
     font-size: var(--text-micro);
   }
+  /* **The chip that is also the control.** Where it is filed is also who else
+     has it, so the chip saying the one opens the sheet that changes the other
+     — and the row that used to say it in prose beside an inert chip is gone.
+     A chip somebody can press has to look pressable, which is the whole of
+     the difference. */
+  .pdrawer .dchip.act:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+
+  /* **A thing this profile carries that the screen cannot otherwise show**,
+     with the control that puts it down.
+
+     `.inform` beside it is the drawer's quiet aside — a fact about the state
+     a field is in. This is the other kind: something is set, it is on its way
+     out, and there is one thing to do about it. The amber pip is the only
+     mark that separates them, which is enough at the one place in this drawer
+     that needs it. Its own name rather than the sheet's `.strip`, which is a
+     hairline-topped line of text under the skills answer and means something
+     else entirely. */
+  .pdrawer .dnote {
+    position: relative;
+    margin-top: 4px;
+    padding: 11px 13px 11px 24px;
+    border-radius: 12px;
+    background: var(--color-raise);
+  }
+  .pdrawer .dnote::before {
+    content: "";
+    position: absolute;
+    top: 17px;
+    left: 13px;
+    width: 5px;
+    height: 5px;
+    border-radius: 99px;
+    background: var(--color-amber-soft);
+  }
+  .pdrawer .dnote b {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--color-bone);
+  }
+  .pdrawer .dnote p {
+    margin-top: 3px;
+    max-width: 58ch;
+    font-size: 0.875rem;
+    line-height: 1.55;
+    color: var(--color-dim);
+  }
+  .pdrawer .dnote .acts {
+    display: flex;
+    gap: 6px;
+    margin-top: 9px;
+  }
   .pdrawer .dchip.on {
     background: var(--color-slate-tint);
     color: var(--color-slate);
@@ -7416,11 +7490,10 @@ html:not([data-platform="macos"]) {
     line-height: 1.45;
     color: var(--color-text);
   }
-  .pdrawer .dfoot .msg.quiet {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    color: var(--color-dim);
+  /* At rest there is no message — the chip is the whole of what the foot has
+     to say — so the chip holds the action end on its own. */
+  .pdrawer .dfoot .dchip {
+    margin-left: auto;
   }
 
   /* **The profile's instructions, then this seat's, in one frame.** The join

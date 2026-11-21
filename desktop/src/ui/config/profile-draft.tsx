@@ -29,28 +29,33 @@ import { usable, type Account } from "~/api/accounts";
 import type { Agent, ControlKind, NewRole, Role } from "~/api/generated/model";
 
 /**
- * One phrase for one idea, in all three fields that have it.
+ * One phrase for one idea, in the fields that put the question to the lead.
  *
- * Placement, Machine and Engine each say the same thing when they say nothing,
- * so they say it in the same words and wear the same mark — a dashed ring
- * (`CircleDashed`), because colour is spent and ember means an agent is waiting
- * on you. Three wordings for one state would unmake the idea that it is one.
+ * Where a child works and which machine it runs on each say the same thing
+ * when they say nothing, so they say it in the same words and wear the same
+ * mark — a dashed ring (`CircleDashed`), because colour is spent and ember
+ * means an agent is waiting on you. Two wordings for one state would unmake
+ * the idea that it is one.
+ *
+ * **The engine is not one of them any more.** It was, and that was the
+ * mistake: an engine is a *requirement the instructions have*, not a question
+ * put to whoever runs it, and the phrase that fits a question does not fit a
+ * requirement. It reads [`ANY_ENGINE`] instead, in a menu rather than on a
+ * pill.
  */
 export const OPEN = "Let the lead choose";
 
 /**
- * What happens when nobody chooses, said on the open pill rather than in the
- * field's hint.
+ * The same idea as an option in a menu, which is where the engine now asks it.
  *
- * Both halves, likelier branch first. In a hint it would read as a default the
- * profile sets, which is the one thing a profile must not have: a field here is
- * a commitment or a question, never a default something else may outrank.
+ * **Named, not blank.** A value column is where a filled-in answer goes, so
+ * `Any` sitting in one read as a field nobody had got to. An option in a list
+ * beside Claude Code and Codex is the same fact, visibly chosen — and the
+ * wording has to say *engine* rather than *let the lead choose*, because what
+ * this field holds is a requirement the instructions have, not a question put
+ * to whoever runs it.
  */
-export const OPEN_FALLBACK = {
-  placement: "here, unless the lead says otherwise",
-  machine: "Firetower picks, unless the lead names one",
-  agent: "the lead's own, unless it names another",
-};
+export const ANY_ENGINE = "Any engine";
 
 /**
  * Where a child runs. **Three, and the open one first.**
@@ -71,10 +76,10 @@ export const OPEN_FALLBACK = {
  * (`desktop-redesign.html:4447`) and the order every field here repeats: the
  * open answer first, wearing the open mark, and the commitments after it.
  */
-export const PLACEMENTS: { value: string; icon: LucideIcon; label: string; note: string }[] = [
-  { value: "lead", icon: CircleDashed, label: OPEN, note: OPEN_FALLBACK.placement },
-  { value: "here", icon: GitBranch, label: "Same workspace", note: "shares the lead's branch" },
-  { value: "new", icon: GitBranchPlus, label: "Its own workspace", note: "a fresh branch" },
+export const PLACEMENTS: { value: string; icon: LucideIcon; label: string }[] = [
+  { value: "lead", icon: CircleDashed, label: OPEN },
+  { value: "here", icon: GitBranch, label: "Same workspace" },
+  { value: "new", icon: GitBranchPlus, label: "Its own workspace" },
 ];
 
 /**

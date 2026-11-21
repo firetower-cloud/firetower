@@ -50,7 +50,6 @@ import {
   CornerUpLeft,
   Eye,
   EyeOff,
-  FolderGit2,
   Maximize2,
   Network,
   PanelRightClose,
@@ -67,7 +66,6 @@ import {
   deleteRole,
   getListRolesQueryKey,
   getRolePositionsQueryKey,
-  setDefaultRole,
   updateRole,
   useListRoles,
   useRolePositions,
@@ -97,10 +95,10 @@ import { Note, WhereTo } from "~/ui/config/bits";
 import { LeaveSheet, Sheet } from "~/ui/config/TeamSheet";
 import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
 import {
+  ANY_ENGINE,
   CONTROL_ICON,
   ON_LIMIT,
   OPEN,
-  OPEN_FALLBACK,
   PLACEMENTS,
   filedIn,
   nameTakenBy,
@@ -686,6 +684,7 @@ function Editing({
             draft={draft}
             set={set}
             taken={taken}
+            roles={roles.data ?? []}
             onExpand={() => setExpanded("profile")}
           />
         )}
@@ -733,11 +732,12 @@ function Editing({
           overhangs it. #492's map puts Save and Discard in an action row for
           the same reason, and this is the same row. */}
       <div className="dfoot">
-        <span className={`msg${changed.length ? "" : " quiet"}`}>
-          {changed.length
-            ? willSave(changed.length, teamsIn(places.data?.places))
-            : "Saved. Workspaces already running keep what they started with."}
-        </span>
+        {/* Nothing at rest: the chip at the other end of this row already
+            reads *No changes*, and a sentence saying the same thing is the
+            second drawing of one fact. */}
+        {changed.length > 0 && (
+          <span className="msg">{willSave(changed.length, teamsIn(places.data?.places))}</span>
+        )}
         {changed.length > 0 ? (
           <>
             <Button variant="quiet" size="sm" onClick={discard} disabled={saving}>
@@ -894,6 +894,13 @@ function Panel({
  * **A profile and a position have the same name and different
  * consequences**, so the heading has to say which. A position wears the team
  * it is in and what it sits under; a profile wears where it is filed.
+ *
+ * **And where it is filed is also who else has it**, which is why that chip
+ * is the sharing control rather than a label beside one. *What it is* carried
+ * a *Who can use it* row whose whole content was a sentence explaining that
+ * the path above it was the answer — a sentence that existed because of where
+ * the control was. The chip was already on screen and already inert; the row
+ * is gone and the chip opens the sheet.
  */
 function Head({ role, seat }: { role: Role; seat?: SeatHandle | null }) {
   return (
@@ -923,10 +930,14 @@ function Head({ role, seat }: { role: Role; seat?: SeatHandle | null }) {
                 : null}
           </span>
         ) : (
-          <span className="dchip mono">
-            <Icon of={FolderGit2} size={12} />
-            {role.path}
-          </span>
+          <WhoCanAccess
+            kind="role"
+            id={role.id}
+            path={role.path}
+            look="chip"
+            label={role.path}
+            className="dchip mono act"
+          />
         )}
         {seat && !seat.position && (
           <span className="dchip">
@@ -1015,7 +1026,7 @@ function Custom({
       <div className="fld">
         <span>Extra instructions</span>
         <span className="hint">
-          Markdown. Added to what {role.name} already says, in {seat.teamName} only.
+          It never replaces the profile’s instructions. Yours are added after.
         </span>
         <div className="joinbox">
           <div className="jh">{role.name} always says</div>
@@ -1053,7 +1064,7 @@ function Custom({
       {seat.mayWrite && !seat.leads && seat.elsewhere.length > 1 && (
         <Group
           label="Reports to"
-          hint={`Who hands it work in ${seat.teamName}. It takes everything under it with it.`}
+          hint="It takes everything under it with it."
         >
           <div className="pickrow">
             {seat.elsewhere.map((o) => (
@@ -1065,6 +1076,11 @@ function Custom({
                 className="pk"
               >
                 {o.name}
+                {seat.under === o.key && (
+                  <span className="tick">
+                    <Icon of={Check} size={14} />
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -1076,11 +1092,24 @@ function Custom({
 
 /* ── What it is ──────────────────────────────────────────────────────────── */
 
+/**
+ * The identity half: what it is called, what it does, what it is told — and
+ * the two statements about the kind of work that nobody else can make.
+ *
+ * **Two rows left this tab and did not come back.** *Who can use it* was a
+ * sentence saying the path chip above it was the answer; the chip is now the
+ * control. *Default* was a fact about this person rather than a field of this
+ * profile, and it carried "only one profile can be the default" — a rule
+ * nobody has to be told on a list where the star is visible and moves. A
+ * sentence that exists because of where a control is, is a sign the control
+ * is in the wrong place.
+ */
 function WhatItIs({
   role,
   draft,
   set,
   taken,
+  roles,
   onExpand,
 }: {
   role: Role;
@@ -1088,35 +1117,15 @@ function WhatItIs({
   set: <K extends keyof Settled>(k: K, v: Settled[K]) => void;
   /** Whichever profile already holds this name in the same directory (#489). */
   taken: string | null;
+  /** Every profile this person can see, for naming the ones old reach names. */
+  roles: Role[];
   onExpand: () => void;
 }) {
-  const cache = useQueryClient();
   const me = useMe();
-  const [isDefault, setIsDefault] = useState(role.isDefault);
-  const [busy, setBusy] = useState(false);
-
-  /* **Its own action, saved the moment it is flipped.** It is a fact about
-     this person rather than a field of the profile, and only one profile can
-     hold it — so it cannot wait for a Save that might be discarded. Carried
-     across from the form it replaced, unchanged. */
-  const toggle = async () => {
-    const next = !isDefault;
-    setBusy(true);
-    try {
-      await setDefaultRole(role.id, { on: next });
-      setIsDefault(next);
-      await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <>
-      <Field
-        label="Name"
-        hint="What you start it as, and what a lead names to delegate to it — e.g. reviewer."
-      >
+      <Field label="Name" hint="Leads delegate by this name.">
         <input
           value={draft.name}
           onChange={(e) => set("name", e.target.value)}
@@ -1134,22 +1143,39 @@ function WhatItIs({
         )}
       </Field>
 
-      <Field
-        label="Description"
-        hint="What it does and when to reach for it. The line a lead reads to decide whether to hand it work. Name the trigger, and the case to skip it."
-      >
+      {/* The craft advice is in the placeholder, where it is read while the
+          box is empty and gone the moment there is something to read
+          instead. */}
+      <Field label="Description" hint="A lead reads this to decide whether to hand it the work.">
         <textarea
           value={draft.does}
           onChange={(e) => set("does", e.target.value)}
           rows={3}
-          placeholder="Reviews a finished branch and reports problems as file:line. Use after a developer hands back — not for a one-line fix."
+          placeholder="Reviews a finished branch and reports problems as file:line. Not for a one-line fix."
           className="w-full resize-y rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
         />
       </Field>
 
-      <Field
+      {/* **Open editor sits beside the label**, not under the box. At the
+          rail's floor the box is for checking what is there rather than for
+          writing it, so the way to the room with the width in it is the
+          control next to the heading — and the bar under the box, which held
+          a character count and the word Markdown the hint already says, is
+          gone with it.
+
+          **And a `Group`, not a `Field`**, now that there are two controls:
+          a `label` adopts the first one under it and forwards to it every
+          click that lands on the label and misses, which is what #df57c93
+          found in the sharing chip one field below this one. The box carries
+          its own name instead. */}
+      <Group
         label="Instructions"
-        hint="Markdown, composed into its prompt. The same in every team."
+        hint="Added to its prompt every time it runs. Markdown."
+        beside={
+          <Button variant="quiet" size="sm" icon={Maximize2} onClick={onExpand}>
+            Open editor
+          </Button>
+        }
       >
         <div className="instrbox">
           <textarea
@@ -1157,57 +1183,91 @@ function WhatItIs({
             value={draft.instructions ?? ""}
             onChange={(e) => set("instructions", e.target.value)}
             placeholder="What it should always do, wherever it is used."
+            aria-label={`Instructions for ${role.name}`}
           />
-          <div className="bar">
-            <span className="msg">
-              {draft.instructions?.length
-                ? `${draft.instructions.length} characters`
-                : "Markdown"}
-            </span>
-            <Button variant="quiet" size="sm" icon={Maximize2} onClick={onExpand}>
-              Open editor
-            </Button>
-          </div>
         </div>
-      </Field>
-
-      {/* **A group, not a label.** `WhoCanAccess` is a button and, while it is
-          open, the sharing sheet as well — both inside whatever wraps it. A
-          `label` adopts the first control under it, so the sheet sat inside a
-          label whose control was the chip that opened it, and every click on
-          the sheet's own chrome fired a second click on that chip. The drawer
-          is the only caller that wrapped it this way. */}
-      <Group label="Who can use it" hint="Anyone who can reach the directory it is filed in.">
-        <WhoCanAccess kind="role" id={role.id} path={role.path} look="chip" />
       </Group>
 
-      <Field
-        label="Default"
-        hint="Start new workspaces as this profile unless you pick another. Only one profile can be the default."
-      >
-        <button
-          type="button"
-          role="switch"
-          aria-checked={isDefault}
-          onClick={() => void toggle()}
-          disabled={busy}
-          className={`flex items-center gap-2.5 rounded-md border px-3 py-2 text-left text-ui transition-colors disabled:opacity-60 ${
-            isDefault
-              ? "border-sage-deep bg-sage-tint text-sage"
-              : "border-line bg-ground text-dim hover:border-dim hover:text-bone"
-          }`}
-        >
-          <span
-            className={`grid h-4 w-4 place-items-center rounded-full border ${
-              isDefault ? "border-sage bg-sage text-ground" : "border-mute"
-            }`}
-          >
-            {isDefault && <Check className="h-3 w-3" strokeWidth={3.5} />}
-          </span>
-          {isDefault ? "Your default for new workspaces" : "Make this the default"}
-        </button>
-      </Field>
+      <OldReach draft={draft} set={set} roles={roles} />
     </>
+  );
+}
+
+/**
+ * The reach a profile carries from before teams, and the way to put it down.
+ *
+ * **Only on a profile that actually carries some.** Every other profile shows
+ * nothing, so nothing here teaches a model that is being removed — which is
+ * the whole reason it is a disclosure and not a field.
+ *
+ * It closes a real gap rather than restating one. The per-profile delegation
+ * controls came out of the drawer when teams took the question over, and the
+ * fields stayed live for a session that holds no position — so a profile with
+ * reach set could not be turned off from this window at all. *Remove* is the
+ * control that was missing. It joins the draft like every other change and
+ * Save writes it, because Save is the only commit in this drawer.
+ *
+ * Goes entirely with #497, which removes the fields.
+ */
+export function OldReach({
+  draft,
+  set,
+  roles,
+}: {
+  draft: Settled;
+  set: <K extends keyof Settled>(k: K, v: Settled[K]) => void;
+  roles: Role[];
+}) {
+  const [showing, setShowing] = useState(false);
+  const scope = draft.delegateScope ?? [];
+  if (!draft.canDelegate && scope.length === 0) return null;
+
+  /* An empty scope is not "nothing": `delegate_scope` empty means *any
+     profile the owner can see*, which is the widest reach of the two and the
+     one worth naming as such. Naming three is what `Show them` is for; there
+     is nothing to show when the list is the whole library. */
+  const named = scope
+    .map((id) => roles.find((r) => r.id === id)?.name)
+    .filter((n): n is string => !!n);
+
+  return (
+    <div className="dnote" role="note">
+      <b>
+        {scope.length
+          ? `Still hands work to ${count(scope.length, "profile")}`
+          : "Still hands work to any profile you can see"}
+      </b>
+      <p>We introduced the Teams feature which deprecated the old profile delegation feature.</p>
+      {showing && (
+        <div className="dchips wrap">
+          {named.length ? (
+            named.map((n) => (
+              <span key={n} className="dchip mono">
+                {n}
+              </span>
+            ))
+          ) : (
+            <span className="none">None of them is a profile you can see.</span>
+          )}
+        </div>
+      )}
+      <div className="acts">
+        <Button
+          size="sm"
+          onClick={() => {
+            set("canDelegate", false);
+            set("delegateScope", []);
+          }}
+        >
+          Remove
+        </Button>
+        {scope.length > 0 && (
+          <Button variant="quiet" size="sm" onClick={() => setShowing((v) => !v)}>
+            {showing ? "Hide them" : "Show them"}
+          </Button>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -1243,7 +1303,6 @@ function Skills({
     <>
       <div className="fld">
         <span>Pinned skills</span>
-        <span className="hint">Pin nothing and it can load any skill you can see.</span>
         <button type="button" onClick={onPin} className="btn plain addsk">
           <Icon of={Plus} size={14} />
           Pin a skill
@@ -1499,9 +1558,18 @@ function HowItRuns({
 
   return (
     <>
+      {/* **One sentence under the group, about the option actually chosen.**
+          Each pill used to carry its own counterfactual — *leave it open and
+          the lead decides* — on all three, whether or not it was open. The
+          thing a reader cannot see is different in the two states: left open,
+          who picks; pinned, that it is a default rather than a pin. */}
       <Group
-        label="Placement"
-        hint="Where a child runs when a lead delegates to it. Pin one and every spawn runs that way. Leave it open and the lead decides."
+        label="Where children work"
+        hint={
+          (draft.placement ?? "lead") === "lead"
+            ? "The lead chooses the workspace when it delegates."
+            : "A team or a lead can override this."
+        }
       >
         <div className="pickrow">
           {PLACEMENTS.map((p) => (
@@ -1516,7 +1584,11 @@ function HowItRuns({
                 <Icon of={p.icon} size={16} />
               </span>
               {p.label}
-              {p.note && <span className="sub">{p.note}</span>}
+              {(draft.placement ?? "lead") === p.value && (
+                <span className="tick">
+                  <Icon of={Check} size={14} />
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -1528,10 +1600,14 @@ function HowItRuns({
       {draft.placement !== "here" && (
         <Group
           label="Machine"
+          /* Nothing on *Its own workspace*: the list is the drawing, and the
+             open row at the top of it says what happens when nothing is
+             pinned. The other branch keeps its sentence, because *this field
+             may never be reached* is not visible from the field. */
           hint={
             draft.placement === "new"
-              ? "Which machine its own workspace runs on. Pin one and every spawn runs there. Leave it open and the lead decides."
-              : "Only reached if the lead gives it a workspace of its own. Pin one, or leave it open and the lead decides."
+              ? undefined
+              : "Only reached if the lead gives it a workspace of its own."
           }
         >
           {machineRows.length > 0 ? (
@@ -1548,7 +1624,6 @@ function HowItRuns({
                   </span>
                   <span className="tx">
                     <b>{OPEN}</b>
-                    <s>{OPEN_FALLBACK.machine}</s>
                   </span>
                   {(draft.machine ?? null) === null && (
                     <span className="g tick">
@@ -1602,52 +1677,40 @@ function HowItRuns({
           ) : (
             <div className="inform">
               <p>
-                <b>No machines yet.</b> That leaves this open, so a lead may name one and Firetower
-                picks otherwise. Agents run on a machine you add over ssh; Firetower does not run
-                them on itself.
+                <b>No machines yet.</b> Agents run on a machine you add over SSH.
               </p>
             </div>
           )}
         </Group>
       )}
 
-      <Group
-        label="Agent"
-        hint="Which engine it runs on. Pin one and every spawn uses it. Leave it open and the lead decides."
-      >
-        <div className="pickrow">
-          <button
-            type="button"
-            aria-pressed={(draft.agent ?? null) === null}
-            onClick={() => set("agent", null)}
-            className="pk"
-          >
-            <span className="ic">
-              <Icon of={CircleDashed} size={16} />
-            </span>
-            {OPEN}
-            <span className="sub">{OPEN_FALLBACK.agent}</span>
-          </button>
-          {agentOptions.map((o) => (
-            <button
-              key={o.value ?? "__open"}
-              type="button"
-              aria-pressed={draft.agent === o.value}
-              onClick={() => set("agent", o.value)}
-              className="pk"
-            >
-              <span className="ic">{o.icon}</span>
-              {o.label}
-            </button>
-          ))}
-        </div>
+      {/* **A requirement, drawn as a choice somebody made.**
+          *Any* in a value column is indistinguishable from a field nobody
+          filled in, and on a pill row the open answer was the heaviest thing
+          on the tab for a profile that had not decided anything. In a menu
+          *Any engine* is an option beside Claude Code and Codex: the same
+          fact, visibly chosen. The field was never the problem. */}
+      <Group label="Engine" hint="Set this only if the instructions depend on one.">
+        <Select
+          ariaLabel="Engine"
+          value={draft.agent ?? null}
+          options={[
+            {
+              value: null,
+              icon: <Icon of={CircleDashed} size={16} />,
+              label: ANY_ENGINE,
+            },
+            ...agentOptions,
+          ]}
+          onChange={(v) => set("agent", v)}
+        />
       </Group>
 
+      {/* Not *How it runs*, which is the tab this group is on: a heading that
+          repeats its own tab is a heading saying nothing. These are the
+          engine's own dials, and that is what names them. */}
       {controls.length > 0 && (
-        <Group
-          label="How it runs"
-          hint="Pin the model and run settings, or leave any on the engine's default. These become a workspace's starting settings."
-        >
+        <Group label="Model and settings">
           <div className="flex flex-col gap-3">
             {controls.map((c) => {
               const Mark = CONTROL_ICON[c.kind];
@@ -1684,7 +1747,7 @@ function HowItRuns({
       {/* A subscription belongs to one engine, so with the engine open there
           is nothing this field could hold. */}
       {draft.agent !== null && (
-        <Group label="Subscription" hint="Which subscription its engine authenticates with.">
+        <Group label="Subscription">
           {connected ? (
             <div className="pickrow">
               {accountOptions.map((o) => (
@@ -1698,6 +1761,11 @@ function HowItRuns({
                   <span className="ic">{o.icon}</span>
                   {o.label}
                   {o.note && <span className="sub">{o.note}</span>}
+                  {(draft.account ?? null) === o.value && (
+                    <span className="tick">
+                      <Icon of={Check} size={14} />
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -1731,7 +1799,7 @@ function HowItRuns({
 
       <Group
         label="If it reaches usage limit"
-        hint="What a lead may do about a child of this profile that has hit its usage limit. It is a grant, not a guarantee: the Manager has to be allowed too."
+        hint="The lead must be allowed this too."
       >
         <div className="ladder">
           {ON_LIMIT.map((o) => (
@@ -1749,6 +1817,11 @@ function HowItRuns({
                 {o.label}
                 {o.note && <span className="sub">{o.note}</span>}
               </span>
+              {(draft.onUsageLimit ?? "wait") === o.value && (
+                <span className="tick">
+                  <Icon of={Check} size={14} />
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -2137,9 +2210,18 @@ function reaching(teams: number): string {
   return `, in ${teams === 2 ? "both teams" : `all ${teams} teams`} that use it`;
 }
 
-/** What a save will do, said before it is pressed. */
+/**
+ * What a save will do, said before it is pressed.
+ *
+ * **The count and how far it goes, and nothing else.** *Will save … to the
+ * profile* spent four words on what the button beside it says and what the
+ * pane somebody is looking at is.
+ */
 export function willSave(fields: number, teams: number): string {
-  return `Will save ${count(fields, "change")} to the profile${reaching(teams)}.`;
+  if (teams <= 1) return `${count(fields, "change")}.`;
+  return `${count(fields, "change")}, in ${
+    teams === 2 ? "both teams" : `all ${teams} teams`
+  } using this profile.`;
 }
 
 /**
@@ -2184,11 +2266,33 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
  *
  * A `label` around a set of buttons hands every click to the first one, which
  * is wrong for a picker where each tile is its own control.
+ *
+ * `beside` is the one control that belongs to the group rather than to what
+ * is in it — *Open editor* next to *Instructions*. It sits on the heading's
+ * own line, which is the only line in a field that is the same height
+ * whatever the field holds.
  */
-function Group({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function Group({
+  label,
+  hint,
+  beside,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  beside?: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div role="group" aria-label={label} className="fld">
-      <span>{label}</span>
+      {beside ? (
+        <span className="flex items-center gap-2">
+          <span className="flex-1">{label}</span>
+          {beside}
+        </span>
+      ) : (
+        <span>{label}</span>
+      )}
       {hint && <span className="hint">{hint}</span>}
       {children}
     </div>

@@ -23,6 +23,7 @@ import {
   Blast,
   withheldLine,
   InTeams,
+  OldReach,
   PROFILE_TABS,
   ProfileDrawer,
   SEAT_TABS,
@@ -32,7 +33,7 @@ import {
   willSave,
   type SeatHandle,
 } from "./ProfileDrawer";
-import { toDraft } from "./profile-draft";
+import { ANY_ENGINE, toDraft } from "./profile-draft";
 
 const REVIEWER: Role = {
   id: "r_rev",
@@ -200,13 +201,13 @@ describe("what the foot says before Save is pressed", () => {
   /* One team is not worth a clause: the drawer is the only thing on screen
      and there is nothing it is hiding. */
   test("one team spends no words on reach", () => {
-    expect(willSave(1, 1)).toBe("Will save 1 change to the profile.");
-    expect(willSave(2, 0)).toBe("Will save 2 changes to the profile.");
+    expect(willSave(1, 1)).toBe("1 change.");
+    expect(willSave(2, 0)).toBe("2 changes.");
   });
 
   test("more than one is counted, because the others are not on screen", () => {
-    expect(willSave(1, 2)).toBe("Will save 1 change to the profile, in both teams that use it.");
-    expect(willSave(3, 4)).toBe("Will save 3 changes to the profile, in all 4 teams that use it.");
+    expect(willSave(1, 2)).toBe("1 change, in both teams using this profile.");
+    expect(willSave(3, 4)).toBe("3 changes, in all 4 teams using this profile.");
   });
 
   /** Leaving says the same fact in the voice the map's own question uses. */
@@ -445,24 +446,22 @@ describe("every field a draft carries is written somewhere in the drawer", () =>
    * creates one and moved afterwards through the sharing sheet — which is the
    * drawer's *Who can use it*. There is no third place a thing changes hands.
    *
-   * **The other three are not elsewhere. They are nowhere, on purpose, and
-   * that is a decision somebody took rather than an omission.** Teams own
-   * delegation now, so a profile-level *Hands work off* sitting beside the
-   * teams that actually decide it is read as the thing that decides it. The
-   * controls are gone from the drawer; the fields are still carried by the
-   * draft and still written on every save, so a profile that already has
-   * reach keeps it and nothing is migrated or dropped.
+   * **Teams own delegation**, so there is no *Hands work off* control here
+   * and there will not be one: a toggle sitting beside the teams that
+   * actually decide it is read as the thing that decides it.
    *
-   * What that costs, stated so it is known rather than discovered: a profile
-   * that already carries `canDelegate` **cannot be turned off from this
-   * window**, because the control that turned it off is the one removed. The
-   * old reach stays live for a session occupying no position until #497
-   * closes, so for those profiles the setting is now read-only and on. The
-   * API still accepts a write, so nothing is stuck permanently — but there is
-   * no interface for it, and how to transition the old model to the new is
-   * still to be scoped.
+   * What is here instead is the way out. `canDelegate` and `delegateScope`
+   * are still carried by the draft and still written on every save, and
+   * `OldReach` is the disclosure that appears **only** on a profile that
+   * already carries some — a heading with the count, the owner's sentence,
+   * and *Remove*, which sets both back. For a while a profile with reach set
+   * could not be turned off from this window at all; that is what the
+   * disclosure closes. It goes entirely with #497.
+   *
+   * `onChildLimit` is the one that really is nowhere. It is the Manager's own
+   * half of the usage-limit grant and belongs with the teams work.
    */
-  const ELSEWHERE = ["directory", "canDelegate", "delegateScope", "onChildLimit"];
+  const ELSEWHERE = ["directory", "onChildLimit"];
 
   test("each one has a setter, or is named here as living elsewhere", () => {
     const missing = Object.keys(toDraft(REVIEWER))
@@ -476,11 +475,15 @@ describe("every field a draft carries is written somewhere in the drawer", () =>
     expect(missing).toEqual([]);
   });
 
-  /* And the two that are not fields at all: the default flag writes on the
-     press through its own endpoint, and filing is the sharing sheet's. */
+  /* And the two that are not fields at all. Neither is a row in the drawer
+     any more: filing is the path chip in the header, which *is* the sharing
+     sheet's control, and the default flag is the star on the list row, which
+     is where the "only one" rule is visible rather than narrated. */
   test("the two that are not draft fields are still reachable", () => {
-    expect(SOURCE).toContain("setDefaultRole");
     expect(SOURCE).toContain("WhoCanAccess");
+    expect(
+      readFileSync(fileURLToPath(new URL("./Roles.tsx", import.meta.url)), "utf8"),
+    ).toContain("setDefaultRole");
   });
 
   /* The actions the form's foot carried. Delete is the drawer's overflow and
@@ -489,5 +492,132 @@ describe("every field a draft carries is written somewhere in the drawer", () =>
     expect(SOURCE).toContain("deleteRole");
     expect(SOURCE).toContain("Save changes");
     expect(SOURCE).toContain("Discard");
+  });
+});
+
+/* ── The reach a profile carried before teams ──────────────────────────── */
+
+/**
+ * **The one thing in this drawer that is drawn because of what is stored**,
+ * rather than for every profile.
+ *
+ * A disclosure that appeared on every profile would teach the model being
+ * removed to everybody who has never used it, which is the opposite of what
+ * it is for. And on a profile that does carry reach it is the only way to put
+ * it down from this window — the delegation controls came out when teams took
+ * the question over, and the fields stayed live.
+ */
+describe("the old-reach disclosure", () => {
+  const said = (over: Partial<Role>) =>
+    renderToStaticMarkup(
+      <OldReach
+        draft={toDraft({ ...REVIEWER, ...over })}
+        set={() => {}}
+        roles={[
+          { ...REVIEWER, id: "r_a", name: "Builder" },
+          { ...REVIEWER, id: "r_b", name: "Scribe" },
+        ]}
+      />,
+    );
+
+  test("a profile with no reach is shown nothing at all", () => {
+    expect(said({})).toBe("");
+  });
+
+  test("the heading carries the count, and the owner's sentence is untouched", () => {
+    const out = said({ canDelegate: true, delegateScope: ["r_a", "r_b", "r_gone"] });
+    expect(out).toContain("Still hands work to 3 profiles");
+    expect(out).toContain(
+      "We introduced the Teams feature which deprecated the old profile delegation feature.",
+    );
+    expect(out).toContain("Remove");
+    expect(out).toContain("Show them");
+  });
+
+  /* An empty `delegate_scope` is the *wider* reach, not the absent one —
+     "any the owner can see" — so it says so rather than counting to zero. */
+  test("an empty scope is the wide case, and has nothing to show", () => {
+    const out = said({ canDelegate: true, delegateScope: [] });
+    expect(out).toContain("Still hands work to any profile you can see");
+    expect(out).not.toContain("Show them");
+  });
+
+  /* Drawn for a scope held by a profile that was never turned off. */
+  test("a scope on its own still shows, because it is still read", () => {
+    expect(said({ canDelegate: false, delegateScope: ["r_a"] })).toContain(
+      "Still hands work to 1 profile",
+    );
+  });
+
+  /** And Remove is a change like any other: Save is the only commit here. */
+  test("removing it is two fields, and the foot counts them", () => {
+    const had = { ...REVIEWER, canDelegate: true, delegateScope: ["r_a"] };
+    expect(diffOf(had, { ...toDraft(had), canDelegate: false, delegateScope: [] })).toEqual([
+      "canDelegate",
+      "delegateScope",
+    ]);
+  });
+});
+
+/* ── The three rows that went home ─────────────────────────────────────── */
+
+/**
+ * Each of the three had a sentence that existed because of where the control
+ * was, which is the sharper form of this feature's copy rule: **a note that
+ * narrates what the drawing already shows goes; a note that warns about
+ * something invisible stays.** The sentences are the thing to test, because a
+ * row can be moved and its explanation left behind.
+ */
+describe("the junk-drawer rows, and what went with them", () => {
+  const SOURCE = readFileSync(
+    fileURLToPath(new URL("./ProfileDrawer.tsx", import.meta.url)),
+    "utf8",
+  );
+
+  test("Who can use it is gone, and the header chip is the control", () => {
+    expect(SOURCE).not.toContain('label="Who can use it"');
+    expect(SOURCE).not.toContain("Anyone who can reach the directory it is filed in.");
+    expect(SOURCE).toMatch(/<WhoCanAccess[\s\S]*?className="dchip mono act"/);
+  });
+
+  test("Default is gone, and so is the rule a list makes visible", () => {
+    expect(SOURCE).not.toContain("Only one profile can be the default");
+    expect(SOURCE).not.toContain("Make this the default");
+  });
+
+  test("the engine is a named option rather than a blank value", () => {
+    expect(SOURCE).toContain("ANY_ENGINE");
+    expect(ANY_ENGINE).toBe("Any engine");
+  });
+});
+
+/* ── What the tabs no longer explain ───────────────────────────────────── */
+
+describe("the copy the drawer stopped carrying", () => {
+  const SOURCE = readFileSync(
+    fileURLToPath(new URL("./ProfileDrawer.tsx", import.meta.url)),
+    "utf8",
+  );
+
+  /* Every pill carried this whether or not it was open — a counterfactual on
+     an option nobody had taken. It is said once now, under the group, about
+     the state that is actually set. */
+  test("no pill carries the counterfactual any more", () => {
+    expect(SOURCE).not.toContain("Leave it open and the lead decides");
+    expect(SOURCE).not.toContain("here, unless the lead says otherwise");
+    expect(SOURCE).toContain("The lead chooses the workspace when it delegates.");
+    expect(SOURCE).toContain("A team or a lead can override this.");
+  });
+
+  /* The band above the body says the profile is shared, so a field under it
+     saying the same thing is the second drawing of one fact. */
+  test("nothing under the band repeats the band", () => {
+    expect(SOURCE).not.toContain("The same in every team");
+    expect(SOURCE).not.toContain("in {seat.teamName} only");
+  });
+
+  /* At rest the chip at the other end of the foot already reads No changes. */
+  test("the foot says nothing when there is nothing to save", () => {
+    expect(SOURCE).not.toContain("Saved. Workspaces already running keep what they started with.");
   });
 });

@@ -12,7 +12,7 @@
  * form.
  */
 import { useEffect, useRef, useState } from "react";
-import { CircleDashed, Plus, Search } from "lucide-react";
+import { Check, CircleDashed, Plus, Search } from "lucide-react";
 import type { Agent, NewRole, Role } from "~/api/generated/model";
 import { AgentMark } from "~/components/AgentMark";
 import { Badge, Button, Icon } from "~/components/ui";
@@ -413,6 +413,11 @@ export function NewProfileSheet({
               >
                 Yours
                 <span className="sub">only you, until you share it</span>
+                {where === null && (
+                  <span className="tick">
+                    <Icon of={Check} size={14} />
+                  </span>
+                )}
               </button>
               {filing.map((d) => (
                 <button
@@ -423,6 +428,11 @@ export function NewProfileSheet({
                   className="pk"
                 >
                   {d.name}
+                  {where === d.id && (
+                    <span className="tick">
+                      <Icon of={Check} size={14} />
+                    </span>
+                  )}
                 </button>
               ))}
             </div>

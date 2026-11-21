@@ -46,6 +46,7 @@ const OURS = [
   "dfoot",
   "dlede",
   "dread",
+  "dnote",
   "crumb",
   "addsk",
   "jh",
@@ -61,8 +62,10 @@ const OURS = [
  *
  * `.itabs` and `.itab` are the right rail's own index — the same control, in
  * the same place, doing the same job; `.fld`, `.hint`, `.pickrow`, `.pk`,
- * `.pickrows`, `.pr2`, `.ladder` and `.inform` are the form's idioms, moved
- * here with the fields that use them; `.btn`, `.find`, `.msg`, `.r`,
+ * `.pickrows`, `.pr2`, `.tick`, `.ladder` and `.inform` are the form's
+ * idioms, moved here with the fields that use them — `.tick` is the mark a
+ * chosen row wears, which `.pr2` and the sharing row already drew and the
+ * pill now does too; `.btn`, `.find`, `.msg`, `.r`,
  * `.sheetcard` and `.scroll-slim` are the app's.
  */
 const BORROWED = [
@@ -75,6 +78,7 @@ const BORROWED = [
   "pickrows",
   "pk",
   "pr2",
+  "tick",
   "ladder",
   "inform",
   "btn",
@@ -139,5 +143,51 @@ describe("the drawer's class names", () => {
   test("the pane is a query container, so a squeezed row can shed columns", () => {
     expect(SHEET).toMatch(/\.pdockmain\s*\{[^}]*container-type:\s*inline-size/);
     expect(SHEET).toMatch(/@container \(max-width: \d+px\)\s*\{\s*\.pdockmain \.r \.path/);
+  });
+});
+
+/**
+ * **A chosen thing and a thing that acts are not the same ink.**
+ *
+ * `.pk[aria-pressed="true"]` filled with `--color-bone`, which is byte for
+ * byte `.btn.primary` — so the selected choice was the heaviest object in the
+ * drawer and *Save changes* wore the same weight. The sheet already held the
+ * right answer twice, in `.row[data-on]` and `.pr2[aria-pressed]`, and the
+ * machine list on the same tab as these pills was already doing it.
+ *
+ * In the stylesheet rather than in a render, because that is where the fault
+ * was: every call site was correct and the fill was one declaration.
+ */
+describe("what a selected pill is made of", () => {
+  const rule = (selector: string) =>
+    SHEET.match(new RegExp(`\\n\\s*${selector.replace(/[[\]"().]/g, "\\$&")}\\s*\\{([^}]*)\\}`))?.[1] ??
+    "";
+
+  test("it is a brightness step, not the primary action's fill", () => {
+    const pressed = rule('.pk[aria-pressed="true"]');
+    expect(pressed).toContain("var(--color-overlay)");
+    expect(pressed).toContain("var(--shadow-raise)");
+    expect(pressed).not.toMatch(/background:\s*var\(--color-bone\)/);
+  });
+
+  /* The same fill `.row[data-on]` and the machine row already take. */
+  test("it is the answer the sheet already had", () => {
+    expect(rule('.pr2[aria-pressed="true"]')).toContain("var(--color-overlay)");
+    expect(rule('.row[data-on="true"]')).toContain("var(--color-overlay)");
+  });
+
+  /* A brightness step alone is a weak signal for anybody who cannot see one,
+     and hover lands on the same fill. */
+  test("and a tick, so the step is not the only signal", () => {
+    expect(SHEET).toMatch(/\.pk\[aria-pressed="true"\] \.tick \{[^}]*display: grid/);
+  });
+
+  /**
+   * One deletion falls out of the fill. The pressed pill needed a ring of its
+   * own only because a bone focus ring was invisible on a bone fill; off the
+   * fill, the global inset ring reads on every pill again.
+   */
+  test("the pressed-focus special case went with it", () => {
+    expect(SHEET).not.toContain('.pk[aria-pressed="true"]:focus-visible');
   });
 });
