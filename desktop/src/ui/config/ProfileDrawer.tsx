@@ -1171,9 +1171,15 @@ function WhatItIs({
         </div>
       </Field>
 
-      <Field label="Who can use it" hint="Anyone who can reach the directory it is filed in.">
+      {/* **A group, not a label.** `WhoCanAccess` is a button and, while it is
+          open, the sharing sheet as well — both inside whatever wraps it. A
+          `label` adopts the first control under it, so the sheet sat inside a
+          label whose control was the chip that opened it, and every click on
+          the sheet's own chrome fired a second click on that chip. The drawer
+          is the only caller that wrapped it this way. */}
+      <Group label="Who can use it" hint="Anyone who can reach the directory it is filed in.">
         <WhoCanAccess kind="role" id={role.id} path={role.path} look="chip" />
-      </Field>
+      </Group>
 
       <Field
         label="Default"
