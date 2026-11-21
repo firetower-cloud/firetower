@@ -214,6 +214,17 @@ directory can only be deleted while empty, so nothing can be pointing at
 `delete_directory` requiring emptiness.** A force-delete or a cascade added
 later would break it silently.
 
+It has already been broken once, and not by a force-delete: emptiness is
+counted kind by kind in `DIRECTORY_COLUMNS`, and a kind missing from that list
+is one a directory can hold while reading as empty. `roles`, `artifacts` and
+`agent_teams` were all missing, so a directory of profiles and agent teams
+deleted cleanly, left them orphaned at `d/<slug>`, and handed the lot to
+whoever was granted the next directory of the same name — the slug being
+derived from the name, not minted. **So the list is the exemption**, and
+`every_kind_a_directory_can_hold_is_counted_and_can_be_named` is what now
+holds it against `Access::filed_under`, in both directions. A new Placed kind
+has to appear in both.
+
 For anything still filed at a departed person's root: Anything of theirs still filed there would become the new person's, so
 `Accounts::delete_user` sweeps the root. Three outcomes, and a new Placed kind
 has to pick one:

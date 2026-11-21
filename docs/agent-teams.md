@@ -136,6 +136,16 @@ The composer's picker is where that is either made plain or papered over, so:
   anybody.* A Manager profile whose older per-profile reach is still live gets
   its own clause rather than a sentence that is false of it; that clause goes
   with `roles.can_delegate` in #497.
+- **The number in that sentence is `AgentTeam.reports`, not
+  `AgentTeam.positions`.** Reach descends exactly one level per hand-off, and
+  a seat whose profile this person cannot see is not a report at all, so the
+  size of the tree overstates what picking the row gets you in two independent
+  ways — a seven-seat team whose lead has two reachable reports said *six
+  other agents* and gave two. `reports` is the lead position's children joined
+  through the same predicate `AgentTeams::reports` uses, so the picker reads
+  the number the spawn will resolve against and the composed persona cannot
+  disagree with it. `positions` keeps meaning *every seat*, which is what the
+  map and the list row want.
 
 The same picker, the same bands and the same counts are on the phone. Starting
 work is within what mobile may do, and the one-agent-or-eight difference is
@@ -185,6 +195,14 @@ editor.
 `AgentTeam.schedules` counts the approved schedules pinning the team, on the
 same read the map already makes to draw its tree, so editing a team that four
 schedules pin says *four* before the press rather than after.
+
+Counted across **every owner** — somebody else's schedule is no less stopped
+for being somebody else's, and a person about to stop four has to be told four
+even where they may never read one of them. **Given only to somebody who could
+save**: it is zero for a reader, and the notice is not drawn for one. A
+consequence-of-saving count beside a Save a `Viewer` cannot press tells them
+nothing they can act on and tells them how much unattended work other people
+have pinned to a shared team.
 
 An agent proposing a schedule may **not** name a team. A profile is identity;
 a team is a reach, and a proposal that named one would be an agent writing
@@ -278,11 +296,29 @@ Past 64, the 63 most recently spawned come across — the lead takes the
 sixty-fourth seat — and the rest are named in the log rather than dropped
 silently.
 
-`roles.delegate_scope` is deliberately not read: a profile that never spawned
-gets an empty team even when somebody had narrowed its scope, because a scope
-that was never exercised is a guess about intent the same way a visibility
-snapshot is. The scope is not lost — it is exactly what the window below
-admits from.
+`roles.delegate_scope` is not **copied**: a profile that never spawned gets an
+empty team even when somebody had narrowed its scope, because a scope that was
+never exercised is a guess about intent the same way a visibility snapshot is.
+An empty scope still means *any*, which was the old default.
+
+**A narrowed scope is read, as a ceiling on what history may resurrect.** That
+is the other direction and it goes the other way: a scope is the one way reach
+was ever taken away. A Manager that spawned an Auditor last March, narrowed
+since to exclude it, is refused the Auditor by the old path today — so seeding
+the March spawn back in as a position would undo a revocation nobody asked it
+to undo. History is intersected with the scope, which puts seeding and the
+window on one rule: what the intersection drops at the cut can still arrive
+later through real use, marked.
+
+**And a seat its team's author cannot see is not written.** Lineage is read
+across every owner, which is right — a shared profile's history belongs to
+everybody who used it — but a colleague's spawn of a profile of *their* own
+would put that private profile into a team filed in somebody else's directory:
+a seat its owner is shown without a name on it, in a team they can then never
+save, because `must_see` refuses their write on an id they cannot resolve, and
+a save is the only way to clear a mark. So each candidate seat passes through
+`agent_teams::admissible`, which is `must_see`'s question asked of the team's
+author. **Every team keeps at least one person who can always save it.**
 
 The cut happens **once per installation**, recorded in `agent_team_seeding`:
 how many teams, how many positions, and when. A team deleted afterwards stays
@@ -316,7 +352,20 @@ it a migration aid rather than a reprieve:
 3. **Only a team nobody drew learns.** `agent_teams.seeded_at` is the
    condition. A team authored after the cut is exactly what was authored, from
    its first spawn onwards.
-4. **It closes.** `agent_teams::window::WINDOW_DAYS`, measured from
+4. **It opens only for somebody who could have drawn the seat by hand.** The
+   window is a *write* — a permanent row in the structure that decides what
+   agents may do — so it asks the `Writer` the editor asks, through the one
+   predicate, and does not open for a reader. A `Viewer` on a shared seeded
+   team gets the ordinary refusal, which is what the Agent teams screen would
+   have told them. What it may seat is bounded the same way seeding's is, by
+   `admissible`: a profile the team's author cannot see is refused by name
+   rather than written.
+5. **A seat it adds stops the schedules pinned to the team**, exactly as an
+   edit does — `paused_reason = 'team_changed'`, re-pinned on the tree as it
+   now stands. It is a fourth path that changes a tree, and the launch gate
+   failing closed at nine in the morning is not the same as telling somebody
+   before it.
+6. **It closes.** `agent_teams::window::WINDOW_DAYS`, measured from
    `agent_team_seeding.seeded_at` rather than from a date in the binary, so an
    installation that upgrades late gets a whole window instead of one that
    expired before it arrived.
@@ -527,6 +576,20 @@ list.
 **Deleting a profile cascades**, and the confirmation names every team and the
 positions each one loses first. `GET /api/v1/roles/{id}/positions` answers
 that and the *In teams* tab in one request.
+
+The cascade does **not** filter — `profile_id` and `parent_id` are both `on
+delete cascade`, so it reaches every team in the organisation — and the read
+behind the confirmation does, as every read does. So the response is a list
+*and a count*: the seats in teams this person can see, named, and a bare
+number for the ones in teams they cannot. The shape may be disclosed, the
+names may not, which is the rule a withheld member name already follows. The
+confirmation says *and 2 positions in teams you cannot see* rather than
+asserting a fact about rows it did not read.
+
+And the delete **stops the schedules** pinned to every team that loses a seat,
+including the ones it could not name — the same `unapprove_schedules_on` the
+editor and the team delete call. Otherwise the person on the other side of
+that boundary, who was never party to the delete, finds out from a failed run.
 
 ## Not yet
 
