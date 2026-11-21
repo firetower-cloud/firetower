@@ -18,6 +18,8 @@ import {
   changes,
   chipRows,
   couldReportTo,
+  lineage,
+  seatTag,
   countUnder,
   depthOf,
   find,
@@ -403,5 +405,64 @@ describe("what is pending, and what Discard puts back", () => {
   test("the lead reports to nothing, so it is offered nothing", () => {
     const before = product();
     expect(couldReportTo(before, before.key)).toEqual([]);
+  });
+});
+
+/**
+ * **What the add-a-seat list offers, and what it refuses before the server
+ * has to.**
+ *
+ * Two structural rules decide a seat off the tree that is already on screen,
+ * and `agent_teams::check` refuses on either of them every time. One of them
+ * was said on the row and left pickable, so pressing it drew the seat into
+ * the draft and spent a Save to come back 400 — a choice already known to
+ * fail, offered anyway.
+ */
+describe("adding a profile under a seat", () => {
+  const lineUnder = (root: Seat, key: string) => ({
+    siblings: (find(root, key) as Seat).children.map((c) => c.profile),
+    above: lineage(root, key),
+  });
+
+  test("a profile already reporting to this seat cannot be picked again", () => {
+    const tree = platform();
+    const { siblings, above } = lineUnder(tree, tree.children[0].key);
+    expect(seatTag("designer", siblings, above)).toEqual({
+      says: "already reports here",
+      blocked: true,
+    });
+  });
+
+  /**
+   * **The rule that was said and not enforced.** A profile anywhere in the
+   * chain above would report to itself, which no save can accept — so the
+   * row is dimmed where it used to be live.
+   */
+  test("a profile anywhere above this seat cannot be picked either", () => {
+    const tree = platform();
+    const deep = (find(tree, tree.children[0].key) as Seat).children[1];
+    const { siblings, above } = lineUnder(tree, deep.key);
+    for (const ancestor of ["release", "em", "engineer"]) {
+      expect(seatTag(ancestor, siblings, above)).toEqual({
+        says: "already above this seat",
+        blocked: true,
+      });
+    }
+  });
+
+  test("and the lead's own profile under the lead, which is the shortest case", () => {
+    const tree = platform();
+    const { siblings, above } = lineUnder(tree, tree.key);
+    expect(seatTag("release", siblings, above)?.blocked).toBe(true);
+  });
+
+  /* Everything else is pickable and says nothing — a badge on a row that can
+     be picked is noise, and the same profile elsewhere in the team is legal
+     and is what per-seat instructions are for. */
+  test("a profile the tree holds elsewhere is offered with nothing said", () => {
+    const tree = platform();
+    const { siblings, above } = lineUnder(tree, tree.children[2].key);
+    expect(seatTag("qa", siblings, above)).toBeNull();
+    expect(seatTag("sec", siblings, above)).toBeNull();
   });
 });

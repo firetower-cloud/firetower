@@ -27,6 +27,7 @@ import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   consequence,
+  pickerFooter,
   ProfileMenu,
   startableIn,
   startableMatches,
@@ -77,10 +78,28 @@ const draw = (profiles: Role[], teams: AgentTeam[] = [], startAs: StartAs = null
 
 describe("the profile picker", () => {
   it("says what profiles are for rather than what the word means", () => {
-    const html = draw([role("p_01", "Ada, the lead")]);
+    const html = draw([]);
     expect(html).toContain("divide your work across teams of agents");
     expect(html).toContain("a designer, an engineer, a security advisor, a QA");
     expect(html).not.toContain("A profile is a saved way of working");
+  });
+
+  /**
+   * **And says it to the person it was written for, and nobody else.**
+   *
+   * Four lines about creating profiles cost 127px of a 392px card at
+   * 1280x824, which is the canonical window: the Profiles group was cut
+   * through its own heading and no profile row was on screen at all. The
+   * teaching text was pushing off the screen the thing it was teaching
+   * about. It appears on the same condition as the button under it — an
+   * empty list — and anybody with a list to read gets the consequence of the
+   * row that is on, which is one line.
+   */
+  it("and once there is a list to read, says the consequence instead", () => {
+    const html = draw([role("p_01", "Ada, the lead")]);
+    expect(html).not.toContain("divide your work across teams of agents");
+    expect(html).toContain("Starts a plain workspace");
+    expect(html).toContain("there is nobody to hand work to");
   });
 
   it("offers the Profiles page when there are none", () => {
@@ -285,10 +304,34 @@ describe("the sentence under the box", () => {
     );
   });
 
+  /* `consequence` answers for a `Startable`, and `null` is not one — the row
+     *Just an agent* already says *no profile, a plain workspace*. The footer
+     still has to say something, because it says something in every other
+     state, so `pickerFooter` is where that row's own consequence lives. */
   it("says nothing about a plain workspace, which the row already states", () => {
     expect(say([product], [ada], null)).toBeNull();
-    // So the footer is free to say what profiles and teams are for.
-    expect(draw([ada], [product])).toContain("its lead can hand work to the rest");
+    expect(pickerFooter(undefined, 1)).toBe(
+      "Starts a plain workspace. No profile, so there is nobody to hand work to.",
+    );
+    expect(pickerFooter(undefined, 0)).toContain("its lead can hand work to the rest");
+  });
+
+  /**
+   * **The sentence is never shortened to make room; the list gives way.**
+   *
+   * It is the whole argument for a team being a row of its own — one agent
+   * or eight — so it is the one thing in the card that may not be trimmed.
+   * What that costs is a footer of a knowable size, which is what lets the
+   * list be sized against it rather than against a paragraph that changes
+   * length with the selection.
+   */
+  it("keeps the consequence whole whatever is picked", () => {
+    const deep = team("t_09", "Growth", ada, 7, 2);
+    for (const s of [product, deep]) {
+      const said = pickerFooter(startableIn(startables([s], [ada]), { kind: "team", id: s.id }), 1);
+      expect(said).toMatch(/^Starts Engineering Manager, \w+'s lead\./);
+      expect(said).toContain("other agent");
+    }
   });
 
   it("is on the footer the moment something is picked", () => {

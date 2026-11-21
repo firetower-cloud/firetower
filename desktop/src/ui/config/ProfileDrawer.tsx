@@ -2093,6 +2093,30 @@ export const EMPTY_PLACES: ProfilePlaces = { places: [], withheld: 0 };
  * a confirmation names every team is the one thing here worth a test that
  * needs no server.
  */
+/**
+ * **What a delete takes, in teams this person cannot see**, as a sentence.
+ *
+ * Its own function for the reason `pausedBySave` is: the singular is the half
+ * that goes silently wrong, and *1 positions in teams you cannot see* is the
+ * whole of what this exists to stop.
+ *
+ * `alsoNamed` is whether anything was named above it, which decides whether
+ * this is a share of a total already stated or the whole of it.
+ */
+export function withheldLine(withheld: number, alsoNamed: boolean): string | null {
+  if (withheld <= 0) return null;
+  const which = alsoNamed
+    ? withheld === 1
+      ? "One of them is"
+      : `${withheld} of them are`
+    : withheld === 1
+      ? "It is"
+      : "They are";
+  const where = withheld === 1 ? "a team you cannot see" : "teams you cannot see";
+  const them = withheld === 1 ? "it" : "them";
+  return `${which} in ${where}. There is nothing here that can name ${them}.`;
+}
+
 export function Blast({ name, used }: { name: string; used: ProfilePlaces }) {
   const withheld = Math.max(0, used.withheld ?? 0);
   const seen = used.places ?? [];
@@ -2105,26 +2129,7 @@ export function Blast({ name, used }: { name: string; used: ProfilePlaces }) {
       </p>
     );
   }
-  /* **Nothing to name, and something to lose.** The cascade does not ask what
-     anybody can see, so a profile shared into a directory can hold seats in
-     teams filed in somebody else's space. The number is the shape and the
-     names are not ours to give, which is the rule a withheld member name on
-     the map already follows. */
-  if (seen.length === 0) {
-    return (
-      <>
-        <p>
-          You can no longer start a workspace as {name}. No team you can see holds a position for
-          it.
-        </p>
-        <p>
-          {count(withheld, "position")} in teams you cannot see {withheld === 1 ? "goes" : "go"}{" "}
-          with it, and everything under {withheld === 1 ? "it" : "them"}.
-        </p>
-        <p>Agents already running are untouched. They keep the profile they started with.</p>
-      </>
-    );
-  }
+
   const byTeam = new Map<string, { name: string; takes: number; leads: boolean }>();
   for (const p of seen) {
     const at = byTeam.get(p.team) ?? { name: p.teamName, takes: 0, leads: false };
@@ -2135,33 +2140,37 @@ export function Blast({ name, used }: { name: string; used: ProfilePlaces }) {
     });
   }
   const teams = [...byTeam.values()].sort((a, b) => a.name.localeCompare(b.name));
-  const positions = teams.reduce((n, t) => n + t.takes, 0);
+  /* **One total, stated once, and every number under it is a share of it.**
+     Both halves were already inclusive — `ProfilePosition.takes` is a seat
+     and its subtree, and `ProfilePlaces.withheld` is the same walk over the
+     teams that were filtered out — and both were followed by *and everything
+     under them*, which reads as more to come. A reader braced for more than
+     the number said. So the subtree is named where the total is, as what the
+     total already counts, and the rows beneath add up to it. */
+  const named = teams.reduce((n, t) => n + t.takes, 0);
+  const total = named + withheld;
 
   return (
     <>
       <p>
-        This removes {count(positions, "position")} from{" "}
-        {teams.length === 1 ? "one team" : `${teams.length} teams`}, and everything under them.
+        This removes {count(total, "position")} in all — the seats {name} holds, and everything
+        reporting under them.
       </p>
-      <ul className="takes">
-        {teams.map((t) => (
-          <li key={t.name}>
-            <b>{t.name}</b>
-            <span>
-              {t.leads
-                ? `loses its lead and all ${count(t.takes, "position")}`
-                : `loses ${count(t.takes, "position")}`}
-            </span>
-          </li>
-        ))}
-      </ul>
-      {withheld > 0 && (
-        <p>
-          And {count(withheld, "position")} in teams you cannot see, which{" "}
-          {withheld === 1 ? "goes" : "go"} too. There is nothing here that can name{" "}
-          {withheld === 1 ? "it" : "them"}.
-        </p>
+      {teams.length > 0 && (
+        <ul className="takes">
+          {teams.map((t) => (
+            <li key={t.name}>
+              <b>{t.name}</b>
+              <span>
+                {t.leads
+                  ? `loses its lead and all ${count(t.takes, "position")}`
+                  : `loses ${count(t.takes, "position")}`}
+              </span>
+            </li>
+          ))}
+        </ul>
       )}
+      {withheld > 0 && <p>{withheldLine(withheld, teams.length > 0)}</p>}
       <p>Agents already running are untouched. They keep the profile they started with.</p>
     </>
   );

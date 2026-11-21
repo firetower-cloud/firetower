@@ -187,6 +187,59 @@ export function couldReportTo(root: Seat | null, key: string): Seat[] {
   return flatten(root).filter((s) => !below.has(s.key));
 }
 
+/** Every profile from the lead down to this seat, the seat's own included. */
+export function lineage(root: Seat | null, key: string): string[] {
+  const walk = (s: Seat, trail: string[]): string[] | null => {
+    const here = [...trail, s.profile];
+    if (s.key === key) return here;
+    for (const k of s.children) {
+      const found = walk(k, here);
+      if (found) return found;
+    }
+    return null;
+  };
+  return (root && walk(root, [])) ?? [];
+}
+
+/**
+ * **What the add-a-seat list says about a profile, and whether it may be
+ * picked.**
+ *
+ * Two structural rules decide a seat before the server is asked, and
+ * `agent_teams::check` refuses on either of them every time — they are a
+ * property of the tree on screen, not of anything the server knows and the
+ * client does not.
+ *
+ * * **One profile at most once among one position's children.** A lead hands
+ *   work off by name, so two sibling seats of one profile would be a name
+ *   that does not say which is meant.
+ * * **A profile may not report to itself, however far up.** A chain of agents
+ *   of one kind handing the same work down is the shape with no natural end.
+ *
+ * Both are said on the row, and **both block it**. The second used to be said
+ * and left pickable, so pressing it drew the seat into the draft and spent a
+ * Save to come back 400 — a choice already known to fail, offered anyway,
+ * which the drawer one screen over states the rule against: *so that Save is
+ * not a button that looks live and comes back refused.*
+ *
+ * A blocked row is still drawn rather than hidden: a profile missing from a
+ * list somebody is searching reads as a profile that does not exist, and the
+ * reason it cannot be picked is the thing worth saying.
+ */
+export function seatTag(
+  profile: string,
+  siblings: Iterable<string>,
+  above: Iterable<string>,
+): { says: string; blocked: boolean } | null {
+  if ([...siblings].includes(profile)) {
+    return { says: "already reports here", blocked: true };
+  }
+  if ([...above].includes(profile)) {
+    return { says: "already above this seat", blocked: true };
+  }
+  return null;
+}
+
 /**
  * Re-parent a seat, with its subtree.
  *

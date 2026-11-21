@@ -66,10 +66,12 @@ import {
   flatten,
   fromPositions,
   layout,
+  lineage,
   moveSeat,
   parentKeyOf,
   removeSeat,
   say,
+  seatTag,
   toNewPosition,
   type Card,
   type Change,
@@ -956,11 +958,11 @@ function AddUnder({
         ? `A team goes ${limits.maxDepth} levels deep, counting the lead, and ${parentName} is on the last one. Put this profile under something higher up.`
         : null;
 
-  /* One profile at most once among one position's children: a lead hands
-     work off by name, and two seats of one profile would be a name that does
-     not say which is meant. Said on the row rather than hidden from it. */
-  const already = new Set(parent.children.map((c) => c.profile));
-  const above = new Set(lineage(draft, parent.key));
+  /* The two rules a tree on screen already decides — said on the row rather
+     than hidden from it, and both of them blocking. `seatTag` is the whole
+     of it, and says why neither is left pickable. */
+  const already = parent.children.map((c) => c.profile);
+  const above = lineage(draft, parent.key);
 
   return (
     <Sheet
@@ -983,13 +985,7 @@ function AddUnder({
           onPick={onPick}
           onMake={onMake}
           makeLabel="Create a profile for this seat"
-          tag={(p) =>
-            already.has(p.id)
-              ? { says: "already reports here", blocked: true }
-              : above.has(p.id)
-                ? { says: "also above this card" }
-                : null
-          }
+          tag={(p) => seatTag(p.id, already, above)}
         />
       )}
     </Sheet>
@@ -1009,20 +1005,6 @@ function levelOf(root: Seat, key: string): number {
     return null;
   };
   return walk(root, 1) ?? 1;
-}
-
-/** Every profile from this seat up to the lead. */
-function lineage(root: Seat, key: string): string[] {
-  const walk = (s: Seat, trail: string[]): string[] | null => {
-    const here = [...trail, s.profile];
-    if (s.key === key) return here;
-    for (const k of s.children) {
-      const found = walk(k, here);
-      if (found) return found;
-    }
-    return null;
-  };
-  return walk(root, []) ?? [];
 }
 
 /** What a new profile would sit under, by name. */

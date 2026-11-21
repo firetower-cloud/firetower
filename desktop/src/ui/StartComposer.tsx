@@ -1349,6 +1349,36 @@ export function consequence(s: Startable | undefined): string | null {
 }
 
 /**
+ * **What the footer says**, which is the consequence of the row that is on —
+ * including the one that is on when nothing has been picked.
+ *
+ * `consequence` answers for a `Startable` and `null` is not one: *Just an
+ * agent* is a row rather than a dismissal, so it has a consequence like every
+ * other row and this is where it is said.
+ *
+ * The four-line paragraph about what profiles are for is kept for the person
+ * it was written for — somebody meeting an **empty** list — and shown on the
+ * same condition as the *Create a profile* button under it, so the two cannot
+ * disagree about who is being spoken to. It used to appear whenever nothing
+ * was picked, which on a 1280x824 window cost 127px of a 392px card and left
+ * the Profiles group cut through its own heading with no profile row below
+ * it: the teaching text was pushing off the screen the thing it was teaching
+ * about. The footer is now one or two lines in every state, so the card stops
+ * changing height as somebody moves down the list.
+ */
+export function pickerFooter(picked: Startable | undefined, profiles: number): string {
+  if (picked) return consequence(picked) ?? "";
+  if (profiles > 0) {
+    return "Starts a plain workspace. No profile, so there is nobody to hand work to.";
+  }
+  return (
+    "You can create agent profiles to divide your work across teams of agents (e.g. a " +
+    "designer, an engineer, a security advisor, a QA, etc.) Put them in an agent team and " +
+    "its lead can hand work to the rest."
+  );
+}
+
+/**
  * The teams and the profiles, in one list, which grows — so once there are
  * more than a handful this filters. Remounts each time the menu opens, so the
  * search box starts empty.
@@ -1448,23 +1478,15 @@ export function ProfileMenu({
       </Sift>
       {/* **What picking this would do, or what they are for.**
           `RepoMenu`'s footer says what ticking another repository does; this
-          is the same job. With something chosen it is the consequence — one
-          agent, or a lead with its team reachable — and with nothing chosen
-          it is what profiles and teams are for, which is what somebody
-          meeting an empty list needs rather than a definition of the word.
+          is the same job: one agent, or a lead with its team reachable. That
+          sentence is the whole argument for a team being a row of its own, so
+          it is never shortened to make room — what gives way is the list,
+          which scrolls, and `pickerFooter` is where the two are weighed.
           The route out of an empty list is the Profiles page: making one
           there is two choices, which is not a thing to reproduce inside a
           menu. */}
-      <div className="pkfoot">
-        {picked ? (
-          <p>{consequence(picked)}</p>
-        ) : (
-          <p>
-            You can create agent profiles to divide your work across teams of agents (e.g. a
-            designer, an engineer, a security advisor, a QA, etc.) Put them in an agent team and
-            its lead can hand work to the rest.
-          </p>
-        )}
+      <div className="pkfoot shrink-0">
+        <p>{pickerFooter(picked, profiles.length)}</p>
         {profiles.length === 0 && (
           <button
             onClick={() => navigate("/configuration/roles")}

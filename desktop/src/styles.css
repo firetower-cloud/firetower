@@ -3296,6 +3296,30 @@ html:not([data-platform="macos"]) {
     background: var(--color-panel);
   }
 
+  /* ── A list that has been cut off says so ──────────────────────
+     `globals.css`'s `.scroll-slim` waits for a hover before it draws a bar,
+     which is right for the message box it was written for and wrong for a
+     menu whose rows continue past the edge of the card: the first read of one
+     is of a list that has ended, and the composer's picker is the path every
+     new conversation takes. Same call `.ft-pre` makes one rule over — a thing
+     that is missing a piece should say so without being touched first — and
+     the same values, so the two agree on what a thin bar is.
+
+     Here rather than in `globals.css` because `Pop` and `Menu` are the desk's
+     and the web application has neither. */
+  .scroll-seen {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line) transparent;
+  }
+  .scroll-seen::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  .scroll-seen::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 99px;
+  }
+
   .pop {
     padding: 7px;
     min-width: 244px;

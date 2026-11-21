@@ -21,6 +21,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ProfilePosition, Role } from "~/api/generated/model";
 import {
   Blast,
+  withheldLine,
   InTeams,
   PROFILE_TABS,
   ProfileDrawer,
@@ -94,15 +95,16 @@ describe("the confirmation before a profile is deleted", () => {
   test("teams it cannot see are counted rather than denied", () => {
     const said = says([], 2);
     expect(said).not.toContain("No team holds a position for it");
-    expect(said).toContain("No team you can see holds a position for it");
-    expect(said).toContain("2 positions in teams you cannot see");
+    expect(said).toContain("This removes 2 positions in all");
+    expect(said).toContain("They are in teams you cannot see");
     expect(said).toContain("Agents already running are untouched");
   });
 
   /** The singular, which is the half that is silently wrong. */
   test("one position in one invisible team reads as one", () => {
     const said = says([], 1);
-    expect(said).toContain("1 position in teams you cannot see goes with it");
+    expect(said).toContain("This removes 1 position in all");
+    expect(said).toContain("It is in a team you cannot see");
   });
 
   /** Named where they can be, counted where they cannot, in one dialog. */
@@ -110,7 +112,7 @@ describe("the confirmation before a profile is deleted", () => {
     const said = says([sits({ teamName: "Product", takes: 3 })], 2);
     expect(said).toContain("Product");
     expect(said).toContain("loses 3 positions");
-    expect(said).toContain("And 2 positions in teams you cannot see");
+    expect(said).toContain("2 of them are in teams you cannot see");
   });
 
   /**
@@ -127,7 +129,7 @@ describe("the confirmation before a profile is deleted", () => {
     expect(said).toContain("Platform");
     expect(said).toContain("loses 3 positions");
     expect(said).toContain("loses 1 position");
-    expect(said).toContain("This removes 4 positions from 2 teams");
+    expect(said).toContain("This removes 4 positions in all");
   });
 
   /** Two seats in one team are one row, and the counts add up. */
@@ -136,8 +138,43 @@ describe("the confirmation before a profile is deleted", () => {
       sits({ position: "p_1", takes: 2 }),
       sits({ position: "p_2", takes: 1 }),
     ]);
-    expect(said).toContain("This removes 3 positions from one team");
+    expect(said).toContain("This removes 3 positions in all");
     expect(said).toContain("loses 3 positions");
+  });
+
+  /**
+   * **The total is inclusive, and the sentence says so once.**
+   *
+   * `takes` is a seat and its subtree, and `withheld` is the same walk over
+   * the teams that were filtered out — so *and everything under them* after
+   * either number read as more to come, and a reader braced for more than
+   * the number said. The subtree is named where the total is, and every row
+   * beneath is a share of it.
+   */
+  test("the number already counts what is under those seats, and says so", () => {
+    const said = says([sits({ teamName: "Product", takes: 3 })], 2);
+    expect(said).toContain("This removes 5 positions in all");
+    expect(said).toContain("everything reporting under them");
+    expect(said).not.toMatch(/positions? from (one|\d+) teams?, and everything under them/);
+    // The rows under it add up to the total rather than extending it.
+    expect(said).toContain("loses 3 positions");
+    expect(said).toContain("2 of them are in teams you cannot see");
+  });
+
+  test("the withheld line is a share when something was named and the whole when not", () => {
+    expect(withheldLine(0, true)).toBeNull();
+    expect(withheldLine(1, true)).toBe(
+      "One of them is in a team you cannot see. There is nothing here that can name it.",
+    );
+    expect(withheldLine(2, true)).toBe(
+      "2 of them are in teams you cannot see. There is nothing here that can name them.",
+    );
+    expect(withheldLine(1, false)).toBe(
+      "It is in a team you cannot see. There is nothing here that can name it.",
+    );
+    expect(withheldLine(3, false)).toBe(
+      "They are in teams you cannot see. There is nothing here that can name them.",
+    );
   });
 
   /**
