@@ -297,6 +297,46 @@ pub(super) async fn delete_role(
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
     let me = whoever(&principal)?;
+    /* **A team standing on this profile refuses the delete, and the refusal
+    names the teams.** `team_positions.role_id` is `on delete restrict`, so
+    without this the database answers with a constraint name in a 500 and the
+    team the person would have to go and fix is nowhere in it.
+
+    Asked before the write rather than read off the violation — which is the
+    opposite of what `refused_by_constraint` does for a machine id, and right
+    for the opposite reason. That one is a race nobody can see (a host removed
+    between the look and the insert); this one is a fact the person is looking
+    at on the next screen, and the answer has to carry the names. */
+    let (held, teams) = state.agent_teams.standing_on(me.id.as_str(), &id).await?;
+    if held > 0 {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            match teams.is_empty() {
+                // Every team holding it is one they cannot see. Said as a
+                // count, because naming them would name things they have no
+                // grant on — and the count is what makes the refusal
+                // actionable: somebody else has to take it out.
+                true => format!(
+                    "this profile holds {held} position{} in teams you cannot see, so deleting \
+                     it would empty somebody else's team. Ask whoever owns them to take it out \
+                     first.",
+                    if held == 1 { "" } else { "s" }
+                ),
+                false => format!(
+                    "this profile holds {held} position{} in {}. Take it out of {} first — \
+                     deleting it would leave {} with a hole in it.",
+                    if held == 1 { "" } else { "s" },
+                    teams.join(", "),
+                    if teams.len() == 1 {
+                        "that team"
+                    } else {
+                        "those teams"
+                    },
+                    if teams.len() == 1 { "the team" } else { "them" },
+                ),
+            },
+        ));
+    }
     if !state.roles.delete(me.id.as_str(), &id).await? {
         return Err(ApiError::not_found("role"));
     }
@@ -1033,6 +1073,7 @@ mod tests {
             AppState {
                 skills: crate::skills::Skills::new(db.pool().clone()),
                 roles: crate::roles::Roles::new(db.pool().clone()),
+                agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
                 updates: crate::updates::Updates::new(db.pool().clone()),
                 policy: crate::auth::Policy::open(),
                 access: crate::access::Access::new(db.pool().clone()),

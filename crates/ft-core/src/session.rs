@@ -289,6 +289,19 @@ pub struct Session {
     /// rail reads to say which kind of agent a workspace holds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_id: Option<String>,
+    /// The agent team this session is running inside, when it is running
+    /// inside one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_id: Option<String>,
+    /// Which position of that team it occupies.
+    ///
+    /// **This is what decides who it may hand work to.** The children of this
+    /// position are the profiles `spawn` will resolve a name against, and a
+    /// session with no position cannot delegate at all — which is what
+    /// replaced a profile carrying its own reach. A child inherits the
+    /// position it was spawned into, which is how a team gets depth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub position_id: Option<String>,
     /// What the lead said this child was for, in its own words.
     ///
     /// Carried so the child's own screen can say why it exists — the first
@@ -398,11 +411,20 @@ pub struct NewSession {
     pub share: Share,
     /// The profile to start as, by id. Omit for a plain agent with no persona.
     ///
-    /// It shapes the agent's system prompt, pins the engine when it names one,
-    /// and decides whether this session may delegate — a Manager may, an
-    /// Operator does the work itself.
+    /// It shapes the agent's system prompt and pins the engine when it names
+    /// one. It no longer decides whether this session may delegate: that is
+    /// `team` below, and a profile started on its own cannot hand work to
+    /// anybody.
     #[serde(default)]
     pub profile: Option<String>,
+    /// The agent team to start, by id.
+    ///
+    /// **You never talk to a team; you talk to its lead.** Naming one starts
+    /// its lead profile with the team behind it — the session stands on the
+    /// team's root position, and the positions under that are what it may hand
+    /// work to. Naming a team and a profile that is not its lead is refused.
+    #[serde(default)]
+    pub team: Option<String>,
     /// Model, effort, permissions and sandbox to start with, overriding what
     /// this person last used. What the New page's picker sends; once the
     /// session has run a turn, its own choices are what a restart remembers.

@@ -33,10 +33,16 @@ A child cannot `spawn`, cannot ask the person, and is told so.
 
 Ending a lead ends its children. A branch a child pushed stays on the remote.
 
-### Profiles
+### Profiles and teams
 
-A lead names a saved profile with `role: "<name>"` and gets its instructions,
-its team and its skills rather than describing a child inline. A profile says
+**Who a lead may hand work to is a team, not a profile.** A profile carries no
+reach of its own — see [agent-teams.md](agent-teams.md), which is where that
+whole question now lives. What a session may `spawn` is the positions directly
+under the position it occupies, and a session with no position cannot delegate
+at all.
+
+A lead names a saved profile with `role: "<name>"` and gets its instructions
+and its skills rather than describing a child inline. A profile says
 three things about where its children run — the engine, the placement, and the
 machine when the placement is its own workspace — and **each of the three is
 either a commitment or left open**. What it commits to is binding: the lead's
@@ -82,10 +88,18 @@ Every check a person starting a session meets, a lead meets.
 
 ## Limits
 
-Flat: a child cannot spawn — the only limit left. There is no cap on how many
-children a lead starts, nor on how many of them run at once; the spawn tool
-says so, and asks the agent to dispatch what the work needs rather than what it
-is allowed. A refusal is a sentence the agent reads: which rule, and why.
+**A child can spawn, where the team gives it somebody to hand to.** It was flat
+— a child could not spawn at all — because reach was a property of a profile
+and a child had nowhere to stand. It stands on a position now, so depth is a
+property of the team that was drawn: at most six levels and fifty positions
+(`agent_teams::MAX_DEPTH`, `MAX_POSITIONS`). A session with no position still
+cannot spawn, and that is the ordinary case for anything started as a bare
+profile.
+
+There is no cap on how many children a lead starts, nor on how many of them run
+at once; the spawn tool says so, and asks the agent to dispatch what the work
+needs rather than what it is allowed. A refusal is a sentence the agent reads:
+which rule, and why.
 
 Money and wall-clock caps are not here. Firetower shows a quota at 100% and
 does not interrupt a running agent; a cap that interrupts is a new behaviour

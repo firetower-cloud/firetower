@@ -410,6 +410,7 @@ async fn frames_fixture() -> (
         access: crate::access::Access::new(db.pool().clone()),
         skills: crate::skills::Skills::new(db.pool().clone()),
         roles: crate::roles::Roles::new(db.pool().clone()),
+        agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
         connections,
         db,
         accounts,
@@ -526,6 +527,7 @@ async fn watched_fixture() -> (
         access: crate::access::Access::new(db.pool().clone()),
         skills: crate::skills::Skills::new(db.pool().clone()),
         roles: crate::roles::Roles::new(db.pool().clone()),
+        agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
         connections,
         db,
         accounts,
@@ -4884,7 +4886,7 @@ async fn a_team_list_says_which_profiles_leave_a_field_open() {
         .unwrap();
 
     // The persona's own list, which is what a Manager reads before it spawns.
-    let persona = super::sessions::persona_for(&state, &owner, &profile)
+    let persona = super::sessions::persona_for(&state, &owner, &profile, None)
         .await
         .unwrap();
     assert!(
@@ -5539,7 +5541,7 @@ async fn an_agent_can_read_a_whole_profile_and_copy_it() {
     let (state, _principal, host, ready, owner) = fixture().await;
     let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
     a_skill(&state, &owner, "changelog").await;
-    let teammate = saved_profile(
+    let _teammate = saved_profile(
         &state,
         &owner,
         serde_json::json!({
@@ -5568,8 +5570,6 @@ async fn an_agent_can_read_a_whole_profile_and_copy_it() {
             "instructions": "# Engineer\n\nWrite the change. Do not review it.",
             "onUsageLimit": "engine",
             "onChildLimit": "reroute",
-            "canDelegate": true,
-            "delegateScope": [teammate],
             "skillScope": [],
             "includeAlwaysOn": false,
             "includeRepoDefaults": false,
@@ -5619,13 +5619,14 @@ async fn an_agent_can_read_a_whole_profile_and_copy_it() {
         "Claude Code",
         "its own workspace",
         "Write the change. Do not review it.",
-        "Reviewer",
         "changelog",
         // The two grants, by the words the editor uses rather than by their
         // stored codes — an agent reads prose, and `engine` alone says nothing.
         "another subscription and engine",
         "Re-route",
-        "Manager",
+        // Where it stands, which is what replaced "Manager". A profile with
+        // no team hands work to nobody, and a copy has to be told so.
+        "In teams",
     ] {
         assert!(
             said.contains(expected),
@@ -5659,8 +5660,6 @@ async fn an_agent_can_read_a_whole_profile_and_copy_it() {
                 "instructions": "# Engineer\n\nWrite the change. Do not review it.",
                 "on_usage_limit": "engine",
                 "on_child_limit": "reroute",
-                "can_delegate": true,
-                "delegate_scope": ["Reviewer"],
                 "skill_scope": ["changelog"],
                 "include_always_on": false,
                 "include_repo_defaults": false,
@@ -5692,8 +5691,6 @@ async fn an_agent_can_read_a_whole_profile_and_copy_it() {
     assert_eq!(after.instructions, before.instructions);
     assert_eq!(after.on_usage_limit, before.on_usage_limit);
     assert_eq!(after.on_child_limit, before.on_child_limit);
-    assert_eq!(after.can_delegate, before.can_delegate);
-    assert_eq!(after.delegate_scope, before.delegate_scope);
     assert_eq!(after.skill_scope, before.skill_scope);
     assert_eq!(after.include_always_on, before.include_always_on);
     assert_eq!(after.include_repo_defaults, before.include_repo_defaults);
@@ -5749,11 +5746,6 @@ async fn a_value_no_profile_can_hold_is_refused_by_name() {
             "a skill nobody has",
             serde_json::json!({ "skill_scope": ["no-such-skill"] }),
             "no-such-skill",
-        ),
-        (
-            "a profile nobody has",
-            serde_json::json!({ "delegate_scope": ["No Such Profile"], "can_delegate": true }),
-            "No Such Profile",
         ),
         (
             "a model the engine does not offer",
@@ -5832,7 +5824,6 @@ async fn an_update_changes_only_what_it_names() {
             "does": "Writes the change",
             "placement": "new",
             "agent": "ClaudeCode",
-            "canDelegate": true,
             "onUsageLimit": "same",
             "onChildLimit": "reroute",
             "includeAlwaysOn": false,
@@ -5847,15 +5838,11 @@ async fn an_update_changes_only_what_it_names() {
             &lead,
             "u1",
             "update_profile",
-            serde_json::json!({
-                "name": "Engineer",
-                "skill_scope": ["changelog"],
-                "delegate_scope": ["Reviewer"],
-            }),
+            serde_json::json!({ "name": "Engineer", "skill_scope": ["changelog"] }),
         ),
     )
     .await
-    .expect("naming two fields changes two fields");
+    .expect("naming a field changes that field");
 
     let after = state
         .roles
@@ -5864,7 +5851,6 @@ async fn an_update_changes_only_what_it_names() {
         .unwrap()
         .unwrap();
     assert_eq!(after.skill_scope.len(), 1, "the one it named");
-    assert_eq!(after.delegate_scope.len(), 1);
     // And everything it did not name is exactly as it was.
     assert_eq!(after.on_usage_limit, "same");
     assert_eq!(after.on_child_limit, "reroute");
@@ -5873,7 +5859,8 @@ async fn an_update_changes_only_what_it_names() {
     assert_eq!(after.placement, "new");
     assert_eq!(after.does, "Writes the change");
 
-    // An explicit empty list is a real answer: this profile names nobody.
+    // An explicit empty list is a real answer: this profile reads nothing of
+    // its own on top of the two switches.
     crate::delegate::handle(
         &state,
         &asks(
@@ -5881,67 +5868,30 @@ async fn an_update_changes_only_what_it_names() {
             &lead,
             "u2",
             "update_profile",
-            serde_json::json!({ "name": "Engineer", "delegate_scope": [] }),
+            serde_json::json!({ "name": "Engineer", "skill_scope": [] }),
         ),
     )
     .await
-    .expect("clearing a team is a thing to be able to say");
+    .expect("clearing a list is a thing to be able to say");
     let after = state
         .roles
         .one(&owner, &id, crate::access::Level::Viewer)
         .await
         .unwrap()
         .unwrap();
-    assert!(after.delegate_scope.is_empty(), "cleared");
-    assert_eq!(after.skill_scope.len(), 1, "and the other one left alone");
+    assert!(after.skill_scope.is_empty(), "cleared");
+    assert_eq!(after.on_usage_limit, "same", "and the rest left alone");
 
     state.fleet.stop_supervising(&host.id).await;
 }
 
-/// A profile cannot be put on its own team.
-///
-/// `Roles.tsx` filters the profile being edited out of its own delegate
-/// picker; a tool resolving by name has to do the same, or "copy the Engineer
-/// and let it hand work to the Engineer" writes a profile that can delegate
-/// to itself — which the flat-hierarchy rule then refuses at spawn, far from
-/// where the mistake was made.
-#[tokio::test]
-async fn a_profile_is_not_put_on_its_own_team() {
-    let (state, _principal, host, ready, owner) = fixture().await;
-    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
-    saved_profile(
-        &state,
-        &owner,
-        serde_json::json!({ "name": "Reviewer", "does": "Reads the diff", "placement": "here" }),
-    )
-    .await;
-    crate::delegate::handle(
-        &state,
-        &asks(
-            &host,
-            &lead,
-            "s1",
-            "create_profile",
-            serde_json::json!({
-                "name": "Engineer",
-                "does": "Writes the change",
-                "can_delegate": true,
-                "delegate_scope": ["Engineer", "Reviewer"],
-            }),
-        ),
-    )
-    .await
-    .expect("naming itself is dropped, not refused — the rest of the team is the ask");
-    let made = state
-        .roles
-        .by_name(&owner, "Engineer")
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(made.delegate_scope.len(), 1, "only the Reviewer");
-
-    state.fleet.stop_supervising(&host.id).await;
-}
+/* `a_profile_is_not_put_on_its_own_team` and
+`dropping_a_profile_from_its_own_team_is_said_out_loud` stood here. Both
+asserted that `delegate_scope` naming the profile being written drops that
+entry and says so — which was the right answer while a profile carried its
+own reach. It does not carry one now: the key is refused by name and nothing
+is written, which `the_mcp_server_draws_a_team_and_refuses_the_old_delegation`
+asserts. A profile cannot be on its own team because a profile has no team. */
 
 /// One name, two things: **neither, and say which name was ambiguous.**
 ///
@@ -6200,43 +6150,6 @@ async fn two_profiles_of_one_name_are_read_and_written_by_neither() {
     )
     .await
     .is_ok());
-
-    state.fleet.stop_supervising(&host.id).await;
-}
-
-/// Dropping a profile from its own team is right; doing it in silence is not.
-#[tokio::test]
-async fn dropping_a_profile_from_its_own_team_is_said_out_loud() {
-    let (state, _principal, host, ready, owner) = fixture().await;
-    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
-    saved_profile(
-        &state,
-        &owner,
-        serde_json::json!({ "name": "Reviewer", "does": "Reads the diff", "placement": "here" }),
-    )
-    .await;
-
-    let said = crate::delegate::handle(
-        &state,
-        &asks(
-            &host,
-            &lead,
-            "self",
-            "create_profile",
-            serde_json::json!({
-                "name": "Engineer",
-                "does": "Writes the change",
-                "can_delegate": true,
-                "delegate_scope": ["Engineer", "Reviewer"],
-            }),
-        ),
-    )
-    .await
-    .expect("the rest of the team is still the ask");
-    assert!(
-        said.contains("not on its own team") && said.contains("Engineer"),
-        "an argument accepted and not applied has to be said: {said}"
-    );
 
     state.fleet.stop_supervising(&host.id).await;
 }
@@ -10111,4 +10024,752 @@ async fn an_agent_may_stop_a_schedule_and_not_start_one() {
         row.paused_reason.is_none(),
         "somebody paused this, which reads differently from a schedule that gave up"
     );
+}
+
+/* ── Agent teams ─────────────────────────────────────────────────────────
+
+The specification's load-bearing conditions, as behaviour. A profile is
+identity; a team is structure; and the only thing that decides whether a
+`spawn` is refused is the children of the position a session occupies. */
+
+/// Make a profile with nothing on it but what it is.
+async fn a_profile(state: &AppState, owner: &str, name: &str) -> String {
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(owner).await.unwrap();
+    let new: crate::roles::NewRole = serde_json::from_value(serde_json::json!({
+        "name": name,
+        "does": format!("does the {name} part"),
+        "placement": "here",
+        "instructions": format!("Be the {name}."),
+    }))
+    .unwrap();
+    state
+        .roles
+        .create(&org, owner, &slug, &new)
+        .await
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
+/// A1 and A2: a profile that leads one team arrives bare in another, and one
+/// profile can hold two positions with different instructions in each.
+#[tokio::test]
+async fn a_profile_in_two_teams_brings_nothing_with_it() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(&owner).await.unwrap();
+    let manager = a_profile(&state, &owner, "Engineering Manager").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let designer = a_profile(&state, &owner, "Designer").await;
+
+    // Product: the manager leads, with a designer and two engineers under it.
+    // Two positions of one profile, told apart only by what they are told.
+    let product: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Product",
+        "positions": [
+            { "key": "lead", "profile": manager },
+            { "key": "d", "parent": "lead", "profile": designer },
+            { "key": "web", "parent": "lead", "profile": engineer,
+              "extraInstructions": "Owns the web client." },
+            { "key": "api", "parent": "lead", "profile": engineer,
+              "extraInstructions": "Owns the API and the migrations." },
+        ],
+    }))
+    .unwrap();
+    let product = state
+        .agent_teams
+        .create(&org, &owner, &slug, None, &product)
+        .await
+        .unwrap();
+
+    // Platform: the *same* manager profile, under somebody else, with nothing
+    // under it. Adding it here must not bring Product's three along.
+    let other_lead = a_profile(&state, &owner, "Head of Platform").await;
+    let platform: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Platform",
+        "positions": [
+            { "key": "lead", "profile": other_lead },
+            { "key": "em", "parent": "lead", "profile": manager },
+        ],
+    }))
+    .unwrap();
+    state
+        .agent_teams
+        .create(&org, &owner, &slug, None, &platform)
+        .await
+        .unwrap();
+
+    let teams = state
+        .agent_teams
+        .visible(&owner, crate::access::Level::Viewer)
+        .await
+        .unwrap();
+    let product_now = teams.iter().find(|t| t.name == "Product").unwrap();
+    let platform_now = teams.iter().find(|t| t.name == "Platform").unwrap();
+    assert_eq!(
+        product_now.size(),
+        4,
+        "Product is the lead and three under it"
+    );
+    assert_eq!(
+        platform_now.size(),
+        2,
+        "the manager arrived in Platform bare — its Product team did not travel with it"
+    );
+    let em_in_platform = platform_now
+        .positions
+        .iter()
+        .find(|p| p.profile == manager)
+        .unwrap();
+    assert!(
+        platform_now.children_of(&em_in_platform.id).is_empty(),
+        "A1: a profile that leads another team has no children here"
+    );
+
+    // A2: the same profile, two positions, same name, different instructions.
+    let lead = product_now.lead().unwrap();
+    let engineers: Vec<_> = product_now
+        .children_of(&lead.id)
+        .into_iter()
+        .filter(|p| p.profile == engineer)
+        .collect();
+    assert_eq!(engineers.len(), 2);
+    assert_eq!(
+        engineers[0].name, engineers[1].name,
+        "one profile, one name"
+    );
+    assert_ne!(
+        engineers[0].extra_instructions, engineers[1].extra_instructions,
+        "A2: what tells two positions of one profile apart"
+    );
+
+    // And the profile itself never gained children by being put in a team.
+    let read = state
+        .roles
+        .one(&owner, &manager, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        !read.can_delegate && read.delegate_scope.is_empty(),
+        "the map must never write a roles row"
+    );
+    let _ = product;
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A3: a profile started without a team cannot delegate, and the refusal says
+/// why — and the same profile in a team can.
+#[tokio::test]
+async fn reach_comes_from_the_position_and_nowhere_else() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(&owner).await.unwrap();
+    let manager = a_profile(&state, &owner, "Engineering Manager").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let stranger = a_profile(&state, &owner, "Stranger").await;
+
+    let team: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Product",
+        "positions": [
+            { "key": "lead", "profile": manager },
+            { "key": "e", "parent": "lead", "profile": engineer },
+        ],
+    }))
+    .unwrap();
+    let team = state
+        .agent_teams
+        .create(&org, &owner, &slug, None, &team)
+        .await
+        .unwrap();
+    let read = state
+        .agent_teams
+        .one(&owner, team.as_str(), crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    let lead_position = read.lead().unwrap().clone();
+
+    // Bare: the manager profile, started on its own.
+    let bare = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &bare,
+            &host.id,
+            &owner,
+            None,
+            "On its own",
+            "do a thing",
+            Some("agent/bare"),
+            Some("main"),
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+    state.db.set_profile(&bare, &manager).await.unwrap();
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &bare,
+            "r1",
+            "spawn",
+            serde_json::json!({ "goal": "build it", "role": "Engineer" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("not in a team"),
+        "A3: a profile with no team cannot delegate, and says why — got {refused}"
+    );
+    assert!(
+        refused.contains("Agent teams"),
+        "and the refusal names where to fix it — got {refused}"
+    );
+
+    // The same profile, standing in the team.
+    let inside = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &inside,
+            &host.id,
+            &owner,
+            None,
+            "Leading Product",
+            "do a thing",
+            Some("agent/lead"),
+            Some("main"),
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+    state.db.set_profile(&inside, &manager).await.unwrap();
+    state
+        .db
+        .set_position(&inside, team.as_str(), &lead_position.id)
+        .await
+        .unwrap();
+
+    // Somebody outside the team reads as *not there*, not as *not allowed*.
+    let off_team = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &inside,
+            "r2",
+            "spawn",
+            serde_json::json!({ "goal": "x", "role": "Stranger" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        off_team.contains("no subagent called \"Stranger\""),
+        "a profile off the team is absent, not refused — got {off_team}"
+    );
+    assert!(
+        off_team.contains("Engineer"),
+        "and the ones it can use are named — got {off_team}"
+    );
+    let _ = stranger;
+
+    // And the one under it works, and the child is left standing on its own
+    // position — which is what lets a team have depth.
+    let ok = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &inside,
+            "r3",
+            "spawn",
+            serde_json::json!({ "goal": "build the thing", "role": "Engineer" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(ok.starts_with("Started"), "it started — got {ok}");
+    let child = child_of(&state, &inside, "r3").await;
+    assert_eq!(
+        child.profile_id.as_deref(),
+        Some(engineer.as_str()),
+        "and it is the profile the position references"
+    );
+    let under = read.children_of(&lead_position.id);
+    assert_eq!(
+        child.position_id.as_deref(),
+        Some(under[0].id.as_str()),
+        "the child stands on the position it was spawned into"
+    );
+    assert_eq!(child.team_id.as_deref(), Some(team.as_str()));
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Naming your own lead gets its own refusal, rather than "no subagent called
+/// that" — which tells an agent a profile does not exist when it plainly does.
+#[tokio::test]
+async fn naming_your_own_lead_is_not_a_not_found() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(&owner).await.unwrap();
+    let manager = a_profile(&state, &owner, "Engineering Manager").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let qa = a_profile(&state, &owner, "QA").await;
+    let team: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Product",
+        "positions": [
+            { "key": "lead", "profile": manager },
+            { "key": "e", "parent": "lead", "profile": engineer },
+            { "key": "q", "parent": "e", "profile": qa },
+        ],
+    }))
+    .unwrap();
+    let team = state
+        .agent_teams
+        .create(&org, &owner, &slug, None, &team)
+        .await
+        .unwrap();
+    let read = state
+        .agent_teams
+        .one(&owner, team.as_str(), crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    let lead = read.lead().unwrap();
+    let engineer_position = read.children_of(&lead.id)[0].clone();
+
+    // A session standing where the Engineer stands: it leads QA, and reports
+    // to the Engineering Manager.
+    let middle = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &middle,
+            &host.id,
+            &owner,
+            None,
+            "In the middle",
+            "do a thing",
+            Some("agent/mid"),
+            Some("main"),
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+    state.db.set_profile(&middle, &engineer).await.unwrap();
+    state
+        .db
+        .set_position(&middle, team.as_str(), &engineer_position.id)
+        .await
+        .unwrap();
+
+    let upward = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &middle,
+            "u1",
+            "spawn",
+            serde_json::json!({ "goal": "x", "role": "Engineering Manager" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        upward.contains("above you"),
+        "naming your own lead has its own sentence — got {upward}"
+    );
+    assert!(
+        !upward.contains("no subagent called"),
+        "and it is not a not-found — got {upward}"
+    );
+
+    // A child *can* spawn now. That is the whole of what depth means.
+    let down = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &middle,
+            "u2",
+            "spawn",
+            serde_json::json!({ "goal": "check it", "role": "QA" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        down.starts_with("Started"),
+        "a position two levels down starts — got {down}"
+    );
+    assert_eq!(
+        child_of(&state, &middle, "u2").await.profile_id.as_deref(),
+        Some(qa.as_str()),
+        "and it is QA, which only this position could reach"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// The MCP server draws a team, and refuses to put delegation on a profile.
+#[tokio::test]
+async fn the_mcp_server_draws_a_team_and_refuses_the_old_delegation() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let lead = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &lead,
+            &host.id,
+            &owner,
+            None,
+            "Configuring",
+            "set things up",
+            Some("agent/cfg"),
+            Some("main"),
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(true, false),
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Three profiles, made the way an agent makes them.
+    for (name, does) in [
+        ("Engineering Manager", "Leads delivery"),
+        ("Engineer", "Writes the code"),
+        ("QA", "Checks a branch"),
+    ] {
+        crate::delegate::handle(
+            &state,
+            &asks(
+                &host,
+                &lead,
+                name,
+                "create_profile",
+                serde_json::json!({ "name": name, "does": does }),
+            ),
+        )
+        .await
+        .unwrap();
+    }
+
+    // Delegation on a profile is refused by name, and nothing is written.
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "bad",
+            "create_profile",
+            serde_json::json!({
+                "name": "Old Manager",
+                "does": "leads the old way",
+                "can_delegate": true,
+                "delegate_scope": ["Engineer"],
+            }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("create_team"),
+        "the refusal points at the tool that does this now — got {refused}"
+    );
+    assert!(
+        !state
+            .roles
+            .visible(&owner, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .iter()
+            .any(|r| r.name == "Old Manager"),
+        "nothing was written"
+    );
+
+    // And the team, drawn in one call, two levels deep.
+    let made = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "team",
+            "create_team",
+            serde_json::json!({
+                "name": "Product",
+                "lead": "Engineering Manager",
+                "members": [
+                    { "key": "web", "profile": "Engineer",
+                      "extra_instructions": "Owns the web client." },
+                    { "key": "qa", "profile": "QA", "under": "web" },
+                    { "key": "api", "profile": "Engineer",
+                      "extra_instructions": "Owns the API and the migrations." },
+                ],
+            }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(made.contains("Product"), "got {made}");
+    assert!(made.contains("4 agents"), "it says how many — got {made}");
+
+    let teams = state
+        .agent_teams
+        .visible(&owner, crate::access::Level::Viewer)
+        .await
+        .unwrap();
+    let product = teams.iter().find(|t| t.name == "Product").unwrap();
+    assert_eq!(product.size(), 4);
+    assert_eq!(product.depth(), 3, "QA sits under the web Engineer");
+    assert_eq!(product.lead().unwrap().name, "Engineering Manager");
+
+    // `update_team` is whole, not a patch, and says so rather than emptying one.
+    let patched = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "patch",
+            "update_team",
+            serde_json::json!({ "name": "Product", "new_name": "Product and Platform" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        patched.contains("whole team"),
+        "a patch is refused with what to send instead — got {patched}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Saving a team keeps the positions that survived, so the sessions standing
+/// on them keep standing on them — and takes the rest, with their subtrees.
+#[tokio::test]
+async fn saving_a_team_keeps_the_positions_that_survived() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(&owner).await.unwrap();
+    let manager = a_profile(&state, &owner, "Engineering Manager").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let qa = a_profile(&state, &owner, "QA").await;
+    let designer = a_profile(&state, &owner, "Designer").await;
+
+    let draft: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Product",
+        "positions": [
+            { "key": "lead", "profile": manager },
+            { "key": "e", "parent": "lead", "profile": engineer },
+            { "key": "q", "parent": "e", "profile": qa },
+        ],
+    }))
+    .unwrap();
+    let team = state
+        .agent_teams
+        .create(&org, &owner, &slug, None, &draft)
+        .await
+        .unwrap();
+    let before = state
+        .agent_teams
+        .one(&owner, team.as_str(), crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    let lead_id = before.lead().unwrap().id.clone();
+    let engineer_id = before.children_of(&lead_id)[0].id.clone();
+
+    // Save: keep the Engineer by its id, drop QA, add a Designer.
+    let saved: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Product",
+        "positions": [
+            { "key": lead_id, "profile": manager },
+            { "key": engineer_id, "parent": lead_id, "profile": engineer,
+              "extraInstructions": "Owns the web client." },
+            { "key": "new-designer", "parent": lead_id, "profile": designer },
+        ],
+    }))
+    .unwrap();
+    assert!(state
+        .agent_teams
+        .replace(&owner, team.as_str(), &saved)
+        .await
+        .unwrap());
+
+    let after = state
+        .agent_teams
+        .one(&owner, team.as_str(), crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after.size(), 3, "the lead, the engineer and the designer");
+    assert_eq!(
+        after.lead().unwrap().id,
+        lead_id,
+        "the lead position is the team's one fixed point"
+    );
+    let kept = after.positions.iter().find(|p| p.id == engineer_id);
+    assert!(
+        kept.is_some(),
+        "a position sent back by its id keeps its row"
+    );
+    assert_eq!(
+        kept.unwrap().extra_instructions,
+        "Owns the web client.",
+        "and takes the change that came with it"
+    );
+    assert!(
+        !after.positions.iter().any(|p| p.profile == qa),
+        "a position left out is taken out"
+    );
+
+    // And none of it touched a profile.
+    for id in [&manager, &engineer, &qa, &designer] {
+        let read = state
+            .roles
+            .one(&owner, id, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!read.can_delegate, "no map action writes a roles row");
+    }
+    // Removing a position never deletes the profile.
+    assert!(state
+        .roles
+        .one(&owner, &qa, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .is_some());
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// A tree that is not a tree is refused, naming what is wrong — and nothing is
+/// written.
+#[tokio::test]
+async fn a_team_that_is_not_a_tree_is_refused_by_name() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(&owner).await.unwrap();
+    let manager = a_profile(&state, &owner, "Engineering Manager").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+
+    let cycle: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Circular",
+        "positions": [
+            { "key": "lead", "profile": manager },
+            { "key": "a", "parent": "b", "profile": engineer },
+            { "key": "b", "parent": "a", "profile": engineer },
+        ],
+    }))
+    .unwrap();
+    let refused = state
+        .agent_teams
+        .create(&org, &owner, &slug, None, &cycle)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("circle"), "got {refused}");
+    assert!(
+        refused.contains('a') && refused.contains('b'),
+        "it names them — got {refused}"
+    );
+
+    let leadless: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Leaderless",
+        "positions": [{ "key": "a", "parent": "b", "profile": engineer },
+                      { "key": "b", "parent": "a", "profile": engineer }],
+    }))
+    .unwrap();
+    let refused = state
+        .agent_teams
+        .create(&org, &owner, &slug, None, &leadless)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("no lead"), "got {refused}");
+
+    assert!(
+        state
+            .agent_teams
+            .visible(&owner, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .is_empty(),
+        "nothing was written"
+    );
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Deleting a profile a team stands on is refused, and the refusal names the
+/// teams. The database would refuse it anyway; this is what makes the refusal
+/// readable.
+#[tokio::test]
+async fn deleting_a_profile_a_team_holds_names_the_teams() {
+    let (state, principal, host, _ready, owner) = fixture().await;
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(&owner).await.unwrap();
+    let manager = a_profile(&state, &owner, "Engineering Manager").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let team: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Product",
+        "positions": [
+            { "key": "lead", "profile": manager },
+            { "key": "e", "parent": "lead", "profile": engineer },
+        ],
+    }))
+    .unwrap();
+    state
+        .agent_teams
+        .create(&org, &owner, &slug, None, &team)
+        .await
+        .unwrap();
+
+    let refused = super::roles::delete_role(
+        State(state.clone()),
+        Extension(principal.clone()),
+        axum::extract::Path(engineer.clone()),
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        refused.message.contains("Product"),
+        "the refusal names the team — got {}",
+        refused.message
+    );
+    assert!(
+        state
+            .roles
+            .one(&owner, &engineer, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .is_some(),
+        "and nothing was deleted"
+    );
+    state.fleet.stop_supervising(&host.id).await;
 }

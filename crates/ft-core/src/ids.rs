@@ -128,6 +128,17 @@ id_type!(
     "Identifies one version of an artifact. Append-only: a note is anchored to one."
 );
 
+id_type!(
+    AgentTeamId,
+    "team",
+    "Identifies an agent team — a lead profile and the tree of positions under it."
+);
+id_type!(
+    PositionId,
+    "pos",
+    "Identifies one position in an agent team: a profile, where it sits, and what is said to it there."
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

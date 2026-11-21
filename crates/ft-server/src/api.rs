@@ -11,6 +11,7 @@
 
 pub(crate) mod access;
 pub(crate) mod accounts;
+pub(crate) mod agent_teams;
 pub(crate) mod agents;
 mod annotations;
 pub(crate) mod artifacts;
@@ -435,6 +436,10 @@ async fn credential_on(
     components(schemas(
         crate::roles::Role,
         crate::roles::NewRole,
+        crate::agent_teams::AgentTeam,
+        crate::agent_teams::Position,
+        crate::agent_teams::NewAgentTeam,
+        crate::agent_teams::DraftPosition,
         crate::roles::import::ProfileDrop,
         crate::roles::import::ImportPlan,
         crate::db::Bucket,
@@ -661,6 +666,15 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(schedules::schedule_runs))
         .routes(routes!(schedules::all_runs))
         .routes(routes!(schedules::read_cadence))
+        .routes(routes!(
+            agent_teams::list_agent_teams,
+            agent_teams::create_agent_team
+        ))
+        .routes(routes!(
+            agent_teams::one_agent_team,
+            agent_teams::update_agent_team,
+            agent_teams::delete_agent_team
+        ))
         .routes(routes!(roles::list_roles, roles::create_role))
         .routes(routes!(roles::update_role, roles::delete_role))
         .routes(routes!(roles::set_default_role))

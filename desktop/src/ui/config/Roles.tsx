@@ -61,7 +61,7 @@ import {
   useRoleImportLimits,
 } from "~/api/generated/roles/roles";
 import { useAgentControls } from "~/api/generated/agents/agents";
-import { useAccounts, useAgents, useDirectories, useHosts, useSkills, why } from "~/data";
+import { useAccounts, useAgentTeams, useAgents, useDirectories, useHosts, useSkills, teamsUsing, why } from "~/data";
 import { quota, usable, type Account } from "~/api/accounts";
 import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
@@ -221,6 +221,10 @@ const BLANK: Settled = {
 export function Roles() {
   const start = useStart();
   const feed = useListRoles();
+  // Which teams hold a position on each profile — the reading that replaced
+  // "can delegate" on the row, and the thing a person needs before they delete
+  // one.
+  const teams = useAgentTeams();
   const rows = {
     data: feed.data ?? [],
     loading: feed.isLoading,
@@ -360,13 +364,19 @@ export function Roles() {
     },
   };
 
-  // By name only. A description search returned the whole roster, because these
-  // profiles reference each other ("hand off to the Security Advisor"), so the
-  // term is in every one. Managers first, then alphabetical.
+  /* By name only. A description search returned the whole roster, because
+     these profiles reference each other ("hand off to the Security Advisor"),
+     so the term is in every one.
+
+     **Alphabetical, with nothing before it.** This used to put Managers
+     first, and that column is gone: no profile delegates on its own any more,
+     so sorting by it would be sorting by a fact that is only true of profiles
+     nobody has moved into a team yet. Which teams use a profile is on the row
+     instead, where it is read rather than ranked. */
   const needle = q.trim().toLowerCase();
   const shown = rows.data
     .filter((r) => !needle || r.name.toLowerCase().includes(needle))
-    .sort((a, b) => Number(b.canDelegate) - Number(a.canDelegate) || a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const removeRole = async (role: Role) => {
     const ok = await confirm({
@@ -404,7 +414,7 @@ export function Roles() {
        where it is changed. */
     const role = editing.id ? rows.data.find((r) => r.id === editing.id) : undefined;
     if (role && !role.mayWrite) return <Reading role={role} onClose={() => setEditing(null)} />;
-    return <Editor state={editing} all={rows.data} onClose={() => setEditing(null)} />;
+    return <Editor state={editing} all={rows.data} role={role} onClose={() => setEditing(null)} />;
   }
 
   /* **Nothing at all, and nothing wrong.** The header action and the
@@ -541,6 +551,7 @@ export function Roles() {
             <RoleRow
               key={role.id}
               role={role}
+              inTeams={teamsUsing(teams.data, role.id)}
               onOpen={() => setEditing({ id: role.id, path: role.path, draft: toDraft(role) })}
               onDelete={() => removeRole(role)}
             />
@@ -691,10 +702,13 @@ export const SERVER_OWNED = [
 /** One role in the list: its name, what it does, and the shape of it as chips. */
 function RoleRow({
   role,
+  inTeams,
   onOpen,
   onDelete,
 }: {
   role: Role;
+  /** The teams holding a position on it, by name. */
+  inTeams: string[];
   onOpen: () => void;
   onDelete: () => void;
 }) {
@@ -736,7 +750,12 @@ function RoleRow({
           <s>{role.does}</s>
         </span>
       </button>
-      {role.canDelegate && <Badge>can delegate</Badge>}
+      {/* Which teams hold a position on it — the reading that replaces
+          "can delegate". A profile has no reach; a team does, and a profile
+          in no team is simply one nothing has been built around yet. */}
+      {inTeams.length > 0 && (
+        <Badge>{inTeams.length === 1 ? inTeams[0] : `${inTeams.length} teams`}</Badge>
+      )}
       {role.isDefault && (
         <span className="said flex items-center gap-1">
           <Star className="h-3 w-3" strokeWidth={1.75} />
@@ -769,6 +788,8 @@ function RoleRow({
  * and Teams make for the administration site.
  */
 function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
+  const teams = useAgentTeams();
+  const inTeams = teamsUsing(teams.data, role.id);
   /* `new`, which is what the server stores and has always stored. This read
      `own`, a value nothing sends, so a profile committed to its own workspace
      fell through to the last branch — harmless while that branch described a
@@ -802,8 +823,10 @@ function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
             "whichever the lead is running"
           )}
         </Reads>
-        <Reads label="Hands work off">
-          {role.canDelegate ? `yes — to ${named(role.delegateScope)} profile${named(role.delegateScope) === 1 ? "" : "s"}` : "no"}
+        <Reads label="In teams">
+          {inTeams.length === 0
+            ? "none — it hands work to nobody until a team puts somebody under it"
+            : inTeams.join(", ")}
         </Reads>
         {/* **One sentence, in all three places** — here, the editor's label
             and its empty note. "Skills it may read" and "whatever the
@@ -961,12 +984,22 @@ export function pinnedAccountFits(
 function Editor({
   state,
   all,
+  role,
   onClose,
 }: {
   state: { id?: string; path?: string; draft: NewRole };
   all: Role[];
+  /** The stored profile, where one exists. Read for the deprecation notice,
+   *  which is about what is on the row rather than about the draft. */
+  role?: Role;
   onClose: () => void;
 }) {
+  /* **Whether this profile still carries the old per-profile reach.** A
+     profile made now never does; one made before teams existed may, and it
+     goes on working until the column is dropped. The notice is drawn only for
+     those, because telling everybody about a thing that is true of nobody is
+     how a deprecation becomes furniture. */
+  const oldReach = !!role?.canDelegate;
   const [draft, setDraft] = useState<NewRole>(state.draft);
   const [busy, setBusy] = useState(false);
   const [trouble, setTrouble] = useState<string | null>(null);
@@ -1098,22 +1131,6 @@ function Editor({
         label: d.name,
       })),
   ];
-
-  // What this profile can be scoped to reach — other profiles, and skills —
-  // each tagged with the directory it's filed in so the picker can group them.
-  const groupOf = (path: string) => {
-    const [root, label] = path.split("/");
-    return root === "u" ? "yours" : `d/${label}`;
-  };
-  const delegationItems: ScopeItem[] = all
-    .filter((r) => r.id !== state.id)
-    .map((r) => ({
-      id: r.id,
-      name: r.name,
-      desc: r.does,
-      group: groupOf(r.path),
-      badge: r.canDelegate ? { text: "manager", tone: "sage" } : undefined,
-    }));
 
   /* Where this profile is filed decides whether the Skills section's count is
      "yours" or everybody's: a profile in a directory is used by colleagues, and
@@ -1638,53 +1655,48 @@ function Editor({
             guard there is. */}
         <WhereTo>{whatAChildGets(draft, machineRows)}</WhereTo>
 
-        <Group
-          label="Delegation"
-          hint="A Manager may hand work to any profile it can reach. Which one, and when, goes in the instructions below."
-        >
-          <Select
-            ariaLabel="Delegation"
-            value={draft.canDelegate ? "manager" : "operator"}
-            options={[
-              {
-                value: "operator",
-                icon: <User className="h-4 w-4" strokeWidth={1.75} />,
-                label: "Operator",
-                note: "Does the work and reports back. Can't delegate.",
-              },
-              {
-                value: "manager",
-                icon: <Users className="h-4 w-4" strokeWidth={1.75} />,
-                label: "Manager",
-                note: "Can hand work to any profile it can reach.",
-              },
-            ]}
-            onChange={(v) => set("canDelegate", v === "manager")}
-          />
-        </Group>
-
-        {draft.canDelegate && (
-          <ScopePicker
-            label="Can delegate to"
-            hint="The subagents this Manager may hand work to. Anything off the list it can't see at all."
-            items={delegationItems}
-            selected={draft.delegateScope ?? []}
-            onChange={(ids) => set("delegateScope", ids)}
-            searchPlaceholder="Search profiles…"
-            allNote="Any profile you can reach — and any you add later."
-          />
+        {/* **No delegation controls, and that is the change.** Who hands work
+            to whom is a team — `/configuration/agent-teams` — so a profile
+            carries none of it. What is left here is a notice, and only for a
+            profile that still holds the old reach: it is read until the
+            compatibility window closes, nothing writes it any more, and
+            somebody looking at this profile has to be able to find out why it
+            still delegates. */}
+        {oldReach && (
+          <Group
+            label="Delegation"
+            hint="This profile carries the old per-profile reach. It is still read, and nothing writes it any more."
+          >
+            <WhereTo className="aside">
+              <b>Delegation moved to teams.</b> This profile still carries{" "}
+              {role?.delegateScope?.length
+                ? `a list of ${role.delegateScope.length} profile${role.delegateScope.length === 1 ? "" : "s"} it may hand work to`
+                : "reach over every profile you can see"}
+              , from before teams existed. It goes on working until the old column is dropped, and
+              saving this profile will not change it.{" "}
+              <button
+                type="button"
+                className="underline underline-offset-2"
+                onClick={() => navigate("/configuration/agent-teams")}
+              >
+                Make a team with {role?.name ?? "this profile"} as its lead
+              </button>{" "}
+              and start that instead — a team says who is under whom, and two teams can hold the
+              same profile with different reports in each.
+            </WhereTo>
+          </Group>
         )}
 
-        {/* The Manager's own half, under Can delegate with the delegates list,
-            because it is a fact about handing work out rather than about this
-            profile's own children. Meaningless on an Operator, so it is not
-            drawn for one — and not cleared either: a profile made an Operator
-            and then a Manager again keeps the answer somebody gave. */}
-        {draft.canDelegate && (
-          <Group
-            label="When a child runs out"
-            hint="Whether this Manager re-routes a spent child on its own, or stops and asks you which subscription to use."
-          >
+        {/* **Drawn for every profile now**, because any profile can lead a
+            team — there is no Manager flag left to hide it behind, and a
+            profile that is bare here and leads in another team would otherwise
+            have nowhere to answer this. Meaningless where it leads nothing,
+            and that costs one row; hiding it behind a flag that no longer
+            exists would cost the answer. */}
+        <Group
+          label="When a child runs out"
+          hint="Where this profile leads a team: whether it re-routes a spent child on its own, or stops and asks you which subscription to use."
+        >
             <div className="pickrow">
               {ON_CHILD_LIMIT.map((o) => (
                 <button
@@ -1702,13 +1714,12 @@ function Editor({
                 </button>
               ))}
             </div>
-            <WhereTo className="aside">
-              <b>Both have to agree.</b> A Manager set to <i>Re-route it</i> still cannot move a
-              child whose own profile says <i>Wait for human action</i> — the profile grants the
-              latitude and this decides whether the Manager uses it.
-            </WhereTo>
-          </Group>
-        )}
+          <WhereTo className="aside">
+            <b>Both have to agree.</b> A lead set to <i>Re-route it</i> still cannot move a child
+            whose own profile says <i>Wait for human action</i> — the profile grants the latitude
+            and this decides whether the lead uses it.
+          </WhereTo>
+        </Group>
 
         <SkillSources r={skills} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
 

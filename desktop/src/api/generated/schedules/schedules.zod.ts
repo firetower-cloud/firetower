@@ -226,6 +226,7 @@ export const CreateScheduleBody = zod.object({
   "sandbox": zod.string().nullish()
 }).optional().describe('Model, effort, permissions and sandbox. **Pinned explicitly** — see\n[`pins_for`].'),
   "skills": zod.array(zod.string()).nullish().describe('The skills each run reads. `null` takes the repository\'s defaults *at\ncreation* and pins the result.'),
+  "team": zod.string().nullish().describe('The agent team to start, by id.\n\n**The whole tree is pinned at approval, not the id.** A team id\nresolved at run time would let an edit between approval and 9am change\nhow many agents start with nobody watching — which is the mistake\npinning a profile\'s composed persona already exists to prevent, with a\nlarger blast radius. Editing a pinned team clears the approval, so the\nnext run is refused until somebody looks.'),
   "timezone": zod.string().describe('An IANA name. Required, and not defaulted to the server\'s own zone:\n"09:00" means nothing without saying whose nine.')
 }).describe('What the API accepts to write one down.')
 
@@ -594,6 +595,7 @@ export const UpdateScheduleBody = zod.object({
   "sandbox": zod.string().nullish()
 }).optional().describe('Model, effort, permissions and sandbox. **Pinned explicitly** — see\n[`pins_for`].'),
   "skills": zod.array(zod.string()).nullish().describe('The skills each run reads. `null` takes the repository\'s defaults *at\ncreation* and pins the result.'),
+  "team": zod.string().nullish().describe('The agent team to start, by id.\n\n**The whole tree is pinned at approval, not the id.** A team id\nresolved at run time would let an edit between approval and 9am change\nhow many agents start with nobody watching — which is the mistake\npinning a profile\'s composed persona already exists to prevent, with a\nlarger blast radius. Editing a pinned team clears the approval, so the\nnext run is refused until somebody looks.'),
   "timezone": zod.string().describe('An IANA name. Required, and not defaulted to the server\'s own zone:\n"09:00" means nothing without saying whose nine.')
 }).describe('What the API accepts to write one down.')
 

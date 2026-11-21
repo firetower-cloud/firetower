@@ -150,6 +150,17 @@ export interface Session {
      */
   plan?: PlanStep[];
   /**
+     * Which position of that team it occupies.
+     *
+     * **This is what decides who it may hand work to.** The children of this
+     * position are the profiles `spawn` will resolve a name against, and a
+     * session with no position cannot delegate at all — which is what
+     * replaced a profile carrying its own reach. A child inherits the
+     * position it was spawned into, which is how a team gets depth.
+     * @nullable
+     */
+  positionId?: string | null;
+  /**
      * The profile this session was started as, by id, when it was started as
      * one. What decides whether it may delegate — a Manager may — and what the
      * rail reads to say which kind of agent a workspace holds.
@@ -217,6 +228,12 @@ export interface Session {
   taskKey?: string | null;
   /** @nullable */
   taskUrl?: string | null;
+  /**
+     * The agent team this session is running inside, when it is running
+     * inside one.
+     * @nullable
+     */
+  teamId?: string | null;
   title: string;
   updatedAt: string;
   usage?: null | WorkspaceUsage;

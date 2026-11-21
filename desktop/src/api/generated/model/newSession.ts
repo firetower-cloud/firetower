@@ -52,9 +52,10 @@ export interface NewSession {
   /**
      * The profile to start as, by id. Omit for a plain agent with no persona.
      *
-     * It shapes the agent's system prompt, pins the engine when it names one,
-     * and decides whether this session may delegate — a Manager may, an
-     * Operator does the work itself.
+     * It shapes the agent's system prompt and pins the engine when it names
+     * one. It no longer decides whether this session may delegate: that is
+     * `team` below, and a profile started on its own cannot hand work to
+     * anybody.
      * @nullable
      */
   profile?: string | null;
@@ -104,5 +105,15 @@ export interface NewSession {
   taskKey?: string | null;
   /** @nullable */
   taskUrl?: string | null;
+  /**
+     * The agent team to start, by id.
+     *
+     * **You never talk to a team; you talk to its lead.** Naming one starts
+     * its lead profile with the team behind it — the session stands on the
+     * team's root position, and the positions under that are what it may hand
+     * work to. Naming a team and a profile that is not its lead is refused.
+     * @nullable
+     */
+  team?: string | null;
   workspaceId?: null | WorkspaceId;
 }

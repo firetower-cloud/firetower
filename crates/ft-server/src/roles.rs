@@ -598,6 +598,27 @@ impl Roles {
         rows.into_iter().map(read).collect()
     }
 
+    /// One role, whoever may see it.
+    ///
+    /// **For the run-time path only**, which has no person to ask about. What
+    /// a running agent may hand work to was decided when somebody who could
+    /// see both the team and the profiles put them in it; asking again as the
+    /// session's owner would mean a team shared with a colleague stopped
+    /// working the moment that colleague started it. `agent_teams::at_position`
+    /// is the only caller, and its doc comment carries the same argument.
+    pub async fn unscoped(&self, id: &str) -> Result<Option<Role>> {
+        let sql = format!(
+            "SELECT {FIELDS}, FALSE AS may_write, FALSE AS may_share, FALSE AS is_default \
+               FROM roles r WHERE r.id = $1"
+        );
+        let row = sqlx::query(&sql)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("reading a role for a running session")?;
+        row.map(read).transpose()
+    }
+
     /// One role, if this person may see it.
     /// Which of these ids are profiles at all, whoever may see them.
     ///

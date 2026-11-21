@@ -60,6 +60,18 @@ export interface NewSchedule {
      */
   skills?: string[] | null;
   /**
+     * The agent team to start, by id.
+     *
+     * **The whole tree is pinned at approval, not the id.** A team id
+     * resolved at run time would let an edit between approval and 9am change
+     * how many agents start with nobody watching — which is the mistake
+     * pinning a profile's composed persona already exists to prevent, with a
+     * larger blast radius. Editing a pinned team clears the approval, so the
+     * next run is refused until somebody looks.
+     * @nullable
+     */
+  team?: string | null;
+  /**
      * An IANA name. Required, and not defaulted to the server's own zone:
      * "09:00" means nothing without saying whose nine.
      */

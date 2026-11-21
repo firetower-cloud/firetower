@@ -1673,6 +1673,28 @@ impl Db {
         Ok(())
     }
 
+    /// Record which position of which team a session occupies.
+    ///
+    /// Written beside `set_profile` and for the same reason it is: one more
+    /// thing a session may or may not have, not worth another argument on
+    /// every `insert_session` caller. The pair is always written together —
+    /// a position without its team would leave the map unable to say which
+    /// tree a running agent is standing in.
+    pub async fn set_position(
+        &self,
+        session: &SessionId,
+        team: &str,
+        position: &str,
+    ) -> Result<()> {
+        sqlx::query("UPDATE sessions SET team_id = $1, position_id = $2 WHERE id = $3")
+            .bind(team)
+            .bind(position)
+            .bind(session.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Keep the system prompt a session was launched with.
     ///
     /// Written whenever a run is launched or relaunched, because a relaunch
@@ -4111,6 +4133,12 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
             .get::<Option<String>, _>("parent_id")
             .map(SessionId::from_stored),
         profile_id: r.get::<Option<String>, _>("profile_id"),
+        // Null for every session started without a team, which is every
+        // session there was before a team existed. `try_get` so a read against
+        // a database the migration has not reached yet degrades to "no team"
+        // rather than failing to decode a session at all.
+        team_id: r.try_get::<Option<String>, _>("team_id").ok().flatten(),
+        position_id: r.try_get::<Option<String>, _>("position_id").ok().flatten(),
         spawn_reason: r.get("spawn_reason"),
         // Null for every session whose agent never set one through the plan
         // tool — which is most of them, since the two engines we drive keep

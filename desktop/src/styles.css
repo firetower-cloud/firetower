@@ -6529,3 +6529,223 @@ html:not([data-platform="macos"]) {
     color: var(--color-text);
   }
 }
+
+/* ── The agent-teams map ──────────────────────────────────────────────
+   A team drawn as a tree: the lead's children spread beneath it with elbow
+   connectors, and everything below that indents. The arrangement was chosen
+   by measuring both — a classic organigramme throughout is 4640px wide on the
+   hardest lane the prototype draws, and this is 504px and complete.
+
+   Every number here is the prototype's own, measured on the rendered card:
+   176 × 34, a line taller where a position carries extra instructions. The
+   layout maths is in `ui/config/teams/layout.ts`; this is only what the cards
+   and the chrome look like. */
+@layer components {
+  /* The action row. `--row-tight` (36px), because Save is a 30px control and
+     a 30px control cannot live in the 22px status strip below. */
+  .maprow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--row-tight);
+    margin-top: 18px;
+  }
+  .maprow .pend {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    background: var(--color-sage-tint);
+    font-size: 0.8125rem;
+    color: var(--color-text);
+  }
+
+  .mapbox {
+    margin-top: 8px;
+    border: 1px solid var(--color-line);
+    border-radius: 12px;
+    overflow: hidden;
+    background: var(--color-panel);
+  }
+  .mapcanvas {
+    position: relative;
+    overflow: auto;
+  }
+  .mapinner {
+    position: relative;
+  }
+  .mapwires {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .mapwires path {
+    stroke: var(--color-line);
+    stroke-width: 1;
+  }
+
+  /* 22px, counts and a sentence. No controls, ever. */
+  .mapstrip {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 22px;
+    padding: 0 10px;
+    border-top: 1px solid var(--color-line-soft);
+    background: var(--color-ground);
+    font-size: 0.75rem;
+    color: var(--color-mute);
+  }
+
+  /* ── One card ──────────────────────────────────────────────────── */
+  .oc {
+    position: absolute;
+    border: 1px solid var(--color-line);
+    border-radius: 8px;
+    background: var(--color-raise);
+    transition:
+      border-color var(--dur-native) var(--ease-swift),
+      box-shadow var(--dur-native) var(--ease-swift);
+  }
+  .oc[data-lead="true"] {
+    border-color: var(--color-dim);
+  }
+  .oc[data-on="true"] {
+    box-shadow: inset 0 0 0 1.5px var(--color-bone);
+  }
+  /* Drafted, and not yet written. A ring rather than a fill: the card still
+     has to read as the same object it will be after Save. */
+  .oc[data-pend="add"],
+  .oc[data-pend="move"] {
+    box-shadow: 0 0 0 1.5px var(--color-sage-tint);
+    border-color: var(--color-sage-tint);
+  }
+
+  .ocopen {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    height: 100%;
+    padding: 7px 9px;
+    text-align: left;
+  }
+  .oc .row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+  }
+  .oc .g {
+    display: grid;
+    place-items: center;
+    width: 14px;
+    flex-shrink: 0;
+  }
+  .oc .nm {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    color: var(--color-bone);
+  }
+  /* How many are directly under it *here*. Not a total: a profile's other
+     teams are not this team's business. */
+  .oc .cnt {
+    flex-shrink: 0;
+    min-width: 15px;
+    padding: 0 4px;
+    border-radius: 999px;
+    background: var(--color-overlay);
+    font-size: 0.6875rem;
+    line-height: 15px;
+    text-align: center;
+    color: var(--color-dim);
+  }
+  /* The first line of what this position is told — the only honest thing that
+     tells two positions of one profile apart. */
+  .oc .brf {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.6875rem;
+    color: var(--color-mute);
+  }
+
+  /* **Bottom centre, on the connector trunk**, because that is where the
+     child appears. Its centre is at half the card's width, on the bottom
+     edge. */
+  .oc .plus {
+    position: absolute;
+    left: 50%;
+    bottom: -9px;
+    transform: translateX(-50%);
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    background: var(--color-overlay);
+    color: var(--color-dim);
+    opacity: 0;
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  /* **Top right, 9px outside the corner**, away from the trunk so neither
+     control's box can intersect the other's. */
+  .oc .bin {
+    position: absolute;
+    right: -9px;
+    top: -9px;
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border: 1px solid var(--color-line);
+    border-radius: 999px;
+    background: var(--color-overlay);
+    color: var(--color-dim);
+    opacity: 0;
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  /* **Never hover alone.** Focus reaches both with no pointer at all, and the
+     selected card keeps them up — which is what makes the map usable from a
+     keyboard rather than nearly usable. */
+  .oc:hover .plus,
+  .oc:hover .bin,
+  .oc:focus-within .plus,
+  .oc:focus-within .bin,
+  .oc[data-on="true"] .plus,
+  .oc[data-on="true"] .bin {
+    opacity: 1;
+  }
+  .oc .plus:hover {
+    border-color: var(--color-bone);
+    color: var(--color-bone);
+  }
+  .oc .bin:hover {
+    border-color: var(--color-brick);
+    color: var(--color-brick);
+  }
+  .oc .plus:focus-visible,
+  .oc .bin:focus-visible {
+    outline: 2px solid var(--color-bone);
+    outline-offset: 1px;
+  }
+
+  /* The drawer, in the app's own right-rail geometry. Below 820 it would
+     leave the map too narrow to read, so it goes full width under it rather
+     than squeezing the thing it is about. */
+  .mapdrawer {
+    display: flex;
+    flex-direction: column;
+    margin-top: 14px;
+    border: 1px solid var(--color-line);
+    border-radius: 12px;
+    background: var(--color-panel);
+    max-height: 60vh;
+  }
+}

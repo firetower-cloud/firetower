@@ -96,6 +96,10 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "create_profile" => create_profile(state, request).await,
         "update_profile" => update_profile(state, request).await,
         "list_profiles" => list_profiles(state, request).await,
+        "create_team" => create_team(state, request).await,
+        "update_team" => update_team(state, request).await,
+        "list_teams" => list_teams(state, request).await,
+        "get_team" => get_team(state, request).await,
         "get_profile" => get_profile(state, request).await,
         "list_compute" => list_compute(state, request).await,
         "create_skill" => create_skill(state, request).await,
@@ -204,6 +208,11 @@ async fn propose_schedule(state: &AppState, request: &AgentRequest) -> Result<St
         &owner,
         &id,
         crate::api::schedules::NewSchedule {
+            // **An agent proposes a profile, never a team.** A team schedule
+            // can start eight agents unattended, and nothing in this scope
+            // caps the spend — so that one is a person's to write, on the
+            // schedule screen, where the count is stated before Save.
+            team: None,
             name: name.clone(),
             prompt,
             repo_id,
@@ -444,6 +453,136 @@ async fn usable_account(state: &AppState, owner: &str, id: &str, agent: Agent) -
     Ok(found.id)
 }
 
+/// Who a session may hand work to, and why there is nobody when there is not.
+///
+/// One type for two answers. **The first is the one this feature exists for:**
+/// a session standing on a position reaches the positions directly under it,
+/// and nothing else — not what its owner can see, not what its profile once
+/// listed.
+///
+/// **The second is the compatibility window.** A session that started before
+/// teams existed, or that was started as a bare profile, still answers the old
+/// question: a Manager reached any profile its owner could see, narrowed by
+/// `delegate_scope`. That is deprecated and still read, so work already in
+/// flight on the morning of the upgrade finishes normally. The columns go at
+/// the end of the window, and so does this half of the function.
+struct Reach {
+    /// The profiles reachable, each paired with the position that put it
+    /// there. The same profile may appear twice under one parent — two
+    /// Engineers, one on the web client and one on the API — so these are
+    /// positions, not a set of profiles.
+    at: Vec<(Option<crate::agent_teams::Position>, crate::roles::Role)>,
+    /// What to say when there is nobody to hand to, which differs by how the
+    /// reach was arrived at.
+    nobody: String,
+}
+
+/// The first line of a position's extra instructions, as the phrase that tells
+/// two positions of one profile apart.
+///
+/// Trimmed to something a refusal and a prompt can both carry on one line.
+/// Empty when the position adds nothing, which is when there is nothing to
+/// distinguish and the name stands alone.
+pub(crate) fn distinguishing(position: &crate::agent_teams::Position) -> String {
+    let first = position
+        .extra_instructions
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_default();
+    let first = first.trim_end_matches('.');
+    match first.chars().count() > 60 {
+        true => format!("{}…", first.chars().take(59).collect::<String>().trim_end()),
+        false => first.to_string(),
+    }
+}
+
+/// How a position is named where two of them would otherwise read the same.
+pub(crate) fn position_label(position: &crate::agent_teams::Position, ambiguous: bool) -> String {
+    let brief = distinguishing(position);
+    match ambiguous && !brief.is_empty() {
+        true => format!("{} ({brief})", position.name),
+        false => position.name.clone(),
+    }
+}
+
+/// Resolve what this session may hand work to.
+async fn reach_of(
+    state: &AppState,
+    lead: &Session,
+    standing: Option<&(crate::agent_teams::AgentTeam, crate::agent_teams::Position)>,
+    profile: Option<&crate::roles::Role>,
+) -> Result<Reach> {
+    if let Some((team, here)) = standing {
+        let under = team.children_of(&here.id);
+        let mut at = Vec::new();
+        for position in under {
+            // Unscoped, like the team read itself: who this agent may hand
+            // work to was decided when somebody who could see both the team
+            // and the profiles put them in it. See `AgentTeams::at_position`.
+            let Some(role) = state.roles.unscoped(&position.profile).await? else {
+                continue;
+            };
+            at.push((Some(position.clone()), role));
+        }
+        return Ok(Reach {
+            nobody: format!(
+                "Nothing sits under {} in the {} team, so there is nobody to hand to — do the \
+                 work yourself, or ask the person to put a profile under it on the Agent teams \
+                 screen.",
+                here.name, team.name
+            ),
+            at,
+        });
+    }
+
+    /* ── the compatibility window ───────────────────────────────────────
+    Deprecated. `roles.can_delegate` and `roles.delegate_scope` are read
+    here and written nowhere: the editor has no delegation controls and the
+    MCP server refuses the keys by name. This is what keeps a session that
+    started before the cut, and an installation that upgraded this morning,
+    working until somebody draws the team. */
+    let Some(profile) = profile else {
+        bail!(
+            "this session is not in a team, so it does the work itself. Start it as a team on the \
+             Agent teams screen — a team is a lead and the profiles under it, and the profiles \
+             under the lead are the ones it can hand work to."
+        );
+    };
+    if !profile.can_delegate {
+        bail!(
+            "this session is not in a team, so it does the work itself. A profile no longer \
+             carries who it hands work to; a team does. Make one on the Agent teams screen with \
+             \"{}\" as its lead, and start that.",
+            profile.name
+        );
+    }
+    // Flat, deliberately, and only here: under the old reach a child could not
+    // spawn, because there was nowhere for it to stand. A team has somewhere.
+    if lead.parent_id.is_some() {
+        bail!("this session is itself a child, and children cannot spawn");
+    }
+    // **Exactly what it was**, the profile itself included: under the old
+    // reach a lead could name its own profile and start a second of itself,
+    // and the window is for finishing work that already started, not for
+    // tidying what it could do.
+    let scoped = !profile.delegate_scope.is_empty();
+    let at: Vec<(Option<crate::agent_teams::Position>, crate::roles::Role)> = state
+        .roles
+        .visible(lead.owner.as_str(), crate::access::Level::Viewer)
+        .await?
+        .into_iter()
+        .filter(|r| !scoped || profile.delegate_scope.contains(&r.id))
+        .map(|r| (None, r))
+        .collect();
+    Ok(Reach {
+        nobody: "No subagents are on this profile's old reach. That reach is deprecated — make a \
+                 team on the Agent teams screen and put the profiles under its lead."
+            .to_string(),
+        at,
+    })
+}
+
 /// Start a child for the session that asked.
 async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     let lead = state
@@ -452,20 +591,19 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         .await?
         .context("the session that asked no longer exists")?;
 
-    // Flat, deliberately: a child may not start children of its own. The
-    // lead decides the shape of the work, and with no cap on how many
-    // children it starts, depth is the one thing still holding the count
-    // down — a tree nobody can see the bottom of is how a handful of
-    // workspaces becomes a thousand.
-    if lead.parent_id.is_some() {
-        bail!("this session is itself a child, and children cannot spawn");
-    }
+    /* **Which position this session occupies**, which is the whole of what
+    decides who it may hand work to. Inherited down the lineage: a child is
+    started standing on the position it was spawned into, so a team has as
+    much depth as it was drawn with.
 
-    // Only a Manager delegates. A session started as an Operator profile — or
-    // as no profile at all — does the work itself rather than handing it off,
-    // which is the whole of what the distinction means. Load the whole profile,
-    // not just the flag: its `delegate_scope` decides which subagents it may
-    // even see.
+    A session with no position is one started as a bare profile, or as no
+    profile at all, or before teams existed. It falls through to `reach`
+    below, where the compatibility window answers for it. */
+    let standing = match lead.position_id.as_deref() {
+        Some(id) => state.agent_teams.at_position(id).await?,
+        None => None,
+    };
+
     let manager = match &lead.profile_id {
         Some(pid) => {
             state
@@ -475,12 +613,6 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         }
         None => None,
     };
-    if !manager.as_ref().map(|p| p.can_delegate).unwrap_or(false) {
-        bail!(
-            "this session is not a Manager, so it does the work itself. Start the workspace as a \
-             Manager profile to hand work off."
-        );
-    }
 
     // The same call again — a worker that reconnects re-announces what its
     // agent is still blocked on — is the same child, not a second one.
@@ -492,80 +624,64 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     let goal = text(&request.input, "goal")
         .context("spawn needs a `goal`: what the child should accomplish")?;
 
-    // The subagents this Manager may delegate to: what its owner can see,
-    // narrowed to its `delegate_scope` when it has one. An empty scope is "any",
-    // which is the default. Everything outside is invisible — a name off this
-    // list is refused exactly as a name that was never defined, so an out-of-
-    // scope profile reads as *does not exist* rather than *not allowed*.
-    let team: Vec<crate::roles::Role> = {
-        let visible = state
-            .roles
-            .visible(lead.owner.as_str(), crate::access::Level::Viewer)
-            .await?;
-        let scope = manager
-            .as_ref()
-            .map(|m| &m.delegate_scope)
-            .filter(|s| !s.is_empty());
-        match scope {
-            Some(scope) => visible
-                .into_iter()
-                .filter(|r| scope.contains(&r.id))
-                .collect(),
-            None => visible,
-        }
-    };
-    /* **The fourth place a profile is resolved by name, and the one that
-    costs most to get wrong.** A read that picks the wrong one of two
-    wastes a call; a spawn that picks wrong starts work on the wrong
-    profile and spends somebody's allowance doing it. Same rule as the
-    other three — `at_most_one` — against `team` rather than through
-    `profile_named`, because the list is already narrowed to what this
-    Manager may hand to and resolving outside it would widen its scope.
+    // Who this session may hand work to. One of two answers, and the first is
+    // the one this feature exists for.
+    let reach = reach_of(state, &lead, standing.as_ref(), manager.as_ref()).await?;
 
-    Not found is untouched: that message is good and was never the
-    defect. */
-    let role = match text(&request.input, "role") {
-        Some(wanted) => match at_most_one("subagent", wanted.trim(), &team, |r| r.name.as_str())? {
-            Some(found) => Some(found.clone()),
-            None => {
-                /* One entry per name, with a collision marked rather than
-                printed twice. `Engineer, Engineer` is the truth and reads
-                as a bug, which costs the reader more than it tells them;
-                de-duplicating in silence would hide a thing a lead can
-                act on. Marked says both, and the refusal above carries
-                the consequence if they name it anyway. Grouped the way
-                the resolution matches, so what is listed once is what
-                resolves once. */
-                let mut counted: Vec<(String, usize)> = Vec::new();
-                for r in &team {
-                    match counted
-                        .iter_mut()
-                        .find(|(n, _)| n.eq_ignore_ascii_case(&r.name))
-                    {
-                        Some((_, seen)) => *seen += 1,
-                        None => counted.push((r.name.clone(), 1)),
+    /* **The place a profile is resolved by name that costs most to get
+    wrong.** A read that picks the wrong one of two wastes a call; a spawn
+    that picks wrong starts work on the wrong profile and spends somebody's
+    allowance doing it.
+
+    Resolved against the *reach* rather than through `profile_named`,
+    because the reach is already exactly what this session may hand to and
+    resolving outside it would widen it. A name off the list is refused as
+    a name that was never defined, so a profile outside the team reads as
+    *does not exist* rather than *not allowed*. */
+    let taken = match text(&request.input, "role") {
+        Some(wanted) => {
+            let wanted = wanted.trim().to_string();
+            match picked(&reach, &wanted)? {
+                Some(found) => Some(found),
+                None => {
+                    /* **Naming your own lead gets its own sentence.** It
+                    would otherwise fall through to "no subagent called
+                    that", which tells an agent a profile does not exist
+                    when it plainly does — and the thing it is reaching for
+                    is the one agent it is already reporting to. */
+                    if let Some((team, here)) = &standing {
+                        if let Some(up) = here
+                            .parent
+                            .as_deref()
+                            .and_then(|p| team.positions.iter().find(|q| q.id == p))
+                        {
+                            if up.name.eq_ignore_ascii_case(&wanted) {
+                                bail!(
+                                    "\"{wanted}\" is the agent above you in {} — it is who you \
+                                     report to, not somebody you can hand work to. Finish your \
+                                     turn and it reads what you say.",
+                                    team.name
+                                );
+                            }
+                        }
+                        if here.name.eq_ignore_ascii_case(&wanted) {
+                            bail!(
+                                "\"{wanted}\" is you. A position cannot hand work to itself — \
+                                 ask the person to put a second one under it in {}, if that is \
+                                 what is wanted.",
+                                team.name
+                            );
+                        }
                     }
+                    bail!("no subagent called \"{wanted}\". {}", offering(&reach));
                 }
-                let names: Vec<String> = counted
-                    .into_iter()
-                    .map(|(name, seen)| match seen {
-                        1 => name,
-                        seen => format!("{name} ({seen} profiles share this name)"),
-                    })
-                    .collect();
-                bail!(
-                    "no subagent called \"{wanted}\". {}",
-                    if names.is_empty() {
-                        "No subagents are on this profile's team — widen its scope, or make one \
-                         under Configuration → Profiles."
-                            .to_string()
-                    } else {
-                        format!("Subagents you can use: {}.", names.join(", "))
-                    }
-                );
             }
-        },
+        }
         None => None,
+    };
+    let (position, role) = match taken {
+        Some((position, role)) => (position, Some(role)),
+        None => (None, None),
     };
 
     // A role that pins a field enforces it — the lead's own argument does not
@@ -616,6 +732,7 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
         &goal,
         text(&request.input, "context").as_deref(),
         role.as_ref(),
+        position.as_ref(),
     );
 
     // Built the way the API builds one, so every default and every check that
@@ -836,8 +953,164 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     if let Some(role) = &role {
         state.db.set_profile(&child.id, role.id.as_str()).await?;
     }
+    /* And where it stands, which is what lets it delegate in turn. A child
+    inherits the position it was spawned into, so depth is a property of the
+    team that was drawn rather than a limit in the code — the old model could
+    only ever be one level deep because a child had nowhere to stand. */
+    if let (Some(position), Some((team, _))) = (&position, &standing) {
+        state
+            .db
+            .set_position(&child.id, &team.id, &position.id)
+            .await?;
+    }
 
     Ok(started(&child, shares))
+}
+
+/// Which position a name means, among the ones this session can reach.
+///
+/// Two positions of one profile are the ordinary case — Product has an
+/// Engineer on the web client and an Engineer on the API — and they share a
+/// name by design, because the profile is one profile. So a bare name that
+/// matches two is not a mistake to refuse outright: it is a question, and the
+/// answer is the thing that already tells them apart on the map, which is the
+/// first line of their extra instructions.
+///
+/// Exact name first. Then `Name (phrase)`, which is how [`offering`] lists
+/// them and therefore what the agent has already been shown. Two that are
+/// still indistinguishable are refused by [`ambiguous`], because at that point
+/// nothing about them differs and picking either would be a guess.
+#[allow(clippy::type_complexity)]
+fn picked(
+    reach: &Reach,
+    wanted: &str,
+) -> Result<Option<(Option<crate::agent_teams::Position>, crate::roles::Role)>> {
+    let by_name: Vec<&(Option<crate::agent_teams::Position>, crate::roles::Role)> = reach
+        .at
+        .iter()
+        .filter(|(_, r)| r.name.eq_ignore_ascii_case(wanted))
+        .collect();
+    match by_name.len() {
+        0 => {}
+        1 => return Ok(Some(by_name[0].clone())),
+        _ => return ambiguous(wanted, &by_name),
+    }
+    let labelled: Vec<&(Option<crate::agent_teams::Position>, crate::roles::Role)> = reach
+        .at
+        .iter()
+        .filter(|(p, r)| match p {
+            Some(p) => format!("{} ({})", r.name, distinguishing(p)).eq_ignore_ascii_case(wanted),
+            None => false,
+        })
+        .collect();
+    match labelled.len() {
+        1 => Ok(Some(labelled[0].clone())),
+        0 => Ok(None),
+        _ => ambiguous(wanted, &labelled),
+    }
+}
+
+/// A name that still means more than one thing, refused with what would settle
+/// it — or with the truth that nothing would.
+///
+/// **Two different facts, said differently.** Inside a team, two cards reading
+/// `Engineer` are two *positions* of one profile, which is the ordinary case
+/// and is settled by naming the phrase that distinguishes them. On the old
+/// per-profile reach there are no positions, so two are two different
+/// *profiles* that happen to share a name — `d34336c8`'s rule, and the remedy
+/// is to rename one. Saying either sentence in the other's situation sends
+/// somebody to fix a thing that is not broken.
+#[allow(clippy::type_complexity)]
+fn ambiguous(
+    wanted: &str,
+    among: &[&(Option<crate::agent_teams::Position>, crate::roles::Role)],
+) -> Result<Option<(Option<crate::agent_teams::Position>, crate::roles::Role)>> {
+    if among.iter().all(|(p, _)| p.is_none()) {
+        bail!(
+            "\"{wanted}\" is the name of more than one subagent you can reach, so it does not \
+             say which you mean — two people may each have one, and picking either would be a \
+             guess. Rename one, or ask the person which they meant. Nothing was started."
+        );
+    }
+    let labels: Vec<String> = among
+        .iter()
+        .map(|(p, r)| match p {
+            Some(p) if !distinguishing(p).is_empty() => {
+                format!("\"{} ({})\"", r.name, distinguishing(p))
+            }
+            _ => format!("\"{}\"", r.name),
+        })
+        .collect();
+    // Every candidate reading the same means the positions really are
+    // identical, and no phrase the agent could pass would separate them.
+    if labels.iter().all(|l| l == &labels[0]) {
+        bail!(
+            "there are {} positions called \"{wanted}\" under you and nothing says them apart — \
+             they have the same profile and no extra instructions, so either would do and \
+             picking one would be a guess. Ask the person to say what each is for on the Agent \
+             teams screen. Nothing was started.",
+            among.len()
+        );
+    }
+    bail!(
+        "\"{wanted}\" is {} positions under you, so it does not say which you mean. Pass one of \
+         these as `role`: {}. Nothing was started.",
+        among.len(),
+        labels.join(", "),
+    )
+}
+
+/// What to list when a name did not resolve.
+///
+/// **In a team, one entry per position**, named the way [`picked`] will take
+/// it back — so what is listed once is what resolves once, and two Engineers
+/// are two entries rather than one entry with a warning on it.
+///
+/// On the old reach there are no positions to name, so it is one entry per
+/// *name* with a collision marked: `Engineer, Engineer` is the truth and reads
+/// as a bug, and de-duplicating in silence would hide a thing a lead can act
+/// on.
+fn offering(reach: &Reach) -> String {
+    if reach.at.is_empty() {
+        return reach.nobody.clone();
+    }
+    if reach.at.iter().all(|(p, _)| p.is_none()) {
+        let mut counted: Vec<(String, usize)> = Vec::new();
+        for (_, r) in &reach.at {
+            match counted
+                .iter_mut()
+                .find(|(n, _)| n.eq_ignore_ascii_case(&r.name))
+            {
+                Some((_, seen)) => *seen += 1,
+                None => counted.push((r.name.clone(), 1)),
+            }
+        }
+        let names: Vec<String> = counted
+            .into_iter()
+            .map(|(name, seen)| match seen {
+                1 => name,
+                seen => format!("{name} ({seen} profiles share this name)"),
+            })
+            .collect();
+        return format!("Subagents you can use: {}.", names.join(", "));
+    }
+    let repeated = |name: &str| {
+        reach
+            .at
+            .iter()
+            .filter(|(_, r)| r.name.eq_ignore_ascii_case(name))
+            .count()
+            > 1
+    };
+    let names: Vec<String> = reach
+        .at
+        .iter()
+        .map(|(p, r)| match p {
+            Some(p) => position_label(p, repeated(&r.name)),
+            None => r.name.clone(),
+        })
+        .collect();
+    format!("Subagents you can use: {}.", names.join(", "))
 }
 
 /// What the child is first told.
@@ -851,6 +1124,7 @@ fn brief(
     goal: &str,
     context: Option<&str>,
     role: Option<&crate::roles::Role>,
+    position: Option<&crate::agent_teams::Position>,
 ) -> String {
     let mut text = format!("Task: {goal}");
     if let Some(context) = context {
@@ -866,6 +1140,18 @@ fn brief(
         if !role.instructions.trim().is_empty() {
             text.push_str("\n\n");
             text.push_str(role.instructions.trim());
+        }
+    }
+
+    /* **The position adds; it never replaces.** Appended after the profile's
+    own instructions rather than instead of them, which is why the field is
+    `extra instructions` and not an override — there is no resolution order
+    to define, and the profile's words are still in the prompt. This is the
+    only thing that tells two positions of one profile apart. */
+    if let Some(position) = position {
+        if !position.extra_instructions.trim().is_empty() {
+            text.push_str("\n\nIn this team, this position also carries:\n\n");
+            text.push_str(position.extra_instructions.trim());
         }
     }
 
@@ -1233,12 +1519,12 @@ fn new_role_from(input: &Value) -> Result<crate::roles::NewRole> {
         // to the owner's default for whatever engine the child runs.
         account: None,
         instructions: text(input, "instructions").unwrap_or_default(),
-        can_delegate: input
-            .get("can_delegate")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        // Filled in by `resolve_scopes`, which needs the database to turn the
-        // names an agent reads into the ids a row holds.
+        // **Never written from here, and never written at all.** Delegation
+        // is a team's, not a profile's: `deprecated_delegation` refuses a call
+        // that names either of these two by name, and a profile created now
+        // carries the column defaults until the compatibility window drops
+        // them.
+        can_delegate: false,
         delegate_scope: vec![],
         skill_scope: vec![],
         // Absent stays `None` rather than becoming `Some(true)`: "the caller
@@ -1325,7 +1611,7 @@ fn profile_shape(new: &crate::roles::NewRole) -> String {
         .map(str::trim)
         .filter(|m| !m.is_empty());
     format!(
-        "{}, {}, {}",
+        "{}, {}",
         new.agent
             .as_deref()
             .unwrap_or("whichever engine its lead is running"),
@@ -1337,11 +1623,6 @@ fn profile_shape(new: &crate::roles::NewRole) -> String {
             // calling that "sharing the lead's workspace" is the ack claiming a
             // commitment nobody made.
             (_, _) => "wherever its lead puts it".into(),
-        },
-        if new.can_delegate {
-            "a Manager that can delegate to other profiles"
-        } else {
-            "an Operator that does the work itself"
         },
     )
 }
@@ -1548,46 +1829,6 @@ async fn the_profile_named(
         .with_context(|| format!("you have no profile called \"{wanted}\""))
 }
 
-/// The profiles a Manager may hand to, by name, as ids.
-///
-/// `self_name` drops the profile being written from its own team — a name
-/// that resolves to itself is a profile that may delegate to itself, which
-/// `Roles.tsx` already filters out of the picker.
-async fn delegate_scope_from(
-    state: &AppState,
-    owner: &str,
-    wanted: &[String],
-    self_name: &str,
-) -> Result<(Vec<String>, bool)> {
-    let visible = state
-        .roles
-        .visible(owner, crate::access::Level::Viewer)
-        .await?;
-    let mut out = Vec::new();
-    let mut dropped_self = false;
-    for name in wanted {
-        /* A profile may not be on its own team, and the drop is right —
-        `Roles.tsx` filters it out of the picker too, and refusing the whole
-        call over it would throw away the rest of the ask. The *silence*
-        was wrong: an argument accepted and not applied, with nothing said,
-        is the discard this whole body of work exists to remove. It is
-        reported in the ack. */
-        if name.eq_ignore_ascii_case(self_name) {
-            dropped_self = true;
-            continue;
-        }
-        let found = one_named(
-            "profile",
-            name,
-            &visible,
-            |r| r.name.as_str(),
-            "list_profiles",
-        )?;
-        out.push(found.id.clone());
-    }
-    Ok((out, dropped_self))
-}
-
 /// The skills a profile loads on top of its two switches, by name, as ids.
 ///
 /// Refused rather than filtered, which is what `api::roles::check_skills`
@@ -1630,28 +1871,38 @@ async fn resolve_scopes(
     owner: &str,
     input: &Value,
     new: &mut crate::roles::NewRole,
-    fallback: (&[String], &[String]),
-) -> Result<Option<String>> {
-    let mut dropped_self = false;
-    new.delegate_scope = match names(input, "delegate_scope") {
-        Some(wanted) => {
-            let (ids, dropped) = delegate_scope_from(state, owner, &wanted, &new.name).await?;
-            dropped_self = dropped;
-            ids
-        }
-        None => fallback.0.to_vec(),
-    };
+    fallback: &[String],
+) -> Result<()> {
     new.skill_scope = match names(input, "skill_scope") {
         Some(wanted) => skill_scope_from(state, owner, &wanted).await?,
-        None => fallback.1.to_vec(),
+        None => fallback.to_vec(),
     };
-    Ok(dropped_self.then(|| {
-        format!(
-            "It is not on its own team: \"{}\" was dropped from `delegate_scope`, because a \
-             profile cannot hand work to itself.",
-            new.name.trim()
-        )
-    }))
+    Ok(())
+}
+
+/// Refuse a call that still tries to put delegation on a profile.
+///
+/// **Refused, not ignored.** Both keys are gone from the tool's schema, so an
+/// agent passing one is working from a description it read somewhere else —
+/// and accepting the call while silently dropping the argument would report a
+/// Manager that cannot delegate, which is precisely the silent discard this
+/// surface keeps being fixed for. The refusal names the thing to do instead,
+/// so the next call is the right one rather than the same one again.
+fn deprecated_delegation(input: &Value) -> Result<()> {
+    let named: Vec<&str> = ["can_delegate", "delegate_scope", "delegates_to"]
+        .into_iter()
+        .filter(|key| input.get(*key).is_some())
+        .collect();
+    if named.is_empty() {
+        return Ok(());
+    }
+    bail!(
+        "`{}` is not something a profile carries any more — who hands work to whom is a team. A \
+         profile is what an agent *is*; a team is where it sits and who is under it. Use \
+         `create_team` with this profile as the `lead` and the others as `members`, or \
+         `update_team` if the team already exists. Nothing was written.",
+        named.join("` and `"),
+    )
 }
 
 /// The run settings a profile pins, checked against what its engine offers.
@@ -1741,18 +1992,20 @@ fn subscription_note(new: &crate::roles::NewRole) -> &'static str {
 async fn create_profile(state: &AppState, request: &AgentRequest) -> Result<String> {
     let session = authoring_session(state, request).await?;
     let owner = session.owner.as_str();
+    deprecated_delegation(&request.input)?;
     let mut new = new_role_from(&request.input)?;
-    let dropped = resolve_scopes(state, owner, &request.input, &mut new, (&[], &[])).await?;
+    resolve_scopes(state, owner, &request.input, &mut new, &[]).await?;
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     let org = state.db.org().await?;
     let (slug, whose) = owner_of(state, &session).await?;
     let id = state.roles.create(&org, owner, &slug, &new).await?;
     let where_it_is = file_profile(state, id.as_str(), &request.input, owner, &whose).await?;
     Ok(format!(
-        "Created the \"{}\" profile in {where_it_is} — {}.{} {} It's on the Profiles screen now.",
+        "Created the \"{}\" profile in {where_it_is} — {}. {} It's on the Profiles screen now. \
+         It hands work to nobody on its own: put it in a team with `create_team` if it is meant \
+         to lead, or add it to one with `update_team` if it is meant to be led.",
         new.name.trim(),
         profile_shape(&new),
-        dropped.map(|d| format!(" {d}")).unwrap_or_default(),
         subscription_note(&new),
     ))
 }
@@ -1761,6 +2014,7 @@ async fn create_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
 async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<String> {
     let session = authoring_session(state, request).await?;
     let owner = session.owner.as_str();
+    deprecated_delegation(&request.input)?;
     let wanted = text(&request.input, "name").context("name the profile to change")?;
     let existing = the_profile_named(state, owner, &wanted).await?;
     // Only what was named changes; everything else stays as it is.
@@ -1791,14 +2045,12 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         // update carries whatever the person set on the Profiles screen.
         account: existing.account.clone(),
         instructions: get_str("instructions", &existing.instructions),
-        can_delegate: request
-            .input
-            .get("can_delegate")
-            .and_then(Value::as_bool)
-            .unwrap_or(existing.can_delegate),
-        // Both resolved below, against what is stored when the call says
-        // nothing about them.
-        delegate_scope: vec![],
+        // Carried, not written. `Roles::update` is a whole-object write and
+        // these two are still columns until the compatibility window closes,
+        // so an update has to put back what is there — clearing them here
+        // would end the window early for whoever edited a profile first.
+        can_delegate: existing.can_delegate,
+        delegate_scope: existing.delegate_scope.clone(),
         skill_scope: vec![],
         // `None` leaves them exactly as they are, and unlike reading them off
         // `existing` and writing them back it cannot lose a change somebody
@@ -1820,12 +2072,12 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
         name,
         directory: None,
     };
-    let dropped = resolve_scopes(
+    resolve_scopes(
         state,
         owner,
         &request.input,
         &mut new,
-        (&existing.delegate_scope, &existing.skill_scope),
+        &existing.skill_scope,
     )
     .await?;
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -1838,10 +2090,9 @@ async fn update_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
     }
     let moved = refile(state, &session, existing.id.as_str(), &request.input).await?;
     Ok(format!(
-        "Updated the \"{}\" profile — {}.{}{} {}",
+        "Updated the \"{}\" profile — {}.{} {}",
         new.name.trim(),
         profile_shape(&new),
-        dropped.map(|d| format!(" {d}")).unwrap_or_default(),
         moved.map(|m| format!(" {m}")).unwrap_or_default(),
         match new.agent.is_some() {
             true =>
@@ -1972,28 +2223,50 @@ async fn get_profile(state: &AppState, request: &AgentRequest) -> Result<String>
             _ => "wait for human action (`on_usage_limit: \"wait\"`)",
         }
     ));
+    /* **Where it stands, not what it may reach.** A profile carries no reach,
+    so the only true answer to "who does this hand work to" is the teams that
+    hold a position on it — and that is a different question with a different
+    tool behind it (`get_team`). Reported here because an agent copying a
+    profile has to know that the copy will be in no team and will therefore
+    hand work to nobody. */
+    let teams = state.agent_teams.holding(owner, &role.id).await?;
     out.push(format!(
-        "- Hands work off: {}",
-        match role.can_delegate {
-            false => "no — an Operator, it does the work itself".into(),
-            true => {
-                let team = named_profiles(state, owner, &role.delegate_scope).await?;
-                format!(
-                    "yes — a Manager, handing to {}",
-                    match team.is_empty() {
-                        true => "any profile its owner can reach".into(),
-                        false => team.join(", "),
-                    }
-                )
-            }
+        "- In teams: {}",
+        match teams.is_empty() {
+            true => "none — on its own it hands work to nobody. `create_team` is what gives a \
+                     profile somebody to hand to."
+                .to_string(),
+            false => format!(
+                "{}. A copy of this profile is in none of them. `get_team` reads one whole.",
+                teams
+                    .iter()
+                    .map(|(name, held)| match held {
+                        1 => name.clone(),
+                        n => format!("{name} ({n} positions)"),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     ));
+    out.push(format!(
+        "- When a child runs out: {}",
+        match role.on_child_limit.as_str() {
+            "reroute" => "Re-route it itself (`on_child_limit: \"reroute\"`)",
+            _ => "ask the person first (`on_child_limit: \"ask\"`)",
+        }
+    ));
+    // The old per-profile reach, where a profile still carries one. Said
+    // rather than omitted: it is what that profile is doing until the column
+    // goes, and an agent reading a copy has to know the copy will not do it.
     if role.can_delegate {
+        let was = named_profiles(state, owner, &role.delegate_scope).await?;
         out.push(format!(
-            "- When a child runs out: {}",
-            match role.on_child_limit.as_str() {
-                "reroute" => "Re-route it itself (`on_child_limit: \"reroute\"`)",
-                _ => "ask the person first (`on_child_limit: \"ask\"`)",
+            "- Old per-profile reach (deprecated): it may still hand work to {}. Nothing writes \
+             this any more and a copy will not carry it — make a team instead.",
+            match was.is_empty() {
+                true => "any profile its owner can reach".into(),
+                false => was.join(", "),
             }
         ));
     }
@@ -2095,17 +2368,379 @@ async fn list_profiles(state: &AppState, request: &AgentRequest) -> Result<Strin
     }
     let lines: Vec<String> = roles
         .iter()
-        .map(|r| {
+        .map(|r| format!("- {}: {}{}", r.name, r.does, left_open(r)))
+        .collect();
+    Ok(format!("The profiles you can see:\n{}", lines.join("\n")))
+}
+
+// ── agent teams ─────────────────────────────────────────────────────────
+//
+// **Create, read, change. No delete.** An agent may draw a team and redraw
+// one; it may not take one away. That is the same asymmetry `propose_schedule`
+// keeps — an agent may write a schedule down and may stop one, and may not
+// turn one on or delete one — and it is the right one here for a sharper
+// reason: deleting a team silently mutes every lead standing in it, and a
+// person who did not ask for that would find out when work stopped being
+// handed on. Teams are deleted on the Agent teams screen, where the
+// confirmation says what goes with it.
+
+/// One member of a team as an agent draws it, before anything is resolved.
+struct Member {
+    /// The caller's own handle for this member, which its children name as
+    /// `under`. Defaults to the profile's name, which is what an agent writes
+    /// when every member is a different profile — the ordinary case.
+    key: String,
+    /// The profile, by name as `list_profiles` shows it.
+    profile: String,
+    /// Whose handle it sits under. `None` is directly under the lead.
+    under: Option<String>,
+    extra_instructions: String,
+}
+
+/// Read the members out of a tool call, with the keys an agent may leave out
+/// filled in.
+///
+/// **A key is optional and the profile's name is the default**, because the
+/// common team names each profile once and asking an agent to invent handles
+/// for a flat list of four would be a step with nothing behind it. The moment
+/// one profile holds two positions — an Engineer on the web client and an
+/// Engineer on the API — the default collides, and that is exactly when the
+/// refusal says so and asks for keys.
+fn members_of(input: &Value) -> Result<Vec<Member>> {
+    let Some(items) = input.get("members") else {
+        return Ok(Vec::new());
+    };
+    if items.is_null() {
+        return Ok(Vec::new());
+    }
+    let items = items
+        .as_array()
+        .context("`members` is a list of {profile, under, key, extra_instructions}")?;
+    let mut out: Vec<Member> = Vec::new();
+    for (at, item) in items.iter().enumerate() {
+        // A bare string is a profile under the lead, which is what a team of
+        // one level is and what an agent writes first.
+        let (profile, key, under, extra) = match item {
+            Value::String(name) => (name.trim().to_string(), None, None, String::new()),
+            Value::Object(_) => (
+                text(item, "profile")
+                    .with_context(|| format!("member {} needs a `profile`", at + 1))?,
+                text(item, "key"),
+                text(item, "under"),
+                text(item, "extra_instructions").unwrap_or_default(),
+            ),
+            _ => bail!(
+                "member {} is neither a profile name nor an object with a `profile` on it",
+                at + 1
+            ),
+        };
+        let key = key.unwrap_or_else(|| profile.clone());
+        if out.iter().any(|m| m.key.eq_ignore_ascii_case(&key)) {
+            bail!(
+                "two members answer to \"{key}\". When one profile holds two positions in a \
+                 team, give each a `key` of its own — `web` and `api`, say — and have anything \
+                 under them say which by `under`. Nothing was written."
+            );
+        }
+        out.push(Member {
+            key,
+            profile,
+            under,
+            extra_instructions: extra,
+        });
+    }
+    Ok(out)
+}
+
+/// Turn the names an agent wrote into the shape the service takes.
+///
+/// Every profile is resolved by name against what this person can see, and a
+/// name that matches two is refused naming it — the rule `at_most_one` keeps
+/// everywhere else in this surface, and for the sharpest version of its
+/// reason: a team decides what a running agent may do, so the wrong profile in
+/// one silently hands work to something nobody chose.
+async fn team_from(
+    state: &AppState,
+    owner: &str,
+    name: &str,
+    lead: &str,
+    members: &[Member],
+) -> Result<crate::agent_teams::NewAgentTeam> {
+    let visible = state
+        .roles
+        .visible(owner, crate::access::Level::Viewer)
+        .await?;
+    let resolve = |wanted: &str| -> Result<String> {
+        Ok(one_named(
+            "profile",
+            wanted,
+            &visible,
+            |r| r.name.as_str(),
+            "list_profiles",
+        )?
+        .id
+        .clone())
+    };
+
+    // The lead is the root, and its key cannot collide with a member's: a
+    // member that answers to the lead's key would be its own parent.
+    const LEAD: &str = "\u{1}lead";
+    let mut positions = vec![crate::agent_teams::DraftPosition {
+        key: LEAD.to_string(),
+        parent: None,
+        profile: resolve(lead)?,
+        extra_instructions: String::new(),
+    }];
+    for member in members {
+        let parent = match &member.under {
+            None => LEAD.to_string(),
+            Some(under) if under.eq_ignore_ascii_case(lead) => LEAD.to_string(),
+            Some(under) => {
+                let found = members
+                    .iter()
+                    .find(|m| m.key.eq_ignore_ascii_case(under))
+                    .with_context(|| {
+                        format!(
+                            "\"{}\" sits under \"{under}\", and no member answers to that. Use a \
+                             member's `key`, or the lead's name for the top. Nothing was written.",
+                            member.key
+                        )
+                    })?;
+                found.key.clone()
+            }
+        };
+        positions.push(crate::agent_teams::DraftPosition {
+            key: member.key.clone(),
+            parent: Some(parent),
+            profile: resolve(&member.profile)?,
+            extra_instructions: member.extra_instructions.clone(),
+        });
+    }
+    Ok(crate::agent_teams::NewAgentTeam {
+        name: name.trim().to_string(),
+        positions,
+        directory: None,
+    })
+}
+
+/// A team written out as an agent reads it back, and could type again.
+fn team_shape(team: &crate::agent_teams::AgentTeam) -> String {
+    let Some(lead) = team.lead() else {
+        return format!("{} — no lead, which should not be possible", team.name);
+    };
+    let mut lines = vec![format!(
+        "**{}** — led by {}, {} agent{} in all, {} level{} deep.",
+        team.name,
+        lead.name,
+        team.size(),
+        if team.size() == 1 { "" } else { "s" },
+        team.depth(),
+        if team.depth() == 1 { "" } else { "s" },
+    )];
+    fn under(
+        team: &crate::agent_teams::AgentTeam,
+        parent: &str,
+        depth: usize,
+        lines: &mut Vec<String>,
+    ) {
+        for p in team.children_of(parent) {
+            let brief = crate::delegate::distinguishing(p);
+            lines.push(format!(
+                "{}- {}{}",
+                "  ".repeat(depth),
+                if p.redacted {
+                    "a profile you cannot see".to_string()
+                } else {
+                    p.name.clone()
+                },
+                if brief.is_empty() {
+                    String::new()
+                } else {
+                    format!(" — {brief}")
+                },
+            ));
+            under(team, &p.id, depth + 1, lines);
+        }
+    }
+    under(team, &lead.id, 1, &mut lines);
+    lines.join("\n")
+}
+
+/// Draw a team: a lead, and the profiles under it.
+async fn create_team(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let name = text(&request.input, "name").context("a team needs a name")?;
+    let lead = text(&request.input, "lead")
+        .context("a team needs a `lead`: the profile it starts as, by name")?;
+    let members = members_of(&request.input)?;
+    let mut new = team_from(state, owner, &name, &lead, &members).await?;
+
+    // Filed where the agent said, by the directory's name, with the same
+    // Writer check `file_profile` makes — and resolved before the write
+    // rather than moved after it, because a team is created with its whole
+    // tree in one transaction and a move would be a second write to undo.
+    let (slug, _) = owner_of(state, &session).await?;
+    let where_it_is = match text(&request.input, "directory") {
+        Some(asked) => {
+            let org = state.db.org().await?;
+            let target = state
+                .access
+                .directory_by_slug(&org, &asked)
+                .await?
+                .with_context(|| format!("there is no directory called \"{asked}\""))?;
+            let may = matches!(
+                state.access.level_on(owner, target.id.as_str()).await?,
+                Some(level) if level >= crate::access::Level::Writer
+            );
+            if !may {
+                bail!(
+                    "you cannot file a team in the \"{}\" directory",
+                    target.slug
+                );
+            }
+            new.directory = Some(target.slug.clone());
+            format!("the \"{}\" directory", target.slug)
+        }
+        None => "your own space".to_string(),
+    };
+
+    let org = state.db.org().await?;
+    let id = state
+        .agent_teams
+        .create(&org, owner, &slug, new.directory.as_deref(), &new)
+        .await?;
+    let made = state
+        .agent_teams
+        .one(owner, id.as_str(), crate::access::Level::Viewer)
+        .await?
+        .context("the team was written and could not be read back")?;
+    Ok(format!(
+        "Made the \"{}\" team in {where_it_is}.\n\n{}\n\nIt is on the Agent teams screen now. \
+         Starting it starts {} with the rest of the team behind it; the profiles directly under \
+         a position are the ones it can hand work to, and nothing else. The profiles themselves \
+         are unchanged — a team holds the structure, and a profile holds what it is.",
+        made.name,
+        team_shape(&made),
+        made.lead().map(|l| l.name.as_str()).unwrap_or("its lead"),
+    ))
+}
+
+/// Every team this person can see, with its lead and its size.
+async fn list_teams(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let teams = state
+        .agent_teams
+        .visible(session.owner.as_str(), crate::access::Level::Viewer)
+        .await?;
+    if teams.is_empty() {
+        return Ok(
+            "There are no agent teams yet. `create_team` draws one: a lead profile, and \
+                   the profiles under it."
+                .into(),
+        );
+    }
+    let lines: Vec<String> = teams
+        .iter()
+        .map(|t| {
             format!(
-                "- {}{}: {}{}",
-                r.name,
-                if r.can_delegate { " (Manager)" } else { "" },
-                r.does,
-                left_open(r),
+                "- {} — led by {}, {} agent{}, {} deep",
+                t.name,
+                t.lead().map(|l| l.name.as_str()).unwrap_or("nobody"),
+                t.size(),
+                if t.size() == 1 { "" } else { "s" },
+                t.depth(),
             )
         })
         .collect();
-    Ok(format!("The profiles you can see:\n{}", lines.join("\n")))
+    Ok(format!(
+        "The agent teams you can see:\n{}\n\n`get_team` reads one whole.",
+        lines.join("\n")
+    ))
+}
+
+/// One team whole, enough to redraw it.
+async fn get_team(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let wanted = text(&request.input, "name").context("name the team to read")?;
+    let found = the_team_named(state, session.owner.as_str(), &wanted).await?;
+    Ok(team_shape(&found))
+}
+
+/// The one team of this name the owner can see.
+async fn the_team_named(
+    state: &AppState,
+    owner: &str,
+    wanted: &str,
+) -> Result<crate::agent_teams::AgentTeam> {
+    let teams = state
+        .agent_teams
+        .visible(owner, crate::access::Level::Viewer)
+        .await?;
+    one_named(
+        "agent team",
+        wanted.trim(),
+        &teams,
+        |t| t.name.as_str(),
+        "list_teams",
+    )
+    .cloned()
+}
+
+/// Redraw a team: its name, its lead, and everybody under it.
+///
+/// **Whole, not a patch.** What is sent is the team, so a member left out is a
+/// member taken out — the same contract the YAML file has, and the reason a
+/// map and a file can be two ways of saying one thing. The tool says so in as
+/// many words, because an agent that reads this as a patch empties a team.
+async fn update_team(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted = text(&request.input, "name").context("name the team to change")?;
+    let existing = the_team_named(state, owner, &wanted).await?;
+    let lead = match text(&request.input, "lead") {
+        Some(named) => named,
+        None => existing
+            .lead()
+            .map(|l| l.name.clone())
+            .context("that team has no lead to keep")?,
+    };
+    let name = text(&request.input, "new_name").unwrap_or_else(|| existing.name.clone());
+    let members = members_of(&request.input)?;
+    if request.input.get("members").is_none() {
+        bail!(
+            "`members` says who is in the team after this call, and it was not given. Send the \
+             whole team — anybody left out is taken out. `get_team` reads the one it has now. \
+             Nothing was changed."
+        );
+    }
+    let new = team_from(state, owner, &name, &lead, &members).await?;
+
+    let was = existing.size();
+    if !state.agent_teams.replace(owner, &existing.id, &new).await? {
+        bail!("you cannot change the \"{wanted}\" team");
+    }
+    let now = state
+        .agent_teams
+        .one(owner, &existing.id, crate::access::Level::Viewer)
+        .await?
+        .context("the team was written and could not be read back")?;
+    Ok(format!(
+        "Changed the \"{}\" team: {was} agent{} before, {} now.\n\n{}\n\n{}The profiles \
+         themselves are untouched.",
+        now.name,
+        if was == 1 { "" } else { "s" },
+        now.size(),
+        team_shape(&now),
+        match now.schedules {
+            0 => String::new(),
+            n => format!(
+                "This pauses {n} schedule{} that pinned this team — the next run is refused \
+                 until somebody approves the new shape. ",
+                if n == 1 { "" } else { "s" }
+            ),
+        },
+    ))
 }
 
 // ── what can run this, and where ────────────────────────────────────────
@@ -2923,6 +3558,7 @@ mod tests {
             "Add a limiter",
             Some("Use the token bucket in api/."),
             None,
+            None,
         );
         assert!(text.starts_with("Task: Add a limiter"));
         assert!(text.contains("Context:\nUse the token bucket"));
@@ -2960,7 +3596,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let text = brief(&lead, "Review it", None, Some(&role));
+        let text = brief(&lead, "Review it", None, Some(&role), None);
         assert!(text.contains("acting as the \"reviewer\" subagent"));
         assert!(text.contains("reads a branch and reports problems"));
         assert!(text.contains("Report findings as path:line."));
@@ -3013,10 +3649,7 @@ mod tests {
     #[test]
     fn the_ack_says_what_landed_so_silence_cannot_read_as_applied() {
         let shape = profile_shape(&asked_for(Some("here"), None));
-        assert_eq!(
-            shape,
-            "ClaudeCode, sharing the lead's workspace, an Operator that does the work itself"
-        );
+        assert_eq!(shape, "ClaudeCode, sharing the lead's workspace");
         assert!(profile_shape(&asked_for(Some("new"), Some("h_1")))
             .contains("its own workspace on h_1"));
     }
@@ -3071,6 +3704,7 @@ mod tests {
         let state = AppState {
             skills: crate::skills::Skills::new(db.pool().clone()),
             roles: crate::roles::Roles::new(db.pool().clone()),
+            agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
             updates: crate::updates::Updates::new(db.pool().clone()),
             policy: crate::auth::Policy::open(),
             access: crate::access::Access::new(db.pool().clone()),

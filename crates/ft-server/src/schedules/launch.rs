@@ -833,7 +833,14 @@ async fn gate(
                 and_stop: None,
             });
         };
-        if crate::api::schedules::profile_fingerprint(&live) != approved {
+        // And the team it was approved with, read the same way. A team that
+        // was edited since fails the comparison and the run is refused, which
+        // is the whole of "editing a team pauses every schedule that pins it".
+        let team = match schedule.pins.get("team").and_then(|v| v.as_str()) {
+            Some(id) => state.agent_teams.unscoped(id).await.ok().flatten(),
+            None => None,
+        };
+        if crate::api::schedules::profile_fingerprint(&live, team.as_ref()) != approved {
             return Err(Stopped {
                 state: "failed",
                 detail: format!(

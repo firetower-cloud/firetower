@@ -984,6 +984,7 @@ const server = createServer(async (req, res) => {
     "/api/v1/directories": scene === "no-dirs" ? [] : DIRECTORIES,
     "/api/v1/secrets": scene === "no-secrets" ? { ...SECRETS, held: [], access: [] } : SECRETS,
     "/api/v1/roles": scene === "no-roles" ? [] : ROLES,
+    "/api/v1/agent-teams": scene === "no-roles" || scene === "no-teams" ? [] : AGENT_TEAMS,
     "/api/v1/provider-kinds": PROVIDER_KINDS,
     /* **The catalogue, for `assert-connected.mjs`.** Not an API route — a
        harness one, under a name no client asks for. The connectedness check
@@ -996,6 +997,7 @@ const server = createServer(async (req, res) => {
       ...HOSTS.map((h) => ({ kind: "machine", id: h.id, name: h.name })),
       ...ARTIFACTS.map((a) => ({ kind: "artifact", id: a.id, name: a.title })),
       ...SKILLS.map((k) => ({ kind: "skill", id: k.id, name: k.name })),
+      ...AGENT_TEAMS.map((t) => ({ kind: "agentTeam", id: t.id, name: t.name })),
       /* A session and the workspace it lives in are one thing to a row that
          names it: the rail lists workspaces by their session's title and
          navigates to the *workspace*. Both ids are a correct landing. */
@@ -1526,6 +1528,47 @@ const ROLES = [
     instructions: "Label, assign and close duplicates. Ask before closing anything with a customer on it.",
     settings: { model: "claude-haiku-4-5", effort: null, mode: null, sandbox: null },
   }),
+];
+
+/* ── Agent teams ─────────────────────────────────────────────────────
+   Delegation, as the thing you can see. A team is a lead and a tree of
+   positions; a position references a profile and may add instructions that
+   apply only there.
+
+   **Two of them, sharing a profile**, because that is the case the whole
+   model exists for and the one a single team cannot photograph: the Reviewer
+   leads Release and also holds a position in Product, with different children
+   in each. And **two positions of one profile under one parent** — the two
+   Load testers in Product — because `extraInstructions` is the only thing
+   that tells those apart, on the card and in the refusal a `spawn` gets. */
+const position = (over) => ({
+  id: "pos_x", parent: null, profile: "r_1", name: "A profile", does: "",
+  agent: "ClaudeCode", redacted: false, extraInstructions: "", ordinal: 0, ...over,
+});
+const AGENT_TEAMS = [
+  {
+    id: "team_product", path: "u/kevin", name: "Product",
+    mayWrite: true, mayShare: true, schedules: 1,
+    createdAt: minutesAgo(9000), updatedAt: minutesAgo(300),
+    positions: [
+      position({ id: "pos_1", parent: null, profile: "r_2", name: "Release captain", does: "Cuts a release, watches the smoke suite, and rolls back when it fails.", ordinal: 0 }),
+      position({ id: "pos_2", parent: "pos_1", profile: "r_1", name: "Reviewer", does: "Reads a change and says what is wrong with it. Never writes.", ordinal: 0 }),
+      position({ id: "pos_3", parent: "pos_1", profile: "r_5", name: "Load tester", agent: "Codex", does: "Hammers a branch until something gives, on whatever is free.", ordinal: 1, extraInstructions: "Owns the web client." }),
+      position({ id: "pos_4", parent: "pos_1", profile: "r_5", name: "Load tester", agent: "Codex", does: "Hammers a branch until something gives, on whatever is free.", ordinal: 2, extraInstructions: "Owns the API and the migrations." }),
+      position({ id: "pos_5", parent: "pos_3", profile: "r_4", name: "Documentation reviewer", agent: null, does: "Turns a change into words somebody outside can read.", ordinal: 0 }),
+    ],
+  },
+  {
+    /* The same Reviewer profile, leading here with nothing under it. Adding a
+       profile that leads elsewhere must bring none of that team with it. */
+    id: "team_docs", path: "d/platform", name: "Docs",
+    mayWrite: true, mayShare: false, schedules: 0,
+    createdAt: minutesAgo(4000), updatedAt: minutesAgo(90),
+    positions: [
+      position({ id: "pos_6", parent: null, profile: "r_1", name: "Reviewer", does: "Reads a change and says what is wrong with it. Never writes.", ordinal: 0 }),
+      position({ id: "pos_7", parent: "pos_6", profile: "r_4", name: "Documentation reviewer", agent: null, does: "Turns a change into words somebody outside can read.", ordinal: 0 }),
+    ],
+  },
 ];
 
 /* Enough to list; the kinds page is what the git-host picker offers. */
