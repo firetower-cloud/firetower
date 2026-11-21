@@ -395,9 +395,12 @@ impl AgentTeams {
     /// and a count of teams they cannot see is the only honest way to say why
     /// the delete will not happen. The names are only those they may read.
     pub async fn standing_on(&self, person: &str, role: &str) -> Result<(i64, Vec<String>)> {
+        // **`DISTINCT` on the names and not on the count.** Two Engineers in
+        // one team is two positions and one team, and both numbers are in the
+        // sentence: how many positions go, and which teams they go from.
         let sql = format!(
             "SELECT count(*) AS held, \
-                    coalesce(array_agg(t.name) FILTER (WHERE {visible}), '{{}}') AS names \
+                    coalesce(array_agg(DISTINCT t.name) FILTER (WHERE {visible}), '{{}}') AS names \
                FROM team_positions p JOIN agent_teams t ON t.id = p.team_id \
               WHERE p.role_id = $2",
             visible = filed_where("t", 1, Level::Viewer),

@@ -487,7 +487,14 @@ function Map({ team }: { team: AgentTeam }) {
     setBusy(true);
     setTrouble(null);
     try {
-      await updateAgentTeam(team.id, toWrite(draft));
+      /* **Re-based from what came back, not from the refetch.** A position
+         the map added carries a `draft:` key and comes back with a minted id,
+         so comparing the draft against the saved team reads as one added and
+         one removed — which leaves the map permanently dirty and the effect
+         below permanently unable to re-base it. The response is the team as
+         written, so it is what the draft becomes. */
+      const saved = await updateAgentTeam(team.id, toWrite(draft));
+      setDraft(draftOf(saved));
       await cache.invalidateQueries({ queryKey: getListAgentTeamsQueryKey() });
     } catch (e) {
       setTrouble(why(e));
@@ -723,7 +730,7 @@ function MapCard({
       }
     >
       <button type="button" className="ocopen" onClick={onOpen} aria-label={`Open ${p.name}`}>
-        <span className="row">
+        <span className="ocrow">
           <span className="g">
             {!p.redacted && agent ? (
               <AgentMark agent={agent} size={13} />

@@ -324,7 +324,7 @@ pub(super) async fn delete_role(
                 ),
                 false => format!(
                     "this profile holds {held} position{} in {}. Take it out of {} first — \
-                     deleting it would leave {} with a hole in it.",
+                     deleting it would leave {}.",
                     if held == 1 { "" } else { "s" },
                     teams.join(", "),
                     if teams.len() == 1 {
@@ -332,7 +332,11 @@ pub(super) async fn delete_role(
                     } else {
                         "those teams"
                     },
-                    if teams.len() == 1 { "the team" } else { "them" },
+                    if teams.len() == 1 {
+                        "the team with a hole in it".to_string()
+                    } else {
+                        format!("holes in all {}", teams.len())
+                    },
                 ),
             },
         ));

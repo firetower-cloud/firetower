@@ -6631,11 +6631,23 @@ html:not([data-platform="macos"]) {
     padding: 7px 9px;
     text-align: left;
   }
-  .oc .row {
+  /* **`ocrow`, not `row`.** `.row` is the sidebar row — 36px of minimum
+     height and 10px of inline padding — and a card's name line inheriting
+     that pushed the instruction line clean out of the bottom of the card.
+     A generic class name is a collision waiting to happen; this one is the
+     card's own.
+
+     `flex: none` on both lines, because the card's height comes from the
+     layout: without it the name row takes the whole box and squeezes the
+     instruction line to nothing, which is the one thing on a card that tells
+     two positions of one profile apart. */
+  .oc .ocrow {
+    flex: none;
     display: flex;
     align-items: center;
     gap: 7px;
     min-width: 0;
+    height: 18px;
   }
   .oc .g {
     display: grid;
@@ -6668,10 +6680,12 @@ html:not([data-platform="macos"]) {
   /* The first line of what this position is told — the only honest thing that
      tells two positions of one profile apart. */
   .oc .brf {
+    flex: none;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 0.6875rem;
+    line-height: 14px;
     color: var(--color-mute);
   }
 
