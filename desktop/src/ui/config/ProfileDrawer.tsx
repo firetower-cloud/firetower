@@ -96,10 +96,8 @@ import { where } from "~/filing";
 import { Note, WhereTo } from "~/ui/config/bits";
 import { LeaveSheet, Sheet } from "~/ui/config/TeamSheet";
 import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
-import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import {
   CONTROL_ICON,
-  ON_CHILD_LIMIT,
   ON_LIMIT,
   OPEN,
   OPEN_FALLBACK,
@@ -720,9 +718,6 @@ function Editing({
         {tab === "where" && (
           <InTeams
             role={role}
-            draft={draft}
-            set={set}
-            all={roles.data ?? []}
             places={places.data?.places ?? []}
             loading={places.isLoading}
             here={seat?.key ?? null}
@@ -1783,39 +1778,27 @@ function HowItRuns({
  * Each row is a destination: pressing it opens that team's map with that card
  * selected.
  *
- * It also holds **the reach a profile had before teams existed**, because the
- * compatibility window has not closed: `canDelegate` and `delegateScope` are
- * still live for a session occupying no position, and #497 is what removes
- * them. A field with nowhere to be edited is a field that quietly stops
- * working, so it is here, labelled as the thing being replaced.
+ * **Teams own delegation.** A profile's own `canDelegate`, `delegateScope` and
+ * `onChildLimit` are still live for a session occupying no position, and #497
+ * is what removes them — but they have no control here any more. A toggle that
+ * says a profile hands work off, sitting next to the teams that actually decide
+ * it, is read as the thing that decides it. The fields are still written on
+ * every save, so a profile that already carries reach keeps carrying it; what
+ * is gone is the way to set one from this window.
  */
 export function InTeams({
   role,
-  draft,
-  set,
-  all,
   places,
   loading,
   here,
   onGoToSeat,
 }: {
   role: Role;
-  draft: Settled | null;
-  set: <K extends keyof Settled>(k: K, v: Settled[K]) => void;
-  all: Role[];
   places: ProfilePosition[];
   loading: boolean;
   here: string | null;
   onGoToSeat?: (team: string, position: string) => void;
 }) {
-  const groupOf = (path: string) => {
-    const [root, label] = path.split("/");
-    return root === "u" ? "yours" : `d/${label}`;
-  };
-  const reachable: ScopeItem[] = all
-    .filter((r) => r.id !== role.id)
-    .map((r) => ({ id: r.id, name: r.name, desc: r.does, group: groupOf(r.path) }));
-
   return (
     <>
       <p className="dlede">
@@ -1875,71 +1858,6 @@ export function InTeams({
               </span>
             </button>
           ))}
-        </div>
-      )}
-
-      {/* The old per-profile reach, while both models are live. Not a claim
-          about what a profile without a team can or cannot do: during the
-          window that depends on which of the two paths its session takes, and
-          no flat sentence about it is true for everybody. */}
-      {draft && (
-        <div className="fld">
-          <span>Before teams: who it may hand work to</span>
-          <span className="hint">
-            A profile could carry its own list of delegates, and a session that holds no position
-            still reads it. Teams replace it. It is kept here until that list is removed.
-          </span>
-          <div className="pickrow">
-            {[
-              { v: false, label: "Does the work itself" },
-              { v: true, label: "Hands work off" },
-            ].map((o) => (
-              <button
-                key={String(o.v)}
-                type="button"
-                aria-pressed={!!draft.canDelegate === o.v}
-                onClick={() => set("canDelegate", o.v)}
-                className="pk"
-              >
-                {o.label}
-              </button>
-            ))}
-          </div>
-          {draft.canDelegate && (
-            <ScopePicker
-              label="On its own list"
-              hint="Read only by a session that occupies no position in any team."
-              items={reachable}
-              selected={draft.delegateScope ?? []}
-              onChange={(ids) => set("delegateScope", ids)}
-              searchPlaceholder="Search profiles…"
-              allNote="Any profile you can reach, and any you add later."
-            />
-          )}
-          {draft.canDelegate && (
-            <Group
-              label="When a child runs out"
-              hint="Whether it re-routes a spent child on its own, or stops and asks you which subscription to use."
-            >
-              <div className="pickrow">
-                {ON_CHILD_LIMIT.map((o) => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    aria-pressed={(draft.onChildLimit ?? "ask") === o.value}
-                    onClick={() => set("onChildLimit", o.value)}
-                    className="pk"
-                  >
-                    <span className="ic">
-                      <Icon of={o.icon} size={16} />
-                    </span>
-                    {o.label}
-                    <span className="sub">{o.note}</span>
-                  </button>
-                ))}
-              </div>
-            </Group>
-          )}
         </div>
       )}
     </>

@@ -280,27 +280,45 @@ describe("which tabs say they change the profile", () => {
   });
 
   /**
-   * And the fact the marking rests on. *In teams* holds the reach a profile
-   * carries on its own, which is live for the whole compatibility window — so
-   * it writes profile fields, and a band saying otherwise is false.
+   * **Teams own delegation, so the drawer offers no control that says
+   * otherwise.** The old per-profile reach is still live on the wire for the
+   * compatibility window — #497 is what removes it — but a toggle reading
+   * *Hands work off*, sitting beside the teams that actually decide it, is
+   * read as the thing that decides it. The controls are gone; the fields they
+   * wrote are not, and `the fields a profile carries survive a save` below is
+   * the half that pins that.
    */
-  test("In teams writes profile fields, which is why it is shared", () => {
-    const written: string[] = [];
+  test("In teams offers no per-profile delegation control", () => {
     const drawn = renderToStaticMarkup(
-      <InTeams
-        role={REVIEWER}
-        draft={{ ...toDraft(REVIEWER), canDelegate: true }}
-        set={(k) => written.push(k as string)}
-        all={[REVIEWER]}
-        places={[]}
-        loading={false}
-        here={null}
-      />,
+      <InTeams role={REVIEWER} places={[]} loading={false} here={null} />,
     );
     expect(SHARED.where).toBe(true);
-    expect(drawn).toContain("Hands work off");
-    expect(drawn).toContain("When a child runs out");
-    expect(written).toEqual([]);
+    for (const gone of [
+      "Before teams",
+      "Does the work itself",
+      "Hands work off",
+      "On its own list",
+      "When a child runs out",
+    ])
+      expect(drawn).not.toContain(gone);
+  });
+
+  /**
+   * The other half, and the one that would be expensive to get wrong: taking
+   * the controls out must not take the data with them. A profile that already
+   * hands work off still says so after a save it made no change to.
+   */
+  test("the fields a profile carries survive a save", () => {
+    const carrying: Role = {
+      ...REVIEWER,
+      canDelegate: true,
+      delegateScope: ["r_other"],
+      onChildLimit: "reroute",
+    };
+    const draft = toDraft(carrying);
+    expect(draft.canDelegate).toBe(true);
+    expect(draft.delegateScope).toEqual(["r_other"]);
+    expect(draft.onChildLimit).toBe("reroute");
   });
 });
 
@@ -321,9 +339,6 @@ describe("the In teams rows", () => {
     renderToStaticMarkup(
       <InTeams
         role={REVIEWER}
-        draft={toDraft(REVIEWER)}
-        set={() => {}}
-        all={[REVIEWER]}
         places={places}
         loading={false}
         here={null}
@@ -425,12 +440,29 @@ describe("every field a draft carries is written somewhere in the drawer", () =>
   );
 
   /**
-   * `directory` is the one exception and it is deliberate: a profile is filed
-   * from the moment it exists, so it is asked for by the sheet that creates
-   * one and moved afterwards through the sharing sheet — which is the drawer's
-   * *Who can use it*. There is no third place a thing changes hands.
+   * `directory` is the first exception and it is deliberate: a profile is
+   * filed from the moment it exists, so it is asked for by the sheet that
+   * creates one and moved afterwards through the sharing sheet — which is the
+   * drawer's *Who can use it*. There is no third place a thing changes hands.
+   *
+   * **The other three are not elsewhere. They are nowhere, on purpose, and
+   * that is a decision somebody took rather than an omission.** Teams own
+   * delegation now, so a profile-level *Hands work off* sitting beside the
+   * teams that actually decide it is read as the thing that decides it. The
+   * controls are gone from the drawer; the fields are still carried by the
+   * draft and still written on every save, so a profile that already has
+   * reach keeps it and nothing is migrated or dropped.
+   *
+   * What that costs, stated so it is known rather than discovered: a profile
+   * that already carries `canDelegate` **cannot be turned off from this
+   * window**, because the control that turned it off is the one removed. The
+   * old reach stays live for a session occupying no position until #497
+   * closes, so for those profiles the setting is now read-only and on. The
+   * API still accepts a write, so nothing is stuck permanently — but there is
+   * no interface for it, and how to transition the old model to the new is
+   * still to be scoped.
    */
-  const ELSEWHERE = ["directory"];
+  const ELSEWHERE = ["directory", "canDelegate", "delegateScope", "onChildLimit"];
 
   test("each one has a setter, or is named here as living elsewhere", () => {
     const missing = Object.keys(toDraft(REVIEWER))
