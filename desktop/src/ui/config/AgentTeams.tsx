@@ -204,9 +204,7 @@ export function AgentTeams({ open, at }: { open: string | null; at?: string | nu
           onClose={() => setNaming(null)}
           foot={
             <>
-              <span className="msg">
-                {problem ?? "Nothing is created until you press Create team."}
-              </span>
+              <span className="msg">{problem}</span>
               <Button variant="quiet" onClick={() => setNaming(null)}>
                 Cancel
               </Button>
@@ -252,10 +250,6 @@ export function AgentTeams({ open, at }: { open: string | null; at?: string | nu
               />
             )}
           </Group>
-          <p className="mt-3 mb-1 max-w-[60ch] text-meta leading-relaxed text-dim">
-            Any profile can lead a team, and there is no setting to turn on first. This one
-            starts with nothing under it. Add the rest on the map.
-          </p>
         </Sheet>
       )}
 

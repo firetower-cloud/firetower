@@ -372,7 +372,7 @@ export function NewProfileSheet({
       onClose={onClose}
       foot={
         <>
-          <span className="msg">{problem ?? "Nothing is created until you press Create profile."}</span>
+          <span className="msg">{problem}</span>
           <Button variant="quiet" onClick={onClose}>
             Cancel
           </Button>
@@ -399,36 +399,40 @@ export function NewProfileSheet({
           other Placed kind does; moving it afterwards is the sharing sheet's
           job, and there is one place a thing changes hands. */}
       {filing && filing.length > 0 && (
-        <Group label="Where it lives" hint="Keep it yours, or file it where your team can use it.">
-          <div className="pickrow">
-            <button
-              type="button"
-              aria-pressed={where === null}
-              onClick={() => setWhere(null)}
-              className="pk"
-            >
-              Yours
-              <span className="sub">only you, until you share it</span>
-            </button>
-            {filing.map((d) => (
+        <>
+          <Group
+            label="Where it lives"
+            hint="Keep it yours, or file it where your team can use it."
+          >
+            <div className="pickrow">
               <button
-                key={d.id}
                 type="button"
-                aria-pressed={where === d.id}
-                onClick={() => setWhere(d.id)}
+                aria-pressed={where === null}
+                onClick={() => setWhere(null)}
                 className="pk"
               >
-                {d.name}
+                Yours
+                <span className="sub">only you, until you share it</span>
               </button>
-            ))}
-          </div>
-        </Group>
+              {filing.map((d) => (
+                <button
+                  key={d.id}
+                  type="button"
+                  aria-pressed={where === d.id}
+                  onClick={() => setWhere(d.id)}
+                  className="pk"
+                >
+                  {d.name}
+                </button>
+              ))}
+            </div>
+          </Group>
+          <p className="mt-3 mb-1 text-meta text-dim">
+            Name it and say what it does. Everything else has a sensible answer already, and the
+            drawer is where you change any of it.
+          </p>
+        </>
       )}
-      <p className="mt-3 mb-1 text-meta text-dim">
-        {filing && filing.length > 0
-          ? "Name it and say what it does. Everything else has a sensible answer already, and the drawer is where you change any of it."
-          : "These are the only two fields a profile needs."}
-      </p>
     </Sheet>
   );
 }
