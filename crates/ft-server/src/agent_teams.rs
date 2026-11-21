@@ -169,6 +169,27 @@ pub struct AgentTeam {
     /// nothing a gap would misrepresent. The map is where a withheld seat
     /// still has to be drawn.
     pub members: Vec<String>,
+    /// **How many agents a session started as this team could hand work to.**
+    ///
+    /// The lead position's children, intersected with what this person can
+    /// see — the same double join [`AgentTeams::reports`] makes, which is
+    /// what a `spawn` actually resolves against and what `persona_for`
+    /// composes the prompt from.
+    ///
+    /// Not [`AgentTeam::positions`], and the difference is the whole reason
+    /// this field exists. `positions` is every seat in the tree, unfiltered,
+    /// which is what the map and the list row want. A picker that read it
+    /// promised somebody seven helpers and gave them two, in two independent
+    /// ways: reach descends exactly one level per hand-off, so the seats
+    /// below a report are reachable by somebody later and not by this run;
+    /// and a seat whose profile this person cannot reach is not a report at
+    /// all. Both overstate, and the moment it is read is the moment somebody
+    /// is choosing a team over the bare profile — which is the one thing that
+    /// choice is about.
+    ///
+    /// Carried here rather than derived in three clients, so that the number
+    /// a person reads and the reach the agent is given cannot disagree.
+    pub reports: i64,
     /// How many of those positions **nobody chose** — added by a spawn during
     /// the compatibility window.
     ///
@@ -198,7 +219,17 @@ pub struct AgentTeam {
     ///
     /// Counted across every owner, for the reason
     /// `Db::schedules_pinning_team` gives: somebody else's schedule is no
-    /// less stopped for being somebody else's.
+    /// less stopped for being somebody else's. A person about to save has to
+    /// be told the full number, including schedules they will never be
+    /// allowed to read, because they are about to stop them.
+    ///
+    /// **Zero for anybody who could not save**, which is the other half of
+    /// the same sentence. The count stays cross-owner; who is handed it does
+    /// not. A `Viewer` on a shared team has no save to be warned about, and
+    /// the number would tell them how much unattended work other people have
+    /// pinned to it and — by watching it fall — when one of them stopped.
+    /// Gated in `team_fields` on the writer predicate already selected beside
+    /// it as `may_write`.
     pub schedules: i64,
     /// Whether the person asking may edit or delete it.
     pub may_write: bool,
@@ -407,6 +438,37 @@ pub struct ProfilePosition {
     pub may_write: bool,
 }
 
+/// Where one profile sits, and how much of that this person may not see.
+///
+/// **Deleting a profile cascades**, and it does not filter:
+/// `agent_team_positions.profile_id` is `on delete cascade` and `parent_id`
+/// is too, so a delete takes every position referencing the profile and
+/// everything under those, in **every** team in the organisation. A team only
+/// needs its author to have been able to see the profile — which is what
+/// sharing one into a directory invites — so the ordinary case puts positions
+/// in a team the profile's owner cannot see.
+///
+/// The read that the confirmation is built from is filtered, as every read
+/// is, and that is right. What was wrong is that the confirmation then
+/// asserted *no team holds a position for it*, which is a claim about teams
+/// it did not read. So the count comes back beside the list: **the shape may
+/// be disclosed, the names may not** — the same move [`AgentTeam::members`]
+/// makes for a withheld name, and the only wording that can be both true and
+/// safe.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfilePlaces {
+    /// Each seat this profile holds, in a team this person can see.
+    pub places: Vec<ProfilePosition>,
+    /// **How many positions it holds in teams this person cannot see**, and
+    /// which a delete would take with it.
+    ///
+    /// A bare number: naming the teams would disclose what the filing
+    /// withholds. Counted the way `places` counts `takes` — each seat and
+    /// everything under it — so the two add up to what the cascade removes.
+    pub withheld: i64,
+}
+
 /// What the profiles a tree names are called, by id.
 ///
 /// **Two of the refusals below point at a position, and a refusal has to
@@ -566,11 +628,17 @@ fn slug_of(name: &str, id: &str) -> String {
 /// not describing the shape of the tree and so has nothing to misrepresent.
 /// The map is where a withheld seat still has to be drawn.
 ///
+/// `reports` is the same join one level down from the lead, and is the
+/// number a picker may promise: see [`AgentTeam::reports`].
+///
 /// `seeded` and `auto_added` say where the team and its seats came from, so a
 /// row can read *2 added automatically* without opening the tree — see
 /// `agent_teams/window.rs`. `schedules` counts the approved schedules a save
 /// would stop, which is the one consequence the editor has to state *before*
-/// Save — see `Db::schedules_pinning_team`.
+/// Save — see `Db::schedules_pinning_team` — and is **gated on the writer
+/// predicate selected one line below as `may_write`**, because it is a number
+/// about other people's unattended work and only somebody who could stop it
+/// has any use for it. See [`AgentTeam::schedules`].
 fn team_fields(person: usize) -> String {
     format!(
         "t.id, t.path::text AS path, t.name, t.created_at, t.updated_at, \
@@ -580,14 +648,21 @@ fn team_fields(person: usize) -> String {
          (SELECT count(*) FROM agent_team_positions c WHERE c.team_id = t.id) AS positions, \
          (SELECT count(*) FROM agent_team_positions c \
            WHERE c.team_id = t.id AND c.auto_added_at IS NOT NULL) AS auto_added, \
-         (SELECT count(*) FROM schedules s \
-           WHERE s.pins -> 'team' ->> 'id' = t.id AND s.approved_at IS NOT NULL) AS schedules, \
+         CASE WHEN {writable} THEN \
+           (SELECT count(*) FROM schedules s \
+             WHERE s.pins -> 'team' ->> 'id' = t.id AND s.approved_at IS NOT NULL) \
+           ELSE 0 END AS schedules, \
+         (SELECT count(*) FROM agent_team_positions rp \
+            JOIN roles rr ON rr.id = rp.profile_id AND {report_visible} \
+           WHERE rp.parent_id = lead.id) AS reports, \
          ARRAY(SELECT DISTINCT mr.name \
                  FROM agent_team_positions mp \
                  JOIN roles mr ON mr.id = mp.profile_id AND {visible} \
                 WHERE mp.team_id = t.id AND mp.parent_id IS NOT NULL \
                 ORDER BY mr.name) AS members",
         visible = filed_where("mr", person, Level::Viewer),
+        report_visible = filed_where("rr", person, Level::Viewer),
+        writable = filed_where("t", person, Level::Writer),
     )
 }
 
@@ -633,6 +708,7 @@ fn read_team(row: &sqlx::postgres::PgRow) -> AgentTeam {
         auto_added: row.get("auto_added"),
         seeded: row.get("seeded"),
         schedules: row.get("schedules"),
+        reports: row.get("reports"),
         may_write: row.get("may_write"),
         may_share: row.get("may_share"),
         created_at: row.get("created_at"),
@@ -732,6 +808,46 @@ impl AgentTeams {
         Ok(row.as_ref().map(read_team))
     }
 
+    /// **Whether this person may change this team**, asked on its own.
+    ///
+    /// The same `filed_where(t, Writer)` [`AgentTeams::write`] takes, and
+    /// nothing beside it: a second way to answer *may I write here* is the
+    /// thing `docs/paths-and-ownership.md` forbids. Here rather than
+    /// `one(…, Writer).is_some()` only because the callers that ask it are
+    /// asking about a write and want none of a list row's counts.
+    pub async fn may_write(&self, person: &str, id: &str) -> Result<bool> {
+        if !self.enabled {
+            return Ok(false);
+        }
+        let sql = format!(
+            "SELECT 1 FROM agent_teams t WHERE t.id = $2 AND {writable}",
+            writable = filed_where("t", 1, Level::Writer),
+        );
+        Ok(sqlx::query_scalar::<_, i32>(&sql)
+            .bind(person)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("reading whether somebody may change an agent team")?
+            .is_some())
+    }
+
+    /// **Who a team is attributed to, and where it is filed.**
+    ///
+    /// What [`admissible`] needs of a team it is about to be written into by
+    /// something other than the editor. Unfiltered: both callers already hold
+    /// the team — the seeder just wrote it, and the window has resolved a
+    /// standing in it — and neither is answering a person's read.
+    pub async fn author_of(&self, team: &str) -> Result<Option<(Option<String>, String)>> {
+        let row =
+            sqlx::query("SELECT created_by, path::text AS path FROM agent_teams WHERE id = $1")
+                .bind(team)
+                .fetch_optional(&self.pool)
+                .await
+                .context("reading who an agent team belongs to")?;
+        Ok(row.map(|r| (r.get("created_by"), r.get("path"))))
+    }
+
     /// One team and its whole tree, if this person may see it.
     pub async fn detail(
         &self,
@@ -805,11 +921,7 @@ impl AgentTeams {
     ///
     /// `takes` is each seat's own subtree, counted in one walk from every
     /// position this profile holds rather than once per row.
-    pub async fn profile_positions(
-        &self,
-        person: &str,
-        profile: &str,
-    ) -> Result<Vec<ProfilePosition>> {
+    pub async fn profile_positions(&self, person: &str, profile: &str) -> Result<ProfilePlaces> {
         let sql = format!(
             "WITH RECURSIVE descend AS ( \
                  SELECT p.id AS root, p.id AS node \
@@ -844,7 +956,7 @@ impl AgentTeams {
             .fetch_all(&self.pool)
             .await
             .context("reading where a profile sits")?;
-        Ok(rows
+        let places: Vec<ProfilePosition> = rows
             .iter()
             .map(|row| ProfilePosition {
                 team: row.get("team_id"),
@@ -857,7 +969,52 @@ impl AgentTeams {
                 takes: row.get("takes"),
                 may_write: row.get("may_write"),
             })
-            .collect())
+            .collect();
+
+        /* **The same walk, over the teams the one above left out.** The
+        cascade does not filter, so a confirmation built only from what
+        can be named says nothing about most of what is about to go. The
+        count is `takes` summed the same way — each seat this profile
+        holds, plus everything under it — so the two numbers on screen add
+        up to the rows the delete removes. */
+        let sql = format!(
+            "WITH RECURSIVE descend AS ( \
+                 SELECT p.id AS root, p.id AS node \
+                   FROM agent_team_positions p \
+                   JOIN agent_teams t ON t.id = p.team_id \
+                  WHERE p.profile_id = $2 AND NOT {visible} \
+               UNION ALL \
+                 SELECT d.root, c.id \
+                   FROM agent_team_positions c JOIN descend d ON c.parent_id = d.node) \
+             SELECT count(*)::bigint FROM descend",
+            visible = filed_where("t", 1, Level::Viewer),
+        );
+        let withheld: i64 = sqlx::query_scalar(&sql)
+            .bind(person)
+            .bind(profile)
+            .fetch_one(&self.pool)
+            .await
+            .context("counting where a profile sits that somebody cannot see")?;
+
+        Ok(ProfilePlaces { places, withheld })
+    }
+
+    /// **Every team holding a position for this profile, unfiltered.**
+    ///
+    /// Who has to be told when it is deleted. Unfiltered on purpose and not
+    /// by omission: the cascade is unfiltered, so a repair that filtered
+    /// would leave exactly the teams the deleter could not see still pinned
+    /// to a tree that no longer exists. Nothing here reaches a person — it is
+    /// a list of ids handed to `unapprove_schedules_on`, which composes each
+    /// schedule as its own owner.
+    pub async fn teams_holding(&self, profile: &str) -> Result<Vec<String>> {
+        sqlx::query_scalar(
+            "SELECT DISTINCT team_id FROM agent_team_positions WHERE profile_id = $1",
+        )
+        .bind(profile)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading which teams hold a position for a profile")
     }
 
     /// The position a session occupies, if its owner may still see the team.
@@ -1287,19 +1444,7 @@ impl AgentTeams {
         // A seat naming no profile at all is `check`'s refusal to make, not a
         // profile nobody can see.
         named.retain(|id| !id.trim().is_empty());
-        let sql = format!(
-            "SELECT r.id, r.name FROM roles r WHERE r.id = ANY($2) AND {visible}",
-            visible = filed_where("r", 1, Level::Viewer),
-        );
-        let seen: ProfileNames = sqlx::query(&sql)
-            .bind(person)
-            .bind(&named)
-            .fetch_all(&mut **tx)
-            .await
-            .context("reading which of a team's profiles somebody can see")?
-            .into_iter()
-            .map(|row| (row.get("id"), row.get("name")))
-            .collect();
+        let seen = seen_by(&mut **tx, person, &named).await?;
         let missing: Vec<&str> = named
             .iter()
             .filter(|id| !seen.contains_key(id.as_str()))
@@ -1315,6 +1460,85 @@ impl AgentTeams {
             .into());
         }
         Ok(seen)
+    }
+}
+
+/// Which of these profiles somebody can see, and what each is called.
+///
+/// **One spelling of the question** every write of a tree asks. The editor
+/// asks it of the person saving ([`AgentTeams::must_see`]); the two writers
+/// that have no person asking ask it through [`admissible`]. A profile absent
+/// from what comes back is one whose name could not be read.
+pub async fn seen_by<'e, E>(x: E, person: &str, ids: &[String]) -> Result<ProfileNames>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let sql = format!(
+        "SELECT r.id, r.name FROM roles r WHERE r.id = ANY($2) AND {visible}",
+        visible = filed_where("r", 1, Level::Viewer),
+    );
+    Ok(sqlx::query(&sql)
+        .bind(person)
+        .bind(ids)
+        .fetch_all(x)
+        .await
+        .context("reading which of a team's profiles somebody can see")?
+        .into_iter()
+        .map(|row| (row.get("id"), row.get("name")))
+        .collect())
+}
+
+/// **Which of these profiles a write that nobody is making may put into this
+/// team**, and what each is called.
+///
+/// [`AgentTeams::must_see`] is the editor's rule: every profile a tree names
+/// has to be one the person saving can see, or the save is refused. Two
+/// writers have no person saving — `agent_teams::seed` runs at start-up, and
+/// `agent_teams::window::admit` writes on behalf of whoever is standing in
+/// the seat, who may be a colleague rather than the team's own author. Both
+/// used to write whatever they resolved, and both could therefore produce the
+/// one state the editor cannot: **a team holding a profile its own author
+/// cannot see, which that author can never save**, because `must_see` refuses
+/// their write on an id they cannot resolve into a name. The seat is drawn on
+/// the map with no name on it and the only way to clear it is a save that is
+/// refused.
+///
+/// So the rule these two keep is the one that makes that state impossible:
+/// **every team has at least one person who can always save it — its
+/// author.** A profile they cannot see is not written.
+///
+/// `author` is `agent_teams.created_by`, which is `on delete set null`: a
+/// team whose author has been offboarded has nobody to ask, and the question
+/// falls back to the structure — the profile has to be filed in the same
+/// directory as the team, which is the one arrangement where everybody who
+/// can reach the team can certainly reach the profile. Fail closed, which is
+/// this feature's rule everywhere.
+pub async fn admissible<'e, E>(
+    x: E,
+    author: Option<&str>,
+    team_path: &str,
+    ids: &[String],
+) -> Result<ProfileNames>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    match author {
+        Some(author) => seen_by(x, author, ids).await,
+        None => {
+            let here = team_path.split('.').take(2).collect::<Vec<_>>().join(".");
+            Ok(sqlx::query(
+                "SELECT r.id, r.name FROM roles r \
+                  WHERE r.id = ANY($2) AND subpath(r.path, 0, 2) = $1::ltree",
+            )
+            .bind(&here)
+            .bind(ids)
+            .fetch_all(x)
+            .await
+            .context("reading which profiles are filed where a team is")?
+            .into_iter()
+            .map(|row| (row.get("id"), row.get("name")))
+            .collect())
+        }
     }
 }
 
@@ -2085,6 +2309,110 @@ mod tests {
         assert_eq!(one.members, deep.members);
     }
 
+    /// **#514 — what the picker promises is the lead's own reach, not the
+    /// size of the tree.**
+    ///
+    /// Reach descends exactly one level per hand-off, and a seat whose
+    /// profile this person cannot see is not a report at all — `reports`
+    /// drops it, and so does the persona composed from it. The row carried
+    /// only `positions`, which counts every seat in the whole tree and
+    /// filters nothing, and the composer reached for that: on a three-level
+    /// team of six seats whose lead has two reachable reports, somebody was
+    /// told *five other agents* and given two.
+    ///
+    /// Both ways of being wrong are in one tree here, and the oracle is
+    /// `reports` itself — the two have to agree, because the second is what
+    /// the spawn actually resolves against.
+    #[tokio::test]
+    async fn a_list_row_says_what_its_lead_can_actually_hand_work_to() {
+        let w = world().await;
+        let (ana, ana_slug) = w.colleague("ana").await;
+        let lead = w.profile_of(&ana, &ana_slug, "Lead").await;
+        let engineer = w.profile_of(&ana, &ana_slug, "Engineer").await;
+        let designer = w.profile_of(&ana, &ana_slug, "Designer").await;
+        let deeper = w.profile_of(&ana, &ana_slug, "Deeper").await;
+
+        // Three levels. The lead has two direct reports; two more seats sit
+        // under one of them, which no hand-off from the lead reaches.
+        let id = w
+            .teams
+            .create(
+                &w.org,
+                &ana,
+                &ana_slug,
+                None,
+                &named(
+                    "Deep",
+                    seat(
+                        &lead,
+                        vec![
+                            seat(
+                                &engineer,
+                                vec![seat(&deeper, vec![]), seat(&designer, vec![])],
+                            ),
+                            seat(&designer, vec![]),
+                        ],
+                    ),
+                ),
+            )
+            .await
+            .unwrap();
+
+        let standing = w.teams.lead_of(&ana, id.as_str()).await.unwrap().unwrap();
+        let hers = w
+            .teams
+            .one(&ana, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(hers.positions, 5, "every seat, which is what the map wants");
+        assert_eq!(
+            hers.reports,
+            w.teams
+                .reports(&ana, &standing.position)
+                .await
+                .unwrap()
+                .len() as i64,
+            "and the number the picker reads is the one a spawn resolves against"
+        );
+        assert_eq!(hers.reports, 2, "the lead's own reports, not the tree");
+
+        // She shares the team and one of the two reports. The other is a seat
+        // whose profile cannot be reached, so it is not a report at all.
+        let access = crate::access::Access::new(w.db.pool().clone());
+        for (kind, what) in [
+            (crate::access::FiledKind::AgentTeam, id.as_str()),
+            (crate::access::FiledKind::Role, lead.as_str()),
+            (crate::access::FiledKind::Role, engineer.as_str()),
+        ] {
+            access
+                .set_exception(kind, what, &w.me, Level::Viewer)
+                .await
+                .unwrap();
+        }
+
+        let mine = w
+            .teams
+            .one(&w.me, id.as_str(), Level::Viewer)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            mine.positions, 5,
+            "the shape of the tree is still the team's"
+        );
+        assert_eq!(
+            mine.reports,
+            w.teams
+                .reports(&w.me, &standing.position)
+                .await
+                .unwrap()
+                .len() as i64,
+            "and what I am told I can hand work to is what I can hand work to"
+        );
+        assert_eq!(mine.reports, 1, "the Designer is a seat, and not a report");
+    }
+
     /// Adding a profile that leads another team creates a position with no
     /// children, and the other team is unchanged. **Nothing travels.**
     #[tokio::test]
@@ -2473,8 +2801,9 @@ mod tests {
 
         // Ana sees the whole of it.
         let hers = w.teams.profile_positions(&ana, &writer).await.unwrap();
-        assert_eq!(hers.len(), 1, "one seat, in one team");
-        let it = &hers[0];
+        assert_eq!(hers.places.len(), 1, "one seat, in one team");
+        assert_eq!(hers.withheld, 0, "and nothing she cannot see");
+        let it = &hers.places[0];
         assert_eq!(it.team, studio.as_str());
         assert_eq!(it.team_name, "Studio");
         assert!(!it.leads, "Writer does not lead Studio");
@@ -2483,7 +2812,12 @@ mod tests {
         assert_eq!(it.takes, 2, "the seat and the one under it");
 
         // The lead's own seat takes the whole tree, and says it leads.
-        let at_the_top = &w.teams.profile_positions(&ana, &designer).await.unwrap()[0];
+        let at_the_top = &w
+            .teams
+            .profile_positions(&ana, &designer)
+            .await
+            .unwrap()
+            .places[0];
         assert!(at_the_top.leads);
         assert_eq!(at_the_top.takes, 3, "the whole tree");
         assert_eq!(at_the_top.reports_to, None, "a lead reports to nobody");
@@ -2502,13 +2836,16 @@ mod tests {
             .await
             .unwrap();
         let mine = w.teams.profile_positions(&w.me, &writer).await.unwrap();
-        assert_eq!(mine.len(), 1, "the seat is in a team I can see");
-        assert_eq!(mine[0].takes, 2, "the count is the team's shape");
-        assert_eq!(mine[0].reports_to, None, "and the name above it is not");
+        assert_eq!(mine.places.len(), 1, "the seat is in a team I can see");
+        assert_eq!(mine.places[0].takes, 2, "the count is the team's shape");
+        assert_eq!(
+            mine.places[0].reports_to, None,
+            "and the name above it is not"
+        );
         assert!(
-            mine[0].under.is_empty(),
+            mine.places[0].under.is_empty(),
             "a name I cannot see is absent, not blank: {:?}",
-            mine[0].under
+            mine.places[0].under
         );
 
         // And a team nobody shared with me is not in the answer at all.
@@ -2528,14 +2865,21 @@ mod tests {
                 .profile_positions(&ana, &writer)
                 .await
                 .unwrap()
+                .places
                 .len(),
             2
         );
         let mine = w.teams.profile_positions(&w.me, &writer).await.unwrap();
         assert!(
-            mine.iter().all(|x| x.team != unshared.as_str()),
+            mine.places.iter().all(|x| x.team != unshared.as_str()),
             "a team I cannot see is absent"
         );
+        /* **But counted.** Deleting the profile would take that seat too —
+        the cascade does not ask what anybody can see — so a confirmation
+        built from this list alone would be describing half of what it is
+        about to do. The shape is disclosed and the name is not, which is the
+        same rule the withheld names above follow. */
+        assert_eq!(mine.withheld, 1, "the seat in the team I cannot see");
     }
 
     /// Filed into a directory through the one operation that moves anything,

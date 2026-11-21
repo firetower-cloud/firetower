@@ -53,7 +53,15 @@ fn refused(e: crate::agent_teams::Refused) -> ApiError {
 /// pins it had and loses the approval anyway. Nothing is lost: the launch
 /// gate recomputes the fingerprint and refuses, with a sentence naming the
 /// team. Fail closed, which is the rule everywhere else in this feature.
-async fn unapprove_schedules_on(state: &crate::AppState, team: &str) -> ApiResult<()> {
+/// Called from `agent_teams::window::admit` as well as from the two verbs
+/// here, which is why it is `pub(crate)` and answers in `anyhow`: the window
+/// is a fourth path that changes a tree, and a schedule pinned to that tree is
+/// no less stopped for the change having come from a hand-off rather than
+/// from the editor.
+pub(crate) async fn unapprove_schedules_on(
+    state: &crate::AppState,
+    team: &str,
+) -> anyhow::Result<()> {
     let reason = crate::schedules::reason_name(ft_core::schedule::PausedReason::TeamChanged);
     for row in state.db.schedules_pinning_team(team).await? {
         let pins = super::schedules::repin_team(state, &row).await;

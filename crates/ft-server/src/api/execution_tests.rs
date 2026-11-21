@@ -12073,10 +12073,18 @@ async fn deleting_a_team_stops_its_schedules_and_the_refusal_names_it() {
 
 /// **The fingerprint is the half an edit hook cannot do.**
 ///
-/// A team can change shape without anybody editing it: deleting a profile
-/// cascades onto its seats. Nothing passes through the team editor, so
-/// nothing clears the approval — and what the run would be allowed to hand
-/// work to has changed. The gate recomputes and refuses.
+/// Every path that is *known* to change a tree now clears the approval
+/// proactively — the editor, the team delete, the compatibility window
+/// (#512) and a profile delete (#513), which is what
+/// `deleting_a_profile_counts_the_teams_it_cannot_see_and_stops_their_schedules`
+/// pins. The gate is what stands behind all four, for the shape none of them
+/// can cover: the tree is different and nothing that knows about schedules
+/// was on the path.
+///
+/// So the change here is made against the rows directly. That is the whole
+/// claim — the gate recomputes what is there now and refuses, rather than
+/// trusting that something upstream noticed — and a test that reached it
+/// through a handler would be pinning that handler's omission instead.
 #[tokio::test]
 async fn a_tree_that_changed_without_an_edit_is_refused_at_the_gate() {
     let (state, principal, _, _, owner) = fixture().await;
@@ -12098,14 +12106,13 @@ async fn a_tree_that_changed_without_an_edit_is_refused_at_the_gate() {
         .unwrap()
         .to_string();
 
-    // The report's profile is deleted, which takes its seat with it.
-    super::roles::delete_role(
-        State(state.clone()),
-        Extension(principal.clone()),
-        Path(engineer.clone()),
-    )
-    .await
-    .expect("a profile its owner may delete");
+    // The seat goes, and nothing that knows what a schedule is was involved.
+    sqlx::query("DELETE FROM agent_team_positions WHERE team_id = $1 AND profile_id = $2")
+        .bind(&team)
+        .bind(&engineer)
+        .execute(state.db.pool())
+        .await
+        .expect("the row is gone");
 
     let live = state
         .agent_teams
@@ -12121,7 +12128,8 @@ async fn a_tree_that_changed_without_an_edit_is_refused_at_the_gate() {
         "so the gate has something to refuse on"
     );
 
-    // Nothing cleared the approval, because nothing edited the team.
+    // Nothing cleared the approval, because nothing that could have was on
+    // the path.
     let still = state.db.schedule(&on.id).await.unwrap().unwrap();
     assert!(still.approved_at.is_some());
 
@@ -12164,5 +12172,1089 @@ async fn a_tree_that_changed_without_an_edit_is_refused_at_the_gate() {
              so it will not run on it. Open the schedule, read what the team is now, and \
              approve it again."
         )
+    );
+}
+
+/* ── the write side of agent teams ───────────────────────────────────────
+ *
+ * Eight findings from the security review of this stack (#508–#515) share one
+ * shape: **a predicate that exists and is not applied.** Each test below
+ * reproduces one of them end to end rather than asserting that a check is
+ * present — a write that happens, a sentence that names something invisible, a
+ * number handed to somebody who cannot see what it counts.
+ */
+
+/// A second person in the same organisation.
+async fn another_person(state: &AppState, name: &str) -> crate::accounts::User {
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    state
+        .accounts
+        .create_user(&org, name, &format!("{name}@example.test"), "member")
+        .await
+        .unwrap()
+        .0
+}
+
+/// A directory of Alice's, with one other person named in it at one level.
+async fn a_shelf(
+    state: &AppState,
+    alice: &ft_core::UserId,
+    name: &str,
+    them: &crate::accounts::User,
+    level: crate::access::Level,
+) -> crate::access::Directory {
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    state
+        .access
+        .create_directory(
+            &org,
+            name,
+            alice,
+            &[crate::access::NewGrant {
+                subject_kind: crate::access::SubjectKind::Person,
+                subject_id: them.id.as_str().to_string(),
+                level,
+            }],
+        )
+        .await
+        .unwrap()
+}
+
+/// A profile filed in a directory, with whatever fields a test needs.
+async fn a_profile_on_the_shelf(
+    state: &AppState,
+    owner: &str,
+    shelf: &str,
+    fields: serde_json::Value,
+) -> String {
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let new: crate::roles::NewRole = serde_json::from_value(fields).unwrap();
+    state
+        .roles
+        .create_filed(org.as_str(), owner, "admin", Some(shelf), &new)
+        .await
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
+/// A session owned by somebody, running a profile, optionally under a parent.
+///
+/// The lineage rows the seeding reads, written the way the seeding's own
+/// tests write them.
+async fn a_past_session(
+    state: &AppState,
+    host: &Host,
+    owner: &str,
+    profile: &str,
+    under: Option<&ft_core::SessionId>,
+) -> ft_core::SessionId {
+    let id = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &id,
+            &host.id,
+            owner,
+            None,
+            // A name of its own: the workspace path is `u.<owner>.<slug of
+            // the name>_<the id's timestamp>`, and the timestamp is cut to a
+            // resolution coarser than a second — so two sessions of one
+            // owner with one name, written back to back, collide on
+            // `workspaces_path_unique`.
+            &format!("months ago, {}", &id.as_str()[id.as_str().len() - 6..]),
+            "do it",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(false, false),
+            Some(&format!("was-{}", &id.as_str()[id.as_str().len() - 6..])),
+        )
+        .await
+        .unwrap();
+    state.db.set_profile(&id, profile).await.unwrap();
+    if let Some(parent) = under {
+        // The request is unique within its parent, so each child carries its
+        // own — two children of one session is the ordinary shape here.
+        state
+            .db
+            .set_lineage(&id, parent, Some("do it"), Some(id.as_str()))
+            .await
+            .unwrap();
+    }
+    id
+}
+
+/// **#508 — the compatibility window is a write, so it asks what a write
+/// asks.**
+///
+/// Bob holds `Viewer` where a seeded team is filed: he may read it and may
+/// not edit it. Every gate on the window's path was answered at `Viewer`, so
+/// one `spawn` wrote a permanent position into somebody else's tree — a
+/// mutation gated by a read, on the structure that decides what agents may
+/// do.
+///
+/// Both people spawn the same profile into the same seat, so the only thing
+/// that differs is the grant. The reader is refused and nothing is written;
+/// the writer is admitted, which is what keeps this a `Writer` check rather
+/// than the window being quietly switched off.
+#[tokio::test]
+async fn a_reader_of_a_seeded_team_cannot_write_a_position_into_it() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let bob = another_person(&state, "bob").await;
+    let alice = ft_core::UserId::from_stored(owner.clone());
+    let shelf = a_shelf(
+        &state,
+        &alice,
+        "Platform",
+        &bob,
+        crate::access::Level::Viewer,
+    )
+    .await;
+
+    let orchestrator = a_profile_on_the_shelf(
+        &state,
+        alice.as_str(),
+        &shelf.slug,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "does": "Breaks work up and hands it out",
+            "placement": "here",
+            "canDelegate": true,
+        }),
+    )
+    .await;
+    // Filed beside it, so both of them can see it: what the window admits
+    // from is not what is in question here.
+    let _reviewer = a_profile_on_the_shelf(
+        &state,
+        alice.as_str(),
+        &shelf.slug,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads the diff",
+            "placement": "here",
+        }),
+    )
+    .await;
+    let body: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Orchestrator",
+        "lead": { "profile": orchestrator },
+        "directory": shelf.slug,
+    }))
+    .unwrap();
+    let team = state
+        .agent_teams
+        .create(
+            ft_core::OrgId::from_stored(state.db.org().await.unwrap()).as_str(),
+            alice.as_str(),
+            "admin",
+            Some(&shelf.slug),
+            &body,
+        )
+        .await
+        .unwrap()
+        .as_str()
+        .to_string();
+    as_if_seeded(&state, &team, 0).await;
+
+    // What Bob holds on the team: a look, and not a pen.
+    assert!(
+        state
+            .agent_teams
+            .one(bob.id.as_str(), &team, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .is_some(),
+        "Bob can see the team — he is a Viewer where it is filed"
+    );
+    assert!(
+        state
+            .agent_teams
+            .one(bob.id.as_str(), &team, crate::access::Level::Writer)
+            .await
+            .unwrap()
+            .is_none(),
+        "and he may NOT write it"
+    );
+    assert!(
+        state
+            .roles
+            .one(bob.id.as_str(), &_reviewer, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .is_some(),
+        "and he can see the profile he is about to name, so the refusal below \
+         is about the team and not about the name"
+    );
+    assert_eq!(
+        team_now(&state, alice.as_str(), &team).await.positions,
+        1,
+        "the lead, alone"
+    );
+
+    // He stands in the team's lead seat and spawns.
+    let his = lead_of_a_team(
+        &state,
+        &host,
+        &ready,
+        bob.id.as_str(),
+        Agent::ClaudeCode,
+        &team,
+    )
+    .await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &his,
+            "viewer-spawn",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect_err("a reader cannot grow somebody else's team");
+    let after = team_now(&state, alice.as_str(), &team).await;
+    assert_eq!(after.positions, 1, "the tree is the one its writer drew");
+    assert_eq!(after.auto_added, 0);
+
+    // Alice holds `Writer` where it is filed, so the window is open for her
+    // and the same spawn is admitted and marked.
+    let hers = lead_of_a_team(
+        &state,
+        &host,
+        &ready,
+        alice.as_str(),
+        Agent::ClaudeCode,
+        &team,
+    )
+    .await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &hers,
+            "writer-spawn",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect("somebody who could have drawn the seat still gets it");
+    let after = team_now(&state, alice.as_str(), &team).await;
+    assert_eq!(after.positions, 2, "the window still does its job");
+    assert_eq!(after.auto_added, 1, "and the seat it added is marked");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **#508 — and what may be written, which a `Writer` check does not answer.**
+///
+/// Bob holds `Writer` here, so the window opens for him. His own private
+/// profile is still not something that may hold a position in a team filed in
+/// Alice's directory: she would be shown a seat with no name on it, and
+/// `AgentTeams::must_see` would refuse her own save on an id she cannot
+/// resolve — and a save is the only way to clear the `auto_added_at` mark, so
+/// the review the mark asks for would be the thing that is blocked.
+///
+/// The rule is `agent_teams::admissible`, which is `must_see`'s question
+/// asked of the team's author rather than of a saver there is none of: **every
+/// team keeps at least one person who can always save it.**
+#[tokio::test]
+async fn the_window_cannot_seat_a_profile_the_teams_author_cannot_see() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let bob = another_person(&state, "bob").await;
+    let alice = ft_core::UserId::from_stored(owner.clone());
+    let shelf = a_shelf(
+        &state,
+        &alice,
+        "Platform",
+        &bob,
+        crate::access::Level::Writer,
+    )
+    .await;
+
+    let orchestrator = a_profile_on_the_shelf(
+        &state,
+        alice.as_str(),
+        &shelf.slug,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "does": "Breaks work up and hands it out",
+            "placement": "here",
+            "canDelegate": true,
+        }),
+    )
+    .await;
+    let body: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Orchestrator",
+        "lead": { "profile": orchestrator },
+        "directory": shelf.slug,
+    }))
+    .unwrap();
+    let team = state
+        .agent_teams
+        .create(
+            ft_core::OrgId::from_stored(state.db.org().await.unwrap()).as_str(),
+            alice.as_str(),
+            "admin",
+            Some(&shelf.slug),
+            &body,
+        )
+        .await
+        .unwrap()
+        .as_str()
+        .to_string();
+    as_if_seeded(&state, &team, 0).await;
+
+    let spy = a_profile(&state, bob.id.as_str(), "Spy").await;
+    assert!(
+        state
+            .agent_teams
+            .one(bob.id.as_str(), &team, crate::access::Level::Writer)
+            .await
+            .unwrap()
+            .is_some(),
+        "Bob may write the team, so the window opens for him"
+    );
+    assert!(
+        state
+            .roles
+            .one(alice.as_str(), &spy, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .is_none(),
+        "and the team's author cannot see the profile he is about to name"
+    );
+
+    let lead = lead_of_a_team(
+        &state,
+        &host,
+        &ready,
+        bob.id.as_str(),
+        Agent::ClaudeCode,
+        &team,
+    )
+    .await;
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "author-cannot-see",
+            "spawn",
+            serde_json::json!({ "role": "Spy", "goal": "read everything" }),
+        ),
+    )
+    .await
+    .expect_err("a seat its owner could never save is not one to write");
+    assert!(
+        format!("{refused:#}").contains("cannot reach"),
+        "and the sentence says why, with the profile's own name: {refused:#}"
+    );
+
+    let after = team_now(&state, alice.as_str(), &team).await;
+    assert_eq!(after.positions, 1, "nothing was written");
+    let seats = state
+        .agent_teams
+        .positions(alice.as_str(), &team)
+        .await
+        .unwrap();
+    assert!(
+        seats.iter().all(|p| p.profile_name.is_some()),
+        "so there is no seat the author is shown and cannot name"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **#508, the half a `Writer` check does not close — the migration reaches
+/// the same unsaveable team with nobody present.**
+///
+/// The seeder reads lineage across every owner, so a profile of Bob's that he
+/// spawned through Alice's shared Manager became a seat in the team filed in
+/// Alice's directory: a seat she cannot name, in a team she cannot save,
+/// because `must_see` refuses her own write on a profile she has no reach to.
+///
+/// Both halves are asserted, because the rule has to hold in both directions:
+/// the profile of somebody else's that must not come across, and Alice's own,
+/// which must — dropping that would be the break the migration exists to
+/// avoid.
+#[tokio::test]
+async fn seeding_leaves_a_team_its_author_can_still_save() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let bob = another_person(&state, "bob").await;
+    let alice = ft_core::UserId::from_stored(owner.clone());
+    let shelf = a_shelf(
+        &state,
+        &alice,
+        "Platform",
+        &bob,
+        crate::access::Level::Viewer,
+    )
+    .await;
+
+    let orchestrator = a_profile_on_the_shelf(
+        &state,
+        alice.as_str(),
+        &shelf.slug,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "does": "Breaks work up and hands it out",
+            "placement": "here",
+            "canDelegate": true,
+        }),
+    )
+    .await;
+    // One profile of Alice's own, and one of Bob's. Each is invisible to the
+    // other; both were spawned through the shared Manager before the cut.
+    let engineer = a_profile(&state, alice.as_str(), "Engineer").await;
+    let spy = a_profile(&state, bob.id.as_str(), "Spy").await;
+
+    let hers = a_past_session(&state, &host, alice.as_str(), &orchestrator, None).await;
+    a_past_session(&state, &host, alice.as_str(), &engineer, Some(&hers)).await;
+    let his = a_past_session(&state, &host, bob.id.as_str(), &orchestrator, None).await;
+    a_past_session(&state, &host, bob.id.as_str(), &spy, Some(&his)).await;
+
+    let org = state.db.org().await.unwrap();
+    crate::agent_teams::seed::seed(&state.agent_teams, &org)
+        .await
+        .unwrap()
+        .expect("the cut ran");
+
+    let team = state
+        .agent_teams
+        .visible(alice.as_str(), crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.lead.as_deref() == Some(orchestrator.as_str()))
+        .expect("a team for the shared Manager");
+    assert!(
+        team.members.iter().any(|m| m == "Engineer"),
+        "what its own author could reach came across: {:?}",
+        team.members
+    );
+    let seats = state
+        .agent_teams
+        .positions(alice.as_str(), &team.id)
+        .await
+        .unwrap();
+    assert!(
+        !seats.iter().any(|p| p.profile == spy),
+        "a profile the team's author cannot see is not a seat in it"
+    );
+    assert!(
+        seats.iter().all(|p| p.profile_name.is_some()),
+        "so there is no seat the administrator is shown and cannot name"
+    );
+
+    // And the whole point of the rule: she can save the team she is told to
+    // review. Round-tripped exactly as the map sends it.
+    let round_trip = serde_json::json!({
+        "name": team.name,
+        "lead": {
+            "id": seats.iter().find(|p| p.parent.is_none()).unwrap().id,
+            "profile": orchestrator,
+            "children": seats
+                .iter()
+                .filter(|p| p.parent.is_some())
+                .map(|p| serde_json::json!({ "id": p.id, "profile": p.profile }))
+                .collect::<Vec<_>>(),
+        },
+    });
+    let body: crate::agent_teams::NewAgentTeam = serde_json::from_value(round_trip).unwrap();
+    assert!(
+        state
+            .agent_teams
+            .write(alice.as_str(), &team.id, &body)
+            .await
+            .expect("the author's own save goes through"),
+        "a seeded team its author cannot save is the state this rule exists to prevent"
+    );
+}
+
+/// **#509 — a directory that holds profiles and agent teams is not empty.**
+///
+/// The emptiness check counted five kinds and three were missing, so a
+/// directory of profiles and teams read as empty, deleted, and left its
+/// contents orphaned at a path a directory of the same name would collect
+/// again — slugs are derived from the name, so recreating one is enough.
+#[tokio::test]
+async fn a_directory_holding_profiles_and_teams_is_not_empty() {
+    let (state, _principal, _host, _ready, owner) = fixture().await;
+    let alice = ft_core::UserId::from_stored(owner.clone());
+    let bob = another_person(&state, "bob").await;
+    let shelf = a_shelf(
+        &state,
+        &alice,
+        "Platform",
+        &bob,
+        crate::access::Level::Writer,
+    )
+    .await;
+
+    let orchestrator = a_profile_on_the_shelf(
+        &state,
+        alice.as_str(),
+        &shelf.slug,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "does": "Breaks work up",
+            "placement": "here",
+            "canDelegate": true,
+            "instructions": "The release key is in the vault under `prod`.",
+        }),
+    )
+    .await;
+    let body: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Platform",
+        "lead": { "profile": orchestrator },
+        "directory": shelf.slug,
+    }))
+    .unwrap();
+    state
+        .agent_teams
+        .create(
+            ft_core::OrgId::from_stored(state.db.org().await.unwrap()).as_str(),
+            alice.as_str(),
+            "admin",
+            Some(&shelf.slug),
+            &body,
+        )
+        .await
+        .unwrap();
+
+    // What the Access screen draws, and what the delete refuses on.
+    let read = state
+        .access
+        .directory(shelf.id.as_str())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        read.holds_anything(),
+        "a directory holding a team and a profile is not empty"
+    );
+    let kinds: Vec<crate::access::FiledKind> = state
+        .access
+        .filed_in(&shelf.slug)
+        .await
+        .unwrap()
+        .iter()
+        .map(|f| f.kind)
+        .collect();
+    assert!(
+        kinds.contains(&crate::access::FiledKind::Role)
+            && kinds.contains(&crate::access::FiledKind::AgentTeam),
+        "and the screen names both of them: {kinds:?}"
+    );
+
+    // So the delete refuses, and says what is in the way.
+    let refused = state
+        .access
+        .delete_directory(shelf.id.as_str())
+        .await
+        .expect_err("something is filed here");
+    let said = format!("{refused:#}");
+    assert!(
+        said.contains("1 profile") && said.contains("1 agent team"),
+        "the refusal names what it holds: {said}"
+    );
+}
+
+/// **#510 — a scope is also how reach is taken away, so seeding may not undo
+/// one.**
+///
+/// A Manager narrowed to the Engineer, with one historical spawn of the
+/// Auditor from before the narrowing. The old path refuses the Auditor today;
+/// seeding read the lineage and wrote it back in as a position, which handed
+/// the reach back with nobody asked and no mark on the seat to say so.
+#[tokio::test]
+async fn seeding_does_not_resurrect_a_reach_the_scope_revoked() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let auditor = a_profile(&state, &owner, "Auditor").await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![engineer.clone()]).await;
+
+    // The history says it spawned the Auditor, back when it could.
+    let then = a_past_session(&state, &host, &owner, &orchestrator, None).await;
+    a_past_session(&state, &host, &owner, &auditor, Some(&then)).await;
+    // And the Engineer, which the scope still allows.
+    a_past_session(&state, &host, &owner, &engineer, Some(&then)).await;
+
+    // The old path refuses the Auditor today, because the scope says so.
+    ready.store(true, Ordering::SeqCst);
+    state
+        .db
+        .mark_host_online(
+            &host.id,
+            "test",
+            4,
+            8192,
+            &ft_core::DockerState::running("27.0.3"),
+        )
+        .await
+        .unwrap();
+    let bare = lead_running(&state, &host, &owner, Agent::ClaudeCode, &orchestrator).await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &bare,
+            "scope-before",
+            "spawn",
+            serde_json::json!({ "role": "Auditor", "goal": "audit it" }),
+        ),
+    )
+    .await
+    .expect_err("the scope says no");
+
+    let org = state.db.org().await.unwrap();
+    crate::agent_teams::seed::seed(&state.agent_teams, &org)
+        .await
+        .unwrap()
+        .expect("it seeded");
+
+    let team = state
+        .agent_teams
+        .visible(&owner, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|t| t.lead.as_deref() == Some(orchestrator.as_str()))
+        .expect("a team for the Manager");
+    assert!(
+        !team.members.iter().any(|m| m == "Auditor"),
+        "a narrowed scope is a ceiling on what history may resurrect: {:?}",
+        team.members
+    );
+    assert!(
+        team.members.iter().any(|m| m == "Engineer"),
+        "and what the scope still allows is seeded as it always was: {:?}",
+        team.members
+    );
+
+    // The seat is not there, so the spawn is refused exactly as before — and
+    // the window, which intersects with the same scope, will not add it
+    // either. The same session, now standing in the seeded team: one lead,
+    // so the two answers are the same session's before and after.
+    let standing = state
+        .agent_teams
+        .lead_of(&owner, &team.id)
+        .await
+        .unwrap()
+        .expect("the team's lead position");
+    state
+        .db
+        .set_position(&bare, &standing.position)
+        .await
+        .unwrap();
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &bare,
+            "scope-after",
+            "spawn",
+            serde_json::json!({ "role": "Auditor", "goal": "audit it" }),
+        ),
+    )
+    .await
+    .expect_err("the seeded seat does not hand back what the scope took away");
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **#511 — a refusal may not name a profile the asker cannot see.**
+///
+/// A name is one profile within one directory, and in a *personal* space
+/// access is per-object: somebody named on one profile filed at `u/alice`
+/// sees none of the others there. The rename refusal spelled the clashing
+/// profile's name back, in its own casing, which made the endpoint a
+/// confirmation oracle over the names in somebody's private space.
+///
+/// The rule itself is unchanged — the name is still taken, and the write is
+/// still refused. Only what the refusal is allowed to say changes.
+#[tokio::test]
+async fn a_rename_refusal_does_not_name_a_profile_the_asker_cannot_see() {
+    let (state, _principal, _host, _ready, owner) = fixture().await;
+    let bob = another_person(&state, "bob").await;
+    let alice = owner.clone();
+
+    let secret = a_profile(&state, &alice, "Chimera Launch Bot").await;
+    let shared = a_profile(&state, &alice, "Shared Helper").await;
+
+    // Bob is named on one of them, as a Writer. He cannot see the other.
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Role,
+            &shared,
+            bob.id.as_str(),
+            crate::access::Level::Writer,
+        )
+        .await
+        .unwrap();
+    assert!(
+        state
+            .roles
+            .one(bob.id.as_str(), &shared, crate::access::Level::Writer)
+            .await
+            .unwrap()
+            .is_some(),
+        "Bob may write the one he was named on"
+    );
+    assert!(
+        state
+            .roles
+            .one(bob.id.as_str(), &secret, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .is_none(),
+        "and cannot see the other at all"
+    );
+
+    // He renames the one he holds, guessing a name.
+    let rename: crate::roles::NewRole = serde_json::from_value(serde_json::json!({
+        "name": "chimera launch bot",
+        "does": "guessing",
+        "placement": "here",
+    }))
+    .unwrap();
+    let refused = state
+        .roles
+        .update(bob.id.as_str(), &shared, &rename)
+        .await
+        .expect_err("the name is taken, and still is");
+    let said = format!("{refused:#}");
+    assert!(
+        !said.contains("Chimera Launch Bot"),
+        "the refusal must not spell out a profile Bob cannot see: {said}"
+    );
+    assert!(
+        said.contains("chimera launch bot"),
+        "only the string he typed: {said}"
+    );
+
+    // And Alice, who can see both, is still told which one is in the way —
+    // the rule is the same and only the audience changed.
+    let hers = a_profile(&state, &alice, "Another Of Hers").await;
+    let clash: crate::roles::NewRole = serde_json::from_value(serde_json::json!({
+        "name": "chimera launch bot",
+        "does": "hers",
+        "placement": "here",
+    }))
+    .unwrap();
+    let refused = state
+        .roles
+        .update(&alice, &hers, &clash)
+        .await
+        .expect_err("the name is taken for her too");
+    assert!(
+        format!("{refused:#}").contains("Chimera Launch Bot"),
+        "she may be told which profile is in the way: {refused:#}"
+    );
+
+    // A name nobody holds still goes through, so the two answers differ and
+    // the test is about the wording rather than about refusing everything.
+    let free: crate::roles::NewRole = serde_json::from_value(serde_json::json!({
+        "name": "Nothing Of That Name",
+        "does": "guessing",
+        "placement": "here",
+    }))
+    .unwrap();
+    assert!(state
+        .roles
+        .update(bob.id.as_str(), &shared, &free)
+        .await
+        .unwrap());
+}
+
+/// **#512 — the window changes a tree, so it does what every other change to
+/// a tree does.**
+///
+/// A schedule that names a team pins the whole tree at approval. The editor
+/// and the delete both clear that approval and re-pin; the window inserted a
+/// position and returned, so the schedule kept `approved_at`, kept drawing a
+/// *Next run*, and failed at the gate every occurrence from then on, with
+/// nothing having told anybody.
+#[tokio::test]
+async fn the_window_stops_the_schedules_pinned_to_the_team_it_grows() {
+    let (state, principal, host, ready, owner) = fixture().await;
+    let orchestrator = a_manager(&state, &owner, "Orchestrator", vec![]).await;
+    let _reviewer = a_profile(&state, &owner, "Reviewer").await;
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": { "profile": orchestrator },
+        }),
+    )
+    .await;
+    as_if_seeded(&state, &team, 0).await;
+
+    let on = a_team_schedule(&state, &principal, &owner, "Morning sweep", &team).await;
+    let row = state.db.schedule(&on.id).await.unwrap().unwrap();
+    let approved = row.pins["team"]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // A spawn during the window adds a seat. Nothing goes near the editor.
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "window-grows",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect("the window admits it");
+
+    let still = state.db.schedule(&on.id).await.unwrap().unwrap();
+    let live = state
+        .agent_teams
+        .detail(&owner, &team, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap()
+        .positions;
+    assert_eq!(live.len(), 2, "the window did add the seat");
+    assert!(
+        still.approved_at.is_none(),
+        "and the approval went with it, as an edit's would"
+    );
+    assert!(
+        !still.active,
+        "so it is not drawing a Next run it cannot keep"
+    );
+    assert_eq!(
+        still.paused_reason.as_deref(),
+        Some(crate::schedules::reason_name(
+            ft_core::schedule::PausedReason::TeamChanged
+        )),
+        "and it reads as Waiting for you, for the reason it is"
+    );
+    assert_ne!(approved, super::schedules::team_fingerprint_of(&live));
+    assert_eq!(
+        still.pins["team"]["fingerprint"].as_str(),
+        Some(super::schedules::team_fingerprint_of(&live).as_str()),
+        "re-pinned on the tree as it is now, so turning it back on is the look"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **#513 — deleting a profile cascades onto teams the deleter cannot see.**
+///
+/// `agent_team_positions.profile_id` is `on delete cascade` and `parent_id`
+/// is too, so a delete takes every position referencing the profile and
+/// everything under them, in every team in the organisation. The confirmation
+/// was built from a read that filters by what the asker can see, and then
+/// asserted *no team holds a position for it* — false in the one direction
+/// that matters.
+///
+/// Two halves: the count of what is invisible, which is the shape without the
+/// names, and the schedules on the other side of the boundary, which now stop
+/// the way an edit would have stopped them.
+#[tokio::test]
+async fn deleting_a_profile_counts_the_teams_it_cannot_see_and_stops_their_schedules() {
+    let (state, principal, _host, _ready, owner) = fixture().await;
+    let bob = another_person(&state, "bob").await;
+    let alice = ft_core::UserId::from_stored(owner.clone());
+    let bob_principal = crate::auth::Principal {
+        subject: "bob".into(),
+        via: crate::auth::Via::Session,
+        user: Some(bob.clone()),
+    };
+    let shelf = a_shelf(
+        &state,
+        &alice,
+        "Platform",
+        &bob,
+        crate::access::Level::Viewer,
+    )
+    .await;
+
+    let engineer = a_profile_on_the_shelf(
+        &state,
+        alice.as_str(),
+        &shelf.slug,
+        serde_json::json!({
+            "name": "Engineer",
+            "does": "Writes the change",
+            "placement": "here",
+        }),
+    )
+    .await;
+
+    // Bob builds a team of his own, in his own space, that uses it.
+    let bob_lead = a_profile(&state, bob.id.as_str(), "Bob's Orchestrator").await;
+    let team = saved_team(
+        &state,
+        bob.id.as_str(),
+        serde_json::json!({
+            "name": "Bob's Platform",
+            "lead": { "profile": bob_lead, "children": [{ "profile": engineer }] },
+        }),
+    )
+    .await;
+    let on = a_team_schedule(
+        &state,
+        &bob_principal,
+        bob.id.as_str(),
+        "Morning sweep",
+        &team,
+    )
+    .await;
+    assert!(on.approved_at.is_some() && on.active);
+    assert!(
+        state
+            .agent_teams
+            .one(alice.as_str(), &team, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .is_none(),
+        "Bob's team is in his own space"
+    );
+
+    // What the delete confirmation is built from: nothing she may name, and
+    // the number of seats she may not.
+    let Json(places) = super::roles::role_positions(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(engineer.clone()),
+    )
+    .await
+    .expect("the profile is hers");
+    assert!(
+        places.places.is_empty(),
+        "there is no team she can see, so there is nothing to name"
+    );
+    assert_eq!(
+        places.withheld, 1,
+        "and the one she cannot see is counted rather than denied"
+    );
+
+    super::roles::delete_role(
+        State(state.clone()),
+        Extension(principal.clone()),
+        Path(engineer.clone()),
+    )
+    .await
+    .expect("a profile its owner may delete");
+
+    // Bob's team lost a seat, which is the cascade doing what it does.
+    let live = state
+        .agent_teams
+        .detail(bob.id.as_str(), &team, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .expect("still there")
+        .positions;
+    assert_eq!(live.len(), 1);
+
+    // And his schedule stopped, rather than failing at nine in the morning.
+    let still = state.db.schedule(&on.id).await.unwrap().unwrap();
+    assert!(
+        still.approved_at.is_none(),
+        "a change to a tree clears the approval, whoever caused it"
+    );
+    assert!(!still.active);
+    assert_eq!(
+        still.paused_reason.as_deref(),
+        Some(crate::schedules::reason_name(
+            ft_core::schedule::PausedReason::TeamChanged
+        ))
+    );
+}
+
+/// **#515 — the count of schedules a save would stop goes to whoever could
+/// save.**
+///
+/// It is counted across every owner, and that is the whole reason it exists:
+/// somebody about to stop four schedules has to be told four, including the
+/// ones they will never be allowed to read. What was wrong is who was handed
+/// it — any `Viewer` on a shared team learned how much unattended work other
+/// people had pinned to it, and watched the number move.
+#[tokio::test]
+async fn only_somebody_who_could_save_is_told_how_many_schedules_pin_a_team() {
+    let (state, principal, _host, _ready, owner) = fixture().await;
+    let bob = another_person(&state, "bob").await;
+    let alice = ft_core::UserId::from_stored(owner.clone());
+    let reader = a_shelf(
+        &state,
+        &alice,
+        "Readable",
+        &bob,
+        crate::access::Level::Viewer,
+    )
+    .await;
+
+    let orchestrator = a_profile_on_the_shelf(
+        &state,
+        alice.as_str(),
+        &reader.slug,
+        serde_json::json!({
+            "name": "Orchestrator",
+            "does": "Breaks work up",
+            "placement": "here",
+        }),
+    )
+    .await;
+    let body: crate::agent_teams::NewAgentTeam = serde_json::from_value(serde_json::json!({
+        "name": "Platform",
+        "lead": { "profile": orchestrator },
+        "directory": reader.slug,
+    }))
+    .unwrap();
+    let team = state
+        .agent_teams
+        .create(
+            ft_core::OrgId::from_stored(state.db.org().await.unwrap()).as_str(),
+            alice.as_str(),
+            "admin",
+            Some(&reader.slug),
+            &body,
+        )
+        .await
+        .unwrap()
+        .as_str()
+        .to_string();
+
+    // Alice's own approved schedule, pinned to the team.
+    a_team_schedule(&state, &principal, alice.as_str(), "Morning sweep", &team).await;
+
+    let hers = state
+        .agent_teams
+        .one(alice.as_str(), &team, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .expect("she can see it");
+    assert!(hers.may_write, "she is where it is filed, at Writer");
+    assert_eq!(
+        hers.schedules, 1,
+        "somebody about to save is told what the save would stop"
+    );
+
+    let his = state
+        .agent_teams
+        .one(bob.id.as_str(), &team, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .expect("he can see it too");
+    assert!(!his.may_write, "but he may only read it");
+    assert_eq!(
+        his.schedules, 0,
+        "so he is told nothing about other people's unattended work"
     );
 }

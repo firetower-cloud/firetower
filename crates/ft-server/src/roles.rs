@@ -801,13 +801,56 @@ impl Roles {
             return Ok(false);
         };
         let there = filed_in_directory(&path);
-        if let Some(held) = named_already(&self.pool, &there, &new.name, Some(id)).await? {
-            return Err(Refused(format!(
-                "\"{held}\" is already filed in {}, and two profiles filed together cannot \
-                 share a name. Pick another name, or file one of the two somewhere else.",
-                place(&there)
-            ))
-            .into());
+        if named_already(&self.pool, &there, &new.name, Some(id))
+            .await?
+            .is_some()
+        {
+            /* **Two questions, and only the second one is filtered.**
+
+            *Is the name free?* is unfiltered and stays that way, because
+            `roles_name_in_directory` is unfiltered and a server that
+            disagreed with its own index would refuse writes it had just
+            accepted.
+
+            *May this refusal name the profile in the way?* is a different
+            question, and this is the one write path where the answer can
+            be no. The migration's reasoning — "everything a refusal can
+            name is already filed where the person asking is writing" — is
+            true of a **directory**, where a grant is uniform: hold Writer
+            on `d/platform` and you can read everything in it. It is false
+            of a **personal space**, where access is per-object: an
+            exception names one profile filed at `u/alice`, and the person
+            named on it can see none of the others there. A rename is the
+            only write whose scope is somebody else's root, so it is the
+            only one that can report back the exact name — casing, spacing
+            and all — of a profile the asker is not allowed to know exists.
+            That is the enumeration oracle the import was built to avoid
+            (#354), one write path over.
+
+            So when the clash is with something they cannot see, the
+            refusal falls back to the sentence `refused_by_constraint`
+            already writes for the race it cannot close: it names only the
+            string they just typed. Where it is filed is no disclosure —
+            they are writing there. */
+            return Err(
+                match named_already_seen_by(&self.pool, person, &there, &new.name, Some(id)).await?
+                {
+                    Some(held) => Refused(format!(
+                        "\"{held}\" is already filed in {}, and two profiles filed together \
+                         cannot share a name. Pick another name, or file one of the two \
+                         somewhere else.",
+                        place(&there)
+                    )),
+                    None => Refused(format!(
+                        "a profile called \"{}\" is already filed in {}, and two filed together \
+                         cannot share a name. Pick another name, or file this one somewhere \
+                         else.",
+                        new.name.trim(),
+                        place(&there)
+                    )),
+                }
+                .into(),
+            );
         }
         replace_in(&self.pool, id, None, new).await?;
         Ok(true)
@@ -1173,6 +1216,17 @@ pub fn filed_in_directory(path: &ft_core::ResourcePath) -> String {
 /// `directory` is [`filed_in_directory`], and the comparison is the index's
 /// own: `lower(btrim(...))`, so it is case-insensitive and a stored space
 /// cannot hide a clash.
+///
+/// **Unfiltered, and what a refusal may say about the answer is a second
+/// question.** `20261120120000_profile_name_unique.sql` says scoping the name
+/// to a directory means "everything a refusal can name is already filed where
+/// the person asking is writing". That holds for a **directory**, where a
+/// grant is uniform, and not for a **personal space**, where `filed_where`
+/// also grants through `extra_perms` one object at a time — so a rename in
+/// somebody else's root can collide with a profile the asker is not allowed
+/// to know exists. [`named_already_seen_by`] is the question to ask before
+/// putting a name in a sentence; see [`Roles::update`], the only path that
+/// reaches it.
 pub async fn named_already<'e, E>(
     x: E,
     directory: &str,
@@ -1195,6 +1249,46 @@ where
     .fetch_optional(x)
     .await
     .context("reading which profile is already called that")
+}
+
+/// The same question, **narrowed to what the asker may already see**.
+///
+/// [`named_already`] answers whether the name is free, which has to be
+/// unfiltered or the server and `roles_name_in_directory` disagree. This
+/// answers whether a refusal may *name* the profile in the way, which is a
+/// different question with a different audience, and the two are separate
+/// calls rather than one because conflating them is how a rule that protects
+/// a namespace becomes a way to read one.
+///
+/// `filed_where(r, person, Viewer)` and nothing beside it — the predicate
+/// every other read of a profile takes.
+pub async fn named_already_seen_by<'e, E>(
+    x: E,
+    person: &str,
+    directory: &str,
+    name: &str,
+    except: Option<&str>,
+) -> Result<Option<String>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let sql = format!(
+        "SELECT r.name FROM roles r \
+          WHERE subpath(r.path, 0, 2) = $2::ltree \
+            AND lower(btrim(r.name)) = lower(btrim($3)) \
+            AND ($4::text IS NULL OR r.id <> $4) \
+            AND {visible} \
+          LIMIT 1",
+        visible = filed_where("r", 1, Level::Viewer),
+    );
+    sqlx::query_scalar::<_, String>(&sql)
+        .bind(person)
+        .bind(directory)
+        .bind(name)
+        .bind(except)
+        .fetch_optional(x)
+        .await
+        .context("reading which profile in the way somebody may be told about")
 }
 
 /// Where a name has to be free, as a sentence says it.

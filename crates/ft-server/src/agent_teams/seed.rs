@@ -30,14 +30,34 @@
 //!   question "could this profile hand work off", and a profile demoted to an
 //!   Operator before the cut had no reach to preserve, whatever its history.
 //!
-//! `roles.delegate_scope` is deliberately **not** read here, and it is the one
-//! thing a reader will ask about. A narrowed scope is a finite list somebody
-//! ticked, so copying it would be defensible — but #491 is explicit that a
-//! profile which never spawned gets an *empty* team, and a scope that was
-//! never exercised is a guess about intent the same way a visibility snapshot
-//! is. The scope is not lost: it is exactly what the compatibility window
-//! admits from, so a profile reaching one of those entries for the first time
-//! gets the seat then, marked, out of real use. See [`super::window`].
+//! `roles.delegate_scope` is **not copied**, and it is the one thing a reader
+//! will ask about. A narrowed scope is a finite list somebody ticked, so
+//! copying it would be defensible — but #491 is explicit that a profile which
+//! never spawned gets an *empty* team, and a scope that was never exercised is
+//! a guess about intent the same way a visibility snapshot is. An empty scope
+//! still means "any", so a profile that never spawned still gets an empty team
+//! rather than a snapshot of everything visible.
+//!
+//! **A non-empty scope is read, as a ceiling.** That is the other direction,
+//! and it goes the other way: a scope is also how reach is *taken away*. A
+//! Manager that spawned an Auditor last March, narrowed since to exclude it,
+//! is refused the Auditor by the old path today — and a migration that read
+//! the March spawn and wrote the Auditor back in as a position would undo a
+//! revocation nobody asked it to undo. So history is intersected with the
+//! scope, which also puts seeding and the window on one rule: during the
+//! window the scope is exactly what gets admitted, so anything the
+//! intersection drops at the cut can still arrive through real use, marked.
+//! See [`super::window`].
+//!
+//! **And lineage is read across every owner**, which is right — a shared
+//! profile's history is everybody's who used it — but what it turns up is
+//! not. A colleague who ran somebody else's Manager and spawned a profile of
+//! their own would have had that private profile written into a team filed in
+//! the Manager's directory: a seat its owner cannot name, in a team they can
+//! then never save, because `AgentTeams::must_see` refuses their write on an
+//! id they cannot resolve. So each seat is passed through
+//! [`super::admissible`], the same question the editor asks of whoever is
+//! saving, asked here of the team's own author.
 
 use anyhow::{Context, Result};
 use sqlx::Row;
@@ -60,7 +80,10 @@ pub struct Seeded {
 pub struct Truncated {
     pub profile: String,
     pub name: String,
-    /// How many distinct profiles it had spawned.
+    /// How many distinct profiles it had spawned **that were still eligible**
+    /// — on its scope, and filed where its team's author can reach them. The
+    /// two it was over by are the two reasons a seat is dropped before the
+    /// limit is even asked about.
     pub spawned: usize,
     /// How many of them became positions: `MAX_POSITIONS - 1`.
     pub kept: usize,
@@ -106,9 +129,9 @@ pub async fn run(state: AppState) {
                     are already wondering where a seat went. */
                     tracing::warn!(
                         profile = %cut.profile,
-                        "\"{}\" had spawned {} different profiles, and a team holds {} positions \
-                         with its lead among them — so its team was seeded with the {} most \
-                         recently spawned and the rest were left out. They can be added on \
+                        "\"{}\" had {} different profiles to bring across, and a team holds {} \
+                         positions with its lead among them — so its team was seeded with the {} \
+                         most recently spawned and the rest were left out. They can be added on \
                          Configuration → Agent teams.",
                         cut.name,
                         cut.spawned,
@@ -160,7 +183,7 @@ pub async fn seed(teams: &AgentTeams, org: &str) -> Result<Option<Seeded>> {
     there are none at the cut, and the guard is what keeps this from
     doubling a hand-made team if the two ever do overlap. */
     let leads = sqlx::query(
-        "SELECT r.id, r.name, r.path::text AS path, r.created_by \
+        "SELECT r.id, r.name, r.path::text AS path, r.created_by, r.delegate_scope \
            FROM roles r \
           WHERE r.org_id = $1 AND r.can_delegate \
             AND NOT EXISTS (SELECT 1 FROM agent_team_positions p \
@@ -178,6 +201,7 @@ pub async fn seed(teams: &AgentTeams, org: &str) -> Result<Option<Seeded>> {
         let name: String = lead.get("name");
         let path: String = lead.get("path");
         let created_by: Option<String> = lead.get("created_by");
+        let scope: Vec<String> = lead.get("delegate_scope");
 
         /* **What this profile actually spawned.** One row per distinct
         profile it has started a child as, newest first — which is both the
@@ -214,20 +238,64 @@ pub async fn seed(teams: &AgentTeams, org: &str) -> Result<Option<Seeded>> {
         suggestion. Keeping the most recently used is the choice that is
         most often right, and the rest are one add away on a screen that
         now exists. */
+        /* **The scope is a ceiling on what history may resurrect.**
+
+        Empty still means "any of those", which was the old default and is
+        why a profile that never spawned still gets an empty team rather
+        than a snapshot. A *narrowed* scope is different: it is the one way
+        reach was ever taken away, and the old path refuses an entry that
+        is not on it today whatever the lineage says. Reading it here is
+        what stops a migration nobody asked for from undoing somebody's
+        revocation — and it puts this on the window's rule, so an entry
+        the intersection drops can still arrive later out of real use,
+        marked. */
+        let scoped = !scope.is_empty();
+
+        /* **And a seat the team's own author could not have drawn.** The
+        lineage above is read across every owner, which is right for a
+        shared profile — but a colleague's spawn of a profile of their own
+        would otherwise become a seat in a team filed in somebody else's
+        directory, which that somebody can see without being able to name
+        and can then never save. `admissible` is `must_see`'s question,
+        asked of the author rather than of a saver there is none of. */
+        let candidates: Vec<String> = spawned
+            .iter()
+            .map(|row| row.get::<String, _>("profile_id"))
+            .filter(|id| !scoped || scope.contains(id))
+            .collect();
+        let allowed =
+            super::admissible(&mut *tx, created_by.as_deref(), &path, &candidates).await?;
+        let wanted: Vec<String> = candidates
+            .iter()
+            .filter(|id| allowed.contains_key(id.as_str()))
+            .cloned()
+            .collect();
+        /* **Said out loud, like the truncation below.** A seat left out is
+        reach somebody had before the cut and does not have after, and the
+        two reasons are different things to do about it: a scope is a
+        decision somebody already made, and a profile the author cannot see
+        wants filing somewhere they can. Neither is a reason to abandon the
+        team. */
+        let dropped = candidates.len() - wanted.len();
+        if dropped > 0 {
+            tracing::warn!(
+                profile = %profile,
+                "\"{name}\" had spawned {dropped} profile(s) that are not seats in its team: \
+                 either off its own delegate scope, or filed where the team's owner cannot \
+                 reach them. They can be added on Configuration → Agent teams."
+            );
+        }
+
         let room = MAX_POSITIONS.saturating_sub(1);
-        if spawned.len() > room {
+        if wanted.len() > room {
             done.truncated.push(Truncated {
                 profile: profile.clone(),
                 name: name.clone(),
-                spawned: spawned.len(),
+                spawned: wanted.len(),
                 kept: room,
             });
         }
-        let reports: Vec<String> = spawned
-            .iter()
-            .take(room)
-            .map(|row| row.get::<String, _>("profile_id"))
-            .collect();
+        let reports: Vec<String> = wanted.into_iter().take(room).collect();
 
         // Named after its lead profile, which is the name somebody already
         // knows it by. Trimmed to what `check` accepts rather than refused for

@@ -135,6 +135,27 @@ pub async fn open_at(
         return Ok(None);
     };
 
+    /* **And somebody who could have drawn the seat by hand.**
+
+    Every other gate here is answered at `Viewer`, because every other gate
+    is a question about reading: is this a team, is it seeded, can this
+    profile delegate. `admit` is a *write* — it puts a permanent row into
+    `agent_team_positions`, which is the structure that decides what agents
+    may do — and a mutation gated by a read is how somebody with a look at a
+    shared team came to own what it hands work to. So the window asks the
+    same `filed_where(t, Writer)` the editor asks, through the one predicate,
+    and simply does not open for a reader.
+
+    A reader then meets the ordinary post-window refusal, which is the honest
+    answer: they could not have added the seat on the Agent teams screen
+    either. **This does not narrow anybody's reach** — the window never
+    granted reach, it wrote structure; what a session may hand work to is
+    still `reports`, intersected on the team and on the profile at every
+    read. */
+    if !state.agent_teams.may_write(owner, &standing.team).await? {
+        return Ok(None);
+    }
+
     let Some(closes_at) = closes_at(state, &standing.team).await? else {
         return Ok(None);
     };
@@ -221,6 +242,44 @@ pub async fn admit(
         );
     }
 
+    /* **A seat the team's author could not have drawn themselves.**
+
+    `AgentTeams::must_see` refuses, on every editor path, a tree naming a
+    profile the person saving cannot see. This path has a person — whoever
+    is standing in the seat — but on a *shared* seeded team that is not
+    necessarily the team's author, and a colleague's private profile
+    written in here leaves the author with a seat they cannot name and a
+    save that is refused on an opaque id. Saving is the only way to clear
+    the `auto_added_at` mark, so the review the mark asks for is the thing
+    that is blocked.
+
+    So the same question the editor asks, asked of the author:
+    `agent_teams::admissible`, which is one spelling for both writers that
+    have no saver of their own. Refused rather than dropped, and with the
+    profile's own name in the sentence, because this one has a name to use
+    — the agent resolved it a moment ago. */
+    let Some((author, team_path)) = state.agent_teams.author_of(&standing.team).await? else {
+        return Ok(None);
+    };
+    if super::admissible(
+        state.db.pool(),
+        author.as_deref(),
+        &team_path,
+        std::slice::from_ref(&found.id),
+    )
+    .await?
+    .is_empty()
+    {
+        bail!(
+            "\"{}\" is filed somewhere the \"{}\" team's own owner cannot reach, so it cannot \
+             hold a position in it — a seat nobody who owns the team can name is one they could \
+             never save. Ask them to add it on Configuration → Agent teams, or hand this work to \
+             a profile the team already holds.",
+            found.name,
+            standing.team_name,
+        );
+    }
+
     /* The position limit, which a seeded team can reach: 63 reports came
     across at the cut and this would be the 65th seat. Refused with the
     number and the fix, rather than a limit enforced on the write screen
@@ -297,6 +356,28 @@ pub async fn admit(
             .into_iter()
             .find(|r| r.profile.id == found.id));
     }
+
+    /* **A tree that changed, so the schedules pinned to it stop — exactly
+    as they do when somebody edits one.**
+
+    A schedule naming a team pins the whole tree at approval, and both
+    paths that change a team through the editor (`update_agent_team`,
+    `delete_agent_team`) clear that approval and re-pin, so the schedule
+    reads as *Waiting for you* and somebody looks at it. This was a fourth
+    such path and did none of it: the schedule kept `approved_at`, kept
+    drawing a *Next run*, and failed at the launch gate every occurrence
+    from then on — correctly, because the gate fails closed, but with
+    nothing having told anybody, and for a person who may not be the one
+    whose spawn caused it.
+
+    Clearing rather than silently re-pinning and keeping the approval, for
+    the reason approval exists at all: a seat **nobody chose** widening
+    what an unattended run may hand work to is the exact case it is for.
+    After the insert, so what is pinned is the tree as it now stands.
+
+    Not on the losing side of the race above: that spawn wrote nothing, and
+    whichever one did write already did this. */
+    crate::api::agent_teams::unapprove_schedules_on(state, &standing.team).await?;
 
     tracing::info!(
         team = %standing.team,

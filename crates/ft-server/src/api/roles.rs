@@ -292,8 +292,30 @@ pub(super) async fn delete_role(
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
     let me = whoever(&principal)?;
+    /* **Which trees this is about to change, read before it changes them.**
+    Deleting a profile removes every position referencing it and everything
+    under those, in every team in the organisation — the cascade does not
+    filter, so it crosses an ownership boundary the moment somebody shares a
+    profile and a colleague builds a team around it. Unfiltered here for the
+    same reason: a repair narrowed to what this person can see would leave
+    exactly the schedules they could not see still approved on a tree that no
+    longer exists. */
+    let changing = state.agent_teams.teams_holding(&id).await?;
     if !state.roles.delete(me.id.as_str(), &id).await? {
         return Err(ApiError::not_found("role"));
+    }
+    /* **And the schedules pinned to them stop, as they would for an edit.**
+    `update_agent_team` and `delete_agent_team` both do this; a profile delete
+    reaches the same trees by a different door and did none of it, so an
+    approved schedule kept `approved_at`, kept drawing a *Next run*, and
+    failed at the gate — for somebody who was never party to the delete and
+    was given no reason to look. After the delete, so what is re-pinned is the
+    tree as it now stands — and so the failure is the safe one: a delete that
+    then fails here leaves schedules approved on a tree that changed, which is
+    exactly the state the launch gate exists to refuse, rather than unapproved
+    on a profile that is still there. */
+    for team in changing {
+        super::agent_teams::unapprove_schedules_on(&state, &team).await?;
     }
     Ok(StatusCode::NO_CONTENT)
 }
@@ -307,12 +329,17 @@ pub(super) async fn delete_role(
 /// and moves the rules about withheld names there at the same time.
 ///
 /// A profile this person cannot see is **not found**, as every other read of
-/// one is. What comes back is already narrowed to the teams they may see.
+/// one is. The *list* is narrowed to the teams they may see; the **count
+/// beside it** is what that narrowing left out, because deleting a profile
+/// cascades onto every team in the organisation and a confirmation that
+/// described only half of it was the one sentence that could not be made
+/// true. The shape may be disclosed, the names may not — see
+/// [`crate::agent_teams::ProfilePlaces`].
 #[utoipa::path(
     get, path = "/api/v1/roles/{id}/positions", tag = "roles",
     params(("id" = String, Path, description = "Role id")),
     responses(
-        (status = 200, body = Vec<crate::agent_teams::ProfilePosition>),
+        (status = 200, body = crate::agent_teams::ProfilePlaces),
         (status = 404, body = ApiError),
     ),
 )]
@@ -320,7 +347,7 @@ pub(super) async fn role_positions(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
-) -> ApiResult<Json<Vec<crate::agent_teams::ProfilePosition>>> {
+) -> ApiResult<Json<crate::agent_teams::ProfilePlaces>> {
     let me = whoever(&principal)?;
     if state
         .roles
