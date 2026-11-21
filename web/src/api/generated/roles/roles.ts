@@ -34,7 +34,7 @@ import type {
   PlanLimits,
   ProfileDrop,
   ProfileFile,
-  ProfilePosition,
+  ProfilePlaces,
   Role,
   RoleDefault
 } from '../model';
@@ -942,13 +942,18 @@ export const getRolePositionsUrl = (id: string,) => {
  * and moves the rules about withheld names there at the same time.
  *
  * A profile this person cannot see is **not found**, as every other read of
- * one is. What comes back is already narrowed to the teams they may see.
+ * one is. The *list* is narrowed to the teams they may see; the **count
+ * beside it** is what that narrowing left out, because deleting a profile
+ * cascades onto every team in the organisation and a confirmation that
+ * described only half of it was the one sentence that could not be made
+ * true. The shape may be disclosed, the names may not — see
+ * [`crate::agent_teams::ProfilePlaces`].
  * @summary Where this profile sits: one entry per position it holds, in a team this
 person can see.
  */
-export const rolePositions = async (id: string, options?: Parameters<typeof http>[1]): Promise<ProfilePosition[]> => {
+export const rolePositions = async (id: string, options?: Parameters<typeof http>[1]): Promise<ProfilePlaces> => {
 
-  return http<ProfilePosition[]>(getRolePositionsUrl(id),
+  return http<ProfilePlaces>(getRolePositionsUrl(id),
   {
     ...options,
     method: 'GET'

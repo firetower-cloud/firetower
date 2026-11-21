@@ -70,6 +70,29 @@ export interface AgentTeam {
   /** How many positions it holds, the lead included. */
   positions: number;
   /**
+     * **How many agents a session started as this team could hand work to.**
+     *
+     * The lead position's children, intersected with what this person can
+     * see — the same double join [`AgentTeams::reports`] makes, which is
+     * what a `spawn` actually resolves against and what `persona_for`
+     * composes the prompt from.
+     *
+     * Not [`AgentTeam::positions`], and the difference is the whole reason
+     * this field exists. `positions` is every seat in the tree, unfiltered,
+     * which is what the map and the list row want. A picker that read it
+     * promised somebody seven helpers and gave them two, in two independent
+     * ways: reach descends exactly one level per hand-off, so the seats
+     * below a report are reachable by somebody later and not by this run;
+     * and a seat whose profile this person cannot reach is not a report at
+     * all. Both overstate, and the moment it is read is the moment somebody
+     * is choosing a team over the bare profile — which is the one thing that
+     * choice is about.
+     *
+     * Carried here rather than derived in three clients, so that the number
+     * a person reads and the reach the agent is given cannot disagree.
+     */
+  reports: number;
+  /**
      * **How many approved schedules saving this team would stop.**
      *
      * A schedule that names a team pins its whole tree at approval, and
@@ -84,7 +107,17 @@ export interface AgentTeam {
      *
      * Counted across every owner, for the reason
      * `Db::schedules_pinning_team` gives: somebody else's schedule is no
-     * less stopped for being somebody else's.
+     * less stopped for being somebody else's. A person about to save has to
+     * be told the full number, including schedules they will never be
+     * allowed to read, because they are about to stop them.
+     *
+     * **Zero for anybody who could not save**, which is the other half of
+     * the same sentence. The count stays cross-owner; who is handed it does
+     * not. A `Viewer` on a shared team has no save to be warned about, and
+     * the number would tell them how much unattended work other people have
+     * pinned to it and — by watching it fall — when one of them stopped.
+     * Gated in `team_fields` on the writer predicate already selected beside
+     * it as `may_write`.
      */
   schedules: number;
   /**

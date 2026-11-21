@@ -117,15 +117,40 @@ const KINDS: Record<FiledKind, { one: string; many: string; icon: typeof FolderO
 const said = (level?: Level | null) =>
   level ? (LEVELS.find((l) => l.value === level)?.label ?? level) : "No access";
 
+/**
+ * Every kind a directory can hold, with what one and many of it are called.
+ *
+ * **One list, read by all three places this screen asks the question.** It
+ * used to be three: a sentence, a count behind the *what is filed here* tab
+ * and a count in the delete confirmation, each naming its own subset — and
+ * all three were missing `skills`, `roles`, `artifacts` and `agentTeams`, so
+ * a directory of profiles and agent teams drew as *Empty* with a delete
+ * offered beside it. The server refuses that now; a screen that still said
+ * *Empty* over a refusal would be the same disagreement one layer up.
+ */
+const HOLDS: [(d: Directory) => number, string, string][] = [
+  [(d) => d.workspaces, "workspace", "workspaces"],
+  [(d) => d.hosts, "machine", "machines"],
+  [(d) => d.agentAccounts, "agent account", "agent accounts"],
+  [(d) => d.secrets, "secret", "secrets"],
+  [(d) => d.skills, "skill", "skills"],
+  [(d) => d.roles, "profile", "profiles"],
+  [(d) => d.agentTeams, "agent team", "agent teams"],
+  [(d) => d.artifacts, "artifact", "artifacts"],
+];
+
+/** How many things are filed here, whatever kind they are. */
+export function filedIn(d: Directory): number {
+  return HOLDS.reduce((n, [of]) => n + (of(d) || 0), 0);
+}
+
 /** What is filed here, in words — the thing a grant actually applies to. */
-function holds(d: Directory) {
+export function holds(d: Directory) {
   const parts: string[] = [];
-  const say = (n: number, one: string, many = `${one}s`) =>
-    n > 0 && parts.push(`${n} ${n === 1 ? one : many}`);
-  say(d.workspaces, "workspace");
-  say(d.hosts, "machine");
-  say(d.agentAccounts, "agent account");
-  say(d.secrets, "secret");
+  for (const [of, one, many] of HOLDS) {
+    const n = of(d) || 0;
+    if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`);
+  }
   return parts.length ? parts.join(" · ") : "Empty";
 }
 
@@ -309,8 +334,7 @@ function Detail({
   // left is fixable by somebody; hiding the controls here meant the one person
   // who could unstick it was shown a read-only screen.
   const mine = directory.level === "admin" || me?.user.role === "admin";
-  const filedCount =
-    directory.workspaces + directory.hosts + directory.agentAccounts + directory.secrets;
+  const filedCount = filedIn(directory);
   const key = (g: Grant) => `${g.subjectKind}:${g.subjectId}`;
   const pick = useSelection(grants.map(key));
   const chosen = useMemo(() => grants.filter((g) => pick.has(key(g))), [grants, pick]);
@@ -551,7 +575,7 @@ function Detail({
       {removing && (
         <Modal title={`Remove ${directory.name}?`} onClose={() => setRemoving(false)}>
           <p className="text-ui text-dim">
-            {directory.workspaces + directory.hosts + directory.agentAccounts + directory.secrets === 0
+            {filedIn(directory) === 0
               ? "Nothing is filed here, so nothing else changes. Everybody who could reach it loses that."
               : `This still holds ${holds(directory).toLowerCase()}. Move them somewhere else first — the server refuses while anything is in it.`}
           </p>
