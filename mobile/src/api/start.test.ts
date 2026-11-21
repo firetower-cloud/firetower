@@ -170,7 +170,11 @@ const team = (over: Partial<AgentTeam> = {}): AgentTeam =>
     name: "Product",
     lead: "r1",
     leadName: "Engineer",
+    // Every seat in the tree, and what the lead can actually hand work to.
+    // They agree on a flat, fully visible team and nowhere else; the picker
+    // reads the second, which is what a spawn resolves against.
     positions: 8,
+    reports: 7,
     path: "u/kev/product_12345678",
     mayWrite: true,
     mayShare: true,
@@ -308,15 +312,28 @@ describe("what picking it would do", () => {
   });
 
   it("counts one other as one agent, not one agents", () => {
-    expect(say([team({ positions: 2 })], [role()], { kind: "team", id: "t1" })).toBe(
-      "Starts Engineer, Product's lead. It can hand work to 1 other agent in the team.",
-    );
+    expect(
+      say([team({ positions: 2, reports: 1 })], [role()], { kind: "team", id: "t1" }),
+    ).toBe("Starts Engineer, Product's lead. It can hand work to 1 other agent in the team.");
   });
 
   it("says a team of one cannot hand work on either", () => {
-    expect(say([team({ positions: 1 })], [role()], { kind: "team", id: "t1" })).toBe(
+    expect(
+      say([team({ positions: 1, reports: 0 })], [role()], { kind: "team", id: "t1" }),
+    ).toBe(
       "Starts Engineer, Product's lead. Nothing reports to it yet, so it cannot hand work to anybody.",
     );
+  });
+
+  /** **#514 — the desk's row, to the character.** A deep team, or one holding
+      a profile this person cannot see, reaches fewer agents than it has
+      seats, and the sheet says the number the spawn will honour. */
+  it("promises what the lead can reach, not how big the tree is", () => {
+    expect(
+      say([team({ positions: 7, reports: 2 })], [role()], { kind: "team", id: "t1" }),
+    ).toBe("Starts Engineer, Product's lead. It can hand work to 2 other agents in the team.");
+    const [deep] = startables([team({ positions: 7, reports: 2 })], [role()]);
+    expect(deep!.agents).toBe(3);
   });
 
   it("does not claim a Manager cannot delegate while its old reach is live", () => {

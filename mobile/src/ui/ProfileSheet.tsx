@@ -254,7 +254,10 @@ export function ProfileSheet({
                 sub={s.blocked ?? s.does ?? undefined}
                 /* **The size, before it is picked.** One agent or eight is
                     the difference this row has to carry, and the count is the
-                    shortest true way to say it. */
+                    shortest true way to say it. `agents` is the lead and the
+                    reports it can actually reach — not every seat in the
+                    tree, which overstated both the depth and what this person
+                    can see. */
                 chip={
                   s.kind === "team"
                     ? `${s.agents} agent${s.agents === 1 ? "" : "s"}`
