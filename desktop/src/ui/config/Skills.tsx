@@ -245,10 +245,15 @@ export function Skills({ open: asked = null }: { open?: string | null }) {
           note: "Describe it; an agent writes it for you.",
           onPick: () => start({ prompt: "Create a Firetower skill that " }),
         },
+        /* **The only visible way in**, same as Profiles. The line at the
+           foot of the list said the page takes a dropped folder, which is
+           the one thing a drop target cannot say for itself until something
+           is already over it — so it moves onto the control somebody opens
+           while asking how to get a skill they already have in here. */
         {
           icon: FolderDown,
           label: "Upload a folder",
-          note: "A skill you already have, dropped in.",
+          note: "A skill you already have. Or drop a folder on this page.",
           onPick: () => add(),
         },
       ]}
@@ -379,10 +384,6 @@ export function Skills({ open: asked = null }: { open?: string | null }) {
             </Group>
           )}
 
-          <p className="mt-9 flex items-center gap-2.5 text-ui text-dim">
-            <FolderDown className="h-[15px] w-[15px]" strokeWidth={1.75} />
-            Or drop a folder anywhere on this page.
-          </p>
           </>
         )}
         </>

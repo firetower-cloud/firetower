@@ -34,7 +34,7 @@ import {
   UsersRound,
   CircleDashed,
 } from "lucide-react";
-import { Blank, Dropping, Group as Rowset, Note, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
+import { Blank, Dropping, Group as Rowset, Note, Rows, Section, Typed } from "~/ui/config/bits";
 import { CreateMenu } from "~/ui/config/CreateMenu";
 import { useStart } from "~/start";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
@@ -290,11 +290,10 @@ export function Roles() {
     );
   }
 
-  /* **Nothing at all, and nothing wrong.** The header action and the
-     `WhereTo` come off the screen while it holds: the blank's own button is
-     the same action, and a note about how a profile is filed is about
-     operating profiles you do not have. A query that matched nothing is not
-     this state — there *are* profiles — and it gets a `Note` instead. */
+  /* **Nothing at all, and nothing wrong.** The header action comes off the
+     screen while it holds, because the blank's own button is the same
+     action. A query that matched nothing is not this state — there *are*
+     profiles — and it gets a `Note` instead. */
   const blank = !rows.loading && !rows.error && rows.data.length === 0;
 
   /* The page's one primary action, written once and worn in two places. */
@@ -314,10 +313,17 @@ export function Roles() {
           note: "Name it, then fill in the rest.",
           onPick: () => setMaking(true),
         },
+        /* **The only visible way into import, now that the sentence under
+           the list is gone.** That sentence narrated two things the controls
+           already say — how a profile is filed, and that reach is a position
+           — and one thing nothing else did: that the whole pane takes a
+           dropped folder. A drop target is invisible until something is over
+           it, so the gesture moves here, onto the control somebody opens
+           while asking this exact question. */
         {
           icon: FolderDown,
           label: "Import a folder",
-          note: "PROFILE.md files you already have.",
+          note: "PROFILE.md files you already have. Or drop a folder on this page.",
           onPick: () => picker.current?.click(),
         },
       ]}
@@ -458,13 +464,6 @@ export function Roles() {
         </Rowset>
       </Rows>
 
-      {!blank && (
-        <WhereTo>
-          A profile is filed like a skill or a machine, so sharing one uses the same sheet.{" "}
-          <b>Who it hands work to is a position in an agent team</b>, not a field here. Drop a
-          folder of PROFILE.md files anywhere on this page to import them.
-        </WhereTo>
-      )}
     </Section>
 
       {making && (
