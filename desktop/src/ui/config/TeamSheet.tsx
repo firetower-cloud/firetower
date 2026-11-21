@@ -140,7 +140,22 @@ export function EngineMark({ role, size = 14 }: { role: Role | undefined; size?:
   return agent ? <AgentMark agent={agent} size={size} /> : <Icon of={CircleDashed} size={size} />;
 }
 
-/** A labelled field, the shape the drawer and the sheets share. */
+/** What a `Field` and a `Group` both put above their control. */
+function Says({ label, hint }: { label: string; hint?: string }) {
+  return (
+    <>
+      <span className="text-body font-medium text-bone">{label}</span>
+      {hint && <span className="max-w-[62ch] text-meta leading-relaxed text-dim">{hint}</span>}
+    </>
+  );
+}
+
+/**
+ * A labelled field, the shape the drawer and the sheets share.
+ *
+ * **One input.** For a set of buttons use `Group` — see what it says about why
+ * that is not a detail of markup.
+ */
 export function Field({
   label,
   hint,
@@ -152,10 +167,43 @@ export function Field({
 }) {
   return (
     <label className="mt-3 flex flex-col gap-1.5">
-      <span className="text-body font-medium text-bone">{label}</span>
-      {hint && <span className="max-w-[62ch] text-meta leading-relaxed text-dim">{hint}</span>}
+      <Says label={label} hint={hint} />
       {children}
     </label>
+  );
+}
+
+/**
+ * A field whose control is a **group of buttons** rather than one input.
+ *
+ * A `label` adopts the first labelable thing inside it and forwards to that
+ * control every click that lands on the label and misses one — the label's own
+ * words, the gap under them, the padding around a row. Around a picker that
+ * first thing is a button, and the forwarded click presses it.
+ *
+ * This is what killed *Led by* on the New team sheet. Before a pick the label's
+ * control was the first profile, so clicking the words *Led by* picked it;
+ * after a pick the picker was replaced by the chosen lead and the control
+ * became its **Change**, so the next click anywhere in the field cleared the
+ * pick again. One click selected and the next unselected, which reads from the
+ * outside as a row that does nothing — and *Create team* could never be
+ * satisfied. `ProfileDrawer` met this first and carries the same pair; the
+ * sheets had only the half that breaks.
+ */
+export function Group({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div role="group" aria-label={label} className="mt-3 flex flex-col gap-1.5">
+      <Says label={label} hint={hint} />
+      {children}
+    </div>
   );
 }
 
@@ -351,7 +399,7 @@ export function NewProfileSheet({
           other Placed kind does; moving it afterwards is the sharing sheet's
           job, and there is one place a thing changes hands. */}
       {filing && filing.length > 0 && (
-        <Field label="Where it lives" hint="Keep it yours, or file it where your team can use it.">
+        <Group label="Where it lives" hint="Keep it yours, or file it where your team can use it.">
           <div className="pickrow">
             <button
               type="button"
@@ -374,7 +422,7 @@ export function NewProfileSheet({
               </button>
             ))}
           </div>
-        </Field>
+        </Group>
       )}
       <p className="mt-3 mb-1 text-meta text-dim">
         {filing && filing.length > 0

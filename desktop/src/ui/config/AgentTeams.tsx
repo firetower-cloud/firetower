@@ -34,6 +34,7 @@ import { autoAddedCount } from "~/ui/config/team-elsewhere";
 import {
   EngineMark,
   Field,
+  Group,
   Line,
   NewProfileSheet,
   ProfilePicker,
@@ -231,7 +232,11 @@ export function AgentTeams({ open, at }: { open: string | null; at?: string | nu
               autoFocus
             />
           </Field>
-          <Field label="Led by">
+          {/* **A group, not a label.** Both halves of this field are buttons,
+              and a `label` around a button forwards to it every click that
+              misses one — which made picking a lead undo itself. `Group` says
+              the rest. */}
+          <Group label="Led by">
             {naming.lead ? (
               <Chosen
                 role={profiles.find((p) => p.id === naming.lead)}
@@ -246,7 +251,7 @@ export function AgentTeams({ open, at }: { open: string | null; at?: string | nu
                 tag={(p) => (leads.has(p.id) ? { says: "leads another team" } : null)}
               />
             )}
-          </Field>
+          </Group>
           <p className="mt-3 mb-1 max-w-[60ch] text-meta leading-relaxed text-dim">
             Any profile can lead a team, and there is no setting to turn on first. This one
             starts with nothing under it. Add the rest on the map.
