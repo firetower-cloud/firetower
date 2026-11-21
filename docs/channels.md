@@ -329,3 +329,21 @@ signal informs the decision, it does not block it.
 that first release until the channel release has been widely taken shrinks the
 population that can be frozen, at no cost. No code will remind anybody of this,
 so it is written here instead.
+
+## Do not merge while a release is running
+
+A push to `main` starts a new `release` run, and the concurrency group cancels
+the one in flight. If that happens after the tag is cut but before `channels`
+has run, the version is **released with no beta pin** — and promotion then
+correctly refuses it, because a version that is not on beta cannot be promoted.
+
+This is not theoretical. `0.56.1` was lost to it: the tag was cut, the worker
+binaries and both images published, and a merge thirty seconds later cancelled
+the run. `channels` ran, found no artifacts recorded by its own run, and
+deliberately published nothing — *"pointing beta at a build that is not in the
+registry is worse than lagging by one release"*. The guard was right; the merge
+was wrong. The version was superseded rather than hand-patched, because editing
+the manifest by hand is the one thing nothing else in this design does.
+
+So: **merge the release pull request, then leave `main` alone until the run
+finishes.** It is about fifteen minutes, most of it the control plane image.
