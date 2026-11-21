@@ -2701,6 +2701,14 @@ html:not([data-platform="macos"]) {
     font-weight: 500;
     color: var(--color-text);
   }
+  /* **A second paragraph is a second fact.** `Blast` only ever had one and a
+     list, so adjacent paragraphs had never been drawn here and ran together
+     as one block. The team's delete states three separate things — the
+     positions, the schedules, and what survives — and a reader has to be able
+     to take them one at a time. The step is the list's own. */
+  .dlg .say p + p {
+    margin-top: 12px;
+  }
   .dlg .say ul {
     margin: 12px 0;
     display: flex;

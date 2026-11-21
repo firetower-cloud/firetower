@@ -16,21 +16,23 @@
  * how deep it goes, so the map is never the only way to see one.
  */
 import { useMemo, useState } from "react";
-import { ChevronRight, Network, Plus, Search } from "lucide-react";
+import { ChevronRight, Network, Plus, Search, Trash2, TriangleAlert } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   createAgentTeam,
+  deleteAgentTeam,
   getListAgentTeamsQueryKey,
   useListAgentTeams,
 } from "~/api/generated/agent-teams/agent-teams";
 import { createRole, getListRolesQueryKey, useListRoles } from "~/api/generated/roles/roles";
 import type { AgentTeam, Role } from "~/api/generated/model";
 import { why } from "~/data";
-import { Badge, Button, Icon } from "~/components/ui";
-import { Blank, Group as Rowset, Note, Row, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
+import { Badge, Button, Icon, IconButton } from "~/components/ui";
+import { Blank, Group as Rowset, Note, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
 import { navigate } from "~/shims/next-navigation";
 import { useOpened } from "~/ui/opened";
-import { autoAddedCount } from "~/ui/config/team-elsewhere";
+import { useConfirm } from "~/ui/Confirm";
+import { autoAddedCount, schedulesPinning } from "~/ui/config/team-elsewhere";
 import {
   EngineMark,
   Field,
@@ -48,6 +50,7 @@ const HOME = "/configuration/agent-teams";
 export function AgentTeams({ open, at }: { open: string | null; at?: string | null }) {
   const [opened, setOpened] = useOpened(open);
   const cache = useQueryClient();
+  const confirm = useConfirm();
   const feed = useListAgentTeams();
   const roles = useListRoles();
   const [q, setQ] = useState("");
@@ -98,6 +101,40 @@ export function AgentTeams({ open, at }: { open: string | null; at?: string | nu
       setProblem(why(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * Delete a team: **immediately, once confirmed**, not as a pending edit.
+   *
+   * The map is a draft and nothing there writes until Save — but a delete is
+   * not a change to the tree, it is the removal of the thing the draft lives
+   * in. Queuing it would make Save sometimes mean *destroy this*, and would
+   * leave the leave-guard asking whether to save changes to a team that is
+   * on its way out. So it reads as the profile library's delete instead: a
+   * `.hov` control on the row, a confirmation that states the blast radius,
+   * and the write the moment it is accepted.
+   *
+   * The server withdraws the approval from every schedule pinning the team
+   * before it removes it, so nothing is left pinning something that is gone;
+   * `TeamBlast` says that is what is about to happen.
+   */
+  const remove = async (team: AgentTeam) => {
+    const ok = await confirm({
+      title: `Delete ${team.name}?`,
+      body: <TeamBlast team={team} />,
+      action: team.positions > 1 ? "Delete the team and its positions" : "Delete team",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setProblem(null);
+    try {
+      await deleteAgentTeam(team.id);
+      await cache.invalidateQueries({ queryKey: getListAgentTeamsQueryKey() });
+    } catch (e) {
+      /* Said on the pane rather than swallowed: a destructive press that
+         quietly did nothing is the worst of the three outcomes. */
+      setProblem(why(e));
     }
   };
 
@@ -184,10 +221,19 @@ export function AgentTeams({ open, at }: { open: string | null; at?: string | nu
         >
           <Rowset>
             {shown.map((team) => (
-              <TeamRow key={team.id} team={team} onOpen={() => go(team.id)} />
+              <TeamRow
+                key={team.id}
+                team={team}
+                onOpen={() => go(team.id)}
+                onDelete={() => void remove(team)}
+              />
             ))}
           </Rowset>
         </Rows>
+
+        {problem && !naming && (
+          <Note icon={TriangleAlert}>{problem}</Note>
+        )}
 
         {!blank && (
           <WhereTo>
@@ -268,10 +314,36 @@ export function AgentTeams({ open, at }: { open: string | null; at?: string | nu
  * names; the two numbers are their own columns, where they can be scanned
  * down the list.
  */
-function TeamRow({ team, onOpen }: { team: AgentTeam; onOpen: () => void }) {
+function TeamRow({
+  team,
+  onOpen,
+  onDelete,
+}: {
+  team: AgentTeam;
+  onOpen: () => void;
+  onDelete: () => void;
+}) {
   const automatic = autoAddedCount(team);
+  /* **A `.r` of its own rather than `Row`.** `Row` with an `onClick` *is* a
+     button, and the delete is a button too — one inside the other is markup
+     no browser agrees about and a press that lands on both. The profile
+     library draws exactly this shape for exactly this reason: the opening
+     press is its own control, and the row's actions are its siblings. */
   return (
-    <Row glyph={<Icon of={Network} size={16} />} name={team.name} sub={who(team)} onClick={onOpen}>
+    <div className="r">
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex min-w-0 flex-1 items-center gap-3.5 text-left"
+      >
+        <span className="g">
+          <Icon of={Network} size={16} />
+        </span>
+        <span className="tx">
+          <b>{team.name}</b>
+          <s>{who(team)}</s>
+        </span>
+      </button>
       {automatic > 0 && (
         <Badge tone="amber">
           {automatic === 1 ? "1 added automatically" : `${automatic} added automatically`}
@@ -279,10 +351,70 @@ function TeamRow({ team, onOpen }: { team: AgentTeam; onOpen: () => void }) {
       )}
       <span className="said">{count(team.positions, "position")}</span>
       <span className="said">{team.depth} deep</span>
+      {/* Revealed on hover **and on keyboard focus** — `.hov` is what carries
+          both, and hover alone is this feature's stated must-not. */}
+      {team.mayWrite && (
+        <IconButton
+          of={Trash2}
+          onClick={onDelete}
+          label={`Delete ${team.name}`}
+          hint="Delete team"
+          className="hov hover:text-brick"
+        />
+      )}
       <span className="g text-mute">
         <Icon of={ChevronRight} size={14} />
       </span>
-    </Row>
+    </div>
+  );
+}
+
+/**
+ * What deleting a team takes with it, said before the press.
+ *
+ * Three facts, and each is here because leaving it out has already gone
+ * wrong on this feature once: a count that understated the blast radius, and
+ * a confirmation that was silent about what it could not see.
+ *
+ * **The positions.** `AgentTeam.positions` counts the whole tree with the
+ * lead in it and is not filtered by what the reader can see, so it is the
+ * honest total — unlike `members`, which is.
+ *
+ * **The schedules.** Editing a team pauses the schedules that pin it and one
+ * press starts each again (`schedules/Pinned.tsx` owns that sentence).
+ * Deleting is strictly worse and must not borrow the softer word: the server
+ * withdraws the approval before it deletes, and there is no team left to
+ * approve again, so each schedule refuses at the launch gate until somebody
+ * points it elsewhere. `AgentTeam.schedules` is already on the row — no
+ * second request — and it is zero for anybody who could not save, which is
+ * the same set that is shown this control at all.
+ *
+ * **The profiles.** The one thing somebody fears here is the one thing that
+ * does not happen, so it is said rather than implied.
+ */
+export function TeamBlast({ team }: { team: AgentTeam }) {
+  const pinned = schedulesPinning(team);
+  return (
+    <>
+      <p>
+        This deletes {team.name} and {count(team.positions, "position")} in it, the lead
+        included.
+      </p>
+      {pinned > 0 && (
+        <p>
+          {pinned === 1
+            ? "1 schedule runs as this team and loses its approval."
+            : `${pinned} schedules run as this team and lose their approval.`}{" "}
+          Editing a team pauses them and one press starts each again. This does not: there is no
+          team left to approve, so {pinned === 1 ? "it refuses" : "each refuses"} to run until
+          somebody points {pinned === 1 ? "it" : "them"} at another team.
+        </p>
+      )}
+      <p>
+        <b>The profiles are not deleted.</b> A position only references one — take the position
+        away and the profile stays in your library, leading whatever it leads elsewhere.
+      </p>
+    </>
   );
 }
 
