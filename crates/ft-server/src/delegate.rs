@@ -97,6 +97,12 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "update_profile" => update_profile(state, request).await,
         "list_profiles" => list_profiles(state, request).await,
         "get_profile" => get_profile(state, request).await,
+        "create_agent_team" => create_agent_team(state, request).await,
+        "rename_agent_team" => rename_agent_team(state, request).await,
+        "add_position" => add_position(state, request).await,
+        "remove_position" => remove_position(state, request).await,
+        "list_agent_teams" => list_agent_teams(state, request).await,
+        "get_agent_team" => get_agent_team(state, request).await,
         "list_compute" => list_compute(state, request).await,
         "create_skill" => create_skill(state, request).await,
         "update_skill" => update_skill(state, request).await,
@@ -1571,6 +1577,9 @@ async fn where_to_file(
     state: &AppState,
     input: &Value,
     owner: &str,
+    // What is being filed, for the two sentences below. A refusal that said
+    // "profile" about a team would send an agent to the wrong screen.
+    kind: &str,
 ) -> Result<Option<(String, String)>> {
     let Some(name) = text(input, "directory") else {
         return Ok(None);
@@ -1580,14 +1589,18 @@ async fn where_to_file(
         .access
         .directory_by_slug(&org, &name)
         .await?
-        .with_context(|| format!("there is no directory called \"{name}\" you can file it in"))?;
+        .with_context(|| {
+            format!("there is no directory called \"{name}\" you can file {kind} in")
+        })?;
     let may = matches!(
         state.access.level_on(owner, target.id.as_str()).await?,
         Some(level) if level >= crate::access::Level::Writer
     );
     if !may {
         bail!(
-            "you cannot file a profile in the \"{}\" directory",
+            "you cannot file {kind} in the \"{}\" directory: you hold no write access there. \
+             Leave `directory` out to keep it in your own space, or ask whoever administers \
+             that directory to file it there for you.",
             target.slug
         );
     }
@@ -2056,7 +2069,7 @@ async fn create_profile(state: &AppState, request: &AgentRequest) -> Result<Stri
     crate::roles::check(&new).map_err(|e| anyhow::anyhow!("{e}"))?;
     let org = state.db.org().await?;
     let (slug, _) = owner_of(state, &session).await?;
-    let filed = where_to_file(state, &request.input, owner).await?;
+    let filed = where_to_file(state, &request.input, owner, "a profile").await?;
     state
         .roles
         .create_filed(
@@ -2232,15 +2245,7 @@ async fn get_profile(state: &AppState, request: &AgentRequest) -> Result<String>
     // Where it is filed, which is what decides who else can reach it.
     out.push(format!(
         "- Filed in: {}",
-        match role.path.split('/').next() {
-            Some("d") => role
-                .path
-                .split('/')
-                .nth(1)
-                .map(|d| format!("the \"{d}\" directory"))
-                .unwrap_or_else(|| "a directory".into()),
-            _ => "your own space".into(),
-        }
+        filed_in(&role.path, &state.access.personal_root(owner).await?)
     ));
     out.push(format!(
         "- Engine: {}",
@@ -2428,6 +2433,954 @@ async fn list_profiles(state: &AppState, request: &AgentRequest) -> Result<Strin
         })
         .collect();
     Ok(format!("The profiles you can see:\n{}", lines.join("\n")))
+}
+
+// ── agent teams ─────────────────────────────────────────────────────────
+//
+// **Where reach lives now.** A profile is identity: a name, a line saying
+// when to reach for it, its instructions, its skills. What an agent may hand
+// work to is the *position* it stands in, and a position belongs to a team.
+// So an agent could already make a profile and could not put it anywhere —
+// it was making something nothing could delegate to. These are the tools that
+// close that, and they are the write half of a surface whose read half,
+// `list_profiles`, already existed.
+//
+// **Not one of them writes a position.** Every write here goes through
+// `AgentTeams::create` or `AgentTeams::write` — the editor's own two writes,
+// which take `filed_where(t, Writer)` inside the transaction that writes, and
+// which call `agent_teams::check`, so the depth and position limits are one
+// rule in one place rather than a copy here that could drift from it. #508
+// was a *fourth* writer into `agent_team_positions` with every gate on its
+// path answered at `Viewer` — "a mutation gated by a read, on the object that
+// is now the privilege boundary" — and #516 proposes asserting in CI that
+// every writer of that table names a predicate. The answer here is to add no
+// writer at all, so there is no second predicate to keep in step with the
+// first, and nothing for that assertion to find.
+//
+// The name a write resolves is resolved at the level the write needs, too:
+// `the_team_to_change` asks `visible(owner, Writer)` rather than finding a
+// team at `Viewer` and letting the write fail afterwards. That is belt and
+// braces — `AgentTeams::write` asks again, `FOR UPDATE`, and is the one that
+// decides — but it is what makes the refusal a sentence about access rather
+// than a bare "not found", which would send an agent off to create a second
+// team of the same name.
+//
+// **And a tree that changed stops the schedules pinned to it**, through the
+// same `unapprove_schedules_on` the editor, the team delete and the
+// compatibility window call. Every answer below says how many stopped and
+// that only a person can start them again: a schedule stopped silently is
+// found out from a run that fails at nine the next morning.
+
+/// Agent teams, or the sentence that says why this installation has none.
+///
+/// `FIRETOWER_AGENT_TEAMS=off` makes every read answer as an install with no
+/// teams, which for a list would be an empty answer and a wasted turn — the
+/// agent would go on to create one and meet the refusal then. Said once, up
+/// front, with the thing that still works named: during the compatibility
+/// window a profile's own reach is what delegation reads.
+fn with_teams_on(state: &AppState) -> Result<()> {
+    if state.agent_teams.enabled() {
+        return Ok(());
+    }
+    bail!(
+        "agent teams are turned off on this installation ({}), so there is nothing to list and \
+         nowhere to put a profile. Reach comes from a profile's own settings while they are \
+         off: make the profile a Manager with `create_profile`, and name what it may hand work \
+         to in `delegate_scope`.",
+        crate::agent_teams::ENABLED_ENV
+    )
+}
+
+/// The one team of this name the owner can see at this level.
+///
+/// [`at_most_one`]'s rule, which is this whole surface's: a name two teams
+/// answer to is refused and both are named, rather than resolved to whichever
+/// the query happened to return first. `create_agent_team` refuses to make
+/// the second one for exactly this reason — a name that resolves to neither
+/// is a team no tool here can reach again.
+async fn team_named(
+    state: &AppState,
+    owner: &str,
+    wanted: &str,
+    at_least: crate::access::Level,
+) -> Result<Option<crate::agent_teams::AgentTeam>> {
+    let visible = state.agent_teams.visible(owner, at_least).await?;
+    Ok(at_most_one("agent team", wanted.trim(), &visible, |t| t.name.as_str())?.cloned())
+}
+
+/// A team to read, where finding none is itself the refusal.
+async fn the_team_named(
+    state: &AppState,
+    owner: &str,
+    wanted: &str,
+) -> Result<crate::agent_teams::AgentTeam> {
+    team_named(state, owner, wanted, crate::access::Level::Viewer)
+        .await?
+        .with_context(|| {
+            format!(
+                "there is no agent team called \"{wanted}\" you can reach. \
+                 `list_agent_teams` names the ones you can, and `create_agent_team` makes one."
+            )
+        })
+}
+
+/// A team to **change**, resolved at the level a change needs.
+///
+/// `Writer`, not `Viewer`. `AgentTeams::write` asks the same question again
+/// inside its own transaction and is the one that decides; this is here so
+/// that the refusal an agent reads is about access and names a next step.
+/// Resolving at `Viewer` and letting the write answer `false` would produce
+/// the bare not-found an agent answers by creating a second team of the same
+/// name — which is the one shape these tools can never recover from.
+async fn the_team_to_change(
+    state: &AppState,
+    owner: &str,
+    wanted: &str,
+) -> Result<crate::agent_teams::AgentTeam> {
+    if let Some(team) = team_named(state, owner, wanted, crate::access::Level::Writer).await? {
+        return Ok(team);
+    }
+    if let Some(seen) = team_named(state, owner, wanted, crate::access::Level::Viewer).await? {
+        bail!(
+            "you can see the \"{}\" agent team but not change it: it is filed in {}, and you \
+             hold no write access there. Ask whoever administers that directory to make the \
+             change on Configuration → Agent teams, or build a team of your own with \
+             `create_agent_team` under a name nothing else answers to.",
+            seen.name,
+            filed_in(&seen.path, &state.access.personal_root(owner).await?),
+        );
+    }
+    bail!(
+        "there is no agent team called \"{wanted}\" you can change. `list_agent_teams` names \
+         every team you can see and says which of them are yours to change; \
+         `create_agent_team` makes a new one."
+    )
+}
+
+/// Where a Placed thing lives, in the words an agent would repeat back.
+///
+/// Paths arrive with slashes — `d/engineering/platform_01h…` — and the first
+/// segment says which of two the rest is: `d` is a directory, `u` is somebody's
+/// own space.
+///
+/// **Which is not the same as *your* own space**, and the difference is the
+/// reason this takes a slug. `filed_where` has a fourth arm — `extra_perms`,
+/// a person or a people-team named on the row itself — so a profile or a team
+/// filed in somebody *else's* personal space can be perfectly visible here.
+/// Calling that "your own space" is a sentence an agent would repeat to the
+/// person, and it is wrong in the one direction that matters: the refusal it
+/// appears in tells them where to go and ask.
+///
+/// The other slug is not printed. It is somebody's username, the filing is
+/// what withholds it, and "another person's own space" is the whole of what
+/// is actable: nothing an agent does next depends on whose.
+///
+/// One spelling, because `get_profile` says this about a profile and the team
+/// tools say it about a team.
+fn filed_in(path: &str, mine: &str) -> String {
+    let mut parts = path.split('/');
+    match (parts.next(), parts.next()) {
+        (Some("d"), Some(directory)) => format!("the \"{directory}\" directory"),
+        (Some("u"), Some(whose)) if whose == mine => "your own space".to_string(),
+        (Some("u"), _) => "another person's own space, shared with you by name".to_string(),
+        _ => "your own space".to_string(),
+    }
+}
+
+/// What a seat is called in everything these tools say and accept.
+///
+/// A position has no name of its own — it is a profile in a place. **And a
+/// seat whose profile this person cannot see is its id**, which is what the
+/// map draws and what the drawer opens: the shape of the tree belongs to the
+/// team, which they may see, and the profile's name belongs to the profile,
+/// which they may not. Disclosing the id is deliberate; a gap would
+/// misrepresent the team.
+fn seat_label(seat: &crate::agent_teams::Position) -> String {
+    seat.profile_name
+        .clone()
+        .unwrap_or_else(|| seat.profile.clone())
+}
+
+/// The chain of labels from the lead down to this seat.
+fn seat_lineage(
+    positions: &[crate::agent_teams::Position],
+    seat: &crate::agent_teams::Position,
+) -> Vec<String> {
+    let mut parts = vec![seat_label(seat)];
+    let mut at = seat.parent.clone();
+    // Bounded by the tree's own depth, and `agent_team_positions` has one
+    // parent per row with exactly one root, so this terminates. The `break`
+    // is for a parent filtered out of the read rather than for a cycle.
+    while let Some(id) = at {
+        let Some(parent) = positions.iter().find(|p| p.id == id) else {
+            break;
+        };
+        parts.push(seat_label(parent));
+        at = parent.parent.clone();
+    }
+    parts.reverse();
+    parts
+}
+
+/// A seat, written the way these tools take one: `Orchestrator > Engineer`.
+fn seat_chain(
+    positions: &[crate::agent_teams::Position],
+    seat: &crate::agent_teams::Position,
+) -> String {
+    seat_lineage(positions, seat).join(" > ")
+}
+
+/// The one seat a name points at.
+///
+/// A bare profile name is enough where that profile sits once, which is the
+/// ordinary case. Where it sits twice — legal, and what per-position
+/// instructions are for — the name does not say which seat is meant, and
+/// [`at_most_one`]'s rule applies: refuse, and name the candidates.
+///
+/// **The candidates it names have to be things the next call can say.** A
+/// refusal listing two seats an agent has no way to address is a refusal it
+/// cannot act on, which on this surface is the whole failure mode. So a seat
+/// is addressable by its chain from the lead down, and the refusal hands back
+/// exactly those chains: the thing it is told to use is the thing it was just
+/// shown.
+fn seat_named<'a>(
+    positions: &'a [crate::agent_teams::Position],
+    team: &str,
+    wanted: &str,
+) -> Result<&'a crate::agent_teams::Position> {
+    let wanted: Vec<String> = wanted
+        .split('>')
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if wanted.is_empty() {
+        bail!(
+            "name the position by the profile in it — \"Engineer\" — or, where one profile \
+             sits in the team more than once, by its chain from the lead down: \
+             \"Orchestrator > Engineer\". `get_agent_team` draws the tree."
+        );
+    }
+    let found: Vec<&crate::agent_teams::Position> = positions
+        .iter()
+        .filter(|p| {
+            let lineage = seat_lineage(positions, p);
+            lineage.len() >= wanted.len()
+                && lineage[lineage.len() - wanted.len()..]
+                    .iter()
+                    .zip(&wanted)
+                    .all(|(have, want)| have.eq_ignore_ascii_case(want))
+        })
+        .collect();
+    match found.as_slice() {
+        [one] => Ok(one),
+        [] => bail!(
+            "no position in the \"{team}\" team is \"{}\". The positions it holds are: {}. Name \
+             one of those, and `get_agent_team` draws the tree with what each one is told.",
+            wanted.join(" > "),
+            positions
+                .iter()
+                .map(|p| format!("\"{}\"", seat_chain(positions, p)))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+        many => bail!(
+            "\"{}\" is the profile in {} positions in the \"{team}\" team, so it does not say \
+             which seat you mean — a profile may sit in a team more than once, and the two are \
+             told different things. Name one of these in full, exactly as written: {}.",
+            wanted.join(" > "),
+            many.len(),
+            many.iter()
+                .map(|p| format!("\"{}\"", seat_chain(positions, p)))
+                .collect::<Vec<_>>()
+                .join(", "),
+        ),
+    }
+}
+
+/// A team's lead seat, or the sentence for a team that has lost it.
+fn lead_seat<'a>(
+    positions: &'a [crate::agent_teams::Position],
+    team: &crate::agent_teams::AgentTeam,
+) -> Result<&'a crate::agent_teams::Position> {
+    positions
+        .iter()
+        .find(|p| p.parent.is_none())
+        .with_context(|| {
+            format!(
+                "the \"{}\" agent team has no lead: the profile that led it was deleted, and \
+             deleting a profile takes every position referencing it and everything under those \
+             — which for a lead is the whole tree. There is nothing to add a position to until \
+             somebody gives it a lead again on Configuration → Agent teams. \
+             `create_agent_team` makes a new team with a lead of its own.",
+                team.name
+            )
+        })
+}
+
+/// The tree as it stands, as a write states it — **every seat carrying its
+/// own id.**
+///
+/// `AgentTeams::write` takes a whole tree, and a seat arriving with its id is
+/// updated in place rather than deleted and re-minted. That is what keeps
+/// `sessions.position_id` pointing at a row when a team is changed under an
+/// agent running in it: without the ids, adding one seat would de-position
+/// every session in the team, and an agent mid-run would quietly lose its
+/// reach. #492's map carries them through its save for the same reason.
+///
+/// `positions` arrives in reading order, so the children come out in sibling
+/// order and `ord` is written back as it was.
+fn as_written(
+    positions: &[crate::agent_teams::Position],
+    seat: &crate::agent_teams::Position,
+) -> crate::agent_teams::NewPosition {
+    crate::agent_teams::NewPosition {
+        id: Some(seat.id.clone()),
+        profile: seat.profile.clone(),
+        instructions: seat.instructions.clone(),
+        children: positions
+            .iter()
+            .filter(|p| p.parent.as_deref() == Some(seat.id.as_str()))
+            .map(|child| as_written(positions, child))
+            .collect(),
+    }
+}
+
+/// Put `add` under the seat `under`, leaving the rest of the tree alone.
+fn seated_under(
+    tree: &mut crate::agent_teams::NewPosition,
+    under: &str,
+    add: crate::agent_teams::NewPosition,
+) -> bool {
+    if tree.id.as_deref() == Some(under) {
+        tree.children.push(add);
+        return true;
+    }
+    for child in &mut tree.children {
+        if seated_under(child, under, add.clone()) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Take `drop` and everything under it out of the tree.
+fn without_seat(tree: &mut crate::agent_teams::NewPosition, drop: &str) -> bool {
+    if let Some(at) = tree
+        .children
+        .iter()
+        .position(|c| c.id.as_deref() == Some(drop))
+    {
+        tree.children.remove(at);
+        return true;
+    }
+    tree.children.iter_mut().any(|c| without_seat(c, drop))
+}
+
+/// The seats directly under this one, by label, in sibling order.
+fn reports_of(
+    positions: &[crate::agent_teams::Position],
+    seat: &crate::agent_teams::Position,
+) -> Vec<String> {
+    positions
+        .iter()
+        .filter(|p| p.parent.as_deref() == Some(seat.id.as_str()))
+        .map(seat_label)
+        .collect()
+}
+
+/// This seat and everything under it, which is what a removal takes.
+fn subtree_of<'a>(
+    positions: &'a [crate::agent_teams::Position],
+    seat: &crate::agent_teams::Position,
+) -> Vec<&'a crate::agent_teams::Position> {
+    let mut out = Vec::new();
+    let mut frontier = vec![seat.id.clone()];
+    while let Some(id) = frontier.pop() {
+        if let Some(found) = positions.iter().find(|p| p.id == id) {
+            out.push(found);
+        }
+        for child in positions
+            .iter()
+            .filter(|p| p.parent.as_deref() == Some(id.as_str()))
+        {
+            frontier.push(child.id.clone());
+        }
+    }
+    out
+}
+
+/// **What changing a team costs the schedules pinned to it**, said rather
+/// than discovered.
+///
+/// A schedule naming a team pins the whole tree at approval, so every path
+/// that changes a tree clears that approval and re-pins — the editor, the
+/// team delete, the compatibility window, and now these tools. The count is
+/// read *before* the write, because afterwards there is nothing approved left
+/// to count, and it is `AgentTeam::schedules`, which is already zero for
+/// anybody who could not save and non-zero only for somebody who could.
+///
+/// Said in the answer because an agent reports to a person, and a schedule
+/// that stopped without anybody being told is found out from a run that fails
+/// the next morning. The agent is told it cannot start them again, because it
+/// cannot: `pause_schedule` stops one and nothing here resumes one.
+fn schedules_stopped(before: i64) -> String {
+    match before {
+        0 => String::new(),
+        1 => " One approved schedule pinned this team: it is now re-pinned on the tree as it \
+              stands and is waiting for a person to turn it back on. Tell them — no tool here \
+              can."
+            .to_string(),
+        many => format!(
+            " {many} approved schedules pinned this team: each is now re-pinned on the tree as \
+             it stands and is waiting for a person to turn it back on. Tell them — no tool here \
+             can."
+        ),
+    }
+}
+
+/// How big a team is, in the two numbers its limits are about.
+fn team_size(team: &crate::agent_teams::AgentTeam) -> String {
+    format!(
+        "{} position{} over {} level{}",
+        team.positions,
+        if team.positions == 1 { "" } else { "s" },
+        team.depth,
+        if team.depth == 1 { "" } else { "s" },
+    )
+}
+
+/// Make a team: a name, and the profile that leads it.
+///
+/// The lead is a position like any other — the root one — so a team made here
+/// has exactly one seat and nothing reporting to it yet. `add_position` is
+/// what gives it reports, and until it has some, an agent started as this
+/// team can hand work to nobody. The answer says so rather than letting
+/// "Created it" stand in for a team that does nothing.
+async fn create_agent_team(state: &AppState, request: &AgentRequest) -> Result<String> {
+    with_teams_on(state)?;
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let name = text(&request.input, "name").context("name the agent team")?;
+    let lead = text(&request.input, "lead").context(
+        "an agent team needs a lead — the profile that leads it, by name as `list_profiles` \
+         shows it",
+    )?;
+
+    /* **Two teams of one name is a name neither of these tools can resolve
+    again.** Every one of them finds a team the way `update_profile` finds a
+    profile: by name, with `at_most_one` refusing a name that answers to two.
+    So a second "Product" does not merely duplicate — it makes both of them
+    unreachable from here, and the agent that made the second one is the one
+    that then cannot act. Refused where there is still something to do about
+    it, with both things to do named. */
+    if let Some(same) = team_named(state, owner, &name, crate::access::Level::Viewer).await? {
+        bail!(
+            "\"{}\" is already the name of an agent team you can reach — {}, {}. These tools \
+             find a team by name, so a second team of this name would be a name that resolves \
+             to neither of them. {}",
+            same.name,
+            match &same.lead_name {
+                Some(lead) => format!("led by {lead}"),
+                None => "with no lead".to_string(),
+            },
+            team_size(&same),
+            match same.may_write {
+                true =>
+                    "Read it with `get_agent_team` and add to it with `add_position`, or call \
+                     this again with a different name.",
+                false =>
+                    "It is not one you can change, so a different name is what is left — and \
+                     say which team you made, so nobody confuses the two.",
+            }
+        );
+    }
+
+    let lead_profile = the_profile_named(state, owner, &lead).await?;
+    let filed = where_to_file(state, &request.input, owner, "an agent team").await?;
+    let new = crate::agent_teams::NewAgentTeam {
+        name: name.clone(),
+        lead: crate::agent_teams::NewPosition {
+            id: None,
+            profile: lead_profile.id.as_str().to_string(),
+            // The lead's own seat can carry instructions, and this is the one
+            // seat `add_position` can never make. They are **added** to the
+            // profile's, never in place of them — there is no override
+            // anywhere in this feature.
+            instructions: text(&request.input, "instructions").unwrap_or_default(),
+            children: Vec::new(),
+        },
+        directory: None,
+    };
+    let org = state.db.org().await?;
+    let (slug, _) = owner_of(state, &session).await?;
+    // The id is not reported and not used: this surface says names, and the
+    // agent reaches the team again through `get_agent_team` by the one it
+    // just gave it.
+    state
+        .agent_teams
+        .create(
+            &org,
+            owner,
+            &slug,
+            filed.as_ref().map(|(slug, _)| slug.as_str()),
+            &new,
+        )
+        .await?;
+    let where_it_is = filed
+        .map(|(_, said)| said)
+        .unwrap_or_else(|| "your own space".to_string());
+    Ok(format!(
+        "Created the \"{}\" agent team in {where_it_is}, led by {}. It holds one position — the \
+         lead's — and nothing reports to it yet, so an agent started as this team can hand work \
+         to nobody. Give it reports with `add_position`, naming this team and the profile each \
+         seat references. It is on Configuration → Agent teams now, theirs to edit or delete. \
+         Note that a profile is not started as a team by being named on its own: you never \
+         start a team, you start its lead with its team behind it, which is the row the \
+         composer's picker draws.",
+        name.trim(),
+        lead_profile.name,
+    ))
+}
+
+/// Rename a team, leaving its tree exactly as it is.
+///
+/// Cheap, because `AgentTeams::write` already takes a name beside the tree —
+/// so this is the tree it read, written back under a different name. It is
+/// still a write, so it still clears the approval on every schedule pinning
+/// the team, and the answer says how many: a rename that silently stopped
+/// four unattended runs is the shape this feature has had to fix four times.
+async fn rename_agent_team(state: &AppState, request: &AgentRequest) -> Result<String> {
+    with_teams_on(state)?;
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted = text(&request.input, "name").context("name the agent team to rename")?;
+    let new_name = text(&request.input, "new_name").context("say what to rename it to")?;
+    let team = the_team_to_change(state, owner, &wanted).await?;
+
+    if new_name.eq_ignore_ascii_case(&team.name) {
+        bail!(
+            "the \"{}\" agent team is already called that, so there is nothing to change. \
+             Renaming it is a write and would stop the schedules pinned to it for nothing.",
+            team.name
+        );
+    }
+    // The same rule `create_agent_team` keeps, for the same reason: a name
+    // that answers to two teams is a name no tool here can resolve again.
+    if let Some(same) = team_named(state, owner, &new_name, crate::access::Level::Viewer).await? {
+        bail!(
+            "\"{}\" is already the name of an agent team you can reach, and these tools find a \
+             team by name — renaming this one to it would leave a name that resolves to \
+             neither. Pick a name nothing else answers to; `list_agent_teams` says what is \
+             taken.",
+            same.name,
+        );
+    }
+
+    let positions = state.agent_teams.positions(owner, &team.id).await?;
+    let lead = lead_seat(&positions, &team)?;
+    let new = crate::agent_teams::NewAgentTeam {
+        name: new_name.clone(),
+        lead: as_written(&positions, lead),
+        directory: None,
+    };
+    let pinned = team.schedules;
+    if !state.agent_teams.write(owner, &team.id, &new).await? {
+        bail!(
+            "you cannot change the \"{}\" agent team — whoever may file it moved it or took \
+             your access away between reading it and this write. Read it again with \
+             `get_agent_team`.",
+            team.name
+        );
+    }
+    crate::api::agent_teams::unapprove_schedules_on(state, &team.id).await?;
+    Ok(format!(
+        "Renamed the \"{}\" agent team to \"{}\". Its tree is untouched — {}, and every session \
+         standing in it keeps its seat.{}",
+        team.name,
+        new_name.trim(),
+        team_size(&team),
+        schedules_stopped(pinned),
+    ))
+}
+
+/// Seat a profile in a team, reporting to a position already in it.
+///
+/// The whole tree goes through `AgentTeams::write` with every existing seat
+/// carrying its own id, which is how one seat is added without re-minting the
+/// rest — see [`as_written`]. The depth and position limits are `check`'s,
+/// applied inside that write, so they are the same rule the screen and the
+/// API meet rather than a copy of it here.
+async fn add_position(state: &AppState, request: &AgentRequest) -> Result<String> {
+    with_teams_on(state)?;
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted = text(&request.input, "team")
+        .context("name the agent team to add a position to, as `list_agent_teams` shows it")?;
+    let profile = text(&request.input, "profile")
+        .context("name the profile this position references, as `list_profiles` shows it")?;
+    let team = the_team_to_change(state, owner, &wanted).await?;
+    let positions = state.agent_teams.positions(owner, &team.id).await?;
+    let lead = lead_seat(&positions, &team)?;
+
+    /* **Reporting to the lead unless told otherwise**, which is the shape
+    somebody asking for a team in words means: a Manager and four people
+    under it. A deeper tree is `reports_to` naming the seat, and the answer
+    below always says which seat it went under so a default is never
+    something an agent has to assume happened. */
+    let parent = match text(&request.input, "reports_to") {
+        Some(said) => seat_named(&positions, &team.name, &said)?,
+        None => lead,
+    };
+    let referenced = the_profile_named(state, owner, &profile).await?;
+
+    let mut tree = as_written(&positions, lead);
+    let instructions = text(&request.input, "instructions").unwrap_or_default();
+    let added = crate::agent_teams::NewPosition {
+        id: None,
+        profile: referenced.id.as_str().to_string(),
+        instructions: instructions.clone(),
+        children: Vec::new(),
+    };
+    if !seated_under(&mut tree, &parent.id, added) {
+        bail!(
+            "the \"{}\" position is no longer in the \"{}\" team — somebody changed the team \
+             between reading it and this write. Read it again with `get_agent_team`.",
+            seat_chain(&positions, parent),
+            team.name
+        );
+    }
+    let new = crate::agent_teams::NewAgentTeam {
+        name: team.name.clone(),
+        lead: tree,
+        directory: None,
+    };
+    let pinned = team.schedules;
+    if !state.agent_teams.write(owner, &team.id, &new).await? {
+        bail!(
+            "you cannot change the \"{}\" agent team — whoever may file it moved it or took \
+             your access away between reading it and this write. Read it again with \
+             `get_agent_team`.",
+            team.name
+        );
+    }
+    crate::api::agent_teams::unapprove_schedules_on(state, &team.id).await?;
+
+    let after = the_team_named(state, owner, &team.name).await?;
+    Ok(format!(
+        "{} now reports to {} in the \"{}\" agent team{}. The team holds {}, and an agent \
+         standing in the {} seat can hand work to {}. Nothing reports to the new position yet, \
+         so an agent in it does the work itself; `add_position` under it is what changes that.{}",
+        referenced.name,
+        seat_label(parent),
+        team.name,
+        match instructions.trim().is_empty() {
+            true => String::new(),
+            false => ", with instructions that apply in this seat and nowhere else — added to the \
+                 profile's own, never in place of them"
+                .to_string(),
+        },
+        team_size(&after),
+        seat_label(lead),
+        match after.reports {
+            0 => "nobody".to_string(),
+            1 => "1 profile".to_string(),
+            n => format!("{n} profiles"),
+        },
+        schedules_stopped(pinned),
+    ))
+}
+
+/// Take a position out of a team.
+///
+/// **A position owns its subtree**, so removing one takes everything under
+/// it. On #492's map that is safe to do without asking, because a removal
+/// there is a draft and Discard brings the subtree back whole. Here there is
+/// no draft: the write is immediate and there is nothing to undo it with. So
+/// a seat with reports is refused unless the call says to take them, with the
+/// reports named and the count said — and the answer names everything that
+/// actually went either way.
+async fn remove_position(state: &AppState, request: &AgentRequest) -> Result<String> {
+    with_teams_on(state)?;
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted =
+        text(&request.input, "team").context("name the agent team to take a position out of")?;
+    let which = text(&request.input, "profile").context(
+        "name the position to take out, by the profile in it — or by its chain from the lead \
+         down where that profile sits in the team more than once",
+    )?;
+    let team = the_team_to_change(state, owner, &wanted).await?;
+    let positions = state.agent_teams.positions(owner, &team.id).await?;
+    let lead = lead_seat(&positions, &team)?;
+    let seat = seat_named(&positions, &team.name, &which)?;
+
+    if seat.parent.is_none() {
+        bail!(
+            "{} leads the \"{}\" agent team, and a team's lead cannot be taken out of it — a \
+             team with no lead has nobody to start work as, and its whole tree hangs off that \
+             seat. Take out one of its reports instead, or give the team a different lead on \
+             Configuration → Agent teams, which re-mints the tree and is somebody's decision \
+             rather than a tool's.",
+            seat_label(seat),
+            team.name
+        );
+    }
+
+    let goes = subtree_of(&positions, seat);
+    let under = reports_of(&positions, seat);
+    let with_reports = request
+        .input
+        .get("with_reports")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if !under.is_empty() && !with_reports {
+        bail!(
+            "{} has {} reporting to it in the \"{}\" agent team — {} — and a position owns \
+             everything under it, so taking it out would take {} positions, not one. This write \
+             is immediate and nothing here undoes it. Call this again with `with_reports: true` \
+             if that is what you mean, or take the reports out first and this one after.",
+            seat_chain(&positions, seat),
+            match under.len() {
+                1 => "1 position".to_string(),
+                n => format!("{n} positions"),
+            },
+            team.name,
+            under.join(", "),
+            goes.len(),
+        );
+    }
+
+    // The seat itself, and the descendants it takes with it, kept apart: one
+    // sentence saying "2 positions went" would not say which seat was asked
+    // for and which came along behind it.
+    let removed = seat_label(seat);
+    let below: Vec<String> = goes
+        .iter()
+        .filter(|p| p.id != seat.id)
+        .map(|p| seat_label(p))
+        .collect();
+    let mut tree = as_written(&positions, lead);
+    if !without_seat(&mut tree, &seat.id) {
+        bail!(
+            "the \"{}\" position is no longer in the \"{}\" agent team — somebody changed the \
+             team between reading it and this write. Read it again with `get_agent_team`.",
+            seat_chain(&positions, seat),
+            team.name
+        );
+    }
+    let new = crate::agent_teams::NewAgentTeam {
+        name: team.name.clone(),
+        lead: tree,
+        directory: None,
+    };
+    let pinned = team.schedules;
+    if !state.agent_teams.write(owner, &team.id, &new).await? {
+        bail!(
+            "you cannot change the \"{}\" agent team — whoever may file it moved it or took \
+             your access away between reading it and this write. Read it again with \
+             `get_agent_team`.",
+            team.name
+        );
+    }
+    crate::api::agent_teams::unapprove_schedules_on(state, &team.id).await?;
+
+    let after = the_team_named(state, owner, &team.name).await?;
+    Ok(format!(
+        "Took {removed} out of the \"{}\" agent team{}. It holds {} now. The profile{} \
+         untouched — a position is where a profile sits, so taking the seat out deletes \
+         nothing from the Profiles screen and the profile can be seated again, here or in \
+         another team.{}",
+        team.name,
+        match below.is_empty() {
+            true => String::new(),
+            false => format!(
+                ", and with it the {} that reported below it: {}",
+                match below.len() {
+                    1 => "1 position".to_string(),
+                    n => format!("{n} positions"),
+                },
+                below.join(", "),
+            ),
+        },
+        team_size(&after),
+        match below.is_empty() {
+            true => " it referenced is",
+            false => "s those seats referenced are",
+        },
+        schedules_stopped(pinned),
+    ))
+}
+
+/// Every team the owner can see, as one line each.
+///
+/// The index this surface needs before it writes anything: `create_profile`
+/// says to read `list_profiles` first so an agent refines rather than
+/// duplicates, and a second "Product" is worse than a second profile, because
+/// a name two teams answer to is one no tool here can resolve again.
+async fn list_agent_teams(state: &AppState, request: &AgentRequest) -> Result<String> {
+    with_teams_on(state)?;
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let teams = state
+        .agent_teams
+        .visible(owner, crate::access::Level::Viewer)
+        .await?;
+    // Read once for the whole list rather than once a row: `filed_in` needs
+    // it only to tell *your* own space from somebody else's.
+    let mine = state.access.personal_root(owner).await?;
+    if teams.is_empty() {
+        return Ok(
+            "There are no agent teams you can see yet. `create_agent_team` makes one — a \
+                   name and the profile that leads it — and `add_position` gives it reports."
+                .into(),
+        );
+    }
+    let lines: Vec<String> = teams
+        .iter()
+        .map(|t| {
+            format!(
+                "- \"{}\" — {}; {}, and its lead can hand work to {} of them.{} Filed in {}. {}{}",
+                t.name,
+                match &t.lead_name {
+                    Some(lead) => format!("led by {lead}"),
+                    None =>
+                        "no lead — the profile that led it was deleted, so its tree went with it"
+                            .to_string(),
+                },
+                team_size(t),
+                t.reports,
+                match t.members.is_empty() {
+                    true => String::new(),
+                    false => format!(" Also in it: {}.", t.members.join(", ")),
+                },
+                filed_in(&t.path, &mine),
+                match t.may_write {
+                    true => "Yours to change.",
+                    false => "You can read it; changing it is not yours to do.",
+                },
+                match t.auto_added {
+                    0 => String::new(),
+                    n => format!(
+                        " {n} of its positions were added by a hand-off rather than chosen by \
+                         anybody — `get_agent_team` marks them."
+                    ),
+                },
+            )
+        })
+        .collect();
+    Ok(format!(
+        "The agent teams you can see:\n{}\n\nA team is where reach lives: an agent standing in \
+         a position hands work to the profiles its children reference and to nothing else. Read \
+         one with `get_agent_team` before adding to it.",
+        lines.join("\n")
+    ))
+}
+
+/// One team's whole tree, enough to decide what to add to it and where.
+async fn get_agent_team(state: &AppState, request: &AgentRequest) -> Result<String> {
+    with_teams_on(state)?;
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted = text(&request.input, "name").context("name the agent team to read")?;
+    let team = the_team_named(state, owner, &wanted).await?;
+    let positions = state.agent_teams.positions(owner, &team.id).await?;
+
+    let mut out = vec![format!(
+        "**{}** — {}, {}. Filed in {}. {}",
+        team.name,
+        match &team.lead_name {
+            Some(lead) => format!("led by {lead}"),
+            None => "no lead: the profile that led it was deleted".to_string(),
+        },
+        team_size(&team),
+        filed_in(&team.path, &state.access.personal_root(owner).await?),
+        match team.may_write {
+            true => "Yours to change.",
+            false =>
+                "You can read it; changing it is not yours to do, so `add_position` and \
+                 `remove_position` will refuse.",
+        }
+    )];
+    out.push(String::new());
+
+    if positions.is_empty() {
+        out.push(
+            "It holds no positions at all — nothing to start as and nothing to hand work to."
+                .into(),
+        );
+    }
+    for seat in &positions {
+        let depth = seat_lineage(&positions, seat).len() - 1;
+        out.push(format!(
+            "{}{}{}{}{}",
+            "  ".repeat(depth),
+            seat_label(seat),
+            match seat.parent.is_none() {
+                true => " — leads this team".to_string(),
+                false => String::new(),
+            },
+            match &seat.profile_does {
+                Some(does) => format!(" — {does}"),
+                // A seat whose profile this person cannot see keeps its place
+                // and loses its name, which is the map's rule: the shape of
+                // the tree belongs to the team, the name belongs to the
+                // profile. The id is what is left and is what somebody needs
+                // to ask about it.
+                None => " — a profile filed where you cannot reach it; its seat is here, its \
+                          name is not"
+                    .to_string(),
+            },
+            match &seat.auto_added_at {
+                Some(at) => format!(
+                    " [added by a hand-off on {}, not chosen by anybody — keep it or take it \
+                     out with `remove_position`]",
+                    at.format("%-d %B %Y")
+                ),
+                None => String::new(),
+            },
+        ));
+        if !seat.instructions.trim().is_empty() {
+            out.push(format!(
+                "{}  In this team: {}",
+                "  ".repeat(depth),
+                seat.instructions.trim()
+            ));
+        }
+    }
+
+    out.push(String::new());
+    out.push(format!(
+        "Name a position to `add_position` or `remove_position` by the profile in it — or, \
+         where one profile sits here more than once, by its chain from the lead down, like \
+         \"{}\".",
+        positions
+            .iter()
+            .find(|p| p.parent.is_some())
+            .map(|p| seat_chain(&positions, p))
+            .unwrap_or_else(|| "Orchestrator > Engineer".to_string()),
+    ));
+    out.push(format!(
+        "Limits: at most {} positions, the lead included, and at most {} levels deep — \
+         delegation descends one level per hand-off, so the depth is the longest chain of \
+         agents this team can produce. This one has room for {} more.",
+        crate::agent_teams::MAX_POSITIONS,
+        crate::agent_teams::MAX_DEPTH,
+        (crate::agent_teams::MAX_POSITIONS as i64 - team.positions).max(0),
+    ));
+    if team.schedules > 0 {
+        out.push(format!(
+            "**{} approved schedule{} pin{} this team.** Changing it re-pins {} on the tree as \
+             it then stands and stops {}, waiting for a person to turn {} back on — no tool \
+             here can. Say so before you change it.",
+            team.schedules,
+            if team.schedules == 1 { "" } else { "s" },
+            if team.schedules == 1 { "s" } else { "" },
+            if team.schedules == 1 { "it" } else { "them" },
+            if team.schedules == 1 { "it" } else { "them" },
+            if team.schedules == 1 { "it" } else { "them" },
+        ));
+    }
+    Ok(out.join("\n"))
 }
 
 // ── what can run this, and where ────────────────────────────────────────
@@ -3168,6 +4121,29 @@ pub fn joined(waiting: Vec<(Option<SessionId>, String)>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// **"Your own space" is a claim, not a default.** `filed_where` has a
+    /// fourth arm — a person named on the row itself — so something filed in
+    /// somebody else's personal space can be perfectly visible here, and the
+    /// refusal that says where to go and ask has to be right about whose.
+    /// The other slug is a username and the filing is what withholds it, so
+    /// it is not printed: nothing an agent does next depends on whose.
+    #[test]
+    fn where_a_thing_is_filed_tells_your_own_space_from_somebody_elses() {
+        assert_eq!(
+            filed_in("d/engineering/platform_01h", "kevin"),
+            "the \"engineering\" directory"
+        );
+        assert_eq!(filed_in("u/kevin/platform_01h", "kevin"), "your own space");
+        assert_eq!(
+            filed_in("u/ana/platform_01h", "kevin"),
+            "another person's own space, shared with you by name"
+        );
+        assert!(
+            !filed_in("u/ana/platform_01h", "kevin").contains("ana"),
+            "and never names them: the filing is what withholds it"
+        );
+    }
 
     fn child(name: &str, said_branch: Option<&str>) -> Session {
         serde_json::from_value(json!({

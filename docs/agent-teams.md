@@ -533,6 +533,86 @@ Save and Discard live in the map's own action row and not in a status strip:
 the desk has one control height, 30px, and 22px of window chrome cannot hold
 one.
 
+## Built by an agent
+
+Somebody says *"create a Firetower Team with the following profiles: Manager
+(will lead the team), Engineer, Designer, QA, Security advisor"* to a session,
+and the agent builds it. Six tools on the internal MCP —
+`crates/ft-worker/src/approver.rs` declares them, `crates/ft-server/src/delegate.rs`
+answers them — beside the profile tools, because reach is what a profile no
+longer carries:
+
+| | |
+| --- | --- |
+| `create_agent_team` | a name, the profile that leads it, the lead seat's own instructions, a directory |
+| `add_position` | a team, the profile the seat references, the position it reports to, instructions for that seat |
+| `remove_position` | a team, the seat, and `with_reports` for the subtree |
+| `rename_agent_team` | a team and its new name; the tree is untouched |
+| `list_agent_teams` | every team, its lead, its size, its depth, its reach, who else is in it |
+| `get_agent_team` | one team's whole tree |
+
+Asking the person what to put in it needs nothing new — a session already
+talks to somebody — and `list_profiles` already answers *is there a Designer
+already*. The gap was that there was no way to make or read a team at all, so
+an agent could create a profile and could not put it anywhere.
+
+**They are named `agent_team`, not `team`.** `create_team` is unclaimed on
+this MCP, and that is exactly the problem: *team* already means a group of
+people here, the people's table is `teams`, and the day a people-team tool
+arrives the shorter name is the one it wants. An agent reading `create_team`
+beside `create_profile` has no way to tell which noun it got. The route is
+`/configuration/agent-teams` and the table is `agent_teams` for the same
+reason, so the long name is the consistent one as well as the clear one.
+
+**Names, not ids, throughout** — the convention `delegate.rs` already keeps.
+A name two teams answer to is refused by `at_most_one`, naming both, and
+`create_agent_team` refuses to *make* the second one: these tools find a team
+by name, so a duplicate makes both unreachable and the agent that made it is
+the one that can no longer act. A seat is named by the profile in it, or —
+where a profile sits in one team twice, which is what per-position
+instructions are for — by its chain from the lead down, `Orchestrator >
+Engineer`. The ambiguity refusal hands back exactly those chains, because a
+refusal naming candidates the next call cannot say is a refusal an agent
+cannot act on.
+
+**No tool here writes a position.** Every write goes through
+`AgentTeams::create` or `AgentTeams::write`, which are the editor's own two
+writes: they take `filed_where(t, Writer)` inside the transaction that writes,
+and they call `agent_teams::check`, so depth and the position count are one
+rule in one place. That is the direct answer to #508 — a fourth writer into
+`agent_team_positions` with every gate on its path answered at `Viewer` — and
+to #516, which would assert that every writer of that table names a predicate:
+these tools add no writer, so there is no second predicate to keep in step
+with the first. A name is still resolved at the level its write needs, so that
+a reader of a shared team meets a sentence about access rather than a bare
+not-found, which an agent answers by creating a second team of the same name.
+
+**And every answer says what the write cost.** A tree that changed stops the
+schedules pinned to it, by the same `unapprove_schedules_on` the editor, the
+delete and the window call, and the count is read before the write and said in
+the answer — with the fact that no tool here can turn one back on. A removal
+names the seat and everything that went with it; `get_agent_team` says how
+many schedules a change *would* stop, before it is made.
+
+Two deliberate gaps, each its own ticket's worth of work rather than a bug:
+there is no tool that changes a team's lead, because that re-mints every
+position in the team and takes the sessions standing in them off their seats,
+and no tool that deletes a team — this MCP has no delete for a profile, a
+skill or a schedule either. Both are the person's, on the screen. An agent may
+also not set a seat's instructions after the fact; it removes the seat and
+adds it again.
+
+### The old per-profile reach, from here
+
+`create_profile` and `update_profile` still take `can_delegate` and
+`delegate_scope`, and still honour them, because the old path still works for
+the window's duration and refusing them today would break what works. What
+changed is what the agent reads: both fields now say they are the older
+per-profile reach, say they are on their way out, and name
+`create_agent_team` and `add_position` as the replacement — so an agent
+reaching for the field it knows learns the tools exist. Refusing them belongs
+with #497, when the column goes.
+
 ## The drawer
 
 **One editor, for a profile and for a position**, in the window's own right
