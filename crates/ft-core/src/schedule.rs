@@ -337,6 +337,16 @@ pub struct ScheduleChoices {
     /// or an engine that authenticates nothing.
     pub account_id: Option<String>,
     pub profile: Option<String>,
+    /// The agent team each run starts, when the schedule names one. The
+    /// profile beside it is that team's lead, which is what actually runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
+    /// How many agents a run of this can start: every position of the team,
+    /// the lead included. Pinned at approval rather than counted later,
+    /// because it is what the screen says out loud before Save and it is the
+    /// only thing standing between a team schedule and a surprise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_size: Option<i64>,
     /// Model, effort, permissions and sandbox, as approved. An absent field
     /// is one the agent decides for itself; see `agentDecides` in the pins.
     pub settings: crate::controls::Preferred,

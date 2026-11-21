@@ -1425,6 +1425,12 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
             .get("profile")
             .and_then(|v| v.as_str())
             .map(str::to_string),
+        team: row
+            .pins
+            .get("team")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        team_size: row.pins.get("teamSize").and_then(|v| v.as_i64()),
         settings: row
             .pins
             .get("settings")

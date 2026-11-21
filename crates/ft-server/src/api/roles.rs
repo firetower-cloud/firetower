@@ -1535,9 +1535,28 @@ mod tests {
                 "`{}` round-tripped with a setting changing",
                 entry.key
             );
-            assert!(entry.warnings.is_empty(), "{:#?}", entry.warnings);
+            /* **The deprecation is the one warning a clean round trip may
+            carry**, and it is not a round-trip defect: the file comes back
+            byte-identical and simply names a key that is going away. Anything
+            else here is the planner finding something it cannot vouch for,
+            which is what this test exists to catch. */
+            let unexpected: Vec<&import::PlanProblem> = entry
+                .warnings
+                .iter()
+                .filter(|w| !matches!(w.key.as_deref(), Some("can_delegate" | "delegates_to")))
+                .collect();
+            assert!(unexpected.is_empty(), "{unexpected:#?}");
+            assert!(
+                entry.warnings.iter().all(|w| w.says.contains("deprecated")),
+                "a delegation warning has to say so: {:#?}",
+                entry.warnings
+            );
         }
-        assert!(plan.appliable);
+        assert!(
+            plan.appliable,
+            "a deprecated key is a warning, not a refusal — a library of bundles that still \
+             carry one has to keep importing"
+        );
     }
 
     // ── the import plan ─────────────────────────────────────────────────

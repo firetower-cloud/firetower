@@ -16984,6 +16984,21 @@
               "type": "string"
             },
             "description": "The skills each run reads, by id, resolved at approval."
+          },
+          "team": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The agent team each run starts, when the schedule names one. The\nprofile beside it is that team's lead, which is what actually runs."
+          },
+          "teamSize": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many agents a run of this can start: every position of the team,\nthe lead included. Pinned at approval rather than counted later,\nbecause it is what the screen says out loud before Save and it is the\nonly thing standing between a team schedule and a surprise."
           }
         }
       },
