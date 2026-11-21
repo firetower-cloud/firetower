@@ -13,10 +13,13 @@ import type { Level } from './level';
  */
 export interface Directory {
   agentAccounts: number;
+  agentTeams: number;
+  artifacts: number;
   hosts: number;
   id: DirectoryId;
   level?: null | Level;
   name: string;
+  roles: number;
   secrets: number;
   skills: number;
   /**
@@ -24,6 +27,11 @@ export interface Directory {
      * renaming a directory must not rewrite every path underneath it.
      */
   slug: string;
-  /** What is filed here, so a list can say so and a deletion can refuse. */
+  /**
+     * What is filed here, so a list can say so and a deletion can refuse.
+     *
+     * One field per kind that can be filed, and all of them — see
+     * [`DIRECTORY_COLUMNS`] for what a missing one costs.
+     */
   workspaces: number;
 }

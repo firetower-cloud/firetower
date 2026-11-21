@@ -7,6 +7,7 @@
  */
 import type { Agent } from './agent';
 import type { Preferred } from './preferred';
+import type { ScheduleTeam } from './scheduleTeam';
 
 /**
  * What an approved run will do, beyond its prompt and its clock.
@@ -43,4 +44,5 @@ export interface ScheduleChoices {
   settings: Preferred;
   /** The skills each run reads, by id, resolved at approval. */
   skills?: string[];
+  team?: null | ScheduleTeam;
 }

@@ -6,7 +6,7 @@
  * address, which is also what makes deep links (`firetower://…`) land somewhere
  * without a route table.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const listeners = new Set<() => void>();
 
@@ -54,16 +54,109 @@ function currentPath(): string {
   return h || "/";
 }
 
+/**
+ * A screen that would lose work if the address changed, and what to ask.
+ *
+ * **Only while it would lose something**, and the screen decides that per
+ * call. A guard that outlives its screen breaks navigation everywhere, so
+ * `useLeaveGuard` drops it on unmount.
+ *
+ * **More than one can be registered, and they are asked in turn**, because
+ * more than one can be on screen: a team's map holds a draft of the tree, and
+ * the profile drawer docked beside it holds a draft of a profile. Two commit
+ * boundaries, two questions, and each sheet speaks only for its own draft —
+ * so none of them can understate what leaving costs.
+ *
+ * **The most recently mounted is asked first.** The drawer opens beside the
+ * map rather than the other way round, so it is the thing somebody was last
+ * working in, and it is the one whose sheet should come up first. It also
+ * matters for a harder reason: the map's Discard closes the drawer, and with
+ * the map asked first a person could press Discard on a sentence counting
+ * only the map's changes and lose the drawer's edit with no second question.
+ * The sentence was right about what it counted and wrong about what went,
+ * which is worse than the silent loss this exists to prevent.
+ *
+ * **An answered guard is skipped for the rest of one navigation, not
+ * dropped.** It was deleted, so cancelling at the second sheet left the first
+ * screen unguarded for the rest of its life.
+ *
+ * Consulted by `navigate` and not by `hashchange`: a rail row, a palette
+ * command and a back link all go through `navigate`, and the ones that do
+ * not — a deep link from outside the window, a reload — are not somebody
+ * choosing to leave a form.
+ */
+type Guard = (resume: () => void) => boolean;
+const guards = new Set<Guard>();
+
+/**
+ * Ask whoever is holding unsaved work, and chain.
+ *
+ * `true` means a guard has taken it: it has put a question on screen and will
+ * call its `resume` if the answer is to go. That resume asks the *rest* of
+ * them, and only runs `proceed` once nobody is left with something to say.
+ */
+function askBeforeLeaving(proceed: () => void, asked: Set<Guard>): boolean {
+  for (const guard of [...guards].reverse()) {
+    if (asked.has(guard)) continue;
+    const taken = guard(() => {
+      const next = new Set(asked).add(guard);
+      if (!askBeforeLeaving(proceed, next)) proceed();
+    });
+    if (taken) return true;
+  }
+  return false;
+}
+
 function go(to: string, replace = false) {
-  const next = `#${to.startsWith("/") ? to : `/${to}`}`;
-  if (replace) window.history.replaceState(null, "", next);
-  else window.location.hash = next;
-  listeners.forEach((l) => l());
+  const commit = () => {
+    const next = `#${to.startsWith("/") ? to : `/${to}`}`;
+    if (replace) window.history.replaceState(null, "", next);
+    else window.location.hash = next;
+    listeners.forEach((l) => l());
+  };
+  if (askBeforeLeaving(commit, new Set())) return;
+  commit();
 }
 
 export function navigate(to: string) {
   go(to);
 }
+
+/**
+ * Ask before this screen is left.
+ *
+ * `ask` answers `true` when it has taken the navigation, and `false` to let
+ * it through — which is what a screen with nothing unsaved answers. It stays
+ * registered for as long as the component is mounted; the decision is `ask`'s,
+ * every time.
+ */
+export function useLeaveGuard(ask: (resume: () => void) => boolean) {
+  const latest = useRef(ask);
+  latest.current = ask;
+  useEffect(() => {
+    const guard: Guard = (resume) => latest.current(resume);
+    guards.add(guard);
+    return () => {
+      guards.delete(guard);
+    };
+  }, []);
+}
+
+/**
+ * For tests: what is registered, asking exactly as `navigate` asks, and
+ * clearing it.
+ *
+ * `ask` is the real path rather than a simplified one, because the order the
+ * guards are asked in and the chain between them are the whole of what there
+ * is to get wrong.
+ */
+export const leaveGuard = {
+  ask: (resume: () => void) => askBeforeLeaving(resume, new Set()),
+  /** Register one, the way a mounted component does. Order is mount order. */
+  add: (ask: Guard) => guards.add(ask),
+  armed: () => guards.size > 0,
+  clear: () => guards.clear(),
+};
 
 export function usePathname(): string {
   const [path, setPath] = useState(currentPath);

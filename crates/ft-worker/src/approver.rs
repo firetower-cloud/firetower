@@ -93,6 +93,23 @@ pub const LIST_SCHEDULES: &str = "list_schedules";
 /// that needs a person.
 pub const PAUSE_SCHEDULE: &str = "pause_schedule";
 
+/// Make an agent team: a name, and the profile that leads it.
+///
+/// **This is where reach lives now**, which is the one thing the description
+/// has to get across. An agent that knows how to make a profile and not how
+/// to seat one makes something nothing can delegate to.
+pub const CREATE_AGENT_TEAM: &str = "create_agent_team";
+/// Rename one, leaving its tree alone.
+pub const RENAME_AGENT_TEAM: &str = "rename_agent_team";
+/// Seat a profile in a team, reporting to a position already in it.
+pub const ADD_POSITION: &str = "add_position";
+/// Take a position out of a team. The profile is untouched.
+pub const REMOVE_POSITION: &str = "remove_position";
+/// List the agent teams, so a second "Product" is never made.
+pub const LIST_AGENT_TEAMS: &str = "list_agent_teams";
+/// One team's whole tree, enough to decide what to add and where.
+pub const GET_AGENT_TEAM: &str = "get_agent_team";
+
 /// What a delegation call is named on its way to the control plane.
 ///
 /// It travels the path a permission question takes — the socket, then the
@@ -125,7 +142,10 @@ Returns the child's id and name at once; the child takes its own time. \
 Its result arrives in THIS conversation as a message when it hands back — \
 between your turns, never inside one — so dispatch, do what does not depend \
 on it, then end your turn with a one-line status. \
-A child cannot spawn, cannot ask the person, and cannot message or schedule. \
+A child cannot ask the person, and cannot message or schedule. Whether it can \
+hand work on in turn depends on where it stands: one holding a position in an \
+agent team may hand work to the profiles reporting to that position, and one \
+holding none cannot spawn at all. Its own prompt says which, and by name. \
 A question it has comes to you as a message; a command it needs permission \
 for goes to the person. There is no cap on how many you start or how many run \
 at once — dispatch what the work actually needs, and no more, since each one \
@@ -217,6 +237,114 @@ feeds the same panel, and this exists for engines that have none. \
 Restate the whole plan each call, like a todo list: 3-8 steps, one \
 `doing` at a time, the rest `pending` or `done`. Update it when a step starts \
 or finishes. It does not pause you and nobody is asked to approve it.";
+
+/// What an agent team is, as the agent reads it — the one place it learns
+/// that reach has moved off the profile.
+///
+/// The hardest thing to say here is the thing the whole feature turns on: a
+/// profile is identity and a *position* is reach, so making a profile and
+/// stopping is making something nothing can delegate to. It leads, because an
+/// agent that reads only the first sentence should still come away with it.
+const CREATE_AGENT_TEAM_DESCRIPTION: &str = "\
+Make an agent team — a name and the profile that leads it. \
+**A team is where delegation comes from.** A profile is identity: a name, \
+what it does, its instructions, its skills. What an agent may hand work to is \
+the POSITION it stands in — an agent standing in a position hands work to the \
+profiles its children reference, and to nothing else. So a profile with no \
+seat in a team is a profile nothing can delegate to, and making one and \
+stopping is half a job. \
+Call `list_agent_teams` FIRST. These tools find a team by name, so a second \
+team of a name that is taken is a name that resolves to neither and the team \
+is then unreachable from here — this refuses rather than make one. \
+Call `list_profiles` too: the lead has to be a profile that already exists, \
+and when a name they asked for is already there, OFFER TO REUSE IT rather \
+than quietly making a near-duplicate — \"there is already a Designer; reuse \
+it or make a second one?\". \
+AGREE THE SHAPE BEFORE YOU CALL THIS unless they have already said: who \
+leads, who reports to whom (a tree, not a list — a report can have reports of \
+its own), whether any seat needs instructions it does not have as a profile, \
+and whether the team is kept theirs or filed in a directory a teammate can \
+reach. \
+THIS MAKES A TEAM WITH ONE POSITION — the lead's — and nothing reporting to \
+it. `add_position` is what gives it reports, one call each; say what you are \
+about to do and then make them. \
+A team holds at most 64 positions including the lead, and goes at most 6 \
+levels deep; delegation descends one level per hand-off, so the depth is the \
+longest chain of agents the team can produce. \
+One thing to tell the person, because it is the thing they will get wrong: \
+YOU NEVER START A TEAM, YOU START ITS LEAD WITH ITS TEAM BEHIND IT. Starting \
+that same profile on its own gives an agent that cannot hand work to anybody. \
+The composer's picker draws the two as separate rows for exactly that reason.";
+
+/// What `add_position` does, and the three rules a tree has to keep.
+///
+/// Each of the three is a refusal this tool can produce, so each is said
+/// here: an agent that reads them first spends no turn finding out.
+const ADD_POSITION_DESCRIPTION: &str = "\
+Seat a profile in an agent team, reporting to a position already in it. This \
+is how a team gets its reach: the agent standing in the parent position can \
+then hand work to this profile, and the agent standing in THIS one can hand \
+work to whatever you seat under it. \
+The profile is REFERENCED, not copied and not moved — the same Designer can \
+sit in three teams with different reports and different instructions in each, \
+and nothing about the profile itself changes. `instructions` apply in this \
+seat and nowhere else, and are ADDED to the profile's own instructions, never \
+in place of them: there is no override anywhere in this feature. \
+`reports_to` names the position the new one reports to, by the profile in it. \
+Leave it out and it reports to the team's lead, which is what somebody asking \
+for \"a Manager and four people under it\" means. Where one profile sits in \
+the team more than once, name the seat by its chain from the lead down — \
+\"Orchestrator > Engineer\" — and the refusal hands you those chains if a \
+bare name is ambiguous. \
+Read `get_agent_team` first when you are adding to a team you did not just \
+make: it draws the tree, names every seat the way this tool takes one, and \
+says how many approved schedules a change would stop. \
+Three rules, each refused with the profile named: a team holds at most 64 \
+positions and goes at most 6 levels deep; a profile may not report to itself, \
+however far up (two seats of one profile in different branches are fine); and \
+one profile may sit at most once among one position's direct reports, because \
+a lead hands work off BY NAME and two seats of one profile under one position \
+would not say which was meant. \
+CHANGING A TEAM STOPS THE APPROVED SCHEDULES PINNED TO IT — each is re-pinned \
+on the tree as it then stands and waits for a person to turn it back on. The \
+answer says how many; pass that on, because no tool here can turn one back \
+on.";
+
+const REMOVE_POSITION_DESCRIPTION: &str = "\
+Take a position out of an agent team, by the profile in it. THE PROFILE IS \
+UNTOUCHED — a position is where a profile sits, so this changes who can hand \
+work to whom and deletes nothing from the Profiles screen. \
+A POSITION OWNS EVERYTHING UNDER IT, so taking one out takes its reports and \
+their reports with it. This write is immediate and nothing here undoes it, so \
+a position that has reports is REFUSED unless you pass `with_reports: true` — \
+the refusal names them and says how many would go. Take the reports out first \
+and this one after if that is not what you meant. \
+A team's lead cannot be taken out: a team with no lead has nobody to start \
+work as, and the whole tree hangs off that seat. Changing a team's lead is \
+done by a person on Configuration → Agent teams, because it re-mints every \
+position in the team. \
+Where one profile sits in the team more than once, name the seat by its chain \
+from the lead down — \"Orchestrator > Engineer\". `get_agent_team` draws them. \
+This stops the approved schedules pinned to the team, exactly as adding a \
+position does; the answer says how many and only a person can start them \
+again.";
+
+const GET_AGENT_TEAM_DESCRIPTION: &str = "\
+One agent team's whole tree, by name: every position, who each reports to, \
+the profile it references and what that seat is told on top of the profile's \
+own instructions. Read it BEFORE adding to or removing from a team you did \
+not just make — it is what says where a new position should go, and it names \
+every seat the way `add_position` and `remove_position` take one. \
+NOT for finding out which teams exist or who leads one — that is \
+`list_agent_teams`, which answers for every team at once and costs a line \
+each. \
+It also says what a change would cost: how many positions the team has room \
+for, and how many approved schedules pin it and would stop. \
+A seat whose profile is filed where this person cannot reach it is drawn in \
+its place WITHOUT its name — the shape of the tree belongs to the team, which \
+they may see, and the name belongs to the profile, which they may not. A seat \
+a hand-off added rather than a person is marked, with the date: those are \
+worth putting to the person, since nobody chose them.";
 
 /// The configuration file that tells an agent to start this.
 pub fn mcp_config(exe: &std::path::Path, session_id: &str, workspace: &std::path::Path) -> Value {
@@ -444,7 +572,7 @@ async fn answer(
                         },
                     }, {
                         "name": CREATE_PROFILE,
-                        "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. Each of the three things a profile says about where it runs — the engine, the placement, and the machine for its own workspace — is either a commitment or left open for whichever lead delegates to it. Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on, or open so each child runs on its lead's; (5) placement — the lead's own workspace (`here`), one of its own (`new`), or open so the lead decides; (6) kept yours, or filed in a directory a teammate can reach. LEAVING A FIELD OPEN IS THE DEFAULT, not a gap: omit `agent` and `placement` unless they asked for something particular, and a child then runs wherever and however its lead does. You CAN set its run settings, the skills it loads, a Manager's team, and what a lead may do if a child runs out — `get_profile` reports all of them for a profile you are copying. TWO THINGS YOU CANNOT SET: the subscription — a profile that pins an engine runs on the owner's default for it, and one that leaves the engine open has none to set — and whether it is the person's default for new workspaces, because setting one unsets another. If they asked for either, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
+                        "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. Each of the three things a profile says about where it runs — the engine, the placement, and the machine for its own workspace — is either a commitment or left open for whichever lead delegates to it. Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) whether it hands work out — and note that WHERE a profile hands work to is now a TEAM rather than a field here: make the profile, then `create_agent_team` with it as the lead and `add_position` for each profile reporting to it. `can_delegate` and `delegate_scope` below are the older per-profile reach, still honoured and going away; (4) which engine it runs on, or open so each child runs on its lead's; (5) placement — the lead's own workspace (`here`), one of its own (`new`), or open so the lead decides; (6) kept yours, or filed in a directory a teammate can reach. LEAVING A FIELD OPEN IS THE DEFAULT, not a gap: omit `agent` and `placement` unless they asked for something particular, and a child then runs wherever and however its lead does. You CAN set its run settings, the skills it loads, and what a lead may do if a child runs out — `get_profile` reports all of them for a profile you are copying. TWO THINGS YOU CANNOT SET: the subscription — a profile that pins an engine runs on the owner's default for it, and one that leaves the engine open has none to set — and whether it is the person's default for new workspaces, because setting one unsets another. If they asked for either, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -454,7 +582,7 @@ async fn answer(
                                 "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"], "description": "The engine it runs on. Omit to leave it open: every child then runs on whatever its lead is running, or on the engine the lead names." },
                                 "placement": { "type": "string", "enum": ["lead", "here", "new"], "description": "Where a delegated child runs: `here` shares the lead's workspace and branch, `new` gets its own, `lead` (the default) leaves it to whichever lead delegates." },
                                 "machine": { "type": "string", "description": "The host id of the machine its own workspace runs on, for a profile that wants a particular one. Omit to leave it open, and Firetower picks a machine that can run the engine — which is the right answer unless they named a machine. `list_compute` lists the host ids." },
-                                "can_delegate": { "type": "boolean", "description": "true makes it a Manager that can hand work to other profiles; false (default) an Operator that does the work itself." },
+                                "can_delegate": { "type": "boolean", "description": "THE OLD PER-PROFILE REACH, still honoured and on its way out. true makes it a Manager that can hand work out when it is started with no position in an agent team; false (default) an Operator that does the work itself. THE REPLACEMENT IS A TEAM: what an agent may hand work to is decided by the position it stands in, so `create_agent_team` and `add_position` are where reach is written now. A profile needs nothing set here to lead a team or to be seated in one." },
                                 "settings": { "type": "object", "description": "How it runs its engine, each optional: `model`, `effort`, `mode`, `sandbox`. Only for a profile that pins `agent` — these belong to one engine. A value the engine does not offer is refused, listing the ones it does.",
                                     "properties": {
                                         "model": { "type": "string" },
@@ -464,7 +592,7 @@ async fn answer(
                                     },
                                 },
                                 "skill_scope": { "type": "array", "items": { "type": "string" }, "description": "Skills this profile loads on top of the two switches below, BY NAME as `list_skills` shows them. A name the person cannot reach is refused, naming it." },
-                                "delegate_scope": { "type": "array", "items": { "type": "string" }, "description": "For a Manager: the profiles it may hand work to, BY NAME as `list_profiles` shows them. Empty means any profile its owner can reach. A name that does not resolve is refused, naming it." },
+                                "delegate_scope": { "type": "array", "items": { "type": "string" }, "description": "THE OLD PER-PROFILE REACH, still honoured and on its way out. For a Manager started with NO position in an agent team: the profiles it may hand work to, BY NAME as `list_profiles` shows them. Empty means any profile its owner can reach, which is why it is worth narrowing. A name that does not resolve is refused, naming it. THE REPLACEMENT IS A TEAM — `create_agent_team` with this profile as the lead, then `add_position` for each profile here. Reach is a property of a relationship, not of a profile: a team lets the same profile have three reports in one team and none in another, lets each seat carry its own instructions, and lets reach go more than one level deep. None of that can be said in this list. Prefer the team unless they asked for this field by name."},
                                 "include_always_on": { "type": "boolean", "description": "Load the owner's always-on skills. Default true." },
                                 "include_repo_defaults": { "type": "boolean", "description": "Load the owner's defaults for the repositories the child checks out. Default true." },
                                 "on_usage_limit": { "type": "string", "enum": ["wait", "same", "engine"], "description": "What a lead may do about a child of this profile that hits its usage limit: `wait` (default — nobody moves it without a person), `same` (the lead may move it to another subscription for the same engine), `engine` (and to another engine). The third is the person's acknowledgement, given in advance, that another engine brings its own default permissions — do not choose it for them." },
@@ -475,7 +603,7 @@ async fn answer(
                         },
                     }, {
                         "name": UPDATE_PROFILE,
-                        "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\", \"stop pinning QA to Codex and let the lead decide\". Only the fields you pass change; everything else stays. Rename with `new_name`. To clear a pin back to open, pass that field as `null` — `agent: null` lets each child run on its lead's engine, `machine: null` lets Firetower pick one, `placement: \"lead\"` lets the lead choose. Omitting a field keeps it, so null is the only way to say \"stop pinning this\". When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. This CAN change the run settings, the skills it loads, a Manager's team, the two inheritance switches, what a lead may do if a child runs out, and which directory it is filed in — read `get_profile` first when the change depends on what it already says. TWO THINGS IT CANNOT CHANGE: the subscription, and whether the profile is the person's default for new workspaces. If they ask for either, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
+                        "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\", \"stop pinning QA to Codex and let the lead decide\". Only the fields you pass change; everything else stays. Rename with `new_name`. To clear a pin back to open, pass that field as `null` — `agent: null` lets each child run on its lead's engine, `machine: null` lets Firetower pick one, `placement: \"lead\"` lets the lead choose. Omitting a field keeps it, so null is the only way to say \"stop pinning this\". When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. This CAN change the run settings, the skills it loads, the two inheritance switches, what a lead may do if a child runs out, and which directory it is filed in — read `get_profile` first when the change depends on what it already says. TWO THINGS IT CANNOT CHANGE: the subscription, and whether the profile is the person's default for new workspaces. If they ask for either, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -486,7 +614,7 @@ async fn answer(
                                 "agent": { "type": ["string", "null"], "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent", null], "description": "The engine it runs on. `null` clears the pin, so each child runs on its lead's engine." },
                                 "placement": { "type": "string", "enum": ["lead", "here", "new"], "description": "`lead` leaves it to whichever lead delegates." },
                                 "machine": { "type": ["string", "null"], "description": "The host id its own workspace runs on. `null` clears the pin, and Firetower picks a machine that can run the engine." },
-                                "can_delegate": { "type": "boolean" },
+                                "can_delegate": { "type": "boolean", "description": "THE OLD PER-PROFILE REACH, still honoured and on its way out — true for a Manager, false for an Operator. It is read only when a session holds no position in an agent team. Where reach is written now is a team: `create_agent_team` and `add_position`." },
                                 "settings": { "type": "object", "description": "How it runs its engine, each optional: `model`, `effort`, `mode`, `sandbox`. Only for a profile that pins `agent` — these belong to one engine. A value the engine does not offer is refused, listing the ones it does.",
                                     "properties": {
                                         "model": { "type": "string" },
@@ -496,7 +624,7 @@ async fn answer(
                                     },
                                 },
                                 "skill_scope": { "type": "array", "items": { "type": "string" }, "description": "Skills this profile loads on top of the two switches below, BY NAME as `list_skills` shows them. A name the person cannot reach is refused, naming it." },
-                                "delegate_scope": { "type": "array", "items": { "type": "string" }, "description": "For a Manager: the profiles it may hand work to, BY NAME as `list_profiles` shows them. Empty means any profile its owner can reach. A name that does not resolve is refused, naming it." },
+                                "delegate_scope": { "type": "array", "items": { "type": "string" }, "description": "THE OLD PER-PROFILE REACH, still honoured and on its way out. For a Manager started with NO position in an agent team: the profiles it may hand work to, BY NAME as `list_profiles` shows them. Empty means any profile its owner can reach, which is why it is worth narrowing. A name that does not resolve is refused, naming it. THE REPLACEMENT IS A TEAM — `create_agent_team` with this profile as the lead, then `add_position` for each profile here. Reach is a property of a relationship, not of a profile: a team lets the same profile have three reports in one team and none in another, lets each seat carry its own instructions, and lets reach go more than one level deep. None of that can be said in this list. Prefer the team unless they asked for this field by name."},
                                 "include_always_on": { "type": "boolean", "description": "Load the owner's always-on skills. Default true." },
                                 "include_repo_defaults": { "type": "boolean", "description": "Load the owner's defaults for the repositories the child checks out. Default true." },
                                 "on_usage_limit": { "type": "string", "enum": ["wait", "same", "engine"], "description": "What a lead may do about a child of this profile that hits its usage limit: `wait` (default — nobody moves it without a person), `same` (the lead may move it to another subscription for the same engine), `engine` (and to another engine). The third is the person's acknowledgement, given in advance, that another engine brings its own default permissions — do not choose it for them." },
@@ -516,6 +644,69 @@ async fn answer(
                             "type": "object",
                             "properties": {
                                 "name": { "type": "string", "description": "The profile to read, by name, as `list_profiles` shows it." },
+                            },
+                            "required": ["name"],
+                        },
+                    }, {
+                        "name": CREATE_AGENT_TEAM,
+                        "description": CREATE_AGENT_TEAM_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "What the team is called, e.g. \"Platform\" or \"Product\". Must not be the name of a team that already exists — `list_agent_teams` says what is taken, and these tools find a team by name." },
+                                "lead": { "type": "string", "description": "The profile that leads it, BY NAME as `list_profiles` shows it. It becomes the team's one position, and everything else reports to it or beneath it. A profile that does not exist is refused; make it with `create_profile` first." },
+                                "instructions": { "type": "string", "description": "Instructions for the LEAD'S OWN SEAT — what this profile is told when it is leading this team, and nowhere else. ADDED to the profile's own instructions, never in place of them. Omit when the profile already says everything the lead needs. This is the one seat `add_position` can never make, so it is set here or not at all." },
+                                "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space. A team is filed, shared and permissioned exactly as a profile is." },
+                            },
+                            "required": ["name", "lead"],
+                        },
+                    }, {
+                        "name": RENAME_AGENT_TEAM,
+                        "description": "Rename an agent team. Its tree is untouched and every session standing in it keeps its seat. It is still a write, so it STOPS THE APPROVED SCHEDULES PINNED TO THE TEAM — the answer says how many, and only a person can turn one back on. A name another team already answers to is refused: these tools find a team by name.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The team to rename, by its current name." },
+                                "new_name": { "type": "string", "description": "What to call it instead. Must not be a name another team you can see already answers to." },
+                            },
+                            "required": ["name", "new_name"],
+                        },
+                    }, {
+                        "name": ADD_POSITION,
+                        "description": ADD_POSITION_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "team": { "type": "string", "description": "The agent team to add to, by name as `list_agent_teams` shows it." },
+                                "profile": { "type": "string", "description": "The profile this position references, BY NAME as `list_profiles` shows it. Referenced, not copied: the same profile can hold positions in several teams." },
+                                "reports_to": { "type": "string", "description": "The position it reports to, named by the profile in it — \"Orchestrator\". Omit for the team's lead, which is what a flat team of reports under one Manager means. Where that profile sits in the team more than once, name the seat by its chain from the lead down: \"Orchestrator > Engineer\". `get_agent_team` draws the tree with those chains." },
+                                "instructions": { "type": "string", "description": "What this profile is told in THIS seat and nowhere else — \"In Platform, the console only\". ADDED to the profile's own instructions, never in place of them. Omit when the profile already says enough." },
+                            },
+                            "required": ["team", "profile"],
+                        },
+                    }, {
+                        "name": REMOVE_POSITION,
+                        "description": REMOVE_POSITION_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "team": { "type": "string", "description": "The agent team to take a position out of, by name." },
+                                "profile": { "type": "string", "description": "The position to take out, named by the profile in it. Where that profile sits in the team more than once, name the seat by its chain from the lead down: \"Orchestrator > Engineer\"." },
+                                "with_reports": { "type": "boolean", "description": "Take everything under it too. Default false, and a position that has reports is refused without it — a position owns its subtree, this write is immediate, and nothing here undoes it. Pass true only when taking the whole branch out is what was asked for." },
+                            },
+                            "required": ["team", "profile"],
+                        },
+                    }, {
+                        "name": LIST_AGENT_TEAMS,
+                        "description": "List the agent teams the person can see — name, the profile leading each, how many positions it holds and how deep it goes, how many of those its lead can actually hand work to, who else is in it, where it is filed, and whether it is theirs to change. READ THIS BEFORE MAKING ONE: these tools find a team by name, so a second team of a name that is taken is a name that resolves to neither, and the agent that made it is the one that can no longer act. It is also how you find the team a profile already sits in, rather than building a second one beside it.",
+                        "inputSchema": { "type": "object", "properties": {} },
+                    }, {
+                        "name": GET_AGENT_TEAM,
+                        "description": GET_AGENT_TEAM_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The agent team to read, by name as `list_agent_teams` shows it." },
                             },
                             "required": ["name"],
                         },
@@ -635,7 +826,9 @@ async fn answer(
             let text = match name {
                 SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
                 | LIST_PROFILES | GET_PROFILE | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL
-                | LIST_SKILLS | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
+                | LIST_SKILLS | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE
+                | CREATE_AGENT_TEAM | RENAME_AGENT_TEAM | ADD_POSITION | REMOVE_POSITION
+                | LIST_AGENT_TEAMS | GET_AGENT_TEAM => {
                     delegate(session_id, name, &id, &arguments).await
                 }
                 // Every call used to be a permission question, and an agent
@@ -936,6 +1129,12 @@ mod tests {
                 UPDATE_PROFILE,
                 LIST_PROFILES,
                 GET_PROFILE,
+                CREATE_AGENT_TEAM,
+                RENAME_AGENT_TEAM,
+                ADD_POSITION,
+                REMOVE_POSITION,
+                LIST_AGENT_TEAMS,
+                GET_AGENT_TEAM,
                 LIST_COMPUTE,
                 CREATE_SKILL,
                 UPDATE_SKILL,

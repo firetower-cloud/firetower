@@ -19,14 +19,17 @@ export const AccessOfQueryParams = zod.object({
 export const AccessOfResponse = zod.object({
   "directory": zod.union([zod.null(),zod.object({
   "agentAccounts": zod.int(),
+  "agentTeams": zod.int(),
+  "artifacts": zod.int(),
   "hosts": zod.int(),
   "id": zod.string().describe('Identifies a directory — the things a grant is held over.'),
   "level": zod.union([zod.null(),zod.enum(['viewer', 'writer', 'admin']).describe('What the person asking may do here. Absent when nothing was asked for.')]).optional(),
   "name": zod.string(),
+  "roles": zod.int(),
   "secrets": zod.int(),
   "skills": zod.int(),
   "slug": zod.string().describe('What appears in a path. Derived from the name once, and stable after —\nrenaming a directory must not rewrite every path underneath it.'),
-  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.')
+  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.\n\nOne field per kind that can be filed, and all of them — see\n[`DIRECTORY_COLUMNS`] for what a missing one costs.')
 }).describe('The directory it is filed in, if it is filed in one. Absent for\n`u/<somebody>/…`, which is a personal root and has no row.')]).optional(),
   "mayShare": zod.boolean().describe('Whether this person may edit the exceptions or move it. Asked once here\nso the client does not have to reconstruct `may_share`.'),
   "path": zod.string().describe('A path, as the wire and the interface spell it: `u/kevin/thing`.'),
@@ -49,7 +52,7 @@ export const AccessOfResponse = zod.object({
 export const SetExceptionBody = zod.object({
   "item": zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'repository'])
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'agentTeam', 'repository'])
 }).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.'),
   "level": zod.enum(['viewer', 'writer', 'admin']).describe('How much somebody may do in a directory.\n\nOrdered, and the order is the point — every check is "at least this much".\n`Ord` comes from the declaration order, so `Viewer < Writer < Admin` without\na comparison written anywhere.'),
   "subjectId": zod.string()
@@ -60,7 +63,7 @@ export const SetExceptionResponse = zod.void()
 export const DropExceptionBody = zod.object({
   "item": zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'repository'])
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'agentTeam', 'repository'])
 }).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.'),
   "subjectId": zod.string()
 })
@@ -85,14 +88,17 @@ export const ListColleaguesResponse = zod.array(ListColleaguesResponseItem)
  */
 export const ListDirectoriesResponseItem = zod.object({
   "agentAccounts": zod.int(),
+  "agentTeams": zod.int(),
+  "artifacts": zod.int(),
   "hosts": zod.int(),
   "id": zod.string().describe('Identifies a directory — the things a grant is held over.'),
   "level": zod.union([zod.null(),zod.enum(['viewer', 'writer', 'admin']).describe('What the person asking may do here. Absent when nothing was asked for.')]).optional(),
   "name": zod.string(),
+  "roles": zod.int(),
   "secrets": zod.int(),
   "skills": zod.int(),
   "slug": zod.string().describe('What appears in a path. Derived from the name once, and stable after —\nrenaming a directory must not rewrite every path underneath it.'),
-  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.')
+  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.\n\nOne field per kind that can be filed, and all of them — see\n[`DIRECTORY_COLUMNS`] for what a missing one costs.')
 }).describe('A bag of things a grant is held over.')
 export const ListDirectoriesResponse = zod.array(ListDirectoriesResponseItem)
 
@@ -104,21 +110,24 @@ export const CreateDirectoryBody = zod.object({
 }).describe('Somebody to put in a directory, and how much they may do there.\n\nLives here rather than in `api::access` because the access layer is what\nconsumes it — `create_directory` takes a list of these — and a type that\ncrosses the boundary should belong to the side that acts on it.')).optional().describe('Who else is in it, set once at creation. Whoever creates it is always an\nadministrator of it and is not in this list.'),
   "move": zod.union([zod.null(),zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'repository'])
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'agentTeam', 'repository'])
 }).describe('Something to put in it straight away.\n\n**The reason this endpoint takes all three jobs.** Creating the\ndirectory, granting the people and moving the thing are one intention,\nand three requests can fail between any two — leaving a directory with\nnobody in it, or people with nothing to look at, and no screen that shows\neither. One call, one transaction, or none of it.')]).optional(),
   "name": zod.string()
 })
 
 export const CreateDirectoryResponse = zod.object({
   "agentAccounts": zod.int(),
+  "agentTeams": zod.int(),
+  "artifacts": zod.int(),
   "hosts": zod.int(),
   "id": zod.string().describe('Identifies a directory — the things a grant is held over.'),
   "level": zod.union([zod.null(),zod.enum(['viewer', 'writer', 'admin']).describe('What the person asking may do here. Absent when nothing was asked for.')]).optional(),
   "name": zod.string(),
+  "roles": zod.int(),
   "secrets": zod.int(),
   "skills": zod.int(),
   "slug": zod.string().describe('What appears in a path. Derived from the name once, and stable after —\nrenaming a directory must not rewrite every path underneath it.'),
-  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.')
+  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.\n\nOne field per kind that can be filed, and all of them — see\n[`DIRECTORY_COLUMNS`] for what a missing one costs.')
 }).describe('A bag of things a grant is held over.')
 
 export const DeleteDirectoryParams = zod.object({
@@ -189,7 +198,7 @@ export const ListItemsParams = zod.object({
 export const ListItemsResponseItem = zod.object({
   "detail": zod.string().nullish().describe('The second line: the repository, the agent, the scope.'),
   "id": zod.string().describe('What identifies it. A secret has no id of its own — it is keyed by\nscope, name and owner — so for one of those this is `scope/name/owner`,\nand\nthe owner is whoever is asking. See `Access::place`.'),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'repository']),
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'agentTeam', 'repository']),
   "name": zod.string(),
   "ownerName": zod.string().nullish().describe('Whose it is. Absent for a machine, which is the organisation\'s.'),
   "path": zod.string().describe('Where it is filed — and so who can reach it.')
@@ -218,7 +227,7 @@ export const FileItemsParams = zod.object({
 export const FileItemsBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'repository'])
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'agentTeam', 'repository'])
 }).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.'))
 })
 
@@ -237,7 +246,7 @@ export const UnfileItemsParams = zod.object({
 export const UnfileItemsBody = zod.object({
   "items": zod.array(zod.object({
   "id": zod.string(),
-  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'repository'])
+  "kind": zod.enum(['workspace', 'machine', 'agentAccount', 'secret', 'skill', 'artifact', 'role', 'agentTeam', 'repository'])
 }).describe('One thing to move, named the way `Filed` names it.\n\n**Not `Placed`.** That is already a schema in this contract — where an\nattached file landed in a workspace — and utoipa registers a type by its\nshort name, so a second `Placed` silently becomes whichever of the two the\ngenerator reached last. The clients then typecheck against a shape the\nserver never sends.'))
 })
 

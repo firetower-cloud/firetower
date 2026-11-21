@@ -110,6 +110,7 @@ const KINDS: Record<FiledKind, string> = {
   skill: "skill",
   artifact: "artifact",
   role: "profile",
+  agentTeam: "agent team",
   // Here for completeness and never drawn: this sheet is how something is
   // filed into a directory, and a repository cannot be. The server refuses it
   // by name, and nothing opens the sheet for one.
@@ -140,6 +141,7 @@ export function WhoCanAccess({
   path,
   look,
   label,
+  className,
 }: {
   kind: FiledKind;
   id: string;
@@ -149,8 +151,16 @@ export function WhoCanAccess({
   /* **A glyph among glyphs, a word among words.** The dense toolbars put this
      beside other icon buttons where a label would be noise; the skill header
      is a row of labelled buttons in the drawing, and a bare glyph in the
-     middle of it is the odd one out. */
+     middle of it is the odd one out. On a chip it is the word the chip wears,
+     for a pane that already has one to say — the profile drawer's header
+     carries the whole path, and shortening it on the way through here would
+     change what that header says. */
   label?: string;
+  /* **A chip among that pane's own chips.** The table rows this was built for
+     want the mono micro chip below; the profile drawer's header is a row of
+     `.dchip`s, and a chip in a different shape beside them reads as a
+     mistake. The look is the caller's, the sheet is still this one's. */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
   const me = useMe();
@@ -170,10 +180,13 @@ export function WhoCanAccess({
         <button
           onClick={() => setOpen(true)}
           title="Who can access it"
-          className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-mono text-micro text-mute transition-colors hover:bg-raise hover:text-bone"
+          className={
+            className ??
+            "flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 font-mono text-micro text-mute transition-colors hover:bg-raise hover:text-bone"
+          }
         >
           <Icon of={UserPlus} size={12} />
-          {where(path, me.data?.user)}
+          {label ?? where(path, me.data?.user)}
         </button>
         {sheet}
       </>

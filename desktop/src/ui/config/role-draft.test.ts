@@ -23,7 +23,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { Role } from "~/api/generated/model";
-import { SERVER_OWNED, toDraft } from "./Roles";
+import { SERVER_OWNED, toDraft } from "./profile-draft";
 
 /**
  * A `Role` with every field set, each to something it would not be by

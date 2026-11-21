@@ -34,6 +34,7 @@ import type {
   PlanLimits,
   ProfileDrop,
   ProfileFile,
+  ProfilePlaces,
   Role,
   RoleDefault
 } from '../model';
@@ -923,6 +924,139 @@ export const useGetExportRoleQueryData = () => {
   const queryClient = useQueryClient();
   return (id: string,) =>
     queryClient.getQueryData<Awaited<ReturnType<typeof exportRole>>>(getExportRoleQueryKey(id));
+}
+
+
+export const getRolePositionsUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/roles/${id}/positions`
+}
+
+/**
+ * The drawer's *In teams* tab, and the confirmation before a delete. It
+ * answers both in one request, which is the point: the alternative reads
+ * every team's whole tree and filters it in the window, at a request a team,
+ * and moves the rules about withheld names there at the same time.
+ *
+ * A profile this person cannot see is **not found**, as every other read of
+ * one is. The *list* is narrowed to the teams they may see; the **count
+ * beside it** is what that narrowing left out, because deleting a profile
+ * cascades onto every team in the organisation and a confirmation that
+ * described only half of it was the one sentence that could not be made
+ * true. The shape may be disclosed, the names may not — see
+ * [`crate::agent_teams::ProfilePlaces`].
+ * @summary Where this profile sits: one entry per position it holds, in a team this
+person can see.
+ */
+export const rolePositions = async (id: string, options?: Parameters<typeof http>[1]): Promise<ProfilePlaces> => {
+
+  return http<ProfilePlaces>(getRolePositionsUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getRolePositionsQueryKey = (id: string,) => {
+    return [
+    `/api/v1/roles/${id}/positions`
+    ] as const;
+    }
+
+
+export const getRolePositionsQueryOptions = <TData = Awaited<ReturnType<typeof rolePositions>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof rolePositions>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getRolePositionsQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof rolePositions>>> = ({ signal }) => rolePositions(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof rolePositions>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type RolePositionsQueryResult = NonNullable<Awaited<ReturnType<typeof rolePositions>>>
+export type RolePositionsQueryError = ApiError
+
+
+export function useRolePositions<TData = Awaited<ReturnType<typeof rolePositions>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof rolePositions>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof rolePositions>>,
+          TError,
+          Awaited<ReturnType<typeof rolePositions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRolePositions<TData = Awaited<ReturnType<typeof rolePositions>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof rolePositions>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof rolePositions>>,
+          TError,
+          Awaited<ReturnType<typeof rolePositions>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useRolePositions<TData = Awaited<ReturnType<typeof rolePositions>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof rolePositions>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary Where this profile sits: one entry per position it holds, in a team this
+person can see.
+ */
+
+export function useRolePositions<TData = Awaited<ReturnType<typeof rolePositions>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof rolePositions>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getRolePositionsQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary Where this profile sits: one entry per position it holds, in a team this
+person can see.
+ */
+export const useSetRolePositionsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof rolePositions>> | undefined | ((old: Awaited<ReturnType<typeof rolePositions>> | undefined) => Awaited<ReturnType<typeof rolePositions>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof rolePositions>>>({ exact: $exactMatch, queryKey: getRolePositionsQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary Where this profile sits: one entry per position it holds, in a team this
+person can see.
+ */
+export const useGetRolePositionsQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof rolePositions>>>(getRolePositionsQueryKey(id));
 }
 
 

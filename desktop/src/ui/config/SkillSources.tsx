@@ -275,12 +275,12 @@ export function SkillSources({
   const here = r.at?.split("/").pop() ?? null;
 
   const budgetWhy = r.pinned
-    ? `${r.agentLabel}'s limit, which this profile pins`
-    : "Codex's limit — the smallest of the three, because this profile pins no agent";
+    ? `Measured against ${r.agentLabel}, which this profile pins.`
+    : "Measured against Codex, the tightest limit.";
 
   const fig = empty
-    ? "It loads no skills from Firetower"
-    : `It loads ${r.loads.length} skill${r.loads.length === 1 ? "" : "s"}${r.shared ? " for you" : ""}`;
+    ? "Starts with no skills from Firetower"
+    : `Starts with ${r.loads.length} skill${r.loads.length === 1 ? "" : "s"}${r.shared ? " for you" : ""}`;
 
   const says = r.over ? (
     <>
@@ -323,14 +323,12 @@ export function SkillSources({
   return (
     <div className="fld">
       <span>Skills it loads</span>
-      {/* **"loads", not "can load".** `can load` is a permission label, and
-          under a union no permission is granted or withheld — the profile
-          names a set. The present tense also makes the sentence falsifiable,
-          which is what the resolved count is for. */}
-      <span className="hint">
-        Three sources, added together. Each one stays in the model's context on every turn. Nothing
-        here removes a skill — turning a source off is the only way to narrow it.
-      </span>
+      {/* **One sentence, and it is the one nothing here draws.** Three
+          sources added together is what the three lines under the figure
+          show, and that each stays in context on every turn is what the
+          token meter is. What no control on this screen says is that none of
+          them *removes* anything — so that is what is left. */}
+      <span className="hint">Switching a source off is the only way to load less.</span>
 
       <div className="answer" data-tone={tone}>
         <div className="fig">{fig}</div>
@@ -652,9 +650,7 @@ export function SkillSources({
           {r.readsHost ? (
             <p>
               {r.pinned ? r.agentLabel : "Claude Code"} also reads <code>~/.claude/skills</code> on
-              the machine, whatever is set here. Nothing on this screen pins, versions, scopes or
-              records what is in there. This decides what Firetower sends. It is not everything the
-              agent can read.
+              the machine. Firetower does not send or record those.
             </p>
           ) : (
             <p>

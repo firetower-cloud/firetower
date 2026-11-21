@@ -8,17 +8,24 @@
  * person still could not import anything, because no screen said a folder
  * worked here.
  *
- * So this asserts the standing sentence that says the page is a drop surface,
- * in both of its states: with a library, and empty, which is a different block
- * of markup and the one somebody meets first.
+ * So this asserts that the page offers it, in both of its states: empty,
+ * which is a different block of markup and the one somebody meets first, and
+ * with a library, where the way in is now a **control** rather than a
+ * sentence under the list. That sentence narrated two things the page's own
+ * controls already said, and it went with them — but it also carried the one
+ * thing a drop target cannot say for itself, so the gesture moved onto the
+ * import item in the primary action, which is what is pinned here instead.
  *
- * **What this cannot see.** The third route in the primary action is inside a
- * popover that opens on a press, so it is not in this markup at all — and the
- * drag handlers firing, the review replacing the pane and an accept reaching
- * the server all need a browser. Those are the end-to-end evidence on the pull
- * request. What is here is the half that fails on a laptop in a second.
+ * **What this cannot see.** That item lives in a popover that opens on a
+ * press, so it is not in the markup at all and is read off the source — and
+ * the drag handlers firing, the review replacing the pane and an accept
+ * reaching the server all need a browser. Those are the end-to-end evidence
+ * on the pull request. What is here is the half that fails on a laptop in a
+ * second.
  */
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Roles } from "./Roles";
@@ -73,15 +80,54 @@ const readable = (html: string) =>
     .replace(/&amp;/g, "&")
     .replace(/\s+/g, " ");
 
-describe("the Profiles screen says a folder of profiles works here", () => {
-  it("says so beside a library that already has profiles in it", () => {
-    const said = readable(draw([profile("Designer")]));
-    expect(said).toContain("Drop a folder of PROFILE.md files anywhere on this page");
+const SOURCE = readFileSync(fileURLToPath(new URL("./Roles.tsx", import.meta.url)), "utf8");
+
+describe("the Profiles screen offers a folder of profiles", () => {
+  /**
+   * A control, in the menu somebody opens to make a profile — and the drop
+   * gesture named on it, because the pane is the drop target and a drop
+   * target shows nothing until something is already over it.
+   */
+  it("offers it as an item in the page's one primary action", () => {
+    expect(SOURCE).toContain('label: "Import a folder"');
+    expect(SOURCE).toContain("Or drop a folder on this page.");
   });
 
   it("says so on the empty state, which is where somebody starts", () => {
     const said = readable(draw([]));
     expect(said).toContain("No profiles yet");
     expect(said).toContain("drop in a folder of profiles you already have");
+  });
+
+  /* And the sentence it replaced does not come back. Two of its three
+     clauses narrated what the controls already say, which is the thing this
+     feature keeps having to be told. */
+  it("does not narrate it under the list", () => {
+    const said = readable(draw([profile("Designer")]));
+    expect(said).not.toContain("A profile is filed like a skill or a machine");
+    expect(said).not.toContain("Drop a folder of PROFILE.md files anywhere on this page");
+  });
+});
+
+/**
+ * And the other page with a folder-drop import, which had the same sentence
+ * and the same hole under it.
+ *
+ * Here rather than in a file of its own because it is one fact about two
+ * pages: both panes are drop targets, both draw `CreateMenu`, and the
+ * failure this whole file exists to stop — *no screen said a folder worked
+ * here* — is the same failure on either. A second file would be the same
+ * assertion kept somewhere it could drift from this one.
+ */
+describe("the Skills screen offers a folder of skills the same way", () => {
+  const SKILLS = readFileSync(fileURLToPath(new URL("./Skills.tsx", import.meta.url)), "utf8");
+
+  it("offers it as an item in the page's one primary action", () => {
+    expect(SKILLS).toContain('label: "Upload a folder"');
+    expect(SKILLS).toContain("Or drop a folder on this page.");
+  });
+
+  it("does not narrate it at the foot of the list", () => {
+    expect(SKILLS).not.toContain("Or drop a folder anywhere on this page.");
   });
 });

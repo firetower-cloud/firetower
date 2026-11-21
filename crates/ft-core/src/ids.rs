@@ -127,6 +127,17 @@ id_type!(
     "arv",
     "Identifies one version of an artifact. Append-only: a note is anchored to one."
 );
+id_type!(
+    AgentTeamId,
+    "ateam",
+    "Identifies an agent team — a name, the profile that leads it, and a tree of positions. \
+     Not a `TeamId`, which is a group of people."
+);
+id_type!(
+    PositionId,
+    "pos",
+    "Identifies one position in an agent team: a profile, a parent, and a place among its siblings."
+);
 
 #[cfg(test)]
 mod tests {

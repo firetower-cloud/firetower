@@ -1,0 +1,472 @@
+//! Teams seeded from what profiles have **actually spawned**.
+//!
+//! A profile used to carry its own list of profiles it could hand work to, and
+//! the default for that list was empty — which meant *anything the owner can
+//! see*, including profiles created later. **That default cannot become a
+//! tree.** It is not a set of rows; it is a standing subscription to a set,
+//! and it changes without anybody touching it.
+//!
+//! So the old default is not copied across. Each team is built from session
+//! lineage — `sessions.parent_id`, the edge `20261028120000_lineage.sql`
+//! added. A session running profile P, a child session of it running profile
+//! Q: that is one position, Q reporting to P. It is the only non-arbitrary
+//! materialisation available, and it is the one with the property the
+//! deprecation needs: **anybody whose patterns continue sees no change at
+//! all**, because the team already holds what they have been doing. A
+//! snapshot of everything visible would have handed somebody a fourteen-seat
+//! team on day one for a profile that only ever used three, and every one of
+//! those seats would be something nobody chose.
+//!
+//! Three shapes follow from the data rather than from a choice:
+//!
+//! * **Every seeded team is one level deep.** A delegated child cannot spawn
+//!   today (`docs/delegation.md`, Limits), so there is no deeper lineage to
+//!   read. Depth arrives when somebody authors it.
+//! * **A profile that never spawned gets an empty team** — a name, a lead, and
+//!   nothing under it. Not a missing one: the team is where reach is authored
+//!   now, and making somebody create one before they can author anything is
+//!   the break this exists to avoid.
+//! * **A profile that cannot delegate gets no team.** `can_delegate` is the
+//!   question "could this profile hand work off", and a profile demoted to an
+//!   Operator before the cut had no reach to preserve, whatever its history.
+//!
+//! `roles.delegate_scope` is **not copied**, and it is the one thing a reader
+//! will ask about. A narrowed scope is a finite list somebody ticked, so
+//! copying it would be defensible — but #491 is explicit that a profile which
+//! never spawned gets an *empty* team, and a scope that was never exercised is
+//! a guess about intent the same way a visibility snapshot is. An empty scope
+//! still means "any", so a profile that never spawned still gets an empty team
+//! rather than a snapshot of everything visible.
+//!
+//! **A non-empty scope is read, as a ceiling.** That is the other direction,
+//! and it goes the other way: a scope is also how reach is *taken away*. A
+//! Manager that spawned an Auditor last March, narrowed since to exclude it,
+//! is refused the Auditor by the old path today — and a migration that read
+//! the March spawn and wrote the Auditor back in as a position would undo a
+//! revocation nobody asked it to undo. So history is intersected with the
+//! scope, which also puts seeding and the window on one rule: during the
+//! window the scope is exactly what gets admitted, so anything the
+//! intersection drops at the cut can still arrive through real use, marked.
+//! See [`super::window`].
+//!
+//! **And lineage is read across every owner**, which is right — a shared
+//! profile's history is everybody's who used it — but what it turns up is
+//! not. A colleague who ran somebody else's Manager and spawned a profile of
+//! their own would have had that private profile written into a team filed in
+//! the Manager's directory: a seat its owner cannot name, in a team they can
+//! then never save, because `AgentTeams::must_see` refuses their write on an
+//! id they cannot resolve. So each seat is passed through
+//! [`super::admissible`], the same question the editor asks of whoever is
+//! saving, asked here of the team's own author.
+
+use anyhow::{Context, Result};
+use sqlx::Row;
+
+use super::{check, slug_of, AgentTeams, MAX_POSITIONS};
+use crate::AppState;
+
+/// What one cut produced, for the log and for a test to assert on.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Seeded {
+    pub teams: usize,
+    /// Positions written, the leads included.
+    pub positions: usize,
+    /// Leads whose spawn history did not fit in one team.
+    pub truncated: Vec<Truncated>,
+}
+
+/// A profile that had spawned more distinct profiles than a team can hold.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Truncated {
+    pub profile: String,
+    pub name: String,
+    /// How many distinct profiles it had spawned **that were still eligible**
+    /// — on its scope, and filed where its team's author can reach them. The
+    /// two it was over by are the two reasons a seat is dropped before the
+    /// limit is even asked about.
+    pub spawned: usize,
+    /// How many of them became positions: `MAX_POSITIONS - 1`.
+    pub kept: usize,
+}
+
+/// Seed every organisation that has not been seeded, at start-up.
+///
+/// Spawned rather than awaited, like `seed_builtin_skills`, and safe to be:
+/// **every session that exists has `position_id` null**, so nothing already
+/// running is waiting on this. A team only reaches a session that is started
+/// as one, which cannot happen before somebody has seen the team.
+pub async fn run(state: AppState) {
+    if !state.agent_teams.enabled() {
+        tracing::info!("agent teams are off: no teams seeded from lineage");
+        return;
+    }
+    let orgs: Vec<String> = match sqlx::query_scalar("SELECT id FROM organizations ORDER BY id")
+        .fetch_all(state.db.pool())
+        .await
+    {
+        Ok(orgs) => orgs,
+        Err(e) => {
+            tracing::error!("could not read the organisations to seed agent teams for: {e:#}");
+            return;
+        }
+    };
+    for org in orgs {
+        match seed(&state.agent_teams, &org).await {
+            Ok(None) => tracing::debug!(org = %org, "agent teams already seeded"),
+            Ok(Some(done)) => {
+                tracing::info!(
+                    org = %org,
+                    teams = done.teams,
+                    positions = done.positions,
+                    "seeded agent teams from session lineage"
+                );
+                for cut in &done.truncated {
+                    /* **The lead takes one of the seats**, so the number
+                    this compares against is `MAX_POSITIONS - 1` and not
+                    `MAX_POSITIONS`. Saying "64 is more than the 64 a team
+                    holds" was true of nothing and wrong at exactly the
+                    boundary — in the one sentence somebody reads when they
+                    are already wondering where a seat went. */
+                    tracing::warn!(
+                        profile = %cut.profile,
+                        "\"{}\" had {} different profiles to bring across, and a team holds {} \
+                         positions with its lead among them — so its team was seeded with the {} \
+                         most recently spawned and the rest were left out. They can be added on \
+                         Configuration → Agent teams.",
+                        cut.name,
+                        cut.spawned,
+                        MAX_POSITIONS,
+                        cut.kept,
+                    );
+                }
+            }
+            Err(e) => tracing::error!(org = %org, "could not seed agent teams: {e:#}"),
+        }
+    }
+}
+
+/// One cut, for one organisation. `None` when it has already been seeded.
+///
+/// **One transaction.** Either the installation has its teams and the row that
+/// says so, or it has neither and the next start-up tries again — a
+/// half-materialised set of teams is the one outcome nobody could reason
+/// about.
+///
+/// Public so the tests can run it against fixture lineage, which is the only
+/// way to assert what it produces: it runs once per installation, and by the
+/// time anything else in the suite exists it has already decided.
+pub async fn seed(teams: &AgentTeams, org: &str) -> Result<Option<Seeded>> {
+    if !teams.enabled() {
+        return Ok(None);
+    }
+    let mut tx = teams.pool.begin().await?;
+
+    /* **The claim, and the mutex.** Two control planes coming up together
+    both reach this; the insert that conflicts returns no row and takes the
+    other's lock on the way, so exactly one of them seeds and the other
+    finds the work done. Claimed before anything is read, so the whole cut
+    is inside the lock. */
+    let claimed: Option<String> = sqlx::query_scalar(
+        "INSERT INTO agent_team_seeding (org_id) VALUES ($1) \
+         ON CONFLICT (org_id) DO NOTHING RETURNING org_id",
+    )
+    .bind(org)
+    .fetch_optional(&mut *tx)
+    .await
+    .context("claiming the agent-team seeding for an organisation")?;
+    if claimed.is_none() {
+        return Ok(None);
+    }
+
+    /* Every profile that could delegate, and therefore every profile with a
+    reach to preserve. `NOT EXISTS` skips one that already leads a team:
+    there are none at the cut, and the guard is what keeps this from
+    doubling a hand-made team if the two ever do overlap. */
+    let leads = sqlx::query(
+        "SELECT r.id, r.name, r.path::text AS path, r.created_by, r.delegate_scope \
+           FROM roles r \
+          WHERE r.org_id = $1 AND r.can_delegate \
+            AND NOT EXISTS (SELECT 1 FROM agent_team_positions p \
+                             WHERE p.profile_id = r.id AND p.parent_id IS NULL) \
+          ORDER BY r.id",
+    )
+    .bind(org)
+    .fetch_all(&mut *tx)
+    .await
+    .context("reading the profiles that could delegate")?;
+
+    let mut done = Seeded::default();
+    for lead in &leads {
+        let profile: String = lead.get("id");
+        let name: String = lead.get("name");
+        let path: String = lead.get("path");
+        let created_by: Option<String> = lead.get("created_by");
+        let scope: Vec<String> = lead.get("delegate_scope");
+
+        /* **What this profile actually spawned.** One row per distinct
+        profile it has started a child as, newest first — which is both the
+        order the seats are written in and the order the truncation below
+        keeps, so there is one rule rather than two.
+
+        `c.profile_id <> $1` is the one exclusion, and it is not
+        housekeeping: a profile that spawned *itself* is a chain of agents
+        of one kind handing the same work down, and `agent_teams::check`
+        refuses a profile under itself on every write. Seeding one would
+        make a team nobody could ever save. It is a narrow break in the old
+        behaviour and the only one here. */
+        let spawned = sqlx::query(
+            "SELECT c.profile_id, q.name, max(c.created_at) AS last_spawn \
+               FROM sessions l \
+               JOIN sessions c ON c.parent_id = l.id \
+               JOIN roles q ON q.id = c.profile_id \
+              WHERE l.profile_id = $1 AND c.profile_id <> $1 AND q.org_id = $2 \
+              GROUP BY c.profile_id, q.name \
+              ORDER BY max(c.created_at) DESC, c.profile_id",
+        )
+        .bind(&profile)
+        .bind(org)
+        .fetch_all(&mut *tx)
+        .await
+        .context("reading what a profile has spawned")?;
+
+        /* **Past the limit, the most recent survive, and it is said out
+        loud.** A team holds `MAX_POSITIONS` seats with the lead among them,
+        so a profile with a longer history than that cannot have all of it.
+        The alternatives were to refuse the team — leaving the profile with
+        no reach at all, which is the break this work exists to avoid — or
+        to raise the limit for migrated teams, which would make the limit a
+        suggestion. Keeping the most recently used is the choice that is
+        most often right, and the rest are one add away on a screen that
+        now exists. */
+        /* **The scope is a ceiling on what history may resurrect.**
+
+        Empty still means "any of those", which was the old default and is
+        why a profile that never spawned still gets an empty team rather
+        than a snapshot. A *narrowed* scope is different: it is the one way
+        reach was ever taken away, and the old path refuses an entry that
+        is not on it today whatever the lineage says. Reading it here is
+        what stops a migration nobody asked for from undoing somebody's
+        revocation — and it puts this on the window's rule, so an entry
+        the intersection drops can still arrive later out of real use,
+        marked. */
+        let scoped = !scope.is_empty();
+
+        /* **And a seat the team's own author could not have drawn.** The
+        lineage above is read across every owner, which is right for a
+        shared profile — but a colleague's spawn of a profile of their own
+        would otherwise become a seat in a team filed in somebody else's
+        directory, which that somebody can see without being able to name
+        and can then never save. `admissible` is `must_see`'s question,
+        asked of the author rather than of a saver there is none of. */
+        let candidates: Vec<String> = spawned
+            .iter()
+            .map(|row| row.get::<String, _>("profile_id"))
+            .filter(|id| !scoped || scope.contains(id))
+            .collect();
+        let allowed =
+            super::admissible(&mut *tx, created_by.as_deref(), &path, &candidates).await?;
+        let wanted: Vec<String> = candidates
+            .iter()
+            .filter(|id| allowed.contains_key(id.as_str()))
+            .cloned()
+            .collect();
+        /* **Said out loud, like the truncation below.** A seat left out is
+        reach somebody had before the cut and does not have after, and the
+        two reasons are different things to do about it: a scope is a
+        decision somebody already made, and a profile the author cannot see
+        wants filing somewhere they can. Neither is a reason to abandon the
+        team. */
+        let dropped = candidates.len() - wanted.len();
+        if dropped > 0 {
+            tracing::warn!(
+                profile = %profile,
+                "\"{name}\" had spawned {dropped} profile(s) that are not seats in its team: \
+                 either off its own delegate scope, or filed where the team's owner cannot \
+                 reach them. They can be added on Configuration → Agent teams."
+            );
+        }
+
+        let room = MAX_POSITIONS.saturating_sub(1);
+        if wanted.len() > room {
+            done.truncated.push(Truncated {
+                profile: profile.clone(),
+                name: name.clone(),
+                spawned: wanted.len(),
+                kept: room,
+            });
+        }
+        let reports: Vec<String> = wanted.into_iter().take(room).collect();
+
+        // Named after its lead profile, which is the name somebody already
+        // knows it by. Trimmed to what `check` accepts rather than refused for
+        // being long, because refusing would cost a profile its whole reach
+        // over its name.
+        let team_name = team_name(&name);
+
+        /* The limits, asked of the same pure function every write asks.
+        It cannot fail on a tree built here — one level, inside the count,
+        no profile under itself — and that is the point of asking: if the
+        limits ever move, this is where the two disagree, loudly, instead
+        of writing a tree nobody can save. One profile skipped rather than
+        the whole cut abandoned. */
+        let shape = super::NewAgentTeam {
+            name: team_name.clone(),
+            lead: super::NewPosition {
+                id: None,
+                profile: profile.clone(),
+                instructions: String::new(),
+                children: reports
+                    .iter()
+                    .map(|p| super::NewPosition {
+                        id: None,
+                        profile: p.clone(),
+                        instructions: String::new(),
+                        children: Vec::new(),
+                    })
+                    .collect(),
+            },
+            directory: None,
+        };
+        /* `check` reads a profile's name off what the caller already has, so
+        that a refusal says *Engineer* rather than a `role_01…` (#494). The
+        names are in the rows this loop just read: the lead's, and one per
+        profile it has spawned. Grouping by `q.name` beside `c.profile_id`
+        changes no group — a name is a function of the id it hangs on. */
+        let names: super::ProfileNames = std::iter::once((profile.clone(), name.clone()))
+            .chain(spawned.iter().map(|row| {
+                (
+                    row.get::<String, _>("profile_id"),
+                    row.get::<String, _>("name"),
+                )
+            }))
+            .collect();
+        if let Err(no) = check(&shape, &names) {
+            tracing::error!(
+                profile = %profile,
+                "not seeding a team for \"{name}\": {no}. Its profile keeps the reach it has."
+            );
+            continue;
+        }
+
+        let team = ft_core::AgentTeamId::new();
+        let slug = slug_of(&team_name, team.as_str());
+        /* **Filed where its lead profile is filed**, so exactly the people
+        who can reach the profile can reach the team. A team dropped into
+        the creator's own space when the profile lives in a directory would
+        be invisible to the colleagues who have been using that profile,
+        and their sessions would resolve to nothing — fail-closed, and
+        silent. `ResourcePath` is the only thing that writes one, here as
+        everywhere. */
+        let path = ft_core::ResourcePath::from_stored(&path);
+        let filed = match (path.directory_slug(), path.owner_slug()) {
+            (Some(directory), _) => ft_core::ResourcePath::in_directory(directory, &slug),
+            (None, Some(owner)) => ft_core::ResourcePath::personal(owner, &slug),
+            // Neither root: a row somebody wrote by hand. Left alone rather
+            // than guessed at, because a path is who can see a thing.
+            (None, None) => {
+                tracing::error!(
+                    profile = %profile,
+                    "not seeding a team for \"{name}\": its path is {path}, which is in neither \
+                     a person's space nor a directory, so there is nowhere to file the team."
+                );
+                continue;
+            }
+        };
+
+        sqlx::query(
+            "INSERT INTO agent_teams (id, org_id, path, created_by, name, slug, seeded_at) \
+             VALUES ($1, $2, $3::ltree, $4, $5, $6, now())",
+        )
+        .bind(team.as_str())
+        .bind(org)
+        .bind(filed.to_ltree())
+        .bind(&created_by)
+        .bind(&team_name)
+        .bind(&slug)
+        .execute(&mut *tx)
+        .await
+        .context("writing a seeded agent team")?;
+
+        let lead_seat = ft_core::PositionId::new();
+        sqlx::query(
+            "INSERT INTO agent_team_positions (id, team_id, profile_id, parent_id, ord) \
+             VALUES ($1, $2, $3, NULL, 0)",
+        )
+        .bind(lead_seat.as_str())
+        .bind(team.as_str())
+        .bind(&profile)
+        .execute(&mut *tx)
+        .await
+        .context("writing a seeded team's lead")?;
+        done.positions += 1;
+
+        for (at, report) in reports.iter().enumerate() {
+            /* `auto_added_at` is **null** on a seeded seat, deliberately.
+            The mark means "the window added this while nobody was
+            looking"; a seeded seat is accounted for by `seeded_at` on the
+            team, which says the whole thing was materialised. Marking
+            every seat as well would make the window's own additions
+            invisible among them, which is the one thing the mark is for. */
+            sqlx::query(
+                "INSERT INTO agent_team_positions (id, team_id, profile_id, parent_id, ord) \
+                 VALUES ($1, $2, $3, $4, $5)",
+            )
+            .bind(ft_core::PositionId::new().as_str())
+            .bind(team.as_str())
+            .bind(report)
+            .bind(lead_seat.as_str())
+            .bind(at as i32)
+            .execute(&mut *tx)
+            .await
+            .context("writing a seeded team's position")?;
+            done.positions += 1;
+        }
+        done.teams += 1;
+    }
+
+    sqlx::query("UPDATE agent_team_seeding SET teams = $2, positions = $3 WHERE org_id = $1")
+        .bind(org)
+        .bind(done.teams as i32)
+        .bind(done.positions as i32)
+        .execute(&mut *tx)
+        .await
+        .context("recording what the agent-team seeding produced")?;
+    tx.commit().await?;
+    Ok(Some(done))
+}
+
+/// A team's name from its lead profile's.
+///
+/// `check` holds a name to 64 characters, so a longer profile name is cut
+/// rather than allowed to cost its profile the whole team. Character-wise, not
+/// byte-wise: a name is somebody's words and may be in any script.
+fn team_name(profile: &str) -> String {
+    let trimmed = profile.trim();
+    let name: String = trimmed.chars().take(64).collect();
+    if name.is_empty() {
+        "Team".to_string()
+    } else {
+        name
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_team_is_named_after_its_lead_and_fits_what_a_name_may_be() {
+        assert_eq!(team_name("  Orchestrator  "), "Orchestrator");
+        assert_eq!(
+            team_name("   "),
+            "Team",
+            "a nameless profile still gets one"
+        );
+        let long: String = "é".repeat(100);
+        assert_eq!(
+            team_name(&long).chars().count(),
+            64,
+            "cut by characters, not by bytes"
+        );
+    }
+}

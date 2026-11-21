@@ -1673,6 +1673,22 @@ impl Db {
         Ok(())
     }
 
+    /// Record which position in an agent team a session occupies.
+    ///
+    /// **The edge the whole of agent teams rides on.** A person starting work
+    /// as a team stands in its lead's seat; a lead spawning a child puts the
+    /// child in the seat below its own. After the row exists, for the reason
+    /// `set_profile` and `set_lineage` are: it is one more thing a session may
+    /// or may not have.
+    pub async fn set_position(&self, session: &SessionId, position: &str) -> Result<()> {
+        sqlx::query("UPDATE sessions SET position_id = $1 WHERE id = $2")
+            .bind(position)
+            .bind(session.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     /// Keep the system prompt a session was launched with.
     ///
     /// Written whenever a run is launched or relaunched, because a relaunch
@@ -2924,6 +2940,84 @@ impl Db {
         .map(schedule_from_row))
     }
 
+    /// Every schedule that pins one agent team, whoever owns it.
+    ///
+    /// **No owner predicate, deliberately.** Changing a team changes what
+    /// every schedule pinning it would do, and a schedule somebody else owns
+    /// is no less affected for being somebody else's — leaving theirs
+    /// approved on a tree that no longer exists is the unattended run this
+    /// whole mechanism exists to stop. Who may change the team is answered
+    /// where the team is changed; this is the consequence of that having
+    /// happened.
+    ///
+    /// `pins -> 'team' ->> 'id'` because the pinned team is an object: the
+    /// tree, its name and its size travel with the id, so a screen can say
+    /// what was approved without reading the team as it is now.
+    pub async fn schedules_pinning_team(&self, team: &str) -> Result<Vec<ScheduleRow>> {
+        Ok(sqlx::query(&format!(
+            "SELECT {SCHEDULE_COLUMNS} FROM schedules s
+              WHERE s.pins -> 'team' ->> 'id' = $1
+              ORDER BY s.id"
+        ))
+        .bind(team)
+        .fetch_all(&self.pool)
+        .await?
+        .iter()
+        .map(schedule_from_row)
+        .collect())
+    }
+
+    /// Re-pin one schedule's team and take its approval away.
+    ///
+    /// **Both halves, in one statement, because either on its own is a
+    /// mistake somebody has already made.** Keeping the old tree pinned means
+    /// a fix never reaches the schedule; adopting the new one without
+    /// clearing the approval is exactly what approval exists to prevent. So
+    /// the pins become what the team is *now* — which is what the schedule's
+    /// own page then draws — and nothing runs on it until a person turns it
+    /// back on.
+    ///
+    /// `active = false` as well as the cleared approval. The clock already
+    /// ignores an unapproved schedule (`schedules_due` requires both), so the
+    /// approval alone would be enough to stop it — but a row left `active`
+    /// with no approval draws a *Next run* that is never going to happen, and
+    /// a promise nothing keeps is worse than the plain word Stopped.
+    ///
+    /// `paused_reason` only where there was an approval to lose: a draft
+    /// nobody had turned on has not been stopped by this, and saying it was
+    /// would put it in *Waiting for you* with nothing to decide.
+    ///
+    /// **The revision moves even for that draft**, because `revision` means
+    /// *which approved text* and the text did change. `schedule_runs.revision`
+    /// is how "why did it do that" is answered after the fact, so two runs
+    /// carrying one revision must not be able to have run two different
+    /// trees. The cost is that a page opened before this sends a revision
+    /// that no longer matches and is told to read it again — which is the
+    /// right answer, and the same one an edit in another tab already gives.
+    pub async fn unapprove_for_team(
+        &self,
+        id: &ScheduleId,
+        pins: &serde_json::Value,
+        reason: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE schedules
+                SET pins = $2,
+                    revision = revision + 1,
+                    approved_by = NULL, approved_at = NULL, active = false,
+                    paused_reason = CASE WHEN approved_at IS NOT NULL
+                                         THEN $3 ELSE paused_reason END,
+                    updated_at = now()
+              WHERE id = $1",
+        )
+        .bind(id.as_str())
+        .bind(pins)
+        .bind(reason)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     /// Write a schedule down. Inactive and unapproved: turning it on is a
     /// separate act, which is the whole of the propose-but-not-activate rule.
     #[allow(clippy::too_many_arguments)]
@@ -4111,6 +4205,12 @@ fn session_from_row(r: sqlx::postgres::PgRow) -> Result<Session> {
             .get::<Option<String>, _>("parent_id")
             .map(SessionId::from_stored),
         profile_id: r.get::<Option<String>, _>("profile_id"),
+        // `try_get`, because one read of a session predates the column being
+        // selectable: `s.*` carries it everywhere, and a query that one day
+        // names its columns should not panic over this one.
+        position_id: r
+            .try_get::<Option<String>, _>("position_id")
+            .unwrap_or_default(),
         spawn_reason: r.get("spawn_reason"),
         // Null for every session whose agent never set one through the plan
         // tool — which is most of them, since the two engines we drive keep

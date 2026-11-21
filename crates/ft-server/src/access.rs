@@ -179,12 +179,79 @@ fn parse_subject(stored: &str) -> Result<SubjectKind> {
 /// The counts are `<@` against each kind's path index — "everything filed under
 /// this root" — which is the same question the access check asks and the reason
 /// a directory needs no join to know what it holds.
+///
+/// **Every kind that can be filed is counted here**, and that is a rule rather
+/// than a list that happens to be complete. A kind absent from it is one a
+/// directory can hold while reading as empty — which makes the directory
+/// deletable, and a delete does not take what is filed in it: those rows keep
+/// their `d.<slug>` path and become orphans. A directory of the same name
+/// recreated later derives the **same slug**, because a slug is derived from
+/// the name once, so everything left behind reappears inside it, held by
+/// whoever is granted the new one. That is a silent transfer of profile and
+/// agent-team instructions — prose people put operational detail into — to
+/// somebody who was never given anything.
+///
+/// `roles`, `artifacts` and `agent_teams` were all missing.
+/// `every_kind_a_directory_can_hold_is_counted_and_can_be_named` is what keeps
+/// the next one from being, and [`Access::filed_under`] has to agree with this
+/// in both directions.
 const DIRECTORY_COLUMNS: &str = "d.id, d.name, d.slug, \
      (SELECT count(*) FROM workspaces     x WHERE x.path <@ ('d.' || d.slug)::ltree) AS workspaces, \
      (SELECT count(*) FROM hosts          x WHERE x.path <@ ('d.' || d.slug)::ltree) AS hosts, \
      (SELECT count(*) FROM agent_accounts x WHERE x.path <@ ('d.' || d.slug)::ltree) AS agent_accounts, \
      (SELECT count(*) FROM secrets        x WHERE x.path <@ ('d.' || d.slug)::ltree) AS secrets, \
-     (SELECT count(*) FROM skills         x WHERE x.path <@ ('d.' || d.slug)::ltree) AS skills";
+     (SELECT count(*) FROM skills         x WHERE x.path <@ ('d.' || d.slug)::ltree) AS skills, \
+     (SELECT count(*) FROM roles          x WHERE x.path <@ ('d.' || d.slug)::ltree) AS roles, \
+     (SELECT count(*) FROM agent_teams    x WHERE x.path <@ ('d.' || d.slug)::ltree) AS agent_teams, \
+     (SELECT count(*) FROM artifacts      x WHERE x.path <@ ('d.' || d.slug)::ltree \
+                                            AND x.deleted_at IS NULL) AS artifacts";
+
+/// The one statement behind [`Access::filed_under`].
+///
+/// A const so that `every_kind_a_directory_can_hold_is_counted_and_can_be_named`
+/// can hold it against [`DIRECTORY_COLUMNS`]: a kind countable in one and
+/// absent from the other is a directory that reads as empty while holding
+/// something, or refuses a delete without saying what for.
+const FILED_UNDER: &str =
+    "SELECT 'workspace' AS kind, w.id, w.path::text, w.name, w.repo AS detail,
+                    u.name AS owner_name
+               FROM workspaces w LEFT JOIN principals u ON u.id = w.created_by
+              WHERE w.path <@ $1::ltree
+             UNION ALL
+             SELECT 'machine', h.id, h.path::text, h.name, NULL, u.name
+               FROM hosts h LEFT JOIN principals u ON u.id = h.created_by
+              WHERE h.path <@ $1::ltree AND {fleet}
+             UNION ALL
+             SELECT 'agentAccount', a.id, a.path::text, a.name, a.kind, u.name
+               FROM agent_accounts a LEFT JOIN principals u ON u.id = a.user_id
+              WHERE a.path <@ $1::ltree
+             UNION ALL
+             SELECT 'secret', s.scope || '/' || s.name || '/' || s.owner,
+                    s.path::text, s.name, s.scope,
+                    u.name
+               FROM secrets s LEFT JOIN principals u ON u.id = s.created_by
+              WHERE s.path <@ $1::ltree
+             UNION ALL
+             SELECT 'skill', k.id, k.path::text, k.name, NULL, u.name
+               FROM skills k LEFT JOIN principals u ON u.id = k.created_by
+              WHERE k.path <@ $1::ltree
+             UNION ALL
+             SELECT 'role', q.id, q.path::text, q.name, q.does, u.name
+               FROM roles q LEFT JOIN principals u ON u.id = q.created_by
+              WHERE q.path <@ $1::ltree
+             UNION ALL
+             SELECT 'agentTeam', g.id, g.path::text, g.name, NULL, u.name
+               FROM agent_teams g LEFT JOIN principals u ON u.id = g.created_by
+              WHERE g.path <@ $1::ltree
+             UNION ALL
+             SELECT 'artifact', a.id, a.path::text, a.title, NULL, u.name
+               FROM artifacts a LEFT JOIN principals u ON u.id = a.owner_id
+              WHERE a.path <@ $1::ltree AND a.deleted_at IS NULL
+             UNION ALL
+             SELECT 'repository', r.id, r.path::text, r.slug, r.remote, u.name
+               FROM repos r LEFT JOIN principals u ON u.id = r.added_by
+              WHERE r.path <@ $1::ltree
+             ORDER BY kind, name";
 
 /// A named group of people.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -212,17 +279,31 @@ pub struct Directory {
     /// What the person asking may do here. Absent when nothing was asked for.
     pub level: Option<Level>,
     /// What is filed here, so a list can say so and a deletion can refuse.
+    ///
+    /// One field per kind that can be filed, and all of them — see
+    /// [`DIRECTORY_COLUMNS`] for what a missing one costs.
     pub workspaces: i64,
     pub hosts: i64,
     pub agent_accounts: i64,
     pub secrets: i64,
     pub skills: i64,
+    pub roles: i64,
+    pub artifacts: i64,
+    pub agent_teams: i64,
 }
 
 impl Directory {
     /// Whether anything at all is filed here.
     pub fn holds_anything(&self) -> bool {
-        self.workspaces + self.hosts + self.agent_accounts + self.secrets + self.skills > 0
+        self.workspaces
+            + self.hosts
+            + self.agent_accounts
+            + self.secrets
+            + self.skills
+            + self.roles
+            + self.artifacts
+            + self.agent_teams
+            > 0
     }
 }
 
@@ -351,6 +432,10 @@ pub enum FiledKind {
     Artifact,
     /// A saved kind of agent a lead can start.
     Role,
+    /// A team of agents: a name, the profile that leads it, and the tree of
+    /// positions delegation resolves from. Not a [`Team`], which is a group of
+    /// people — see `migrations/server/20261120130000_agent_teams.sql`.
+    AgentTeam,
     /// The one kind that is never in a directory.
     ///
     /// It is in this enum because the screens that list what somebody owns,
@@ -370,6 +455,7 @@ impl FiledKind {
             "skill" => FiledKind::Skill,
             "artifact" => FiledKind::Artifact,
             "role" => FiledKind::Role,
+            "agentTeam" => FiledKind::AgentTeam,
             "repository" => FiledKind::Repository,
             other => bail!("{other} is not something a directory holds"),
         })
@@ -385,6 +471,7 @@ impl FiledKind {
             FiledKind::Skill => "skill",
             FiledKind::Artifact => "artifact",
             FiledKind::Role => "role",
+            FiledKind::AgentTeam => "agent team",
             FiledKind::Repository => "repository",
         }
     }
@@ -857,6 +944,9 @@ impl Access {
             agent_accounts: 0,
             skills: 0,
             secrets: 0,
+            roles: 0,
+            artifacts: 0,
+            agent_teams: 0,
         })
     }
 
@@ -922,6 +1012,7 @@ impl Access {
             FiledKind::Skill => "skills",
             FiledKind::Artifact => "artifacts",
             FiledKind::Role => "roles",
+            FiledKind::AgentTeam => "agent_teams",
             // Never reached by a move: `is_filable` refuses before this, and
             // `may_share` would refuse again on the personal path. Named
             // anyway, because the one place a kind becomes a table name should
@@ -942,59 +1033,71 @@ impl Access {
     /// own. So does the install's own. `path IS NULL` is what "attached" looks
     /// like in the schema, and this filters on it by asking for descendants of
     /// the root, which a null path can never be.
+    ///
+    /// **A kind countable by [`DIRECTORY_COLUMNS`] and absent from
+    /// [`FILED_UNDER`] is a defect**, and so is the reverse: this is what the
+    /// Access screen draws as *what is filed here*, and the counts are what a
+    /// delete refuses on. A screen saying a directory is empty over a delete
+    /// that refuses is one of those two being wrong; `roles`, `artifacts` and
+    /// `agent_teams` were missing from both, which is what made a directory
+    /// of profiles deletable.
+    /// `every_kind_a_directory_can_hold_is_counted_and_can_be_named` holds
+    /// the two together.
+    ///
+    /// A deleted artifact is a tombstone rather than an empty slot
+    /// (`20261103180000_artifact_tombstone.sql`), so it is neither named nor
+    /// counted: it has a row and nothing a person could move somewhere else.
     pub async fn filed_in(&self, directory_slug: &str) -> Result<Vec<Filed>> {
-        self.filed_under(&format!("d.{directory_slug}")).await
+        self.everything_under(&format!("d.{directory_slug}")).await
     }
 
-    /// The same question asked of any root, including somebody's own.
+    /// **What goes with this person**, which is a different question from
+    /// what is filed at their root — and the difference is `delete_user`.
     ///
-    /// `u.<slug>` is what "theirs" means, and asking it is how offboarding
-    /// finds out what would go with them. The only difference from a directory
-    /// is the first label.
+    /// `u.<slug>` is what "theirs" means, and the offboarding confirmation
+    /// asks this and then says *N things are destroyed*. So a row offered
+    /// here has to be one the delete actually destroys: `offboard_user`
+    /// refuses unless every item is named in the request, and a row offered
+    /// and then spared is one an administrator must confirm destroying and
+    /// then cannot.
     ///
-    /// A retired machine is left out. It is filed under whoever was here first
-    /// — the control plane registered its own process at boot and had nobody
-    /// else to file it under — so it would otherwise appear on an offboarding
-    /// confirmation as a machine called `localhost`, with nothing to say that
-    /// agreeing to it destroys every transcript of what ran in that container.
-    /// [`crate::accounts`] spares the same row when it deletes, and these two
-    /// have to agree: a row offered here and spared there is one an
-    /// administrator must confirm destroying and then cannot.
+    /// Two kinds are therefore left out, for the same reason and not the same
+    /// cause:
+    ///
+    /// * **A retired machine.** Filed under whoever was here first — the
+    ///   control plane registered its own process at boot and had nobody else
+    ///   to file it under — so it would appear as a machine called
+    ///   `localhost`, with nothing to say that agreeing to it destroys every
+    ///   transcript of what ran in that container. [`crate::accounts`] spares
+    ///   the same row.
+    /// * **Profiles and agent teams.** `roles.created_by` and
+    ///   `agent_teams.created_by` are `on delete set null`, so `delete_user`
+    ///   leaves them where they are. `principals` never reuses a slug, so
+    ///   what is left is unreachable by anybody rather than inherited — a
+    ///   leak and not a disclosure. Making them *go* is offboarding's to
+    ///   decide (`docs/offboarding.md` is scoped and not built, and its own
+    ///   rule says everything at a personal root dies with the account);
+    ///   listing them as destroyed before that is true would be the same
+    ///   false confirmation #513 is about, one screen over. They are listed
+    ///   and counted for a **directory**, which is the question #509 asks and
+    ///   where nothing is being destroyed.
     pub async fn filed_under(&self, under: &str) -> Result<Vec<Filed>> {
-        let rows = sqlx::query(&format!(
-            "SELECT 'workspace' AS kind, w.id, w.path::text, w.name, w.repo AS detail,
-                    u.name AS owner_name
-               FROM workspaces w LEFT JOIN principals u ON u.id = w.created_by
-              WHERE w.path <@ $1::ltree
-             UNION ALL
-             SELECT 'machine', h.id, h.path::text, h.name, NULL, u.name
-               FROM hosts h LEFT JOIN principals u ON u.id = h.created_by
-              WHERE h.path <@ $1::ltree AND {fleet}
-             UNION ALL
-             SELECT 'agentAccount', a.id, a.path::text, a.name, a.kind, u.name
-               FROM agent_accounts a LEFT JOIN principals u ON u.id = a.user_id
-              WHERE a.path <@ $1::ltree
-             UNION ALL
-             SELECT 'secret', s.scope || '/' || s.name || '/' || s.owner,
-                    s.path::text, s.name, s.scope,
-                    u.name
-               FROM secrets s LEFT JOIN principals u ON u.id = s.created_by
-              WHERE s.path <@ $1::ltree
-             UNION ALL
-             SELECT 'skill', k.id, k.path::text, k.name, NULL, u.name
-               FROM skills k LEFT JOIN principals u ON u.id = k.created_by
-              WHERE k.path <@ $1::ltree
-             UNION ALL
-             SELECT 'repository', r.id, r.path::text, r.slug, r.remote, u.name
-               FROM repos r LEFT JOIN principals u ON u.id = r.added_by
-              WHERE r.path <@ $1::ltree
-             ORDER BY kind, name",
-            fleet = crate::db::in_the_fleet("h")
-        ))
-        .bind(under)
-        .fetch_all(&self.pool)
-        .await
-        .context("reading what is filed there")?;
+        Ok(self
+            .everything_under(under)
+            .await?
+            .into_iter()
+            .filter(|f| !matches!(f.kind, FiledKind::Role | FiledKind::AgentTeam))
+            .collect())
+    }
+
+    /// Everything filed under a root, whatever kind it is and whatever
+    /// anything else would do about it. [`FILED_UNDER`] is the statement.
+    async fn everything_under(&self, under: &str) -> Result<Vec<Filed>> {
+        let rows = sqlx::query(&FILED_UNDER.replace("{fleet}", &crate::db::in_the_fleet("h")))
+            .bind(under)
+            .fetch_all(&self.pool)
+            .await
+            .context("reading what is filed there")?;
 
         rows.into_iter()
             .map(|r| {
@@ -1592,6 +1695,29 @@ impl Access {
                             );
                         }
                     }
+                    // **And for the same reason, its name.** A profile's name
+                    // is one profile within the directory it is filed in
+                    // (`roles_name_in_directory`), so a move is a write of
+                    // that name into a scope it was never judged against —
+                    // the write path most easily forgotten, because nothing
+                    // about the profile changes. Asked here, where the
+                    // profile in the way can still be named and the person
+                    // can be told which directory to settle it in; the index
+                    // would answer with a constraint name and an aborted
+                    // transaction.
+                    let there = crate::roles::filed_in_directory(to);
+                    if let Some(name) = crate::roles::name_of_role(&mut **tx, id).await? {
+                        if let Some(held) =
+                            crate::roles::named_already(&mut **tx, &there, &name, Some(id)).await?
+                        {
+                            bail!(
+                                "`{held}` is already filed in {} and two profiles filed together \
+                                 cannot share a name, so this profile stays where it is. Rename \
+                                 one of the two there, or file this one somewhere else.",
+                                crate::roles::place(&there)
+                            );
+                        }
+                    }
                 }
                 let table = Self::table(other);
                 let done = sqlx::query(&format!(
@@ -2037,6 +2163,9 @@ fn directory_from_row(r: sqlx::postgres::PgRow) -> Result<Directory> {
         agent_accounts: r.get("agent_accounts"),
         secrets: r.get("secrets"),
         skills: r.get("skills"),
+        roles: r.get("roles"),
+        artifacts: r.get("artifacts"),
+        agent_teams: r.get("agent_teams"),
     })
 }
 
@@ -2049,6 +2178,9 @@ fn what_it_holds(directory: &Directory) -> String {
         (directory.agent_accounts, "agent account", "agent accounts"),
         (directory.secrets, "secret", "secrets"),
         (directory.skills, "skill", "skills"),
+        (directory.roles, "profile", "profiles"),
+        (directory.agent_teams, "agent team", "agent teams"),
+        (directory.artifacts, "artifact", "artifacts"),
     ] {
         if n > 0 {
             parts.push(format!("{n} {}", if n == 1 { one } else { many }));
@@ -2072,6 +2204,114 @@ mod tests {
         let access = Access::new(db.pool().clone());
         let org = OrgId::from_stored(db.org().await.unwrap());
         (db, access, accounts, org, UserId::from_stored(admin))
+    }
+
+    /// **The two readings of a directory's contents have to agree.**
+    ///
+    /// `DIRECTORY_COLUMNS` is what `holds_anything` counts and what a delete
+    /// refuses on; `FILED_UNDER` is what the Access screen draws and what the
+    /// offboarding confirmation names. A kind in one and not the other is a
+    /// defect in whichever direction it falls: countable and unnameable is a
+    /// delete that refuses without saying what for, and nameable and
+    /// uncountable is a directory that reads as empty while holding
+    /// something — which deletes, orphans what is in it at a path a directory
+    /// of the same name would collect again, and hands somebody else's
+    /// profiles and agent teams to whoever is granted the new one.
+    ///
+    /// `roles`, `artifacts` and `agent_teams` were absent from both. Asked of
+    /// the SQL rather than of rows, because the whole point is to catch the
+    /// next kind on the day its table is added.
+    #[tokio::test]
+    async fn what_goes_with_a_person_is_only_what_the_delete_destroys() {
+        let (db, access, accounts, org, admin) = set_up().await;
+        let ana = person(&accounts, &org, "ana").await;
+        let slug: String = sqlx::query_scalar("SELECT slug FROM principals WHERE id = $1")
+            .bind(ana.as_str())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+
+        let roles = crate::roles::Roles::new(db.pool().clone());
+        let new: crate::roles::NewRole = serde_json::from_value(serde_json::json!({
+            "name": "Hers", "does": "what she does", "placement": "here",
+        }))
+        .unwrap();
+        let hers = roles
+            .create_filed(org.as_str(), ana.as_str(), &slug, None, &new)
+            .await
+            .unwrap();
+
+        // The Access screen asks what is filed there, and is told.
+        let shelf = access
+            .create_directory(&org, "Platform", &admin, &[])
+            .await
+            .unwrap();
+        roles
+            .create_filed(
+                org.as_str(),
+                admin.as_str(),
+                "admin",
+                Some(&shelf.slug),
+                &new,
+            )
+            .await
+            .unwrap();
+        assert!(
+            access
+                .filed_in(&shelf.slug)
+                .await
+                .unwrap()
+                .iter()
+                .any(|f| f.kind == FiledKind::Role),
+            "a profile filed in a directory is filed there, and the screen says so"
+        );
+
+        /* **And the offboarding confirmation is not.** It says *N things are
+        destroyed*, and `delete_user` does not destroy a profile:
+        `roles.created_by` is `on delete set null`. A row offered there and
+        spared by the delete is one an administrator must agree to destroy
+        and then cannot — the same false confirmation #513 is about, one
+        screen over. Nothing is inherited either way, because `principals`
+        never reuses a slug. */
+        let mine = access.filed_under(&format!("u.{slug}")).await.unwrap();
+        assert!(
+            mine.iter().all(|f| f.id != hers.as_str()),
+            "a profile at her own root is not offered as a thing that goes with her"
+        );
+    }
+
+    #[test]
+    fn every_kind_a_directory_can_hold_is_counted_and_can_be_named() {
+        let flat = |sql: &str| sql.split_whitespace().collect::<Vec<_>>().join(" ");
+        let (counted, named) = (flat(DIRECTORY_COLUMNS), flat(FILED_UNDER));
+        for kind in [
+            FiledKind::Workspace,
+            FiledKind::Machine,
+            FiledKind::AgentAccount,
+            FiledKind::Secret,
+            FiledKind::Skill,
+            FiledKind::Artifact,
+            FiledKind::Role,
+            FiledKind::AgentTeam,
+        ] {
+            let table = Access::table(kind);
+            assert!(
+                counted.contains(&format!("FROM {table} ")),
+                "{} can be filed in a directory, so a directory has to count it — \
+                 one that does not reads as empty and deletes",
+                kind.singular()
+            );
+            assert!(
+                named.contains(&format!("FROM {table} ")),
+                "{} can be filed in a directory, so the screen has to be able to name it",
+                kind.singular()
+            );
+        }
+        // The one kind that is named and never counted, because it is never
+        // filed: `is_filable` refuses a repository before a move reaches here.
+        assert!(!FiledKind::Repository.is_filable());
+        assert!(named.contains("FROM repos "));
+        assert!(!counted.contains("FROM repos "));
     }
 
     /// A vault, for the tests that move something sealed.
@@ -2431,6 +2671,116 @@ mod tests {
                 .unwrap(),
             from
         );
+    }
+
+    /// **And a move into a directory where the profile's name is taken is
+    /// refused in a sentence that says where to settle it.**
+    ///
+    /// The write path most easily missed, because nothing about the profile
+    /// changes: a move writes its name into a directory the name was never
+    /// judged against. Case-insensitively, like every other reading of a name
+    /// — `roles_name_in_directory` compares `lower(btrim(...))`.
+    #[tokio::test]
+    async fn a_profile_cannot_be_filed_where_its_name_already_is() {
+        let (db, access, _accounts, org, admin) = set_up().await;
+        let vault = vault(&db);
+        let shelf = access
+            .create_directory(&org, "Platform", &admin, &[])
+            .await
+            .unwrap();
+        let roles = crate::roles::Roles::new(db.pool().clone());
+
+        let asked = |name: &str| crate::roles::NewRole {
+            name: name.into(),
+            does: "designs".into(),
+            placement: "lead".into(),
+            agent: None,
+            machine: None,
+            account: None,
+            settings: Default::default(),
+            instructions: String::new(),
+            on_usage_limit: None,
+            on_child_limit: None,
+            can_delegate: false,
+            delegate_scope: vec![],
+            include_always_on: None,
+            include_repo_defaults: None,
+            skill_scope: vec![],
+            directory: None,
+        };
+        // An `engineer` on the shelf, and an `Engineer` of their own — which
+        // is accepted, because two directories are two places.
+        roles
+            .create_filed(
+                org.as_str(),
+                admin.as_str(),
+                "admin",
+                Some(&shelf.slug),
+                &asked("engineer"),
+            )
+            .await
+            .unwrap();
+        let mine = roles
+            .create(org.as_str(), admin.as_str(), "admin", &asked("Engineer"))
+            .await
+            .unwrap();
+
+        let from = access
+            .path_of(FiledKind::Role, mine.as_str())
+            .await
+            .unwrap()
+            .unwrap();
+        let no = access
+            .transfer(
+                &vault,
+                FiledKind::Role,
+                mine.as_str(),
+                &from.moved_to(ft_core::path::DIRECTORY, &shelf.slug),
+                "admin",
+            )
+            .await
+            .expect_err("two profiles filed together cannot share a name");
+        let says = format!("{no:#}");
+        assert!(says.contains("engineer"), "it names the one there: {says}");
+        assert!(
+            says.contains("the \"platform\" directory"),
+            "and where to settle it: {says}"
+        );
+        assert!(
+            says.contains("Rename one of the two there"),
+            "and what to do: {says}"
+        );
+        assert!(
+            !says.contains("roles_name_in_directory"),
+            "not a constraint: {says}"
+        );
+
+        // Still where it was, and still called what it was called.
+        assert_eq!(
+            access
+                .path_of(FiledKind::Role, mine.as_str())
+                .await
+                .unwrap()
+                .unwrap(),
+            from
+        );
+
+        // Renaming it is what makes the move go through, which is what the
+        // sentence told them to do.
+        assert!(roles
+            .update(admin.as_str(), mine.as_str(), &asked("Architect"))
+            .await
+            .unwrap());
+        access
+            .transfer(
+                &vault,
+                FiledKind::Role,
+                mine.as_str(),
+                &from.moved_to(ft_core::path::DIRECTORY, &shelf.slug),
+                "admin",
+            )
+            .await
+            .unwrap();
     }
 
     /// A subscription's credential is *attached*: it has no path, and moving

@@ -150,6 +150,21 @@ export interface Session {
      */
   plan?: PlanStep[];
   /**
+     * The position in an agent team this session occupies, by id, when it
+     * occupies one.
+     *
+     * **What it may hand work to, when it has one**: the profiles its
+     * position's children reference, and nothing else. Inherited down the
+     * lineage — a lead's child occupies the child of the lead's position — so
+     * the chain of sessions walks the chain of positions.
+     *
+     * Absent for every session a person started without naming a team, which
+     * is every session there was. Absent means the old path: a Manager
+     * profile's own `delegate_scope`, or no delegation at all.
+     * @nullable
+     */
+  positionId?: string | null;
+  /**
      * The profile this session was started as, by id, when it was started as
      * one. What decides whether it may delegate — a Manager may — and what the
      * rail reads to say which kind of agent a workspace holds.

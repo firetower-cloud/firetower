@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 pub mod access;
 pub mod accounts;
+pub mod agent_teams;
 pub mod api;
 pub mod artifact;
 pub mod auth;
@@ -82,6 +83,8 @@ pub struct AppState {
     /// The skill library, and what each session is reading from it.
     pub skills: skills::Skills,
     pub roles: roles::Roles,
+    /// Agent teams, and the positions delegation resolves from.
+    pub agent_teams: agent_teams::AgentTeams,
     /// What this deployment will accept, so `/bootstrap` can say so.
     ///
     /// A copy rather than a reference to the gate's: the gate enforces it and
@@ -235,6 +238,7 @@ pub async fn run(config: Config) -> Result<()> {
         access: access::Access::new(db_pool.clone()),
         skills: skills::Skills::new(db_pool.clone()),
         roles: roles::Roles::new(db_pool.clone()),
+        agent_teams: agent_teams::AgentTeams::new(db_pool.clone()),
         forwards: Default::default(),
         previews: Default::default(),
         names,
@@ -257,6 +261,13 @@ pub async fn run(config: Config) -> Result<()> {
     // rather than awaited because a control plane that will not start over a
     // missing skill has traded a product for a paragraph.
     tokio::spawn(seed_builtin_skills(state.clone()));
+    /* **Teams, from what profiles have actually spawned** (#491). Once per
+    installation, recorded so a restart does not re-assert it, and spawned
+    rather than awaited for the reason the skills above are: every session
+    that exists holds no position, so nothing already running is waiting on
+    this, and a control plane that would not start over a backfill has traded
+    a product for a paragraph. */
+    tokio::spawn(agent_teams::seed::run(state.clone()));
     // Whether a release is out, every few hours; and whatever upgrade was in
     // progress when this process was last replaced — which, for the run that
     // recreates the control plane, is the ordinary way it ends.

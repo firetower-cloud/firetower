@@ -80,6 +80,26 @@ pub struct NewSchedule {
     pub timezone: String,
     #[serde(default)]
     pub profile: Option<String>,
+    /// The agent team each run starts as, by id. Omit for a lone profile.
+    ///
+    /// **You never talk to a team — you talk to its lead, with its team behind
+    /// it.** Naming one runs each occurrence as that team's lead, with the
+    /// profiles reporting to its position reachable. Naming nothing, or naming
+    /// a profile on its own, is a run that cannot hand work to anybody: a
+    /// profile that happens to lead a team does not pick the team up by being
+    /// named bare.
+    ///
+    /// A team and a different profile is a contradiction rather than two
+    /// settings and is refused, which is the rule `NewSession` already
+    /// follows.
+    ///
+    /// **The whole tree is pinned at approval**, not resolved at each run —
+    /// for the reason the profile's revision is pinned: an edit must not be
+    /// able to change what an unattended run does. Editing the team clears
+    /// the approval instead, and the next run is refused until somebody
+    /// looks.
+    #[serde(default)]
+    pub team: Option<String>,
     #[serde(default = "default_agent")]
     pub agent: ft_core::Agent,
     #[serde(default)]
@@ -297,10 +317,22 @@ pub(crate) async fn write_one(
     // which has no controls at all, and handed a worker Codex with whatever
     // sandbox had been asked for. Everything below reads this, and the spec
     // records it, so the thing that is checked is the thing that runs.
-    let profile = profile_for(state, owner_id, &req).await?;
+    // **The team first, because the lead's seat decides which profile runs.**
+    // Same order and same reason as `create_session_as`: a team and a profile
+    // that is not its lead is a contradiction rather than two settings.
+    let standing = standing_for(state, owner_id, &req).await?;
+    let profile = profile_for(state, owner_id, &req, standing.as_ref()).await?;
     let agent = effective_agent(&req, profile.as_ref());
-    let spec = spec_for(&req, agent);
-    let pins = pins_for(state, owner_id, &req, agent, profile.as_ref()).await?;
+    let spec = spec_for(&req, agent, standing.as_ref());
+    let pins = pins_for(
+        state,
+        owner_id,
+        &req,
+        agent,
+        profile.as_ref(),
+        standing.as_ref(),
+    )
+    .await?;
     let delete_clean_runs = !repos_asked(&req).is_empty() && req.delete_clean_runs;
 
     if fresh {
@@ -346,7 +378,11 @@ pub(crate) async fn write_one(
 /// Stored as the JSON it will be read back as rather than as a typed struct,
 /// because what was approved is a *text* — and a build that adds a field to
 /// `NewSession` must not retroactively change what an approved schedule does.
-fn spec_for(req: &NewSchedule, agent: ft_core::Agent) -> serde_json::Value {
+fn spec_for(
+    req: &NewSchedule,
+    agent: ft_core::Agent,
+    standing: Option<&crate::agent_teams::Standing>,
+) -> serde_json::Value {
     let mut spec = serde_json::json!({
         "name": req.name.trim(),
         "prompt": req.prompt.trim(),
@@ -395,6 +431,13 @@ fn spec_for(req: &NewSchedule, agent: ft_core::Agent) -> serde_json::Value {
     if let Some(host) = &req.host_id {
         spec["hostId"] = serde_json::json!(host.as_str());
     }
+    // **The team, where one was named**, so the launch stands the session in
+    // its lead's seat exactly as a person starting work as a team does. The
+    // id is written from the resolved standing rather than from the request,
+    // which is what keeps the spec and the pins naming one team.
+    if let Some(standing) = standing {
+        spec["team"] = serde_json::json!(standing.team);
+    }
     spec
 }
 
@@ -425,6 +468,7 @@ async fn pins_for(
     req: &NewSchedule,
     agent: ft_core::Agent,
     profile: Option<&crate::roles::Role>,
+    standing: Option<&crate::agent_teams::Standing>,
 ) -> ApiResult<serde_json::Value> {
     let mut settings = req.settings.clone();
 
@@ -676,9 +720,51 @@ async fn pins_for(
     let (persona, fingerprint) = match profile {
         None => (None, None),
         Some(role) => (
-            Some(super::sessions::persona_for(state, owner_id, role).await?),
+            // Composed in the seat this will run in, when a team was named,
+            // and the way an unteamed profile is when one was not. A schedule
+            // that names no team acquires no reach — a profile that happens
+            // to lead one does not pick it up by being named bare, which is
+            // the distinction the composer's picker carries.
+            Some(super::sessions::persona_for(state, owner_id, role, standing).await?),
             Some(profile_fingerprint(role)),
         ),
+    };
+
+    // **The team's whole tree, pinned.**
+    //
+    // A team id resolved at run time would be the mistake the profile
+    // revision already exists to prevent, with a larger blast radius: a seat
+    // added to a team would silently widen what an approved unattended run
+    // may hand work to. So the tree is read now and written down, with a
+    // fingerprint the gate recomputes — and editing the team clears the
+    // approval on every schedule that pins it, so the fix reaches the
+    // schedule rather than being refused forever or adopted in silence.
+    //
+    // The name and the size travel with it because every screen that draws a
+    // schedule has to be able to say what it was approved on, and the live
+    // team is the one thing that is not that.
+    let team = match standing {
+        None => None,
+        Some(standing) => {
+            let tree = state
+                .agent_teams
+                .positions(owner_id, &standing.team)
+                .await
+                .map_err(|e| {
+                    ApiError::new(
+                        ErrorCode::ActionFailed,
+                        format!("could not read the team this would run as: {e:#}"),
+                    )
+                })?;
+            Some(serde_json::json!({
+                "id": standing.team,
+                "name": standing.team_name,
+                "position": standing.position,
+                "positions": tree.len(),
+                "tree": tree,
+                "fingerprint": team_fingerprint_of(&tree),
+            }))
+        }
     };
 
     // **What the pins say about a control nobody can resolve here.** Codex
@@ -700,11 +786,135 @@ async fn pins_for(
         "agentDecides": decides_itself,
         "skills": skills,
         "accountId": account,
-        "profile": req.profile,
+        // **The resolved profile, not the requested one.** With a team named,
+        // the profile is its lead's and the request may not have carried one
+        // at all; writing `req.profile` back would pin a null and leave the
+        // launch to resolve the lead again.
+        "profile": profile.map(|p| p.id.as_str()),
         "skillVersionIds": versions,
         "persona": persona,
         "profileFingerprint": fingerprint,
+        "team": team,
     }))
+}
+
+/// Everything about a team's tree that decides what a run may hand work to.
+///
+/// **The shape and the seats, hashed** — each position's id, who it reports
+/// to, which profile it holds, where it sits among its siblings and what it
+/// is told. A hash rather than a field-by-field comparison for the reason
+/// [`profile_fingerprint`] gives: the question the gate asks is "is this
+/// still the tree somebody approved", and a hash answers exactly that,
+/// including for a field a later build adds.
+///
+/// It reads the same list the pins store, so it cannot disagree with what a
+/// screen draws. A profile's *own* content is [`profile_fingerprint`]'s
+/// question and is covered for the lead; a report's profile being edited is
+/// no more and no less covered than it is for a schedule that names a
+/// profile bare.
+pub(crate) fn team_fingerprint_of(tree: &[crate::agent_teams::Position]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    for seat in tree {
+        for part in [
+            seat.id.as_str(),
+            seat.parent.as_deref().unwrap_or(""),
+            seat.profile.as_str(),
+            seat.instructions.as_str(),
+        ] {
+            hasher.update(part.as_bytes());
+            hasher.update([0u8]);
+        }
+        hasher.update(seat.order.to_le_bytes());
+        hasher.update([0u8]);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+/// The pins a schedule should hold after its team was saved.
+///
+/// **The tree and the prompt, and deliberately not the profile.**
+///
+/// A seat added, removed, reordered or re-worded under the same lead is a
+/// change to the *reach* and nothing else, so the new tree is adopted and the
+/// lead's persona recomposed from it. That is what makes a fix to a team
+/// reach the schedules that run it, once somebody turns one back on.
+///
+/// A team whose **lead profile** has changed is not that. The lead decides
+/// the engine, and the engine decides which permission mode and which sandbox
+/// are even words — so adopting a new lead would carry a model, a fence and a
+/// subscription that were approved for a different engine, and `pins_for`
+/// refuses exactly that combination when it is asked directly. There is no
+/// `NewSchedule` here to run that validation over, so the honest answer is to
+/// change nothing: the pins stay as they were, the approval still goes, and
+/// the launch gate's fingerprint check refuses with a sentence that sends
+/// somebody to the schedule rather than to the switch.
+///
+/// Best effort by construction. Anything this cannot resolve — the owner has
+/// lost sight of the team, the lead's profile is gone, the persona will not
+/// compose — leaves the pins alone. The approval is cleared either way by the
+/// caller, so the failure is always the safe one.
+pub(super) async fn repin_team(
+    state: &AppState,
+    row: &crate::db::ScheduleRow,
+) -> serde_json::Value {
+    let mut pins = row.pins.clone();
+    let Some((team, _, _)) = approved_team(&pins) else {
+        return pins;
+    };
+    let approved_profile = pins.get("profile").and_then(|v| v.as_str()).unwrap_or("");
+
+    let Ok(Some(standing)) = state.agent_teams.lead_of(&row.owner_id, &team).await else {
+        return pins;
+    };
+    if standing.profile != approved_profile {
+        return pins;
+    }
+    let Ok(tree) = state.agent_teams.positions(&row.owner_id, &team).await else {
+        return pins;
+    };
+    let Ok(Some(role)) = state
+        .roles
+        .one(
+            &row.owner_id,
+            &standing.profile,
+            crate::access::Level::Viewer,
+        )
+        .await
+    else {
+        return pins;
+    };
+    let Ok(persona) =
+        super::sessions::persona_for(state, &row.owner_id, &role, Some(&standing)).await
+    else {
+        return pins;
+    };
+
+    pins["team"] = serde_json::json!({
+        "id": standing.team,
+        "name": standing.team_name,
+        "position": standing.position,
+        "positions": tree.len(),
+        "tree": tree,
+        "fingerprint": team_fingerprint_of(&tree),
+    });
+    /* The persona too, because the reach is *in* it: a lead is told the names
+    of the profiles reporting to its position, and a tree adopted without
+    recomposing the prompt would be an agent holding a reach nobody had
+    described to it. The same pairing `pins_for` makes. */
+    pins["persona"] = serde_json::json!(persona);
+    pins["profileFingerprint"] = serde_json::json!(profile_fingerprint(&role));
+    pins
+}
+
+/// The fingerprint a stored schedule was approved on, when it names a team.
+pub(crate) fn approved_team(pins: &serde_json::Value) -> Option<(String, String, String)> {
+    let team = pins.get("team")?;
+    Some((
+        team.get("id")?.as_str()?.to_string(),
+        team.get("name")?.as_str()?.to_string(),
+        team.get("fingerprint")?.as_str()?.to_string(),
+    ))
 }
 
 /// One schedule of yours.
@@ -783,6 +993,32 @@ pub(super) async fn approve_schedule(
     Query(at): Query<Reviewed>,
 ) -> ApiResult<Json<Schedule>> {
     let row = mine(&state, &principal, &id).await?;
+    // **A team that is not the pinned tree is refused here rather than at
+    // 9am.** Saving a team re-pins the schedules that run it, so the ordinary
+    // case — a seat added or removed — matches by the time anybody presses
+    // this. What does not match is a team whose *lead* changed, which carries
+    // a different engine and so a permission mode and a sandbox that were
+    // approved for something else; adopting that is `pins_for`'s job and
+    // `pins_for` needs the whole schedule. So this says what to do instead of
+    // letting the switch look like it worked.
+    if let Some((team, name, approved)) = approved_team(&row.pins) {
+        let live = state
+            .agent_teams
+            .detail(&row.owner_id, &team, crate::access::Level::Viewer)
+            .await?
+            .map(|t| t.positions)
+            .unwrap_or_default();
+        if live.is_empty() || team_fingerprint_of(&live) != approved {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                format!(
+                    "The “{name}” agent team is not the one this was approved on, so \
+                     turning it on would start something nobody has read. Open \
+                     it and set what it runs as."
+                ),
+            ));
+        }
+    }
     // Resolved and checked, and **nothing written**: this used to write the
     // pin before the comparison below, so an approval that was then rejected
     // as stale had already changed the row.
@@ -1167,9 +1403,15 @@ async fn profile_for(
     state: &AppState,
     owner_id: &str,
     req: &NewSchedule,
+    standing: Option<&crate::agent_teams::Standing>,
 ) -> ApiResult<Option<crate::roles::Role>> {
-    let Some(id) = &req.profile else {
-        return Ok(None);
+    // **A team names the profile too**, because the lead *is* a profile. The
+    // standing has already refused a team beside a different profile, so
+    // there is one answer here rather than a precedence rule.
+    let id = match (standing, &req.profile) {
+        (Some(standing), _) => &standing.profile,
+        (None, Some(id)) => id,
+        (None, None) => return Ok(None),
     };
     Ok(Some(
         state
@@ -1179,10 +1421,62 @@ async fn profile_for(
             .ok_or_else(|| {
                 ApiError::new(
                     ErrorCode::InvalidRequest,
-                    "that profile isn't one you can start a workspace as",
+                    match standing {
+                        // The team is visible and its lead's profile is not,
+                        // which is the state a team filed beside a profile
+                        // that was not leaves behind. Naming the profile is
+                        // no use — they cannot reach it either — so the
+                        // sentence names the team and the remedy.
+                        Some(standing) => format!(
+                            "the profile leading the “{}” team isn't one you can use, so \
+                             there is nothing for a run to start as.",
+                            standing.team_name
+                        ),
+                        None => "that profile isn't one you can start a workspace as".to_string(),
+                    },
                 )
             })?,
     ))
+}
+
+/// The lead seat each run of this schedule stands in, when it names a team.
+///
+/// Resolved as the schedule's **owner**, who is who every run is started as —
+/// not as whoever typed it. A team they cannot see is refused here rather
+/// than at 9am from a run that says nothing useful.
+///
+/// `create_session_as` makes the same refusal for the same contradiction, in
+/// the same words: a team and a profile that is not its lead is not two
+/// settings to reconcile.
+async fn standing_for(
+    state: &AppState,
+    owner_id: &str,
+    req: &NewSchedule,
+) -> ApiResult<Option<crate::agent_teams::Standing>> {
+    let Some(team) = req.team.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    let standing = state
+        .agent_teams
+        .lead_of(owner_id, team)
+        .await?
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidRequest,
+                "that agent team isn't one a run could start as. Either it isn't shared with \
+                 whoever this runs as, or it has no lead yet.",
+            )
+        })?;
+    if let Some(named) = &req.profile {
+        if named != &standing.profile {
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "that team is led by a different profile. Name the team, or the profile, not \
+                 both.",
+            ));
+        }
+    }
+    Ok(Some(standing))
 }
 
 /// Everything about a profile that decides what a run does.
@@ -1330,6 +1624,18 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
             .get("skills")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default(),
+        // **The pinned team, read off the pins like everything else here.**
+        // Not joined against the live team: an approved schedule is an
+        // authorization over a particular tree, and the live one is the only
+        // thing it is definitely not. The whole tree is in the pins; what a
+        // row needs is the name and the size, which is what this carries.
+        team: row.pins.get("team").and_then(|t| {
+            Some(ft_core::schedule::ScheduleTeam {
+                id: t.get("id")?.as_str()?.to_string(),
+                name: t.get("name")?.as_str()?.to_string(),
+                positions: t.get("positions")?.as_u64().unwrap_or(0) as u32,
+            })
+        }),
     };
 
     let by_agent = row.from_session_id.is_some();

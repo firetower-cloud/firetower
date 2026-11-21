@@ -33,8 +33,24 @@ import { Pop } from "~/ui/Pop";
  * flexbox rule in STYLE.md. Anything that should stay put while this scrolls,
  * a search box or a readiness footer, goes beside it rather than inside it.
  */
+/**
+ * The scrolling list of rows inside a [`Pop`].
+ *
+ * **No height of its own.** `Pop` caps the whole card at the room there
+ * actually was beside the button, and this is the child that gives way to
+ * that cap — `min-h-0` is what lets it, and the footer beside it, which has a
+ * sentence somebody has to be able to read, is what it gives way *to*. A
+ * second cap here (`max-h-80`) fought the first: at 1680x1050 the card had
+ * 515px and the list stopped at 320 of 572 for no reason anybody could see.
+ *
+ * `scroll-seen` rather than `scroll-slim`, and that is the one judgement in
+ * this component. A bar that waits for a hover is right for a two-line
+ * message box, which is what `scroll-slim` was written for; it is wrong for a
+ * list cut off mid-row, where the first read is of a list that appears to
+ * have ended. Same call `.ft-pre` makes, for the same reason.
+ */
 export function Menu({ children }: { children: React.ReactNode }) {
-  return <div className="scroll-slim max-h-80 min-h-0 overflow-y-auto py-1">{children}</div>;
+  return <div className="scroll-seen min-h-0 overflow-y-auto py-1">{children}</div>;
 }
 
 export function Head({ children }: { children: React.ReactNode }) {

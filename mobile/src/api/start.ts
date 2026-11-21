@@ -28,7 +28,17 @@
  * twice, and the test is what keeps the two readings honest.
  */
 import { usable } from "~/api/accounts";
-import type { Account, Agent, AgentView, ControlKind, Host, Preferred, Repo, Role } from "~/api/generated/model";
+import type {
+  Account,
+  Agent,
+  AgentTeam,
+  AgentView,
+  ControlKind,
+  Host,
+  Preferred,
+  Repo,
+  Role,
+} from "~/api/generated/model";
 
 /* The whole of it, uncapped: the length cap belongs to `fewWords`, which is
    the only thing that knows where a word ends. */
@@ -100,42 +110,205 @@ export function firstLine(draft: string): string {
 }
 
 /**
- * Delegating profiles first, then alphabetical.
+ * What the composer will start as: a lone profile, an agent team, or neither.
  *
- * The desk's order, from `ProfileMenu`: the lead you'd start a board as is the
- * one you reach for most. `localeCompare` rather than `<`, so an accented name
- * files where a person would look for it.
+ * The desk's `StartAs`, retyped for the reason `branchFor` is — there is no
+ * module the two clients share. **A team is entered explicitly**: a profile
+ * that happens to lead a team does not pick that team up by being named bare,
+ * which is what keeps "a profile started on its own cannot delegate" true.
+ * `null` is *Just an agent*, which is a value and not a dismissal.
  */
-export function orderProfiles(profiles: Role[]): Role[] {
-  return [...profiles].sort(
-    (a, b) => Number(b.canDelegate) - Number(a.canDelegate) || a.name.localeCompare(b.name),
-  );
+export type StartAs = { kind: "profile" | "team"; id: string } | null;
+
+/**
+ * One row the sheet offers.
+ *
+ * **A position is never one of these.** A position only means something inside
+ * its tree, and the only way to reach one is through the team that holds it.
+ * This is built from the team list and the profile list and from nothing else,
+ * which is how that stays true rather than being remembered.
+ */
+export type Startable = {
+  kind: "profile" | "team";
+  id: string;
+  /** The row's title: the team's name, or the profile's. */
+  name: string;
+  /** The profile that will actually run — a team's lead, or the profile. */
+  lead: string | null;
+  /**
+   * **How many agents the run has: a team's lead and what it can hand work
+   * to, or one.**
+   *
+   * `AgentTeam.reports`, plus the lead, and deliberately **not**
+   * `AgentTeam.positions`. `positions` is every seat in the whole tree,
+   * unfiltered, which is what the map and the list row are for; it overstates
+   * what picking this row gets you in two independent ways. Reach descends
+   * exactly one level per hand-off, so the seats below a report are somebody
+   * else's to reach later, through a hand-off this person is not making; and
+   * a seat whose profile this person cannot see is not a report at all —
+   * `AgentTeams::reports` drops it, and so does the persona the agent is
+   * given. A team of seven seats whose lead has two reachable reports said
+   * *six other agents* and gave two.
+   *
+   * This is the moment of choosing, and picking the team rather than the bare
+   * profile is the difference between one agent and eight. That difference is
+   * the only thing the row is for, so the number has to be the one the spawn
+   * will resolve against.
+   */
+  agents: number;
+  /** The engine the profile that runs pins, when it pins one. */
+  agent?: string | null;
+  /** The second line. What a profile does, or who leads a team. */
+  does?: string;
+  /** Why this cannot be started, when it cannot. */
+  blocked?: string;
+  /** The old per-profile reach, which agent teams replace. Goes with #497. */
+  delegates?: boolean;
+};
+
+/**
+ * Everything the sheet offers, in the order it offers it.
+ *
+ * **Teams above profiles** — the desk's `startables`, to the same rules,
+ * because a picker that orders two ways within one release is two pickers.
+ * This replaces `orderProfiles`: that floated the delegating profiles to the
+ * top, and reach has moved off the profile and onto the team, so the position
+ * it held moves with it rather than being a second preference.
+ *
+ * **Within the profiles, `orderProfiles`' sort survives for as long as the
+ * old reach does**, which is the correction the desk carries too: during the
+ * compatibility window a Manager started bare genuinely still hands work out,
+ * which is the same fact that earns it a chip and its own sentence. It dies
+ * with `roles.can_delegate` in #497, alongside that sentence.
+ *
+ * **A profile that leads a team appears twice**, once bare and once as the
+ * team, because the two start completely different things: one agent that
+ * cannot delegate at all, against that same profile with its reports
+ * reachable. A name shared by a team and a profile is told apart by the band
+ * labels; neither is renamed.
+ */
+export function startables(teams: AgentTeam[], profiles: Role[]): Startable[] {
+  const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
+  /* Delegating profiles first while any of them still delegate, then by name.
+     `Number(…)` because `canDelegate` is a boolean and a comparator needs a
+     number. Goes with #497. */
+  const byReach = (a: Role, b: Role) =>
+    Number(b.canDelegate) - Number(a.canDelegate) || byName(a, b);
+  return [
+    ...[...teams].sort(byName).map((t): Startable => {
+      const lead = t.lead ? profiles.find((p) => p.id === t.lead) : undefined;
+      return {
+        kind: "team",
+        id: t.id,
+        name: t.name,
+        lead: t.leadName ?? null,
+        agents: t.reports + 1,
+        agent: lead?.agent ?? null,
+        /* Its lead, named before it is picked: a row that says *Growth* over
+           a conversation that opens with the Orchestrator misled somebody
+           about the one thing it was for. */
+        does: t.leadName ? `Led by ${t.leadName}` : undefined,
+        blocked: !t.lead
+          ? "It has no lead, so there is nobody to start"
+          : t.leadName
+            ? undefined
+            : "Its lead isn't a profile you can use",
+      };
+    }),
+    ...[...profiles].sort(byReach).map(
+      (p): Startable => ({
+        kind: "profile",
+        id: p.id,
+        name: p.name,
+        lead: p.name,
+        agents: 1,
+        agent: p.agent ?? null,
+        does: p.does,
+        delegates: p.canDelegate,
+      }),
+    ),
+  ];
+}
+
+/** Whichever of the two kinds is in force, or nothing. */
+export function startableIn(all: Startable[], start: StartAs): Startable | undefined {
+  return start ? all.find((s) => s.kind === start.kind && s.id === start.id) : undefined;
 }
 
 /**
- * Whether a query leaves a profile.
+ * Whether a query leaves a row.
  *
- * On the name **or** on what it does, which is how somebody looks for one
- * they set up months ago. `looselyMatches`' rule, which folds case and reads
- * an underscore as a space — a profile called `security_advisor` has to be
- * findable by typing *security advisor*.
+ * The name, what it does, and for a team its lead — the lead is what somebody
+ * remembers about a team they set up months ago. `looselyMatches`' rule, which
+ * folds case and reads an underscore as a space: a profile called
+ * `security_advisor` has to be findable by typing *security advisor*.
  */
-export function profileMatches(p: Pick<Role, "name" | "does">, query: string): boolean {
+export function startableMatches(
+  s: Pick<Startable, "name" | "does" | "lead">,
+  query: string,
+): boolean {
   const q = query.trim().toLowerCase().replace(/_/g, " ");
   if (!q) return true;
-  return `${p.name} ${p.does ?? ""}`.toLowerCase().replace(/_/g, " ").includes(q);
+  return `${s.name} ${s.does ?? ""} ${s.lead ?? ""}`
+    .toLowerCase()
+    .replace(/_/g, " ")
+    .includes(q);
 }
 
 /**
- * Above how many profiles the sheet offers a search field.
+ * **What picking this would actually do**, said under the list rather than
+ * discovered afterwards.
  *
- * The desk's `when={profiles.length > 3}`, kept: a box over three rows you can
- * read at a glance is furniture pretending to be a control. And on a phone it
- * costs more than on a desk — see `ProfileSheet`, which must not focus it.
+ * The desk's sentence, to the character, because the difference it states is
+ * the largest thing in this sheet and is **harder on a phone, not easier**: a
+ * profile started on its own cannot delegate at all, while a team starts its
+ * lead with its members reachable. One agent, or eight.
+ *
+ * `null` is not a selection and gets no consequence — the row already says
+ * *no profile, a plain workspace*.
+ */
+export function consequence(s: Startable | undefined): string | null {
+  if (!s) return null;
+  /* **A row there is nothing to start says so**, rather than a sentence about
+     a lead it does not have. Reachable without picking one: a team's lead
+     profile can be deleted while a composer is open holding it. */
+  if (s.blocked) return `${s.name} can't be started. ${s.blocked}.`;
+  if (s.kind === "team") {
+    const lead = s.lead ?? "its lead";
+    /* **What this run will be able to hand work to**, which is a property of
+       the lead's seat and not of the team: `Startable.agents` is the lead
+       plus its own reachable reports, so this is `AgentTeams::reports` and
+       the number the spawn resolves against. It used to be the whole tree,
+       unfiltered. */
+    const others = Math.max(0, s.agents - 1);
+    if (others === 0) {
+      return `Starts ${lead}, ${s.name}'s lead. Nothing reports to it yet, so it cannot hand work to anybody.`;
+    }
+    return `Starts ${lead}, ${s.name}'s lead. It can hand work to ${others} other agent${
+      others === 1 ? "" : "s"
+    } in the team.`;
+  }
+  /* The compatibility window, said plainly: a Manager profile started bare
+     still hands work out through its own older settings, so "it cannot hand
+     work to anybody" would be false of it. Goes with `roles.can_delegate`
+     in #497. */
+  if (s.delegates) {
+    return `Starts ${s.name} on its own. Its own profile still lets it hand work out, which an agent team replaces.`;
+  }
+  return `Starts ${s.name} on its own. It cannot hand work to anybody.`;
+}
+
+/**
+ * Above how many rows the sheet offers a search field.
+ *
+ * The desk's `when={all.length > 3}`, kept, and counting the teams too: they
+ * are rows to read past. A box over three rows you can read at a glance is
+ * furniture pretending to be a control, and on a phone it costs more than on
+ * a desk — see `ProfileSheet`, which must not focus it.
  */
 export const SEARCH_ABOVE = 3;
 
-/** Whether this many profiles earn a search field. */
+/** Whether this many rows earn a search field. */
 export function searchable(count: number): boolean {
   return count > SEARCH_ABOVE;
 }
@@ -179,7 +352,18 @@ export type Refusal = { tone: "brick" | "dim"; say: string };
 
 /** What the composer would send, and what is stopping it. */
 export type Start = {
+  /** The profile that will actually run: a team's lead, or the profile. */
   profile: Role | null;
+  /** The team it runs as, when one was picked. Null for a lone profile. */
+  team: AgentTeam | null;
+  /**
+   * The row that will actually be started, and what the composer sends.
+   *
+   * Absent when nothing is picked **or** when what was picked can no longer
+   * be started — a team whose lead profile has been deleted since. Falling
+   * back is the rule the machine and the account follow too.
+   */
+  startable: Startable | undefined;
   /** The engine the profile pins. Non-null means the agent is shown, not chosen. */
   pinned: Agent | null;
   /** True when the agent pick is a statement rather than a control. */
@@ -200,7 +384,13 @@ export type Start = {
 
 /** What has been chosen by hand, each empty until somebody chooses. */
 export type Chose = {
-  profileId: string | null;
+  /**
+   * **One selection, not two.** A profile and a team are mutually exclusive —
+   * a team names its lead's profile on the server, and a team beside a
+   * different profile is refused there — so two fields would be two things
+   * able to disagree about what is about to start.
+   */
+  startAs: StartAs;
   repoIds: string[];
   hostId: string;
   agentKind: string;
@@ -224,6 +414,8 @@ export function resolveStart(input: {
   draft: string;
   chose: Chose;
   profiles: Role[];
+  /** Every agent team this person can see. Empty is the ordinary case. */
+  teams: AgentTeam[];
   repos: Repo[];
   hosts: Host[];
   agents: AgentView[];
@@ -231,9 +423,26 @@ export function resolveStart(input: {
   /** What the server said when a create was refused, already read for words. */
   refused?: string | null;
 }): Start {
-  const { draft, chose, profiles, repos, hosts, agents, accounts, refused } = input;
+  const { draft, chose, profiles, teams, repos, hosts, agents, accounts, refused } = input;
 
-  const profile = profiles.find((p) => p.id === chose.profileId) ?? null;
+  /* **The profile that will actually run, whichever way it was chosen.** A
+     team names its lead's profile too, because the lead *is* a profile — so
+     the engine, the pinned settings and the account resolve from one place
+     either way. `create_session_as` makes the same resolution and refuses a
+     team beside a different profile, so the two cannot disagree. */
+  /* **A held pick that has gone falls back rather than sticking**, which is
+     the rule the machine and the account above already follow: a team's lead
+     profile can be deleted, or the team filed away, while a composer sits
+     open holding it, and sending it would be a refusal from the server about
+     something this screen could already see. */
+  const held = startableIn(startables(teams, profiles), chose.startAs);
+  const startable = held && !held.blocked ? held : undefined;
+  const team =
+    startable?.kind === "team" ? (teams.find((t) => t.id === startable.id) ?? null) : null;
+  const profile =
+    profiles.find(
+      (p) => p.id === (startable?.kind === "team" ? team?.lead : startable?.id),
+    ) ?? null;
   const pinned = pinnedAgent(profile);
   const wanted = pinned ?? chose.agentKind;
 
@@ -329,6 +538,8 @@ export function resolveStart(input: {
 
   return {
     profile,
+    team,
+    startable,
     pinned,
     locked: pinned !== null,
     host,
