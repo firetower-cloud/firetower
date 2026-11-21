@@ -1693,13 +1693,39 @@ pub(super) async fn persona_for(
         }
         _ => "\n\nThe profiles you can hand work to — pass the name as `role`:\n",
     });
+    /* **A name two of them answer to is marked where it is handed over.**
+    Profile names are one per *directory* (#489) and a position's children
+    may come from several, so a rename in one directory can leave a lead with
+    two reports called `Reviewer` — legal on every write path, and exactly the
+    ambiguity `at_most_one` refuses at the spawn. The refusal's own list marks
+    it; this one did not, so the first an agent knew was a spent turn on a
+    name it had been handed. Same note, from `delegate`, so the two lists
+    cannot drift apart. */
+    let names: Vec<&str> = reach.iter().map(|r| r.name.as_str()).collect();
+    let mut ambiguous = false;
     for r in &reach {
+        let same = crate::delegate::how_many_called(&r.name, names.iter().copied());
+        ambiguous |= same > 1;
         text.push_str(&format!(
-            "- **{}** — {}{}\n",
+            "- **{}**{} — {}{}\n",
             r.name,
+            if same > 1 {
+                crate::delegate::shared_name_note(same)
+            } else {
+                String::new()
+            },
             r.does,
             crate::delegate::left_open(r)
         ));
+    }
+    /* And the consequence, once rather than per row: what to do about it is
+    the same whichever name it is, and it is not the agent's to fix. */
+    if ambiguous {
+        text.push_str(
+            "\n**A name more than one of them answers to cannot be used.** `spawn` refuses it, \
+             because it does not say which is meant and picking either would be a guess. Hand \
+             the work to one of the others, or ask the person to rename one.\n",
+        );
     }
     Ok(text)
 }

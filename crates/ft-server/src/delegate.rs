@@ -737,7 +737,7 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
                         .into_iter()
                         .map(|(name, seen)| match seen {
                             1 => name,
-                            seen => format!("{name} ({seen} profiles share this name)"),
+                            seen => format!("{name}{}", shared_name_note(seen)),
                         })
                         .collect();
                     bail!(
@@ -1761,6 +1761,25 @@ fn names(input: &Value, key: &str) -> Option<Vec<String>> {
 /// a profile that silently does less than was asked for. On `skill_scope`
 /// that is a skill not loaded, invisible until something behaves oddly much
 /// later.
+/// **What a list says beside a name more than one thing answers to.**
+///
+/// [`at_most_one`] refuses such a name, and the refusal's own *Subagents you
+/// can use* list marks it — so an agent that guesses wrong is told what went
+/// wrong and why. The list it is *handed*, in the composed persona, said
+/// nothing, so the first it knew was a spent turn. One spelling of the note,
+/// used by both, because two of them is how they come to disagree.
+pub(crate) fn shared_name_note(same: usize) -> String {
+    format!(" ({same} profiles share this name)")
+}
+
+/// How many of these answer to that name, by [`at_most_one`]'s own comparison.
+pub(crate) fn how_many_called<'a>(name: &str, among: impl IntoIterator<Item = &'a str>) -> usize {
+    among
+        .into_iter()
+        .filter(|n| n.eq_ignore_ascii_case(name))
+        .count()
+}
+
 pub(crate) fn at_most_one<'a, T>(
     kind: &str,
     name: &str,

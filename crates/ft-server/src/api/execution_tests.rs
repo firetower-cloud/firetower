@@ -13258,3 +13258,121 @@ async fn only_somebody_who_could_save_is_told_how_many_schedules_pin_a_team() {
         "so he is told nothing about other people's unattended work"
     );
 }
+
+/// **A name two reports answer to is marked in the list the agent is handed.**
+///
+/// Profile names are one per *directory* (#489) and a position's children may
+/// come from several, so a rename in one directory can leave a lead with two
+/// reports called `Reviewer`. Every write path accepts it, correctly — and it
+/// is exactly the ambiguity `at_most_one` refuses at the spawn.
+///
+/// The refusal's own *Subagents you can use* list already marks a shared
+/// name. The composed persona — the list the agent is actually handed, and
+/// the only one it reads before choosing — did not, so an agent met the
+/// refusal by spending a turn on a name it had been given. Both lists now
+/// carry the same note, and the persona says once what to do about it.
+#[tokio::test]
+async fn two_reports_of_one_name_are_marked_where_the_agent_is_handed_them() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let alice = ft_core::UserId::from_stored(owner.clone());
+    let bob = another_person(&state, "bob").await;
+    let shelf = a_shelf(
+        &state,
+        &alice,
+        "Platform",
+        &bob,
+        crate::access::Level::Writer,
+    )
+    .await;
+
+    let orchestrator = a_profile(&state, &owner, "Orchestrator").await;
+    // Two profiles called Reviewer, in two directories, which #489 permits
+    // and the drawer accepts — the name is free where each is filed.
+    let hers = a_profile(&state, &owner, "Reviewer").await;
+    let theirs = a_profile_on_the_shelf(
+        &state,
+        alice.as_str(),
+        &shelf.slug,
+        serde_json::json!({
+            "name": "Reviewer",
+            "does": "Reads a finished branch and reports problems as file:line",
+            "placement": "here",
+        }),
+    )
+    .await;
+    let engineer = a_profile(&state, &owner, "Engineer").await;
+
+    let team = saved_team(
+        &state,
+        &owner,
+        serde_json::json!({
+            "name": "Platform",
+            "lead": {
+                "profile": orchestrator,
+                "children": [
+                    { "profile": hers },
+                    { "profile": theirs },
+                    { "profile": engineer },
+                ],
+            },
+        }),
+    )
+    .await;
+    let standing = state
+        .agent_teams
+        .lead_of(&owner, &team)
+        .await
+        .unwrap()
+        .unwrap();
+    let profile = state
+        .roles
+        .one(&owner, &orchestrator, crate::access::Level::Viewer)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let persona = super::sessions::persona_for(&state, &owner, &profile, Some(&standing))
+        .await
+        .unwrap();
+    assert_eq!(
+        persona
+            .matches("**Reviewer** (2 profiles share this name)")
+            .count(),
+        2,
+        "both rows say the name does not say which is meant: {persona}"
+    );
+    assert!(
+        persona.contains("- **Engineer** —"),
+        "and a name only one of them answers to is left alone: {persona}"
+    );
+    assert!(
+        !persona.contains("**Engineer** ("),
+        "with no note on it: {persona}"
+    );
+    assert!(
+        persona.contains("cannot be used"),
+        "and the consequence is said once: {persona}"
+    );
+
+    // Which is the same answer the spawn gives, about the same fact — the
+    // list it was handed and the refusal it meets cannot drift apart.
+    let lead = lead_of_a_team(&state, &host, &ready, &owner, Agent::ClaudeCode, &team).await;
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "two-reviewers",
+            "spawn",
+            serde_json::json!({ "role": "Reviewer", "goal": "read the diff" }),
+        ),
+    )
+    .await
+    .expect_err("a name two of them answer to does not say which is meant");
+    assert!(
+        format!("{refused:#}").contains("more than one"),
+        "{refused:#}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
