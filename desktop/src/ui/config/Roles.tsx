@@ -64,7 +64,7 @@ import { readProfileDrop, readProfileFiles, type Dropped } from "~/profiles";
 import { useConfirm } from "~/ui/Confirm";
 import { navigate } from "~/shims/next-navigation";
 import { Badge, IconButton } from "~/components/ui";
-import { Blast, ProfileDrawer, WithRail } from "~/ui/config/ProfileDrawer";
+import { Blast, EMPTY_PLACES, ProfileDrawer, WithRail } from "~/ui/config/ProfileDrawer";
 import { NewProfileSheet, blankProfile } from "~/ui/config/TeamSheet";
 
 export function Roles() {
@@ -245,13 +245,19 @@ export function Roles() {
    *
    * The placements are read on the press rather than held for every row: one
    * request, at the one moment anybody needs the answer.
+   *
+   * What comes back is the seats in teams this person can see **and a count
+   * of the ones in teams they cannot** — the cascade does not filter, so a
+   * confirmation built from the list alone would describe half of what the
+   * press is about to do. See `Blast`.
    */
   const removeRole = async (role: Role) => {
-    const used = await rolePositions(role.id).catch(() => []);
+    const used = await rolePositions(role.id).catch(() => EMPTY_PLACES);
+    const takes = used.places.length + Math.max(0, used.withheld ?? 0);
     const ok = await confirm({
       title: `Delete ${role.name}?`,
       body: <Blast name={role.name} used={used} />,
-      action: used.length ? "Delete and take the positions out" : "Delete profile",
+      action: takes ? "Delete and take the positions out" : "Delete profile",
       tone: "danger",
     });
     if (!ok) return;

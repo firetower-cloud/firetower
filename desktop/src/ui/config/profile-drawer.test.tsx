@@ -71,13 +71,46 @@ const sits = (over: Partial<ProfilePosition>): ProfilePosition => ({
 /* ── What a delete takes with it ───────────────────────────────────────── */
 
 describe("the confirmation before a profile is deleted", () => {
-  const says = (used: ProfilePosition[]) =>
-    renderToStaticMarkup(<Blast name="Engineer" used={used} />).replace(/<[^>]+>/g, " ");
+  const says = (places: ProfilePosition[], withheld = 0) =>
+    renderToStaticMarkup(<Blast name="Engineer" used={{ places, withheld }} />).replace(
+      /<[^>]+>/g,
+      " ",
+    );
 
   test("a profile no team uses says that, rather than a count of nothing", () => {
     const said = says([]);
     expect(said).toContain("No team holds a position for it");
     expect(said).not.toContain("0 positions");
+  });
+
+  /**
+   * **The one sentence that could not be made true.** Deleting a profile
+   * cascades onto every team in the organisation, and the list this is built
+   * from is filtered to what the person can see — so *no team holds a
+   * position for it* was a claim about rows nobody read, and false in exactly
+   * the ordinary case: a profile shared into a directory, and somebody else's
+   * team built around it.
+   */
+  test("teams it cannot see are counted rather than denied", () => {
+    const said = says([], 2);
+    expect(said).not.toContain("No team holds a position for it");
+    expect(said).toContain("No team you can see holds a position for it");
+    expect(said).toContain("2 positions in teams you cannot see");
+    expect(said).toContain("Agents already running are untouched");
+  });
+
+  /** The singular, which is the half that is silently wrong. */
+  test("one position in one invisible team reads as one", () => {
+    const said = says([], 1);
+    expect(said).toContain("1 position in teams you cannot see goes with it");
+  });
+
+  /** Named where they can be, counted where they cannot, in one dialog. */
+  test("it says both when there is something of each", () => {
+    const said = says([sits({ teamName: "Product", takes: 3 })], 2);
+    expect(said).toContain("Product");
+    expect(said).toContain("loses 3 positions");
+    expect(said).toContain("And 2 positions in teams you cannot see");
   });
 
   /**

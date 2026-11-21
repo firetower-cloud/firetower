@@ -443,7 +443,12 @@ export const ExportRoleResponse = zod.object({
  * and moves the rules about withheld names there at the same time.
  *
  * A profile this person cannot see is **not found**, as every other read of
- * one is. What comes back is already narrowed to the teams they may see.
+ * one is. The *list* is narrowed to the teams they may see; the **count
+ * beside it** is what that narrowing left out, because deleting a profile
+ * cascades onto every team in the organisation and a confirmation that
+ * described only half of it was the one sentence that could not be made
+ * true. The shape may be disclosed, the names may not — see
+ * [`crate::agent_teams::ProfilePlaces`].
  * @summary Where this profile sits: one entry per position it holds, in a team this
 person can see.
  */
@@ -451,7 +456,8 @@ export const RolePositionsParams = zod.object({
   "id": zod.string().describe('Role id')
 })
 
-export const RolePositionsResponseItem = zod.object({
+export const RolePositionsResponse = zod.object({
+  "places": zod.array(zod.object({
   "instructions": zod.string().describe('This seat\'s own instructions.'),
   "leads": zod.boolean().describe('It is the team\'s lead, so deleting the profile empties the team.'),
   "mayWrite": zod.boolean().describe('Whether this person may change that team.'),
@@ -461,6 +467,7 @@ export const RolePositionsResponseItem = zod.object({
   "team": zod.string(),
   "teamName": zod.string(),
   "under": zod.array(zod.string()).describe('The profiles directly under it in this team, by name, in sibling\norder. A name this person cannot see is absent, as it is from\n[`AgentTeam::members`].')
-}).describe('Where one profile sits in one team.\n\nThe answer to *is this the same Designer* — yes, and here is each seat it\nholds, with what sits above and below it in that team. #494\'s drawer reads\nits **In teams** tab off these, and so does the confirmation before a\nprofile is deleted: deleting one takes every position that references it\nand everything under those, so the teams and the count have to be on\nscreen before the press.\n\n**One request rather than one per team.** The alternative is reading every\nteam\'s whole tree and filtering it in the client, which is a request a team\nand puts the withholding rules in the client at the same time.')
-export const RolePositionsResponse = zod.array(RolePositionsResponseItem)
+}).describe('Where one profile sits in one team.\n\nThe answer to *is this the same Designer* — yes, and here is each seat it\nholds, with what sits above and below it in that team. #494\'s drawer reads\nits **In teams** tab off these, and so does the confirmation before a\nprofile is deleted: deleting one takes every position that references it\nand everything under those, so the teams and the count have to be on\nscreen before the press.\n\n**One request rather than one per team.** The alternative is reading every\nteam\'s whole tree and filtering it in the client, which is a request a team\nand puts the withholding rules in the client at the same time.')).describe('Each seat this profile holds, in a team this person can see.'),
+  "withheld": zod.int().describe('**How many positions it holds in teams this person cannot see**, and\nwhich a delete would take with it.\n\nA bare number: naming the teams would disclose what the filing\nwithholds. Counted the way `places` counts `takes` — each seat and\neverything under it — so the two add up to what the cascade removes.')
+}).describe('Where one profile sits, and how much of that this person may not see.\n\n**Deleting a profile cascades**, and it does not filter:\n`agent_team_positions.profile_id` is `on delete cascade` and `parent_id`\nis too, so a delete takes every position referencing the profile and\neverything under those, in **every** team in the organisation. A team only\nneeds its author to have been able to see the profile — which is what\nsharing one into a directory invites — so the ordinary case puts positions\nin a team the profile\'s owner cannot see.\n\nThe read that the confirmation is built from is filtered, as every read\nis, and that is right. What was wrong is that the confirmation then\nasserted *no team holds a position for it*, which is a claim about teams\nit did not read. So the count comes back beside the list: **the shape may\nbe disclosed, the names may not** — the same move [`AgentTeam::members`]\nmakes for a withheld name, and the only wording that can be both true and\nsafe.')
 

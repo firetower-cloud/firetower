@@ -1169,7 +1169,26 @@ export type Startable = {
   name: string;
   /** The profile that will actually run — a team's lead, or the profile. */
   lead: string | null;
-  /** How many agents the run has: a team's positions, or one. */
+  /**
+   * **How many agents the run has: a team's lead and what it can hand work
+   * to, or one.**
+   *
+   * `AgentTeam.reports`, plus the lead, and deliberately **not**
+   * `AgentTeam.positions`. `positions` is every seat in the whole tree,
+   * unfiltered, which is what the map and the list row are for; it overstates
+   * what picking this row gets you in two independent ways. Reach descends
+   * exactly one level per hand-off, so the seats below a report are somebody
+   * else's to reach later, through a hand-off this person is not making; and
+   * a seat whose profile this person cannot see is not a report at all —
+   * `AgentTeams::reports` drops it, and so does the persona the agent is
+   * given. A team of seven seats whose lead has two reachable reports said
+   * *six other agents* and gave two.
+   *
+   * This is the moment of choosing, and picking the team rather than the bare
+   * profile is the difference between one agent and eight. That difference is
+   * the only thing the row is for, so the number has to be the one the spawn
+   * will resolve against.
+   */
   agents: number;
   /** The engine the profile that runs pins, when it pins one. */
   agent?: string | null;
@@ -1234,7 +1253,7 @@ export function startables(teams: AgentTeam[], profiles: Role[]): Startable[] {
       id: t.id,
       name: t.name,
       lead: t.leadName ?? null,
-      agents: t.positions,
+      agents: t.reports + 1,
       agent: lead?.agent ?? null,
       /* **Its lead, named before it is picked.** If the picker says *Growth*
          and the conversation opens with the Orchestrator, the row misled
@@ -1305,6 +1324,11 @@ export function consequence(s: Startable | undefined): string | null {
   if (s.blocked) return `${s.name} can't be started. ${s.blocked}.`;
   if (s.kind === "team") {
     const lead = s.lead ?? "its lead";
+    /* **What this run will be able to hand work to**, which is a property of
+       the lead's seat and not of the team: `Startable.agents` is the lead
+       plus its own reachable reports, so this is `AgentTeams::reports` and
+       the number the spawn resolves against. It used to be the whole tree,
+       unfiltered. */
     const others = Math.max(0, s.agents - 1);
     if (others === 0) {
       return `Starts ${lead}, ${s.name}'s lead. Nothing reports to it yet, so it cannot hand work to anybody.`;

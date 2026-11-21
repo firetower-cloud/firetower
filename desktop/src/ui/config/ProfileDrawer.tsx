@@ -79,6 +79,7 @@ import type {
   Control,
   ControlKind,
   NewRole,
+  ProfilePlaces,
   ProfilePosition,
   Role,
 } from "~/api/generated/model";
@@ -588,11 +589,12 @@ function Editing({
    */
   const remove = async () => {
     if (!role) return;
-    const used = places.data ?? [];
+    const used: ProfilePlaces = places.data ?? EMPTY_PLACES;
+    const takes = used.places.length + Math.max(0, used.withheld ?? 0);
     const ok = await confirm({
       title: `Delete ${role.name}?`,
       body: <Blast name={role.name} used={used} />,
-      action: used.length ? "Delete and take the positions out" : "Delete profile",
+      action: takes ? "Delete and take the positions out" : "Delete profile",
       tone: "danger",
     });
     if (!ok) return;
@@ -622,27 +624,27 @@ function Editing({
      boundary is read as a boundary. */
   if (!may) {
     return (
-      <Panel label="Profile" onClose={() => onClose(null)} crumb={crumbOf(seat, places.data)}>
+      <Panel label="Profile" onClose={() => onClose(null)} crumb={crumbOf(seat, places.data?.places)}>
         <Head role={role} seat={seat} />
-        <Reading role={role} places={places.data ?? []} seat={seat} />
+        <Reading role={role} places={places.data?.places ?? []} seat={seat} />
       </Panel>
     );
   }
 
   const band =
     seat && SHARED[tab] ? (
-      <Everywhere name={role.name} teams={teamsIn(places.data)} />
+      <Everywhere name={role.name} teams={teamsIn(places.data?.places)} />
     ) : seat ? (
       <OnlyHere team={seat.teamName} />
-    ) : SHARED[tab] && teamsIn(places.data) > 0 ? (
-      <Everywhere name={role.name} teams={teamsIn(places.data)} />
+    ) : SHARED[tab] && teamsIn(places.data?.places) > 0 ? (
+      <Everywhere name={role.name} teams={teamsIn(places.data?.places)} />
     ) : null;
 
   return (
     <Panel
       label={seat ? "Position" : "Profile"}
       onClose={() => ifSaved(() => onClose(null))}
-      crumb={crumbOf(seat, places.data)}
+      crumb={crumbOf(seat, places.data?.places)}
       more={
         <IconButton
           of={Trash2}
@@ -721,7 +723,7 @@ function Editing({
             draft={draft}
             set={set}
             all={roles.data ?? []}
-            places={places.data ?? []}
+            places={places.data?.places ?? []}
             loading={places.isLoading}
             here={seat?.key ?? null}
             onGoToSeat={onGoToSeat}
@@ -738,7 +740,7 @@ function Editing({
       <div className="dfoot">
         <span className={`msg${changed.length ? "" : " quiet"}`}>
           {changed.length
-            ? willSave(changed.length, teamsIn(places.data))
+            ? willSave(changed.length, teamsIn(places.data?.places))
             : "Saved. Workspaces already running keep what they started with."}
         </span>
         {changed.length > 0 ? (
@@ -831,7 +833,7 @@ function Editing({
         <PinSkill
           name={role.name}
           pinned={draft.skillScope ?? []}
-          teams={places.data ?? []}
+          teams={places.data?.places ?? []}
           onChange={(skillScope) => set("skillScope", skillScope)}
           onClose={() => setPinning(false)}
         />
@@ -840,7 +842,7 @@ function Editing({
       {leaving && (
         <LeaveSheet
           what={role.name}
-          says={`${notSaved(changed.length, teamsIn(places.data))} The drawer is showing them until you decide.`}
+          says={`${notSaved(changed.length, teamsIn(places.data?.places))} The drawer is showing them until you decide.`}
           saving={saving}
           problem={problem}
           onStay={() => setLeaving(null)}
@@ -2060,6 +2062,15 @@ function loadsWhat(role: Role): string {
 /* ── Deleting ────────────────────────────────────────────────────────────── */
 
 /**
+ * A profile that sits nowhere.
+ *
+ * One spelling, so a read that has not arrived and a read that failed look
+ * the same to `Blast` as a profile genuinely in no team — and none of the
+ * three can be an array that quietly has no `withheld` on it.
+ */
+export const EMPTY_PLACES: ProfilePlaces = { places: [], withheld: 0 };
+
+/**
  * What a delete takes with it, before it is pressed.
  *
  * **The same pattern the map card's destructive control establishes**: state
@@ -2068,12 +2079,25 @@ function loadsWhat(role: Role): string {
  * team this profile leads says that instead, because deleting the lead takes
  * the whole tree and leaves the team with nothing.
  *
+ * **And it may not assert a fact about teams it did not read.** Deleting a
+ * profile cascades onto every team in the organisation; the list here is
+ * filtered to what this person can see, as every read is. *No team holds a
+ * position for it* was therefore a claim about rows nobody had looked at, and
+ * false in the one direction that matters — the ordinary case is sharing a
+ * profile into a directory and somebody building a team of their own around
+ * it. So the server sends the count of what it withheld beside the list, and
+ * the shape is said without the names: the same rule a withheld member name
+ * on the map follows.
+ *
  * Exported for `profile-drawer.test.tsx`, which renders it on its own: whether
  * a confirmation names every team is the one thing here worth a test that
  * needs no server.
  */
-export function Blast({ name, used }: { name: string; used: ProfilePosition[] }) {
-  if (used.length === 0) {
+export function Blast({ name, used }: { name: string; used: ProfilePlaces }) {
+  const withheld = Math.max(0, used.withheld ?? 0);
+  const seen = used.places ?? [];
+
+  if (seen.length === 0 && withheld === 0) {
     return (
       <p>
         You can no longer start a workspace as {name}. No team holds a position for it. Agents
@@ -2081,8 +2105,28 @@ export function Blast({ name, used }: { name: string; used: ProfilePosition[] })
       </p>
     );
   }
+  /* **Nothing to name, and something to lose.** The cascade does not ask what
+     anybody can see, so a profile shared into a directory can hold seats in
+     teams filed in somebody else's space. The number is the shape and the
+     names are not ours to give, which is the rule a withheld member name on
+     the map already follows. */
+  if (seen.length === 0) {
+    return (
+      <>
+        <p>
+          You can no longer start a workspace as {name}. No team you can see holds a position for
+          it.
+        </p>
+        <p>
+          {count(withheld, "position")} in teams you cannot see {withheld === 1 ? "goes" : "go"}{" "}
+          with it, and everything under {withheld === 1 ? "it" : "them"}.
+        </p>
+        <p>Agents already running are untouched. They keep the profile they started with.</p>
+      </>
+    );
+  }
   const byTeam = new Map<string, { name: string; takes: number; leads: boolean }>();
-  for (const p of used) {
+  for (const p of seen) {
     const at = byTeam.get(p.team) ?? { name: p.teamName, takes: 0, leads: false };
     byTeam.set(p.team, {
       name: p.teamName,
@@ -2111,6 +2155,13 @@ export function Blast({ name, used }: { name: string; used: ProfilePosition[] })
           </li>
         ))}
       </ul>
+      {withheld > 0 && (
+        <p>
+          And {count(withheld, "position")} in teams you cannot see, which{" "}
+          {withheld === 1 ? "goes" : "go"} too. There is nothing here that can name{" "}
+          {withheld === 1 ? "it" : "them"}.
+        </p>
+      )}
       <p>Agents already running are untouched. They keep the profile they started with.</p>
     </>
   );

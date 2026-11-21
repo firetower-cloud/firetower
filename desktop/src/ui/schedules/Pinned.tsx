@@ -17,7 +17,7 @@
  * ```tsx
  * import { SchedulesPinned } from "~/ui/schedules/Pinned";
  * …
- * <SchedulesPinned count={team.schedules} />
+ * <SchedulesPinned count={team.schedules} mayWrite={team.mayWrite} />
  * ```
  *
  * `AgentTeam.schedules` is already on the team the map reads to draw its
@@ -25,7 +25,7 @@
  * counts the **approved** schedules pinning the team, across every owner —
  * somebody else's schedule is no less stopped for being somebody else's — and
  * it does not depend on what the draft changed, because any save stops all of
- * them.
+ * them. It is shown only to somebody who could save — see the component.
  *
  * Drawn whenever the editor is open rather than only once something has been
  * edited: the whole point is that it is read before anybody decides to
@@ -56,8 +56,25 @@ export function pausedBySave(count: number): string | null {
     : `Saving this pauses ${count} schedules that run as this team. They will not run again until you turn them back on.`;
 }
 
-/** The notice, for the action row the Save button sits in. */
-export function SchedulesPinned({ count }: { count: number }) {
+/**
+ * The notice, for the action row the Save button sits in.
+ *
+ * **Drawn for somebody who could press that Save, and nobody else.** It is a
+ * consequence-of-saving notice, so beside a Save a reader cannot press it
+ * says nothing useful to them either way — and the number it carries is
+ * counted across **every owner**, which is exactly right for the person about
+ * to stop those schedules and is a reading of other people's unattended work
+ * to anybody else. A `Viewer` on a shared team would otherwise learn how many
+ * approved schedules other people had pinned to it, and by watching the
+ * number fall, when one of them stopped.
+ *
+ * The server answers `AgentTeam.schedules` as zero for a reader for the same
+ * reason, so this is the belt to that braces: the gate is named here, where
+ * the sentence is, rather than at each call site where it would be a thing to
+ * remember.
+ */
+export function SchedulesPinned({ count, mayWrite }: { count: number; mayWrite: boolean }) {
+  if (!mayWrite) return null;
   const says = pausedBySave(count);
   if (!says) return null;
   return (

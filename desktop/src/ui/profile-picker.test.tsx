@@ -38,13 +38,30 @@ import type { AgentTeam, Role } from "~/api/generated/model";
 const role = (id: string, name: string, canDelegate = false) =>
   ({ id, name, does: "Reads the dependency diff", canDelegate, placement: "new" }) as unknown as Role;
 
-const team = (id: string, name: string, lead: Role | null, positions: number) =>
+/**
+ * A team, with only the fields the picker reads.
+ *
+ * `positions` and `reports` are separate arguments because they are separate
+ * facts and the picker reads only one of them: `positions` is every seat in
+ * the tree, `reports` is what the lead can actually hand work to. They differ
+ * the moment a team is deeper than two levels or holds a profile this person
+ * cannot see, which is `the picker promises what the lead can reach` below.
+ * `reports` defaults to a flat, fully visible team, where the two agree.
+ */
+const team = (
+  id: string,
+  name: string,
+  lead: Role | null,
+  positions: number,
+  reports = Math.max(0, positions - 1),
+) =>
   ({
     id,
     name,
     lead: lead?.id,
     leadName: lead?.name,
     positions,
+    reports,
     path: `u/ada/${id}`,
     mayWrite: true,
     mayShare: true,
@@ -209,6 +226,23 @@ describe("the sentence under the box", () => {
     expect(say([product], [ada], { kind: "team", id: "t_01" })).toBe(
       "Starts Engineering Manager, Product's lead. It can hand work to 7 other agents in the team.",
     );
+  });
+
+  /**
+   * **#514 — the number has to be the lead's own reach, not the tree's size.**
+   *
+   * Reach descends one level per hand-off, and a seat whose profile this
+   * person cannot see is not a report at all. A seven-seat team whose lead
+   * has two reachable reports said *six other agents* and gave two. The
+   * server now carries the filtered count beside the unfiltered one, and this
+   * is the row where the two disagree.
+   */
+  it("promises what the lead can reach, not how big the tree is", () => {
+    const deep = team("t_04", "Growth", ada, 7, 2);
+    expect(say([deep], [ada], { kind: "team", id: "t_04" })).toBe(
+      "Starts Engineering Manager, Growth's lead. It can hand work to 2 other agents in the team.",
+    );
+    expect(draw([ada], [deep])).toContain("3 agents");
   });
 
   it("against a profile on its own, which cannot hand work to anybody", () => {

@@ -574,8 +574,16 @@ export function TeamMap({
           {/* **Whenever the map is open, not once something has been
               edited.** The whole point is that it is read before anybody
               decides to change anything — `schedules/Pinned.tsx` says so,
-              and owns the sentence. */}
-          <SchedulesPinned count={paused} />
+              and owns the sentence.
+
+              **For somebody who could save, and nobody else.** It is a
+              consequence-of-saving notice, so beside a Save a reader cannot
+              press it says nothing useful — and the number is counted across
+              every owner, which is right for whoever is about to stop them
+              and is other people's unattended work to anybody else.
+              `AgentTeam.schedules` is zero for a reader now, so this is the
+              belt to that braces and the two agree. */}
+          <SchedulesPinned count={paused} mayWrite={may} />
           {pending.length > 0 && (
             <span className="pend" role="status">
               <span className="n">

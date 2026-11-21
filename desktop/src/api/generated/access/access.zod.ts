@@ -19,14 +19,17 @@ export const AccessOfQueryParams = zod.object({
 export const AccessOfResponse = zod.object({
   "directory": zod.union([zod.null(),zod.object({
   "agentAccounts": zod.int(),
+  "agentTeams": zod.int(),
+  "artifacts": zod.int(),
   "hosts": zod.int(),
   "id": zod.string().describe('Identifies a directory — the things a grant is held over.'),
   "level": zod.union([zod.null(),zod.enum(['viewer', 'writer', 'admin']).describe('What the person asking may do here. Absent when nothing was asked for.')]).optional(),
   "name": zod.string(),
+  "roles": zod.int(),
   "secrets": zod.int(),
   "skills": zod.int(),
   "slug": zod.string().describe('What appears in a path. Derived from the name once, and stable after —\nrenaming a directory must not rewrite every path underneath it.'),
-  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.')
+  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.\n\nOne field per kind that can be filed, and all of them — see\n[`DIRECTORY_COLUMNS`] for what a missing one costs.')
 }).describe('The directory it is filed in, if it is filed in one. Absent for\n`u/<somebody>/…`, which is a personal root and has no row.')]).optional(),
   "mayShare": zod.boolean().describe('Whether this person may edit the exceptions or move it. Asked once here\nso the client does not have to reconstruct `may_share`.'),
   "path": zod.string().describe('A path, as the wire and the interface spell it: `u/kevin/thing`.'),
@@ -85,14 +88,17 @@ export const ListColleaguesResponse = zod.array(ListColleaguesResponseItem)
  */
 export const ListDirectoriesResponseItem = zod.object({
   "agentAccounts": zod.int(),
+  "agentTeams": zod.int(),
+  "artifacts": zod.int(),
   "hosts": zod.int(),
   "id": zod.string().describe('Identifies a directory — the things a grant is held over.'),
   "level": zod.union([zod.null(),zod.enum(['viewer', 'writer', 'admin']).describe('What the person asking may do here. Absent when nothing was asked for.')]).optional(),
   "name": zod.string(),
+  "roles": zod.int(),
   "secrets": zod.int(),
   "skills": zod.int(),
   "slug": zod.string().describe('What appears in a path. Derived from the name once, and stable after —\nrenaming a directory must not rewrite every path underneath it.'),
-  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.')
+  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.\n\nOne field per kind that can be filed, and all of them — see\n[`DIRECTORY_COLUMNS`] for what a missing one costs.')
 }).describe('A bag of things a grant is held over.')
 export const ListDirectoriesResponse = zod.array(ListDirectoriesResponseItem)
 
@@ -111,14 +117,17 @@ export const CreateDirectoryBody = zod.object({
 
 export const CreateDirectoryResponse = zod.object({
   "agentAccounts": zod.int(),
+  "agentTeams": zod.int(),
+  "artifacts": zod.int(),
   "hosts": zod.int(),
   "id": zod.string().describe('Identifies a directory — the things a grant is held over.'),
   "level": zod.union([zod.null(),zod.enum(['viewer', 'writer', 'admin']).describe('What the person asking may do here. Absent when nothing was asked for.')]).optional(),
   "name": zod.string(),
+  "roles": zod.int(),
   "secrets": zod.int(),
   "skills": zod.int(),
   "slug": zod.string().describe('What appears in a path. Derived from the name once, and stable after —\nrenaming a directory must not rewrite every path underneath it.'),
-  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.')
+  "workspaces": zod.int().describe('What is filed here, so a list can say so and a deletion can refuse.\n\nOne field per kind that can be filed, and all of them — see\n[`DIRECTORY_COLUMNS`] for what a missing one costs.')
 }).describe('A bag of things a grant is held over.')
 
 export const DeleteDirectoryParams = zod.object({
