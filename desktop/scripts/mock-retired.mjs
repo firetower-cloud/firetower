@@ -21,7 +21,10 @@ import { createHash } from "node:crypto";
 const PORT = Number(process.argv[2] ?? 4471);
 
 const ORG = { id: "o_1", name: "Acme" };
-const USER = { id: "u_1", orgId: "o_1", username: "kevin", role: "admin", mustChangePassword: false };
+/* `slug` is what every path is keyed on — `u/kevin/…` — and it was missing
+   here as it once was in `mock-server.mjs`: `isPersonal` answers false for
+   every session this person owns without it. */
+const USER = { id: "u_1", orgId: "o_1", username: "kevin", slug: "kevin", email: "kevin@acme.co", role: "admin", mustChangePassword: false };
 
 let scene = "retired";
 
@@ -50,10 +53,10 @@ const retired = () => (scene === "empty" ? [] : [RETIRED]);
 /* Repositories connected by a path, which is one of the two chores: a path
    only means something on the machine that did the cloning. */
 const PATH_REPOS = [
-  { id: "r_web", slug: "acme/web", remote: "/srv/checkouts/web", defaultBranch: "main", env: [] },
-  { id: "r_notes", slug: "acme/notes", remote: "~/scratch/notes", defaultBranch: "main", env: [] },
+  { id: "r_web", slug: "acme/web", path: "u/kevin/acme-web", remote: "/srv/checkouts/web", defaultBranch: "main", env: [] },
+  { id: "r_notes", slug: "acme/notes", path: "u/kevin/acme-notes", remote: "~/scratch/notes", defaultBranch: "main", env: [] },
 ];
-const URL_REPOS = [{ id: "r_api", slug: "acme/api", remote: "git@github.com:acme/api.git", defaultBranch: "main", env: [] }];
+const URL_REPOS = [{ id: "r_api", slug: "acme/api", path: "u/kevin/acme-api", remote: "git@github.com:acme/api.git", defaultBranch: "main", env: [] }];
 const repos = () => (scene === "empty" ? [] : scene === "norecord" ? URL_REPOS : [...PATH_REPOS, ...URL_REPOS]);
 
 const role = (id, name, does, machine) => ({
@@ -69,6 +72,10 @@ const role = (id, name, does, machine) => ({
   delegateScope: [],
   skillScope: [],
   instructions: "Run the suite and report back.",
+  onUsageLimit: "wait",
+  onChildLimit: "ask",
+  includeAlwaysOn: true,
+  includeRepoDefaults: true,
   isDefault: false,
   mayShare: true,
   mayWrite: true,
@@ -101,6 +108,7 @@ const session = (id, number, name, title, branch, status) => ({
   size: "Medium",
   status,
   agent: "ClaudeCode",
+  path: "u/kevin",
   hostId: RETIRED.id,
   workspaceId: id,
   createdAt: "2026-10-28T09:12:00Z",
@@ -111,7 +119,7 @@ const session = (id, number, name, title, branch, status) => ({
   repo: "acme/web",
   checkouts: [{ slug: "acme/web", repoId: "r_web", base: "main", branch, path: "web", trouble: null, pullRequest: null, pullState: null }],
   steps: ["Fetch", "Worktree", "Workspace", "Setup", "Launch"],
-  usage: { cpu: 0, memoryMb: 0 },
+  usage: { cpu: 0, memoryMb: 0, memoryPeakMb: 0, memoryMaxMb: null, oomKills: 0 },
   note: null,
   pullRequest: null,
   proposedTitle: null,
@@ -135,20 +143,23 @@ const LIVE = {
 
 const sessions = () => (scene === "empty" ? [] : [...GONE, LIVE]);
 
+/* `AssistantText` and `UserText`: `StreamKind` has never had `Content` in it. */
 const say = (item, text) => [
   { lineNo: 0, type: "ItemStarted", item, kind: "AssistantMessage", title: null, task: null },
-  { lineNo: 0, type: "ContentDelta", item, stream: "Content", delta: text },
+  { lineNo: 0, type: "ContentDelta", item, stream: "AssistantText", delta: text },
   { lineNo: 0, type: "ItemCompleted", item, status: "Completed" },
 ];
 const asked = (item, text) => [
   { lineNo: 0, type: "ItemStarted", item, kind: "UserMessage", title: null, task: null },
-  { lineNo: 0, type: "ContentDelta", item, stream: "Content", delta: text },
+  { lineNo: 0, type: "ContentDelta", item, stream: "UserText", delta: text },
   { lineNo: 0, type: "ItemCompleted", item, status: "Completed" },
 ];
 
 /** A short transcript, complete and readable — which is the claim being tested. */
 const conversation = () => ({
   lastLine: 42,
+  firstLine: 0,
+  hasMore: false,
   events: [
     { lineNo: 0, type: "SessionConfigured", model: "claude-opus-5", mode: "acceptEdits", tools: [], commands: [] },
     { lineNo: 1, type: "TurnStarted", turn: "t_1" },
@@ -169,6 +180,7 @@ const AGENTS = () => [
     supported: true,
     needsCredential: true,
     credentialSet: true,
+    signsInWithACode: false,
     latestVersion: "2.1.285",
     hosts: hosts().map((h) => ({
       hostId: h.id,
@@ -184,8 +196,12 @@ const AGENTS = () => [
   },
 ];
 
+/* `connected`, `Subscription` and a `path`, for the reasons written out over
+   `ACCOUNTS` in `mock-server.mjs`: `usable()` is `enabled && state ===
+   "connected" && credentialSet`, so `"ready"` here meant nothing could be
+   started against this mock either. */
 const ACCOUNTS = [
-  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
+  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "Subscription", isDefault: true, enabled: true, state: "connected", revision: 1, credentialSet: true, identity: "kevin@acme.com", path: "u/kevin/acme-max", limits: [] },
 ];
 
 const json = (res, body, status = 200) => {
@@ -228,7 +244,7 @@ const server = createServer(async (req, res) => {
   const routes = {
     "/api/v1/bootstrap": { version: "0.51.0", eventsPath: "/api/v1/events", authModes: ["password"], organization: ORG.name, serverId: "o_1" },
     "/api/v1/auth/me": { user: USER, organization: ORG },
-    "/api/v1/setup": { needsPassword: false, needsOrganization: false, needsGithub: false, completed: true, organization: ORG },
+    "/api/v1/setup": { needsPassword: false, needsOrganization: false, needsGithub: false, publicUrl: `http://localhost:${PORT}`, completed: true, organization: ORG },
     "/api/v1/hosts": hosts(),
     "/api/v1/hosts/retired": retired(),
     "/api/v1/repos": repos(),
@@ -239,10 +255,13 @@ const server = createServer(async (req, res) => {
     /* A fresh install has no git host connected either, which is the state
        that puts `Repos` into its own `Start` block — the only route to the
        paste-a-remote form. */
+    /* `ProviderStatus` in full, and `kind` is the software — `github`,
+       lower case, which is what decides the mark beside the row. `GitHub`
+       was the label spelt twice. */
     "/api/v1/providers":
       scene === "empty"
-        ? [{ id: "github", kind: "GitHub", label: "GitHub", gitHost: "github.com", connected: false, identity: null }]
-        : [{ id: "github", kind: "GitHub", label: "GitHub", gitHost: "github.com", connected: true, identity: "kevin" }],
+        ? [{ id: "github", kind: "github", label: "GitHub", gitHost: "github.com", baseUrl: "https://github.com", tokenPage: "https://github.com/settings/tokens/new?scopes=repo,workflow&description=Firetower", appPage: "https://github.com/settings/applications/new", auth: "device", authModes: ["device", "token"], changeNoun: "pull request", builtin: true, configured: true, maySetApplication: true, sharedApplication: false, connected: false, identity: null }]
+        : [{ id: "github", kind: "github", label: "GitHub", gitHost: "github.com", baseUrl: "https://github.com", tokenPage: "https://github.com/settings/tokens/new?scopes=repo,workflow&description=Firetower", appPage: "https://github.com/settings/applications/new", auth: "device", authModes: ["device", "token"], changeNoun: "pull request", builtin: true, configured: true, maySetApplication: true, sharedApplication: false, connected: true, identity: "kevin" }],
     "/api/v1/trackers": [],
     "/api/v1/artifacts": [],
     "/api/v1/skills": [],
