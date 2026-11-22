@@ -39,6 +39,12 @@ pub const GIT: &str = "git";
 pub const AGENT: &str = "agent";
 /// Keys for a task tracker that is not a git host, keyed by tracker id.
 pub const TRACKER: &str = "tracker";
+/// A plugin connector's authorization, keyed by the plugin it belongs to.
+///
+/// The connector travels with a plugin through a directory or a profile; this
+/// does not. Per person, like every other key here, so a colleague reading the
+/// same plugin's row gets their own answer.
+pub const CONNECTOR: &str = "connector";
 
 /// Which secret, and whose.
 ///

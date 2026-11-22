@@ -3352,6 +3352,36 @@ impl Skills {
         Ok(out)
     }
 
+    /// The pool, for the routes that write a connector's own tables.
+    ///
+    /// Narrow on purpose: `connector_clients` and `connector_pending` hang off
+    /// a skill row and nothing else reads them, so they live beside the API
+    /// that owns them rather than growing a store of their own.
+    pub fn pool(&self) -> &PgPool {
+        &self.pool
+    }
+
+    /// One plugin's connector, if it has one.
+    pub async fn connector_of(&self, id: &str) -> Result<Option<SessionConnector>> {
+        let row = sqlx::query(
+            "SELECT k.id AS skill_id, k.name AS plugin, c.server, c.url, c.auth, c.borrow \
+               FROM skills k JOIN connectors c ON c.skill_id = k.id \
+              WHERE k.id = $1",
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("reading a connector")?;
+        Ok(row.map(|r| SessionConnector {
+            skill_id: r.get("skill_id"),
+            plugin: r.get("plugin"),
+            server: r.get("server"),
+            url: r.get("url"),
+            auth: r.get("auth"),
+            borrow: r.get("borrow"),
+        }))
+    }
+
     /// The connectors this session's plugins declare.
     ///
     /// Keyed on the plugin's folder name because that is what a bundle carries
@@ -3359,7 +3389,7 @@ impl Skills {
     /// is what `deliverable` already guarantees is unique within one session.
     pub async fn connectors_for_session(&self, session: &str) -> Result<Vec<SessionConnector>> {
         let rows = sqlx::query(
-            "SELECT k.name AS plugin, c.server, c.url, c.auth, c.borrow \
+            "SELECT k.id AS skill_id, k.name AS plugin, c.server, c.url, c.auth, c.borrow \
                FROM skill_pins p \
                JOIN skills k ON k.id = p.skill_id \
                JOIN connectors c ON c.skill_id = k.id \
@@ -3373,6 +3403,7 @@ impl Skills {
         Ok(rows
             .into_iter()
             .map(|r| SessionConnector {
+                skill_id: r.get("skill_id"),
                 plugin: r.get("plugin"),
                 server: r.get("server"),
                 url: r.get("url"),
@@ -3630,6 +3661,8 @@ async fn write_connector(
 /// One connector a session is pinned to.
 #[derive(Debug, Clone)]
 pub struct SessionConnector {
+    /// The plugin this belongs to, which is what the vault key is filed under.
+    pub skill_id: String,
     /// The plugin's folder name, which is what matches it to a bundle.
     pub plugin: String,
     /// What the agent calls this server.

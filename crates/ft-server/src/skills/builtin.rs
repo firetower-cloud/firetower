@@ -130,6 +130,25 @@ pub const ALL: &[Builtin] = &[
         ],
         connector: None,
     },
+    // The one that goes through the broker. Linear advertises dynamic client
+    // registration, so connecting it needs no administrator and no
+    // application — which is the claim the broker exists to make true, and
+    // this is where somebody can press it.
+    Builtin {
+        slug: "linear",
+        kind: Kind::Plugin,
+        files: &[(
+            ".claude-plugin/plugin.json",
+            include_str!("../../plugins/linear/.claude-plugin/plugin.json"),
+        )],
+        connector: Some(Connector {
+            server: "linear",
+            url: "https://mcp.linear.app/mcp",
+            auth: "oauth",
+            borrow: None,
+            scopes: None,
+        }),
+    },
     Builtin {
         slug: "github",
         kind: Kind::Plugin,

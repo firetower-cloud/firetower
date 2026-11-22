@@ -102,6 +102,15 @@ pub struct AppState {
     pub names: preview::Names,
     /// Public UI address used to connect annotations from directly opened previews.
     pub public_url: Arc<str>,
+    /// Where **this process** answers, which is not always where a person
+    /// opens Firetower.
+    ///
+    /// `public_url` is the interface's address, and in development the
+    /// interface is a separate dev server on another port — so a redirect
+    /// built from it lands on something that does not serve the API. An OAuth
+    /// callback has to come back to the route that handles it, and that route
+    /// is here. In production the two are one origin and these agree.
+    pub api_url: Arc<str>,
     /// Ports this machine is holding open on behalf of a session.
     ///
     /// In memory on purpose, like `pending`: a forwarded port is a view
@@ -247,6 +256,7 @@ pub async fn run(config: Config) -> Result<()> {
         previews: Default::default(),
         names,
         public_url: public_url(&config).into(),
+        api_url: api_url(&config).into(),
         updates: updates::Updates::new(db_pool),
     };
     // In the background: it fetches a few hundred megabytes, and nothing else
@@ -365,6 +375,21 @@ fn public_url(config: &Config) -> String {
     // is the dev server's rather than this one's.
     let port = if config.dev { 3000 } else { config.port };
     format!("http://localhost:{port}")
+}
+
+/// Where this process answers, for a URL somebody else has to call back on.
+///
+/// The same configured address as [`public_url`] when there is one, because
+/// behind a proxy the API and the interface are one origin — and this port
+/// otherwise, never the interface's.
+fn api_url(config: &Config) -> String {
+    if let Ok(url) = std::env::var(PUBLIC_URL_ENV) {
+        let url = url.trim().trim_end_matches('/');
+        if !url.is_empty() {
+            return url.to_string();
+        }
+    }
+    format!("http://localhost:{}", config.port)
 }
 
 /// The variables that seed the first administrator.

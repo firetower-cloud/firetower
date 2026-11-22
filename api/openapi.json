@@ -1256,6 +1256,144 @@
         }
       }
     },
+    "/api/v1/connectors/callback": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Where the browser lands. **Not an API route** — a person is looking at it.",
+        "operationId": "connector_callback",
+        "responses": {
+          "200": {
+            "description": "A page saying what happened"
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}": {
+      "get": {
+        "tags": [
+          "connectors"
+        ],
+        "operationId": "connector_state",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The plugin the connector belongs to",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectorState"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "connectors"
+        ],
+        "operationId": "disconnect",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The plugin the connector belongs to",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Forgotten"
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/{id}/connect": {
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "operationId": "connect",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The plugin the connector belongs to",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Open this in the person's browser",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Opened"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/consumption": {
       "get": {
         "tags": [
@@ -11448,6 +11586,40 @@
           }
         }
       },
+      "ConnectorState": {
+        "type": "object",
+        "description": "Whether **you** are connected, and how this one is authorized at all.",
+        "required": [
+          "auth",
+          "server",
+          "url",
+          "connected"
+        ],
+        "properties": {
+          "auth": {
+            "type": "string",
+            "description": "`none`, `borrow-git` or `oauth`. What the row on the screen says about\nwhat pressing Connect will do."
+          },
+          "blocked": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why it cannot be connected here, when that is the answer. A connector\nwhose git host nobody has authorized is not broken — it is waiting on\na different screen, and saying so is cheaper than a failed attempt."
+          },
+          "connected": {
+            "type": "boolean",
+            "description": "Whether this person holds a credential for it."
+          },
+          "server": {
+            "type": "string",
+            "description": "What the agent calls this server."
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "Consumption": {
         "type": "object",
         "description": "The whole page, in the terms the person asking may see it.",
@@ -14693,6 +14865,18 @@
               "null"
             ],
             "description": "Which checkout, by its path inside the workspace. Absent means all."
+          }
+        }
+      },
+      "Opened": {
+        "type": "object",
+        "required": [
+          "authorizeUrl"
+        ],
+        "properties": {
+          "authorizeUrl": {
+            "type": "string",
+            "description": "Send the person's browser here."
           }
         }
       },

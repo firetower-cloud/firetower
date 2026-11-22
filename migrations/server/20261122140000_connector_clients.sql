@@ -33,3 +33,23 @@ create table connector_clients (
     scopes        text,
     discovered_at timestamptz not null default now()
 );
+
+-- An authorization that has left for a browser and not come back.
+--
+-- **The verifier is the point.** PKCE only protects anything if the verifier
+-- never leaves the party that made it, so it is written here and handed to
+-- nobody — the browser carries the *challenge*, and the code is worthless to
+-- an interceptor without the other half.
+--
+-- A row rather than a map in memory: the control plane restarts, and somebody
+-- mid-authorization should get a refusal they can act on rather than a
+-- callback that silently matches nothing.
+create table connector_pending (
+    state    text primary key,
+    skill_id text not null references skills(id) on delete cascade,
+    owner    text not null references principals(id) on delete cascade,
+    verifier text not null,
+    at       timestamptz not null default now()
+);
+
+create index connector_pending_by_age on connector_pending (at);

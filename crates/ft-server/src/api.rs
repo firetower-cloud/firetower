@@ -28,6 +28,7 @@ pub(crate) mod schedules;
 mod secrets;
 pub(crate) mod sessions;
 mod setup;
+mod connectors;
 mod skills;
 mod stream;
 mod tasks;
@@ -454,9 +455,11 @@ pub(crate) async fn with_connectors(
                 }
                 None => None,
             },
-            // The broker's shapes. Until it lands these hold no credential, so
-            // the plugin arrives with its skills and without its tools — which
-            // is what the row on the screen already says about them.
+            // Brokered: this person's own grant, renewed on the way out if it
+            // has gone stale. An access token has an hour on it and a session
+            // may be starting long after the browser closed, so the renewal
+            // happens here rather than being hoped for.
+            "oauth" => connector_token(state, &c.skill_id, owner).await,
             _ => None,
         };
         let Some(token) = token else {
@@ -490,6 +493,96 @@ pub(crate) async fn with_connectors(
         tracing::info!(plugin = %c.plugin, server = %c.server, "this session's connector is authorized");
     }
     bundles
+}
+
+/// This person's access token for one brokered connector, renewed if stale.
+///
+/// `None` is "nobody has authorized this yet", which is not an error: the
+/// plugin loads with its skills and without its tools, and the interface is
+/// where somebody is asked to connect. Refusing a whole session because one
+/// connector is unauthorized would make it cost every other plugin in the set.
+async fn connector_token(
+    state: &AppState,
+    skill_id: &str,
+    owner: &str,
+) -> Option<zeroize::Zeroizing<String>> {
+    let key = || crate::vault::Key::of(crate::vault::CONNECTOR, skill_id, owner);
+    let held = crate::oauth::Grant::parse(
+        &state
+            .vault
+            .get(key(), "a plugin's connector asked for it")
+            .await
+            .ok()
+            .flatten()?,
+    );
+    if !held.stale(chrono::Utc::now()) {
+        return Some(zeroize::Zeroizing::new(held.access));
+    }
+
+    // Past here a single-use refresh token is being spent, so one task per
+    // person per connector — the same gate `git_token` takes, for the same
+    // reason: whoever waited has to look again rather than renew the grant
+    // they arrived with.
+    let _queued = state.renewals.at(&format!("connector:{skill_id}:{owner}")).await;
+    let held = crate::oauth::Grant::parse(
+        &state
+            .vault
+            .get(key(), "renewing a connector's authorization")
+            .await
+            .ok()
+            .flatten()?,
+    );
+    if !held.stale(chrono::Utc::now()) {
+        return Some(zeroize::Zeroizing::new(held.access));
+    }
+
+    let (found, client_id) = connector_client(state, skill_id).await?;
+    let refresh = held.refresh.as_deref()?;
+    match crate::connectors::refresh(&found, &client_id, None, refresh).await {
+        Ok(fresh) => {
+            if let Err(e) = state
+                .vault
+                .put(key(), &fresh.to_stored(), "renewed a connector's authorization")
+                .await
+            {
+                // The server has already rotated the refresh token, so the one
+                // in the vault is spent and this person will have to connect
+                // again. The only failure here that loses a credential.
+                tracing::error!("storing a renewed connector token: {e:#}");
+            }
+            Some(zeroize::Zeroizing::new(fresh.access))
+        }
+        Err(e) => {
+            tracing::warn!(skill = %skill_id, "renewing a connector: {e:#}");
+            None
+        }
+    }
+}
+
+/// What was discovered for this connector, if it has ever been connected.
+async fn connector_client(
+    state: &AppState,
+    skill_id: &str,
+) -> Option<(crate::connectors::Discovered, String)> {
+    use sqlx::Row as _;
+    let r = sqlx::query(
+        "SELECT resource, authorize_url, token_url, register_url, client_id, scopes \
+           FROM connector_clients WHERE skill_id = $1",
+    )
+    .bind(skill_id)
+    .fetch_optional(state.skills.pool())
+    .await
+    .ok()??;
+    Some((
+        crate::connectors::Discovered {
+            resource: r.get("resource"),
+            authorize_url: r.get("authorize_url"),
+            token_url: r.get("token_url"),
+            register_url: r.get("register_url"),
+            scopes: r.get("scopes"),
+        },
+        r.get::<Option<String>, _>("client_id")?,
+    ))
 }
 
 /// This person's token for one host, as git wants it.
@@ -728,6 +821,9 @@ pub fn router() -> OpenApiRouter<AppState> {
             artifacts::rename_artifact,
             artifacts::delete_artifact
         ))
+        .routes(routes!(connectors::connector_state, connectors::disconnect))
+        .routes(routes!(connectors::connect))
+        .routes(routes!(connectors::connector_callback))
         .routes(routes!(skills::list_skills, skills::create_skill))
         .routes(routes!(skills::match_skills))
         .routes(routes!(skills::rename_skill, skills::delete_skill))

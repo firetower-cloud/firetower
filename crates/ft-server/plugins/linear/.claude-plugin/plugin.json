@@ -1,0 +1,6 @@
+{
+  "name": "linear",
+  "description": "Read a ticket, move it, and write back what the agent actually did.",
+  "version": "1.0.0",
+  "author": { "name": "Firetower" }
+}

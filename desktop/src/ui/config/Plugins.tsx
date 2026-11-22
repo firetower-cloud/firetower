@@ -27,7 +27,14 @@ import { Check, Link2, Plus, Puzzle, Search, Square, Terminal } from "lucide-rea
 import { Blank, Note, Row, Section } from "~/ui/config/bits";
 import { useSkills, why } from "~/data";
 import { setDefault, getListSkillsQueryKey } from "~/api/generated/skills/skills";
+import {
+  connect,
+  disconnect,
+  useConnectorState,
+  getConnectorStateQueryKey,
+} from "~/api/generated/connectors/connectors";
 import { useQueryClient } from "@tanstack/react-query";
+import { openExternal } from "~/open";
 import type { Skill } from "~/api/generated/model";
 
 /**
@@ -198,20 +205,85 @@ export function Plugins() {
  * Whether **you** are connected, which is not a property of the plugin.
  *
  * A connector travels with a plugin through a directory or a profile; the
- * authorization never does. So this line is read per person, and a colleague
- * sees a different one on the same row.
+ * authorization never does. So this is read per person, and a colleague sees a
+ * different answer on the same row.
  *
- * Until the broker lands this reports the one path that needs no new
- * authorization code: a connector that borrows a credential Firetower already
- * holds. The server resolves that at session start, so what the row can
- * honestly say here is what kind of connector it is.
+ * Three shapes, and each is the honest one for what the server said:
+ *
+ * - **`borrow-git`** needs no browser at all. Its token is the one Firetower
+ *   already holds for that git host, so the row either says you are connected
+ *   or sends you to the screen where that host is.
+ * - **`oauth`** opens your browser. Firetower registers itself with the
+ *   server, which is why there is no application for anybody to create.
+ * - Already connected: a quiet statement, with disconnecting on the same
+ *   control rather than hidden behind a menu.
  */
 function Connected({ of }: { of: Skill }) {
+  const q = useConnectorState(of.id);
+  const cache = useQueryClient();
+  const [busy, setBusy] = useState(false);
+  const state = q.data;
+  const refresh = () =>
+    cache.invalidateQueries({ queryKey: getConnectorStateQueryKey(of.id) });
+
+  if (!state) return null;
+
+  if (state.connected) {
+    return (
+      <button
+        type="button"
+        className="on"
+        title={`Connected to ${state.server}. Disconnecting takes out your credential and leaves everybody else's.`}
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await disconnect(of.id);
+            await refresh();
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Link2 className="h-3.5 w-3.5 text-sage" strokeWidth={1.75} />
+        Connected
+      </button>
+    );
+  }
+
+  /* Not connectable from here, and the sentence says where it is instead. A
+     connector waiting on a git host nobody has authorized is not broken. */
+  if (state.blocked) {
+    return (
+      <span className="chip3" title={state.blocked}>
+        needs a git host
+      </span>
+    );
+  }
+
   return (
-    <span className="chip3" title={`${of.name} brings tools the agent can call`}>
-      <Link2 className="mr-1 inline h-3.5 w-3.5 align-[-2px]" strokeWidth={1.5} />
-      connector
-    </span>
+    <button
+      type="button"
+      className="on"
+      disabled={busy}
+      onClick={async () => {
+        setBusy(true);
+        try {
+          const opened = await connect(of.id);
+          /* The person's own browser, as them. Nothing is stored until it
+             comes back to the callback. */
+          await openExternal(opened.authorizeUrl);
+        } catch (e) {
+          /* The server's own sentence, which says more than ours would. */
+          window.alert(why(e));
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+      {busy ? "Opening…" : "Connect"}
+    </button>
   );
 }
 

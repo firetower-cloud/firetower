@@ -4,6 +4,7 @@ export * from './agent-teams/agent-teams';
 export * from './agents/agents';
 export * from './artifacts/artifacts';
 export * from './auth/auth';
+export * from './connectors/connectors';
 export * from './consumption/consumption';
 export * from './conversation/conversation';
 export * from './events/events';
