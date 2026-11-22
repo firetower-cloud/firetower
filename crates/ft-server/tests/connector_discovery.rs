@@ -58,8 +58,10 @@ async fn github_is_still_the_one_that_registers_no_clients() {
     let d = connectors::discover("https://api.githubcopilot.com/mcp/")
         .await
         .expect("github publishes metadata");
-    println!("GitHub\n  authorize {}\n  register  {:?}\n  scopes    {:?}",
-        d.authorize_url, d.register_url, d.scopes);
+    println!(
+        "GitHub\n  authorize {}\n  register  {:?}\n  scopes    {:?}",
+        d.authorize_url, d.register_url, d.scopes
+    );
     assert!(
         d.authorize_url.contains("github.com/login/oauth"),
         "its authorization server is the application Firetower already registered"
@@ -89,7 +91,10 @@ async fn firetower_can_register_itself_with_no_administrator() {
     let d = connectors::discover("https://mcp.linear.app/mcp")
         .await
         .expect("linear publishes metadata");
-    let at = d.register_url.clone().expect("linear registers clients dynamically");
+    let at = d
+        .register_url
+        .clone()
+        .expect("linear registers clients dynamically");
 
     let registered = connectors::register(&at, "http://localhost:14400/api/v1/connectors/callback")
         .await
@@ -109,5 +114,8 @@ async fn firetower_can_register_itself_with_no_administrator() {
     );
     println!("authorize  {url}");
     assert!(url.contains("code_challenge_method=S256"));
-    assert!(url.contains("resource="), "the token must be audience-bound");
+    assert!(
+        url.contains("resource="),
+        "the token must be audience-bound"
+    );
 }

@@ -19,7 +19,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, FolderDown } from "lucide-react";
 import { addVersion, createSkill, matchSkills } from "~/api/generated/skills/skills";
 import { why } from "~/data";
-import { readDrop, readFiles, size, skillsIn, RISK_SAYS, type Found } from "~/skills";
+import { bundlesIn, readDrop, readFiles, size, RISK_SAYS, type Found } from "~/skills";
 
 type Step = "waiting" | "reading" | "review" | "saving";
 
@@ -91,7 +91,11 @@ export function AddSkill({
     setStep("reading");
     setFailed(null);
     const raw = await job;
-    const skills = await skillsIn(raw);
+    /* **Whatever is in it, as what it is.** A folder with a manifest is a
+       plugin, one with a SKILL.md is a skill, and a folder of folders is
+       however many of whichever — so one drop surface reads both and nobody
+       is asked to say which they meant. */
+    const skills = await bundlesIn(raw);
 
     /* What the library already holds under each of these names, asked once,
        before anything is written. It is what lets a row say "you already have
@@ -149,6 +153,9 @@ export function AddSkill({
           frontmatter: s.frontmatter,
           body: s.body,
           files: s.files,
+          /* The source declared this when it was read. It decides which home
+             the bundle lands in on a worker, so it travels with the bytes. */
+          kind: s.kind,
         };
         /* A bundle that matches something already yours becomes the next
            version of it rather than a second row with the same name. Only

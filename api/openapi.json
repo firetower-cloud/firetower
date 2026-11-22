@@ -1256,6 +1256,46 @@
         }
       }
     },
+    "/api/v1/connectors/add": {
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "operationId": "add_from_url",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddFromUrl"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/connectors/callback": {
       "get": {
         "tags": [
@@ -1266,6 +1306,46 @@
         "responses": {
           "200": {
             "description": "A page saying what happened"
+          }
+        }
+      }
+    },
+    "/api/v1/connectors/from-url": {
+      "post": {
+        "tags": [
+          "connectors"
+        ],
+        "operationId": "probe_url",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FromUrl"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "What that address turned out to be",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Probed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
           }
         }
       }
@@ -9966,6 +10046,23 @@
           "pin"
         ]
       },
+      "AddFromUrl": {
+        "type": "object",
+        "description": "What to make, after somebody has read what the probe found.",
+        "required": [
+          "url",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Editable, because a name derived from a hostname is a guess."
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "Administered": {
         "type": "object",
         "description": "Everything one person can reach, and everything that is theirs.\n\n**Answered for a person, which is the opposite of how access is stored.**\nEvery other read asks \"may this person see this thing\" and lets\n[`filed_where`] answer it per row. This asks the reverse, and nothing else\nneeds it — only offboarding, where deciding about somebody means seeing what\ngoes with them before it goes.\n\nEach field is a list so the shape can grow a kind without breaking a client:\na reader that does not know about a new one ignores it rather than failing.",
@@ -13024,6 +13121,18 @@
           }
         }
       },
+      "FromUrl": {
+        "type": "object",
+        "description": "An address somebody pasted.",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "GitIdentity": {
         "type": "object",
         "description": "What a person's commits are signed with, and where that came from.",
@@ -14721,6 +14830,13 @@
           "frontmatter": {
             "description": "Parsed, for the library to read. The bytes are kept as they arrived in\n`files`, so nothing here is what gets written onto a worker."
           },
+          "kind": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`skill` or `plugin`. Absent means `skill`, which is what every client\nwritten before plugins sends and what every bundle imported before them\nwas.\n\n**The source declares this, never the person importing.** A folder with\n`.claude-plugin/plugin.json` is a plugin and a folder with `SKILL.md` is\na skill; asking somebody to choose at the moment they drop something is\nasking them when they know least, and a wrong answer is a bundle that\nloads nowhere."
+          },
           "name": {
             "type": "string"
           },
@@ -15795,6 +15911,36 @@
           "slug": {
             "type": "string",
             "description": "Derived from the remote, and editable before saving."
+          }
+        }
+      },
+      "Probed": {
+        "type": "object",
+        "description": "What the server turned out to be, before anybody commits to it.",
+        "required": [
+          "name",
+          "auth",
+          "host"
+        ],
+        "properties": {
+          "auth": {
+            "type": "string",
+            "description": "`oauth` or `none`, as the server itself answered."
+          },
+          "host": {
+            "type": "string",
+            "description": "What it will reach, which is the one fact worth reading before saying yes."
+          },
+          "name": {
+            "type": "string",
+            "description": "The name the plugin will take, derived from the address."
+          },
+          "scopes": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What it publishes as its scopes, when it publishes any."
           }
         }
       },

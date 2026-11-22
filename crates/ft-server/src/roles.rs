@@ -1369,6 +1369,7 @@ mod tests {
             .to_string();
 
         let bundle = |name: &str| NewSkill {
+            kind: None,
             name: name.into(),
             description: format!("Does {name}."),
             frontmatter: serde_json::json!({"name": name}),

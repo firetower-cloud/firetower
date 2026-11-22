@@ -19,6 +19,19 @@ export interface NewSkill {
      * `files`, so nothing here is what gets written onto a worker.
      */
   frontmatter: unknown;
+  /**
+     * `skill` or `plugin`. Absent means `skill`, which is what every client
+     * written before plugins sends and what every bundle imported before them
+     * was.
+     *
+     * **The source declares this, never the person importing.** A folder with
+     * `.claude-plugin/plugin.json` is a plugin and a folder with `SKILL.md` is
+     * a skill; asking somebody to choose at the moment they drop something is
+     * asking them when they know least, and a wrong answer is a bundle that
+     * loads nowhere.
+     * @nullable
+     */
+  kind?: string | null;
   name: string;
   /** @nullable */
   notes?: string | null;

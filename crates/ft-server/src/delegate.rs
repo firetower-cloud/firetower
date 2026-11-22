@@ -3436,6 +3436,7 @@ fn new_skill_from(input: &Value) -> Result<crate::skills::NewSkill> {
             .filter(|f| f.path != "SKILL.md"),
     );
     Ok(crate::skills::NewSkill {
+        kind: None,
         frontmatter: serde_json::json!({ "name": name, "description": description }),
         body,
         name,
@@ -3615,6 +3616,9 @@ async fn update_skill(state: &AppState, request: &AgentRequest) -> Result<String
     files.extend(carried.into_iter().filter(|f| f.path != "SKILL.md"));
 
     let new = crate::skills::NewSkill {
+        // An agent publishing through MCP writes a skill. Authoring a whole
+        // plugin is a different shape and is not offered there yet.
+        kind: None,
         frontmatter: serde_json::json!({ "name": name, "description": description }),
         body,
         name: name.clone(),
@@ -4020,6 +4024,7 @@ mod tests {
             forwards: Default::default(),
             previews: Default::default(),
             public_url: "http://localhost".into(),
+            api_url: "http://localhost".into(),
         };
         (state, db, admin)
     }
@@ -4412,6 +4417,7 @@ mod tests {
     #[test]
     fn all_four_of_what_a_skill_does_hold_it() {
         let bundle = |fm: Value, body: &str, files: Vec<(&str, bool)>| crate::skills::NewSkill {
+            kind: None,
             name: "x".into(),
             description: "Does a thing.".into(),
             frontmatter: fm,

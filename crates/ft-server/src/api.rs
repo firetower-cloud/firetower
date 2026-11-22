@@ -16,6 +16,7 @@ pub(crate) mod agents;
 mod annotations;
 pub(crate) mod artifacts;
 mod auth;
+mod connectors;
 mod consumption;
 mod conversation;
 mod events;
@@ -28,7 +29,6 @@ pub(crate) mod schedules;
 mod secrets;
 pub(crate) mod sessions;
 mod setup;
-mod connectors;
 mod skills;
 mod stream;
 mod tasks;
@@ -523,7 +523,10 @@ async fn connector_token(
     // person per connector — the same gate `git_token` takes, for the same
     // reason: whoever waited has to look again rather than renew the grant
     // they arrived with.
-    let _queued = state.renewals.at(&format!("connector:{skill_id}:{owner}")).await;
+    let _queued = state
+        .renewals
+        .at(&format!("connector:{skill_id}:{owner}"))
+        .await;
     let held = crate::oauth::Grant::parse(
         &state
             .vault
@@ -542,7 +545,11 @@ async fn connector_token(
         Ok(fresh) => {
             if let Err(e) = state
                 .vault
-                .put(key(), &fresh.to_stored(), "renewed a connector's authorization")
+                .put(
+                    key(),
+                    &fresh.to_stored(),
+                    "renewed a connector's authorization",
+                )
                 .await
             {
                 // The server has already rotated the refresh token, so the one
@@ -823,6 +830,8 @@ pub fn router() -> OpenApiRouter<AppState> {
         ))
         .routes(routes!(connectors::connector_state, connectors::disconnect))
         .routes(routes!(connectors::connect))
+        .routes(routes!(connectors::probe_url))
+        .routes(routes!(connectors::add_from_url))
         .routes(routes!(connectors::connector_callback))
         .routes(routes!(skills::list_skills, skills::create_skill))
         .routes(routes!(skills::match_skills))

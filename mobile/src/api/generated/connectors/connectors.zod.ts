@@ -8,10 +8,52 @@
 import * as zod from 'zod';
 
 
+export const AddFromUrlBody = zod.object({
+  "name": zod.string().describe('Editable, because a name derived from a hostname is a guess.'),
+  "url": zod.string()
+}).describe('What to make, after somebody has read what the probe found.')
+
+export const AddFromUrlResponse = zod.object({
+  "alwaysOn": zod.boolean().describe('On in every workspace this person starts.'),
+  "author": zod.string().nullish().describe('Who wrote it. A fact that outlives them leaving.'),
+  "builtin": zod.boolean().describe('Firetower ships this one. Filed in `d/firetower`, which nobody holds\nwriter on — so it is readable by everybody and deletable by nobody.'),
+  "bytes": zod.int(),
+  "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
+  "description": zod.string(),
+  "files": zod.int(),
+  "hasConnector": zod.boolean(),
+  "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
+  "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "kind": zod.string().describe('What this bundle is: `skill` or `plugin`. Decides which home it lands\nin on a worker, and which list it appears in on a screen.'),
+  "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
+  "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
+  "nCommands": zod.int(),
+  "nSkills": zod.int().describe('How many skills, commands and connectors are inside it.\n\nDerived from the paths in the version rather than stored beside them,\nso a count cannot drift from the bytes it is counting. A lone skill\nreports zero of each: its own `SKILL.md` is the bundle, not a component\nwithin one.'),
+  "name": zod.string(),
+  "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
+  "risk": zod.array(zod.string()).describe('What this skill does to a session, read from the bundle rather than\nfrom what its author said about it. See [`risk_of`].'),
+  "slug": zod.string(),
+  "tokens": zod.int().describe('What the listing entry costs in the model\'s context, every turn.'),
+  "updatedAt": zod.iso.datetime({"offset":true}),
+  "version": zod.int(),
+  "versionId": zod.string().describe('Identifies one version of a skill. Append-only: a session pins one.')
+}).describe('One row of the library.\n\n`name` and `description` are copied down from the current version rather\nthan joined per row: this list is three hundred long and those two fields\nare what every one of them draws.')
+
 /**
  * @summary Where the browser lands. **Not an API route** — a person is looking at it.
  */
 export const ConnectorCallbackResponse = zod.unknown()
+
+export const ProbeUrlBody = zod.object({
+  "url": zod.string()
+}).describe('An address somebody pasted.')
+
+export const ProbeUrlResponse = zod.object({
+  "auth": zod.string().describe('`oauth` or `none`, as the server itself answered.'),
+  "host": zod.string().describe('What it will reach, which is the one fact worth reading before saying yes.'),
+  "name": zod.string().describe('The name the plugin will take, derived from the address.'),
+  "scopes": zod.string().nullish().describe('What it publishes as its scopes, when it publishes any.')
+}).describe('What the server turned out to be, before anybody commits to it.')
 
 export const ConnectorStateParams = zod.object({
   "id": zod.string().describe('The plugin the connector belongs to')

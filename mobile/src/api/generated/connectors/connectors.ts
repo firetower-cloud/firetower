@@ -26,9 +26,13 @@ import type {
 } from '@tanstack/react-query';
 
 import type {
+  AddFromUrl,
   ApiError,
   ConnectorState,
-  Opened
+  FromUrl,
+  Opened,
+  Probed,
+  Skill
 } from '../model';
 
 import { http } from '../../../client/http';
@@ -53,7 +57,88 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export const getConnectorCallbackUrl = () => {
+export const getAddFromUrlUrl = () => {
+
+
+
+
+  return `/api/v1/connectors/add`
+}
+
+export const addFromUrl = async (addFromUrlBody: AddFromUrl, options?: Parameters<typeof http>[1]): Promise<Skill> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Skill>(getAddFromUrlUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(addFromUrlBody)
+  }
+);}
+
+
+
+
+
+export const getAddFromUrlMutationKey = () => ['addFromUrl'] as const;
+
+export const getAddFromUrlMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addFromUrl>>, TError,AddFromUrlMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof addFromUrl>>, TError,AddFromUrlMutationVariables, TContext> => {
+
+const mutationKey = getAddFromUrlMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof addFromUrl>>, AddFromUrlMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  addFromUrl(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AddFromUrlMutationResult = NonNullable<Awaited<ReturnType<typeof addFromUrl>>>
+    export type AddFromUrlMutationBody = AddFromUrl
+    export type AddFromUrlMutationError = ApiError
+    export type AddFromUrlMutationVariables = {data: AddFromUrl}
+
+    export const useAddFromUrl = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addFromUrl>>, TError,AddFromUrlMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof addFromUrl>>,
+        TError,
+        AddFromUrlMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAddFromUrlMutationOptions(options), queryClient);
+    }
+    export const getConnectorCallbackUrl = () => {
 
 
 
@@ -170,7 +255,88 @@ export const useGetConnectorCallbackQueryData = () => {
 }
 
 
-export const getConnectorStateUrl = (id: string,) => {
+export const getProbeUrlUrl = () => {
+
+
+
+
+  return `/api/v1/connectors/from-url`
+}
+
+export const probeUrl = async (fromUrl: FromUrl, options?: Parameters<typeof http>[1]): Promise<Probed> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<Probed>(getProbeUrlUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(fromUrl)
+  }
+);}
+
+
+
+
+
+export const getProbeUrlMutationKey = () => ['probeUrl'] as const;
+
+export const getProbeUrlMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeUrl>>, TError,ProbeUrlMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof probeUrl>>, TError,ProbeUrlMutationVariables, TContext> => {
+
+const mutationKey = getProbeUrlMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof probeUrl>>, ProbeUrlMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  probeUrl(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type ProbeUrlMutationResult = NonNullable<Awaited<ReturnType<typeof probeUrl>>>
+    export type ProbeUrlMutationBody = FromUrl
+    export type ProbeUrlMutationError = ApiError
+    export type ProbeUrlMutationVariables = {data: FromUrl}
+
+    export const useProbeUrl = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof probeUrl>>, TError,ProbeUrlMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof probeUrl>>,
+        TError,
+        ProbeUrlMutationVariables,
+        TContext
+      > => {
+      return useMutation(getProbeUrlMutationOptions(options), queryClient);
+    }
+    export const getConnectorStateUrl = (id: string,) => {
 
 
 

@@ -134,6 +134,7 @@ export const CreateSkillBody = zod.object({
   "path": zod.string().describe('Relative, inside the bundle. Never absolute and never climbing out.')
 }).describe('A file arriving from a drop.')),
   "frontmatter": zod.unknown().describe('Parsed, for the library to read. The bytes are kept as they arrived in\n`files`, so nothing here is what gets written onto a worker.'),
+  "kind": zod.string().nullish().describe('`skill` or `plugin`. Absent means `skill`, which is what every client\nwritten before plugins sends and what every bundle imported before them\nwas.\n\n**The source declares this, never the person importing.** A folder with\n`.claude-plugin/plugin.json` is a plugin and a folder with `SKILL.md` is\na skill; asking somebody to choose at the moment they drop something is\nasking them when they know least, and a wrong answer is a bundle that\nloads nowhere.'),
   "name": zod.string(),
   "notes": zod.string().nullish()
 }).describe('A whole bundle somebody dropped.')
@@ -347,6 +348,7 @@ export const AddVersionBody = zod.object({
   "path": zod.string().describe('Relative, inside the bundle. Never absolute and never climbing out.')
 }).describe('A file arriving from a drop.')),
   "frontmatter": zod.unknown().describe('Parsed, for the library to read. The bytes are kept as they arrived in\n`files`, so nothing here is what gets written onto a worker.'),
+  "kind": zod.string().nullish().describe('`skill` or `plugin`. Absent means `skill`, which is what every client\nwritten before plugins sends and what every bundle imported before them\nwas.\n\n**The source declares this, never the person importing.** A folder with\n`.claude-plugin/plugin.json` is a plugin and a folder with `SKILL.md` is\na skill; asking somebody to choose at the moment they drop something is\nasking them when they know least, and a wrong answer is a bundle that\nloads nowhere.'),
   "name": zod.string(),
   "notes": zod.string().nullish()
 }).describe('A whole bundle somebody dropped.')

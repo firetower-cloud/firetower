@@ -424,6 +424,7 @@ async fn frames_fixture() -> (
         forwards: Default::default(),
         previews: Default::default(),
         public_url: "http://localhost".into(),
+        api_url: "http://localhost".into(),
     };
     state
         .db
@@ -541,6 +542,7 @@ async fn watched_fixture() -> (
         forwards: Default::default(),
         previews: Default::default(),
         public_url: "http://localhost".into(),
+        api_url: "http://localhost".into(),
     };
     (state, principal, host, ready, owner, launched)
 }
@@ -2715,6 +2717,7 @@ async fn a_profile_hands_a_second_agent_the_repositorys_defaults_too() {
                     &owner,
                     "admin",
                     &NewSkill {
+                        kind: None,
                         name: name.into(),
                         description: format!("Does {name}."),
                         frontmatter: serde_json::json!({ "name": name }),
@@ -5499,6 +5502,7 @@ async fn a_skill(state: &AppState, owner: &str, name: &str) -> String {
             owner,
             &slug,
             &crate::skills::NewSkill {
+                kind: None,
                 name: name.into(),
                 description: format!("what {name} is for"),
                 frontmatter: serde_json::json!({}),

@@ -28,6 +28,15 @@ export type Incoming = { path: string; contents: string; executable: boolean; ha
 export type Found = {
   /** Where it came from, for the row that says so. */
   from: string;
+  /**
+   * What the source said this is.
+   *
+   * **Declared, never asked.** A folder with `.claude-plugin/plugin.json` is
+   * a plugin and a folder with `SKILL.md` is a skill. Putting the question to
+   * somebody at the moment they drop something asks them when they know
+   * least, and a wrong answer is a bundle that loads nowhere.
+   */
+  kind: "skill" | "plugin";
   name: string;
   description: string;
   frontmatter: Record<string, unknown>;
@@ -272,6 +281,7 @@ export async function skillsIn(raw: Raw[]): Promise<Found[]> {
     return [
       {
         from: top,
+        kind: "skill",
         name: top.replace(/[^a-z0-9-]+/gi, "-").toLowerCase().replace(/^-|-$/g, "") || "untitled",
         description: "",
         frontmatter: {},
@@ -288,6 +298,104 @@ export async function skillsIn(raw: Raw[]): Promise<Found[]> {
   return Promise.all(
     roots.map((root) => bundle(root, raw.filter((f) => inside(f.path, root)))),
   );
+}
+
+/**
+ * Everything in what was dropped, as the things it actually holds.
+ *
+ * A plugin first, then any skill that is not inside one — because a plugin's
+ * `skills/` are *its*, and listing them again as loose skills would import the
+ * same bytes twice under two rows.
+ *
+ * **A folder of folders is however many of whichever.** What is on somebody's
+ * disk is `~/.claude/skills` or a checkout holding several plugins, not one
+ * bundle, and the shape of the drop is the answer rather than a question.
+ */
+export async function bundlesIn(raw: Raw[]): Promise<Found[]> {
+  const MANIFEST = ".claude-plugin/plugin.json";
+  const pluginRoots = raw
+    .filter((f) => f.path === MANIFEST || f.path.endsWith(`/${MANIFEST}`))
+    .map((f) => f.path.slice(0, Math.max(0, f.path.length - MANIFEST.length - 1)));
+
+  const skillRoots = raw
+    .filter((f) => f.path.endsWith("/SKILL.md") || f.path === "SKILL.md")
+    .map((f) => f.path.slice(0, Math.max(0, f.path.length - "SKILL.md".length - 1)))
+    /* A plugin's own skills travel with it. Importing them again as loose
+       skills would put the same bytes in the library twice, under two rows
+       that cannot be told apart. */
+    .filter((root) => !pluginRoots.some((p) => root === p || root.startsWith(`${p}/`)));
+
+  if (pluginRoots.length === 0) return skillsIn(raw);
+
+  const plugins = await Promise.all(
+    pluginRoots.map((root) => pluginBundle(root, raw.filter((f) => inside(f.path, root)))),
+  );
+  const skills = await Promise.all(
+    skillRoots.map((root) => bundle(root, raw.filter((f) => inside(f.path, root)))),
+  );
+  return [...plugins, ...skills];
+}
+
+/** One plugin, read from its manifest rather than from frontmatter. */
+async function pluginBundle(root: string, raw: Raw[]): Promise<Found> {
+  const folder = root.split("/").filter(Boolean).pop() ?? "plugin";
+  const files: Incoming[] = await Promise.all(raw.map(async (f) => ({
+    path: root === "" ? f.path : f.path.slice(root.length + 1),
+    contents: toBase64(f.bytes),
+    hash: await sha256Hex(f.bytes),
+    executable: looksExecutable(f.bytes),
+  })));
+
+  const manifestFile = raw.find((f) => f.path.endsWith(".claude-plugin/plugin.json"));
+  const text = manifestFile ? new TextDecoder().decode(manifestFile.bytes) : "";
+  const errors: string[] = [];
+  const warnings: string[] = [];
+
+  let manifest: Record<string, unknown> = {};
+  try {
+    manifest = JSON.parse(text) as Record<string, unknown>;
+  } catch (e) {
+    errors.push(`.claude-plugin/plugin.json is not JSON: ${(e as Error).message}`);
+  }
+
+  const declared = typeof manifest.name === "string" ? manifest.name.trim() : "";
+  const description =
+    typeof manifest.description === "string" ? manifest.description.trim() : "";
+  const name = declared || folder;
+
+  if (!declared)
+    errors.push("The manifest declares no name, and a plugin loads under the one it says.");
+  if (!description)
+    errors.push("The manifest declares no description, and that is what the model decides on.");
+
+  /* What is in it, so the review row can say so before anybody presses Add. */
+  const skills = files.filter((f) => /^skills\/[^/]+\/SKILL\.md$/.test(f.path)).length;
+  const commands = files.filter((f) => /^commands\/[^/]+\.md$/.test(f.path)).length;
+  const connector = files.some((f) => f.path === ".mcp.json");
+  if (!skills && !commands && !connector)
+    warnings.push("Nothing in it that an engine reads — no skills, no commands, no connector.");
+
+  /* Hooks and subagents exist in Claude Code and nowhere else. Said here
+     rather than discovered at run time, which is the rule the rest of the
+     interface already follows. */
+  if (files.some((f) => f.path === "hooks.json" || f.path.startsWith("hooks/")))
+    warnings.push("Its hooks reach Claude Code only. The rest of the plugin still loads.");
+  if (files.some((f) => /^agents\//.test(f.path)))
+    warnings.push("Its subagents reach Claude Code only. The rest of the plugin still loads.");
+
+  return {
+    from: root || folder,
+    kind: "plugin",
+    name,
+    description,
+    frontmatter: { name, description },
+    body: "",
+    files,
+    bytes: raw.reduce((n, f) => n + f.bytes.length, 0),
+    errors,
+    warnings,
+    risk: riskOf({}, "", files.map((f) => f.path)),
+  };
 }
 
 const inside = (path: string, root: string) => (root === "" ? !path.includes("/") || true : path.startsWith(`${root}/`));
@@ -416,6 +524,7 @@ async function bundle(root: string, raw: Raw[]): Promise<Found> {
 
   return {
     from: root || folder,
+    kind: "skill",
     name,
     description,
     frontmatter,

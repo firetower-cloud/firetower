@@ -182,7 +182,8 @@ pub const KINDS: &[Kind] = &[
         git_username: "x-access-token",
         device_path: "/login/device/code",
         token_path: "/login/oauth/access_token",
-        token_page: "/settings/tokens/new?scopes=repo,workflow,read:org,read:user&description=Firetower",
+        token_page:
+            "/settings/tokens/new?scopes=repo,workflow,read:org,read:user&description=Firetower",
         // The link carries the scopes already ticked, so there is nothing to
         // explain that the page does not arrive with.
         token_steps: &[],

@@ -399,3 +399,225 @@ fn html(s: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
+
+/// An address somebody pasted.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FromUrl {
+    pub url: String,
+}
+
+/// What the server turned out to be, before anybody commits to it.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Probed {
+    /// The name the plugin will take, derived from the address.
+    pub name: String,
+    /// `oauth` or `none`, as the server itself answered.
+    pub auth: String,
+    /// What it will reach, which is the one fact worth reading before saying yes.
+    pub host: String,
+    /// What it publishes as its scopes, when it publishes any.
+    pub scopes: Option<String>,
+}
+
+/// A name from an address.
+///
+/// `mcp.linear.app` is Linear and `api.githubcopilot.com` is githubcopilot —
+/// the subdomain everybody uses for this is noise, and the suffix is never the
+/// name. Editable afterwards, because a guess from a hostname is a guess.
+fn name_from(url: &str) -> String {
+    let host = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .unwrap_or_default();
+    let parts: Vec<&str> = host.split('.').filter(|p| !p.is_empty()).collect();
+    let middle = match parts.as_slice() {
+        [] => "connector",
+        // Drop a leading `mcp`/`api` and the public suffix, and take what is
+        // left of the registrable name.
+        [first, rest @ ..] if matches!(*first, "mcp" | "api") && rest.len() >= 2 => rest[0],
+        [_, second, ..] if parts.len() >= 3 => second,
+        [first, ..] => first,
+    };
+    let slug: String = middle
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() {
+                c.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let slug = slug.trim_matches('-').to_string();
+    if slug.is_empty() {
+        "connector".into()
+    } else {
+        slug
+    }
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/connectors/from-url", tag = "connectors",
+    request_body = FromUrl,
+    responses(
+        (status = 200, body = Probed, description = "What that address turned out to be"),
+        (status = 400, body = ApiError),
+    ),
+)]
+pub(super) async fn probe_url(
+    State(_state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(body): Json<FromUrl>,
+) -> ApiResult<Json<Probed>> {
+    let _ = whoever(&principal)?;
+    let url = body.url.trim().to_string();
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that is not an address — an MCP server is an https:// URL".to_string(),
+        ));
+    }
+
+    // **Asked, not assumed.** The server says whether it wants authorizing;
+    // a pasted address that turns out to need none is a connector that works
+    // immediately, and one that does is a Connect button on the row.
+    let found = connectors::discover(&url).await;
+    let (auth, scopes) = match &found {
+        Ok(d) => ("oauth".to_string(), d.scopes.clone()),
+        // Not an error. Plenty of servers are open, and the refusal to
+        // discover is itself the answer: there is nothing to authorize.
+        Err(e) => {
+            tracing::info!("{url} published no authorization metadata: {e:#}");
+            ("none".to_string(), None)
+        }
+    };
+
+    Ok(Json(Probed {
+        name: name_from(&url),
+        auth,
+        host: reqwest::Url::parse(&url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_owned))
+            .unwrap_or_default(),
+        scopes,
+    }))
+}
+
+/// What to make, after somebody has read what the probe found.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AddFromUrl {
+    pub url: String,
+    /// Editable, because a name derived from a hostname is a guess.
+    pub name: String,
+}
+
+#[utoipa::path(
+    post, path = "/api/v1/connectors/add", tag = "connectors",
+    request_body = AddFromUrl,
+    responses(
+        (status = 201, body = crate::skills::Skill),
+        (status = 400, body = ApiError),
+    ),
+)]
+pub(super) async fn add_from_url(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(body): Json<AddFromUrl>,
+) -> ApiResult<(StatusCode, Json<crate::skills::Skill>)> {
+    let me = whoever(&principal)?;
+    let url = body.url.trim().to_string();
+    let name = crate::skills::slug_of(&body.name);
+    crate::skills::check_name(&name).map_err(|e| ApiError::new(ErrorCode::InvalidRequest, e.0))?;
+
+    let found = connectors::discover(&url).await;
+    let auth = if found.is_ok() { "oauth" } else { "none" };
+    let description = format!(
+        "Tools from {}, as an agent can call them.",
+        reqwest::Url::parse(&url)
+            .ok()
+            .and_then(|u| u.host_str().map(str::to_owned))
+            .unwrap_or_else(|| name.clone())
+    );
+
+    // **The wrapper is written here, never by a person.** A pasted address is
+    // an entry path and not a concept: nobody should have to learn what a
+    // manifest is to use an MCP server, and the one this writes is the same
+    // one a published plugin ships.
+    let manifest = serde_json::json!({
+        "name": name,
+        "description": description,
+        "version": "1.0.0",
+        "author": { "name": "Added here" },
+    });
+    let manifest = serde_json::to_string_pretty(&manifest)
+        .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;
+
+    let new = crate::skills::NewSkill {
+        name: name.clone(),
+        description: description.clone(),
+        frontmatter: serde_json::json!({ "name": name, "description": description }),
+        body: String::new(),
+        files: vec![crate::skills::IncomingFile {
+            path: ".claude-plugin/plugin.json".into(),
+            contents: ft_proto::encode(manifest.as_bytes()),
+            executable: false,
+        }],
+        notes: None,
+        kind: Some("plugin".into()),
+    };
+    crate::skills::check(&new).map_err(|e| ApiError::new(ErrorCode::InvalidRequest, e.0))?;
+
+    let id = state
+        .skills
+        .create(
+            me.org_id.as_str(),
+            me.id.as_str(),
+            &me.slug,
+            &new,
+            // A connector ships no executable and no instructions. There is
+            // nothing here for an owner to review that the probe did not
+            // already report.
+            false,
+        )
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+
+    // The server key the agent will call it by. Its own name, so a tool shows
+    // up as `linear:…` rather than under a hostname.
+    state
+        .skills
+        .set_connector(id.as_str(), &name, &url, auth)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+
+    let made = state
+        .skills
+        .one(me.id.as_str(), id.as_str(), crate::access::Level::Viewer)
+        .await?
+        .ok_or_else(|| ApiError::not_found("plugin"))?;
+    Ok((StatusCode::CREATED, Json(made)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::name_from;
+
+    /// A name from a hostname, and the two prefixes that are noise.
+    #[test]
+    fn the_name_is_the_part_somebody_would_say_out_loud() {
+        assert_eq!(name_from("https://mcp.linear.app/mcp"), "linear");
+        assert_eq!(name_from("https://mcp.notion.com/mcp"), "notion");
+        assert_eq!(name_from("https://mcp.sentry.dev/mcp"), "sentry");
+        assert_eq!(
+            name_from("https://api.githubcopilot.com/mcp/"),
+            "githubcopilot"
+        );
+        // No subdomain to drop.
+        assert_eq!(name_from("https://example.com/mcp"), "example");
+        // And nothing usable at all still produces a folder name.
+        assert_eq!(name_from("not a url"), "connector");
+    }
+}

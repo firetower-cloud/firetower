@@ -69,7 +69,12 @@ pub struct Builtin {
 
 /// A lone skill, which is one file and needs no manifest.
 const fn skill(slug: &'static str, files: &'static [(&'static str, &'static str)]) -> Builtin {
-    Builtin { slug, kind: Kind::Skill, files, connector: None }
+    Builtin {
+        slug,
+        kind: Kind::Skill,
+        files,
+        connector: None,
+    }
 }
 
 pub const ALL: &[Builtin] = &[
@@ -82,7 +87,10 @@ pub const ALL: &[Builtin] = &[
     ),
     skill(
         "skill-creator",
-        &[("SKILL.md", include_str!("../../skills/skill-creator/SKILL.md"))],
+        &[(
+            "SKILL.md",
+            include_str!("../../skills/skill-creator/SKILL.md"),
+        )],
     ),
     // ── Plugins ──────────────────────────────────────────────────────
     //
@@ -191,7 +199,10 @@ impl Builtin {
                 let value: serde_json::Value =
                     serde_json::from_str(manifest).context("that manifest is not JSON")?;
                 let name = value["name"].as_str().unwrap_or_default().to_string();
-                let description = value["description"].as_str().unwrap_or_default().to_string();
+                let description = value["description"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
                 if name.is_empty() || description.is_empty() {
                     bail!("a plugin needs a name and a description in its manifest");
                 }
@@ -252,8 +263,9 @@ mod tests {
     #[test]
     fn every_bundle_can_be_read() {
         for one in ALL {
-            let (name, description, _body) =
-                one.describe().unwrap_or_else(|e| panic!("{}: {e}", one.slug));
+            let (name, description, _body) = one
+                .describe()
+                .unwrap_or_else(|e| panic!("{}: {e}", one.slug));
 
             assert_eq!(name, one.slug, "the folder and the name must agree");
             assert!(
@@ -268,7 +280,11 @@ mod tests {
                 "{}: no angle brackets in a description",
                 one.slug
             );
-            assert!(!one.files.is_empty(), "{}: a bundle with no files", one.slug);
+            assert!(
+                !one.files.is_empty(),
+                "{}: a bundle with no files",
+                one.slug
+            );
         }
     }
 
@@ -285,8 +301,9 @@ mod tests {
                 one.slug
             );
             assert!(
-                one.files.iter().any(|(p, _)| p.starts_with("skills/")
-                    || p.starts_with("commands/"))
+                one.files
+                    .iter()
+                    .any(|(p, _)| p.starts_with("skills/") || p.starts_with("commands/"))
                     || one.connector.is_some(),
                 "{}: a plugin with no components in it",
                 one.slug

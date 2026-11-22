@@ -162,7 +162,10 @@ pub async fn discover(url: &str) -> Result<Discovered> {
             .token_endpoint
             .context("that authorization server publishes no token endpoint")?,
         register_url: meta.registration_endpoint,
-        scopes: pr.scopes_supported.map(|s| s.join(" ")).filter(|s| !s.is_empty()),
+        scopes: pr
+            .scopes_supported
+            .map(|s| s.join(" "))
+            .filter(|s| !s.is_empty()),
     })
 }
 
@@ -388,7 +391,10 @@ pub async fn refresh(
     let status = r.status();
     let text = r.text().await.unwrap_or_default();
     if !status.is_success() {
-        bail!("the authorization server refused the renewal: {status} {}", text.trim());
+        bail!(
+            "the authorization server refused the renewal: {status} {}",
+            text.trim()
+        );
     }
     grant_from(&text)
 }
@@ -406,8 +412,7 @@ fn grant_from(text: &str) -> Result<crate::oauth::Grant> {
         refresh_token: Option<String>,
         expires_in: Option<i64>,
     }
-    let t: Token =
-        serde_json::from_str(text).context("that is not a token response")?;
+    let t: Token = serde_json::from_str(text).context("that is not a token response")?;
     Ok(crate::oauth::Grant {
         access: t.access_token,
         refresh: t.refresh_token,
@@ -500,6 +505,9 @@ mod tests {
         assert_eq!(q["resource"], "https://mcp.linear.app/mcp");
         assert_eq!(q["scope"], "read write");
         assert_eq!(q["state"], "st");
-        assert!(!url.contains(&pkce.verifier), "the verifier never leaves here");
+        assert!(
+            !url.contains(&pkce.verifier),
+            "the verifier never leaves here"
+        );
     }
 }
