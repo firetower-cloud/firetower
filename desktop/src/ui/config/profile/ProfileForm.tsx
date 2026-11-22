@@ -580,17 +580,6 @@ export function ProfileForm({
                   ]}
                   onChange={(v) => set("machine", v)}
                 />
-                {/* Whether a machine can run an engine depends on which engine,
-                    and this profile leaves that open — so the column that would
-                    say so is honestly missing rather than quietly absent. */}
-                {draft.agent === null && (
-                  <div className="inform">
-                    <p>
-                      Whether a machine can run an engine depends on which engine, and this profile
-                      leaves that open. The lead is told at launch, not here.
-                    </p>
-                  </div>
-                )}
               </>
             ) : (
               /* Not the pickers' "No machine to run on" block: a profile with
@@ -721,28 +710,27 @@ export function ProfileForm({
             they went, *and names what came off with them*. Clearing is
             otherwise invisible, and silently discarding a value somebody chose
             is the bug this whole screen is being changed for. */}
-        {draft.agent === null && (
+        {/* **The explanation goes; the consequence stays.** That subscription
+            and run settings belong to an engine is background — true of every
+            profile, and a paragraph above a field nobody is looking at. That
+            *this* profile just lost a pinned subscription and two run
+            settings is not: it happened a second ago because the engine was
+            opened, it is invisible otherwise, and silently discarding a value
+            somebody chose is the bug this screen was changed for. */}
+        {draft.agent === null && dropped && (dropped.account || dropped.settings > 0) && (
           <div className="fld">
             <div className="inform">
               <p>
-                <b>Subscription and run settings belong to an engine</b>, so a profile that leaves
-                the engine open carries neither. A child gets your default subscription for
-                whatever engine it runs, on that engine's own settings.
-                {dropped && (dropped.account || dropped.settings > 0) && (
-                  <>
-                    {" "}
-                    Its{" "}
-                    {[
-                      dropped.account ? "pinned subscription" : null,
-                      dropped.settings > 0
-                        ? `${dropped.settings} run setting${dropped.settings === 1 ? "" : "s"}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" and ")}{" "}
-                    came off with the engine.
-                  </>
-                )}
+                Its{" "}
+                {[
+                  dropped.account ? "pinned subscription" : null,
+                  dropped.settings > 0
+                    ? `${dropped.settings} run setting${dropped.settings === 1 ? "" : "s"}`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" and ")}{" "}
+                came off with the engine.
               </p>
             </div>
           </div>
