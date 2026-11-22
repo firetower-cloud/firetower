@@ -83,6 +83,7 @@ import type { Selection } from "~/ui/config/import-plan";
 import { readProfileDrop, readProfileFiles, type Dropped } from "~/profiles";
 import { navigate } from "~/shims/next-navigation";
 import { ProfileForm } from "~/ui/config/profile/ProfileForm";
+import { AskedToDelete } from "~/ui/config/AskedToDelete";
 import { useConfirm } from "~/ui/Confirm";
 import { Badge, IconButton } from "~/components/ui";
 
@@ -516,6 +517,10 @@ export function Roles() {
           {wrote(imported)}
         </Note>
       )}
+
+      {/* An agent can ask for a deletion and cannot perform one. This is
+          where the asking is answered. */}
+      <AskedToDelete of="role" />
 
       <Rows
         feed={{ data: shown, loading: rows.loading, error: rows.error }}

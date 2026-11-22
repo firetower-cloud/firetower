@@ -139,6 +139,28 @@ full editor for the engine, the machine, the skills and the limits.
 
 ## Deleting
 
+**An agent may ask. It may not delete.** `request_deletion` is the only tool
+that mentions deletion and all it does is write the question down: the row
+lands in `deletion_requests`, pending, and the agent is told in its first
+line that nothing has happened. A person answers it on the Agent teams or
+Agent profiles screen — the screen that holds the thing being asked about,
+rather than a tray somewhere else, because an irreversible decision should be
+made with the object in front of you.
+
+The guarantee is structural, not a check somebody remembers to write. An
+agent's only door to the control plane is `delegate.rs`'s tool dispatch; it
+has no API token, only a session id handed to a local worker. `approve` and
+`refuse` are REST paths that are not on that list, and
+`there_is_no_tool_that_deletes_or_approves` asserts it.
+
+Approve re-reads everything. A request records what was *asked*; it is not a
+capability to delete whatever that id now points at. The delete runs under
+the **approver's** grants, re-computes what it takes with it, and meets every
+refusal the person's own button meets — so a team that grew a branch since
+the ask is deleted with the branch, and the count on screen is the count that
+happens.
+
+
 Deleting a **team** takes its positions and leaves every profile alone.
 
 Deleting a **profile** that a team stands on is refused, and the refusal names
@@ -189,6 +211,9 @@ says so on the profile itself. Both halves go when the columns do —
 **There is no `delete_team`.** An agent may draw a team and redraw one; it may
 not take one away. That is the asymmetry `propose_schedule` already keeps, and
 it is sharper here: deleting a team silently mutes every lead standing in it.
+
+`request_deletion` asks a person to delete a team or a profile. There is no
+tool that deletes, and no tool that approves — see **Deleting** above.
 
 ## Not yet
 

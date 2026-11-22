@@ -19,6 +19,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::api::sessions::{create_session_as, Lineage};
+use crate::removals::Kind;
 use crate::AppState;
 
 /// What a delegation call is named on the wire, before the tool's own name.
@@ -108,8 +109,130 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "propose_schedule" => propose_schedule(state, request).await,
         "list_schedules" => list_schedules(state, request).await,
         "pause_schedule" => pause_schedule(state, request).await,
+        "request_deletion" => request_deletion(state, request).await,
         other => bail!("`{other}` is not something a session can ask Firetower for"),
     }
+}
+
+// ── deleting things ────────────────────────────────────────────────────
+//
+// **There is no tool that deletes.** This one asks, and a person answers on
+// the screen that owns the object. That is the condition the feature was
+// asked for under, and the shape is what enforces it rather than a check:
+// an agent's only door to the control plane is the dispatch above, and
+// approving is a REST call that is not on it.
+//
+// The same asymmetry `propose_schedule` has, for the same reason — an agent
+// may write a thing down, and a person turns it on.
+
+/// Ask a person to delete a team or a profile.
+///
+/// Returns what it would take with it, so the agent can report the cost
+/// without having to ask a second question — and so the sentence it writes
+/// back to the person matches the one on the screen they will decide on.
+async fn request_deletion(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str().to_string();
+    let user = state
+        .accounts
+        .user_by_id(&session.owner)
+        .await?
+        .context("the person this session runs as no longer exists")?;
+
+    let name = text(&request.input, "name").context("name what should be deleted")?;
+    let reason = text(&request.input, "reason");
+
+    let (kind, target, target_name, consequence) =
+        match text(&request.input, "kind").unwrap_or_default().to_lowercase().as_str() {
+            "team" | "agentteam" | "agent_team" => {
+                let team = the_team_named(state, &owner, &name).await?;
+                let count = team.positions.len();
+                (
+                    Kind::AgentTeam,
+                    team.id.clone(),
+                    team.name.clone(),
+                    format!(
+                        "{} and its {count} position{}. Every profile in it is left alone.",
+                        team.name,
+                        if count == 1 { "" } else { "s" }
+                    ),
+                )
+            }
+            "profile" | "role" => {
+                let role = state
+                    .roles
+                    .by_name(&owner, &name)
+                    .await?
+                    .with_context(|| format!("there is no profile called \"{name}\""))?;
+                /* **Said now, not discovered at approval.** A profile a team
+                   stands on cannot be deleted at all, so an agent that asks
+                   about one is told here — otherwise a person approves a
+                   thing that then refuses, and the refusal is the first
+                   anybody hears of the team. */
+                let (held, teams) = state.agent_teams.standing_on(&owner, &role.id).await?;
+                if held > 0 {
+                    bail!(
+                        "\"{}\" holds {held} position{} in {}. A profile a team stands on cannot \
+                         be deleted — take it out of {} first, and then ask again.",
+                        role.name,
+                        if held == 1 { "" } else { "s" },
+                        if teams.is_empty() {
+                            "teams you cannot see".to_string()
+                        } else {
+                            teams.join(", ")
+                        },
+                        if teams.len() == 1 { "that team" } else { "those teams" }
+                    );
+                }
+                (
+                    Kind::Role,
+                    role.id.clone(),
+                    role.name.clone(),
+                    format!("{}. No team stands on it, so nothing else changes.", role.name),
+                )
+            }
+            other if other.is_empty() => bail!("say whether it is a `team` or a `profile`, in `kind`"),
+            other => bail!("`{other}` is not something this can ask about. Use `team` or `profile`."),
+        };
+
+    // One open question per thing. Asking twice is answered with the one
+    // already waiting rather than a second row somebody has to decide twice.
+    if let Some(open) = state.removals.pending_for(kind, &target).await? {
+        return Ok(format!(
+            "Already asked. \"{}\" is waiting for somebody to approve deleting it — asked {}. \
+             Nothing has been deleted, and nothing will be until a person says so.",
+            open.target_name, open.asked_at
+        ));
+    }
+
+    let made = state
+        .removals
+        .ask(
+            user.org_id.as_str(),
+            kind,
+            &target,
+            &target_name,
+            &consequence,
+            reason.as_deref(),
+            &owner,
+            Some(request.session_id.as_str()),
+        )
+        .await?
+        .context("somebody else asked about the same thing a moment ago")?;
+
+    Ok(format!(
+        "Asked. Nothing has been deleted.\n\n\
+         A person has to approve this on the {} screen before anything happens, and they may \
+         refuse. What it would take: {}\n\n\
+         Tell them what you asked for and why, rather than waiting on this — the request id is \
+         {}.",
+        match kind {
+            Kind::AgentTeam => "Agent teams",
+            Kind::Role => "Agent profiles",
+        },
+        made.consequence,
+        made.id
+    ))
 }
 
 // ── schedules ──────────────────────────────────────────────────────────
@@ -3705,6 +3828,7 @@ mod tests {
             skills: crate::skills::Skills::new(db.pool().clone()),
             roles: crate::roles::Roles::new(db.pool().clone()),
             agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
+            removals: crate::removals::Removals::new(db.pool().clone()),
             updates: crate::updates::Updates::new(db.pool().clone()),
             policy: crate::auth::Policy::open(),
             access: crate::access::Access::new(db.pool().clone()),
@@ -4649,5 +4773,168 @@ mod tests {
             .expect_err("her own draft is still waiting on her")
         );
         assert!(why.contains("approve or discard"), "{why}");
+    }
+
+    // ── asking is not doing ────────────────────────────────────────────
+    //
+    // The whole feature is one property. These are the tests that hold it:
+    // if one starts failing because a tool was added to the dispatch, that
+    // is the test working.
+
+    /// A profile and a team to ask about, built through the tools a person's
+    /// agent would actually use — so the fixture cannot drift from the path.
+    async fn a_shipping_team(
+        state: &AppState,
+        host: &ft_core::HostId,
+        lead: &SessionId,
+    ) -> String {
+        handle(
+            state,
+            &call(
+                host.clone(),
+                lead,
+                "create_profile",
+                json!({ "name": "Reviewer", "does": "Reads a branch." }),
+            ),
+        )
+        .await
+        .unwrap();
+        handle(
+            state,
+            &call(
+                host.clone(),
+                lead,
+                "create_team",
+                json!({ "name": "Shipping", "lead": "Reviewer" }),
+            ),
+        )
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn asking_to_delete_a_team_writes_a_question_and_deletes_nothing() {
+        let (state, db, admin) = library().await;
+        let (host, lead) = lead_for(&db, &admin).await;
+        a_shipping_team(&state, &host, &lead).await;
+
+        let said = handle(
+            &state,
+            &call(
+                host,
+                &lead,
+                "request_deletion",
+                json!({ "kind": "team", "name": "Shipping", "reason": "the job shipped" }),
+            ),
+        )
+        .await
+        .unwrap();
+
+        // The agent is told, in the first line, that nothing happened.
+        assert!(said.contains("Nothing has been deleted"), "{said}");
+        // And nothing did: the team is still there to be read.
+        let still = state
+            .agent_teams
+            .visible(&admin, crate::access::Level::Viewer)
+            .await
+            .unwrap();
+        assert_eq!(still.len(), 1);
+        // The question is waiting, carrying the agent's own reason.
+        let open = state
+            .removals
+            .pending_for(crate::removals::Kind::AgentTeam, &still[0].id)
+            .await
+            .unwrap()
+            .expect("a pending request");
+        assert_eq!(open.target_name, "Shipping");
+        assert_eq!(open.reason.as_deref(), Some("the job shipped"));
+    }
+
+    #[tokio::test]
+    async fn asking_twice_is_answered_with_the_question_already_waiting() {
+        let (state, db, admin) = library().await;
+        let (host, lead) = lead_for(&db, &admin).await;
+        a_shipping_team(&state, &host, &lead).await;
+        let org = db.org().await.unwrap();
+
+        for _ in 0..2 {
+            handle(
+                &state,
+                &call(
+                    host.clone(),
+                    &lead,
+                    "request_deletion",
+                    json!({ "kind": "team", "name": "Shipping" }),
+                ),
+            )
+            .await
+            .unwrap();
+        }
+        let again = handle(
+            &state,
+            &call(
+                host,
+                &lead,
+                "request_deletion",
+                json!({ "kind": "team", "name": "Shipping" }),
+            ),
+        )
+        .await
+        .unwrap();
+        assert!(again.contains("Already asked"), "{again}");
+        // One row, not three — a person decides this once.
+        assert_eq!(state.removals.waiting(&org).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_profile_a_team_stands_on_is_refused_where_it_is_asked_about() {
+        // Not at approval. A person who approved it would meet the refusal
+        // the profile's own delete gives, and the team it names would be the
+        // first anybody had heard of it.
+        let (state, db, admin) = library().await;
+        let (host, lead) = lead_for(&db, &admin).await;
+        a_shipping_team(&state, &host, &lead).await;
+        let org = db.org().await.unwrap();
+
+        let no = handle(
+            &state,
+            &call(
+                host,
+                &lead,
+                "request_deletion",
+                json!({ "kind": "profile", "name": "Reviewer" }),
+            ),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(no.contains("Shipping"), "{no}");
+        assert!(no.contains("cannot \nbe deleted") || no.contains("cannot be deleted"), "{no}");
+        assert!(state.removals.waiting(&org).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn there_is_no_tool_that_deletes_or_approves() {
+        // **The guarantee, as an assertion.** An agent reaches the control
+        // plane through `handle` and nowhere else, so a name this refuses
+        // cannot be called however the agent spells it.
+        let (state, db, admin) = library().await;
+        let (host, lead) = lead_for(&db, &admin).await;
+        for forbidden in [
+            "delete_team",
+            "delete_profile",
+            "delete_role",
+            "approve_deletion",
+            "refuse_deletion",
+        ] {
+            let no = handle(&state, &call(host.clone(), &lead, forbidden, json!({})))
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                no.contains("is not something a session can ask Firetower for"),
+                "`{forbidden}` reached something: {no}"
+            );
+        }
     }
 }

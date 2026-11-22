@@ -103,6 +103,17 @@ pub const LIST_SCHEDULES: &str = "list_schedules";
 /// that needs a person.
 pub const PAUSE_SCHEDULE: &str = "pause_schedule";
 
+/// Ask a person to delete a team or a profile.
+///
+/// **It does not delete.** There is deliberately no tool that does: this one
+/// writes the question down and a person answers it on the screen that owns
+/// the object. Deleting is irreversible and an agent's judgement about what
+/// is no longer needed is exactly the judgement nobody wants acted on
+/// unattended — so the asymmetry is the same one `propose_schedule` has, and
+/// it is enforced by the control plane's dispatch rather than by this
+/// description.
+pub const REQUEST_DELETION: &str = "request_deletion";
+
 /// What a delegation call is named on its way to the control plane.
 ///
 /// It travels the path a permission question takes — the socket, then the
@@ -689,6 +700,18 @@ async fn answer(
                             },
                             "required": ["name"],
                         },
+                    }, {
+                        "name": REQUEST_DELETION,
+                        "description": "Ask the person to delete an agent team or an agent profile. THIS DOES NOT DELETE ANYTHING. It writes the request down; the person approves or refuses it on the Agent teams or Agent profiles screen, and nothing happens until they do. There is no tool that deletes and you cannot approve your own request. Use it when something you can see is clearly finished with — a team built for a job that shipped, a profile superseded by another — and SAY WHAT YOU ASKED FOR AND WHY in your reply, because they decide from that. Tell them the cost: the call returns what it would take with it. A profile that still holds a position in any team cannot be deleted at all, and you will be told so instead.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "kind": { "type": "string", "enum": ["team", "profile"], "description": "Which kind of thing." },
+                                "name": { "type": "string", "description": "What it is called, as `list_teams` or `list_profiles` shows it." },
+                                "reason": { "type": "string", "description": "Why it should go, in one line. The person reads this next to what it would take with it, so give them the fact that decides it rather than a summary of the object." },
+                            },
+                            "required": ["kind", "name"],
+                        },
                     }]
                 }),
             ))
@@ -708,7 +731,7 @@ async fn answer(
                 SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
                 | LIST_PROFILES | GET_PROFILE | CREATE_TEAM | UPDATE_TEAM | LIST_TEAMS
                 | GET_TEAM | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS
-                | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
+                | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE | REQUEST_DELETION => {
                     delegate(session_id, name, &id, &arguments).await
                 }
                 // Every call used to be a permission question, and an agent
@@ -1019,7 +1042,8 @@ mod tests {
                 LIST_SKILLS,
                 PROPOSE_SCHEDULE,
                 LIST_SCHEDULES,
-                PAUSE_SCHEDULE
+                PAUSE_SCHEDULE,
+                REQUEST_DELETION
             ]
         );
         assert_eq!(tool_name(), "mcp__firetower__approve");

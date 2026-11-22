@@ -1078,6 +1078,7 @@ mod tests {
                 skills: crate::skills::Skills::new(db.pool().clone()),
                 roles: crate::roles::Roles::new(db.pool().clone()),
                 agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
+                removals: crate::removals::Removals::new(db.pool().clone()),
                 updates: crate::updates::Updates::new(db.pool().clone()),
                 policy: crate::auth::Policy::open(),
                 access: crate::access::Access::new(db.pool().clone()),
