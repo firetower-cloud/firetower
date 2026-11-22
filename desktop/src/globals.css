@@ -325,6 +325,19 @@
 }
 
 @layer base {
+  /* **`hidden` has to win, and by default it does not.**
+     The UA sheet says `[hidden] { display: none }`, and any class that sets
+     `display` outranks it — which means `hidden={!spills}` on a button that
+     is `display: inline-flex` hides nothing, and `hidden={!term}` on a panel
+     that is `display: flex` leaves it on screen taking its height. Both are
+     in this app today: Home's "See all" and Workbench's terminal. It is the
+     same defect twice and it will be the same defect a third time, because
+     the markup reads as correct. One line, in the layer everything else
+     builds on. */
+  [hidden] {
+    display: none !important;
+  }
+
   html {
     background: var(--color-ground);
     color-scheme: dark;

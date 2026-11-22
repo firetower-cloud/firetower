@@ -117,6 +117,26 @@ sessions standing on it.
 One card belongs to exactly one team. There are no cross-team edges and no
 borrowed cards.
 
+**The map is the page, and the drawer is over it.** No column and no padding:
+the canvas is the body, it pans by dragging and zooms on ⌘-scroll, and the
+view controls float on it. The drawer is `position: fixed` against the right
+edge with a scrim over the canvas, rather than a second column — a column
+takes width from the map permanently and reflows the drawing every time one
+opens. It starts below the title bar, not at `top: 0`, because on Windows and
+Linux the window controls are at the top right.
+
+Opening a card nudges the canvas left if the drawer would cover it, and only
+then. A panel that hides the thing it describes is the failure an overlay
+invites.
+
+**The drawer is the profile editor's form at 392px.** `.form` → `.fld` →
+label, hint, `.box`/`.pickrow`, with `.sh-foot` pinned under it. Literally the
+same components `/configuration/roles/<id>` is built from, which is the only
+arrangement that keeps two surfaces editing the same two objects aligned as
+either changes. *Extra instructions* is this position in this team; *Profile*
+is the thing every team that holds it shares, and its foot is the door to the
+full editor for the engine, the machine, the skills and the limits.
+
 ## Deleting
 
 Deleting a **team** takes its positions and leaves every profile alone.

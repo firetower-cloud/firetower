@@ -1284,25 +1284,27 @@ function Editor({
 
       <div className="form">
         <Field label="Name" hint="What you start it as, and what a lead names to delegate to it — e.g. reviewer.">
-          <input
-            value={draft.name}
-            onChange={(e) => set("name", e.target.value)}
-            placeholder="reviewer"
-            className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
-          />
+          <span className="box">
+            <input
+              value={draft.name}
+              onChange={(e) => set("name", e.target.value)}
+              placeholder="reviewer"
+            />
+          </span>
         </Field>
 
         <Field
           label="Description"
           hint="What it does and when to reach for it — the line a lead reads to decide whether to hand it work, like a skill's description. Name the trigger, and the case to skip it."
         >
-          <textarea
-            value={draft.does}
-            onChange={(e) => set("does", e.target.value)}
-            rows={2}
-            placeholder="Reviews a finished branch and reports problems as file:line. Use after a developer hands back — not for a one-line fix."
-            className="w-full resize-y rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
-          />
+          <span className="box brief">
+            <textarea
+              value={draft.does}
+              onChange={(e) => set("does", e.target.value)}
+              rows={2}
+              placeholder="Reviews a finished branch and reports problems as file:line. Use after a developer hands back — not for a one-line fix."
+            />
+          </span>
         </Field>
 
         <Group
@@ -1724,13 +1726,15 @@ function Editor({
         <SkillSources r={skills} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
 
         <Field label="Instructions" hint="Composed into its prompt. Markdown; the agent reads all of it. A Manager names its delegates here.">
-          <textarea
-            value={draft.instructions}
-            onChange={(e) => set("instructions", e.target.value)}
-            rows={10}
-            placeholder={"# Reviewer\n\nYou review. You do not fix.\n\n## How to work\n- Read the diff and the tests first.\n- Report problems as `path:line — what, why`.\n\n## Don't\n- Don't edit files. Don't push."}
-            className="scroll-slim w-full resize-y rounded-md border border-line bg-ground px-3 py-2 font-mono text-code leading-relaxed text-text placeholder:text-mute focus:border-dim focus:outline-none"
-          />
+          <span className="box mono">
+            <textarea
+              value={draft.instructions}
+              onChange={(e) => set("instructions", e.target.value)}
+              rows={10}
+              placeholder={"# Reviewer\n\nYou review. You do not fix.\n\n## How to work\n- Read the diff and the tests first.\n- Report problems as `path:line — what, why`.\n\n## Don't\n- Don't edit files. Don't push."}
+              className="scroll-slim"
+            />
+          </span>
         </Field>
 
         {existing ? (
@@ -1930,8 +1934,8 @@ function Select({
   // nothing. A placeholder rather than a crash on `current.icon`.
   if (!current) {
     return (
-      <div className="flex w-full items-center rounded-md border border-line bg-ground px-3 py-2 text-ui text-mute">
-        —
+      <div className="box">
+        <span className="text-mute">—</span>
       </div>
     );
   }
@@ -1943,10 +1947,10 @@ function Select({
         aria-haspopup="listbox"
         aria-label={ariaLabel}
         onClick={(e) => setOpen(open ? null : e.currentTarget)}
-        className="flex w-full items-center gap-2.5 rounded-md border border-line bg-ground px-3 py-2 text-left transition-colors hover:border-dim focus:border-dim focus:outline-none"
+        className="box w-full text-left"
       >
         <span className="shrink-0 text-dim">{current.icon}</span>
-        <span className="min-w-0 flex-1 truncate text-ui text-bone">{current.label}</span>
+        <span className="min-w-0 flex-1 truncate text-bone">{current.label}</span>
         <ChevronDown
           className={`h-4 w-4 shrink-0 text-mute transition-transform ${open ? "rotate-180" : ""}`}
           strokeWidth={1.75}

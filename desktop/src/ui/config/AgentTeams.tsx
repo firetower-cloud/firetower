@@ -29,12 +29,13 @@
  * own label states the count before it is pressed. Save sends the draft as one
  * `PUT`, so a team is never half-written.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleDashed,
+  Minus,
   Info,
   Network,
   PanelRightClose,
@@ -383,35 +384,34 @@ function NewTeam({ onClose, onMade }: { onClose: () => void; onMade: (id: string
           <IconButton of={X} label="Close" onClick={onClose} />
         </div>
 
+        {/* The same `.form` the drawer and the profile editor are, at a
+            sheet's width. One set of components for every surface that edits
+            a profile or a position. */}
         <div className="dbody scroll-slim">
-          <div className="dsec">
-            <label className="lb" htmlFor="team-name">
-              Name
+          <div className="form">
+            <label className="fld">
+              <span>Name</span>
+              <span className="box">
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && make()}
+                  placeholder="Product"
+                  autoFocus
+                />
+              </span>
             </label>
-            <input
-              id="team-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && make()}
-              placeholder="Product"
-              autoFocus
-              className="field"
-            />
-          </div>
 
-          <div className="dsec">
-            <span className="lb">Lead</span>
-            <PickProfile chosen={lead?.id ?? null} onPick={setLead} />
-            <span className="said">
-              Starting the team starts this profile, with the team behind it.
-            </span>
-          </div>
-
-          {trouble && (
-            <div className="dsec">
-              <p className="text-ui text-brick">{trouble}</p>
+            <div role="group" aria-label="Lead" className="fld">
+              <span>Lead</span>
+              <span className="hint">
+                Starting the team starts this profile, with the team behind it.
+              </span>
+              <PickProfile chosen={lead?.id ?? null} onPick={setLead} />
             </div>
-          )}
+
+            {trouble && <p className="bad">{trouble}</p>}
+          </div>
         </div>
 
         {/* Its own padding and its own rule, rather than `.dlgfoot` — that one
@@ -467,19 +467,17 @@ function PickProfile({
 
   return (
     <>
-      <div className="relative">
-        <Search
-          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mute"
-          strokeWidth={1.75}
-        />
+      {/* The glyph lives inside the box rather than in the padding of an
+          input: `.box` is a row, so a mark is one more child of it. */}
+      <span className="box">
+        <Icon of={Search} size={14} className="shrink-0 text-mute" />
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder={under ? `Search profiles to put under ${under}…` : "Search profiles…"}
           aria-label="Search profiles"
-          className="field pl-8"
         />
-      </div>
+      </span>
 
       <div className="scroll-slim max-h-64 overflow-y-auto rounded-lg border border-line">
         {/* **First, and not behind an empty state.** Somebody with thirty
@@ -629,68 +627,76 @@ function NewProfile({
         </div>
 
         <div className="dbody scroll-slim">
-          <div className="dsec">
-            <span className="lb">Name</span>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="Reviewer"
-              autoFocus
-              className="field"
-            />
-          </div>
+          <div className="form">
+            <label className="fld">
+              <span>Name</span>
+              <span className="box">
+                <input
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Reviewer"
+                  autoFocus
+                />
+              </span>
+            </label>
 
-          <div className="dsec">
-            <span className="lb">What it does</span>
-            <input
-              value={does}
-              onChange={(e) => setDoes(e.target.value)}
-              placeholder="Reads a finished branch and reports what is wrong with it."
-              className="field"
-            />
-            <span className="said">
-              The one line a lead reads before handing it work.
-            </span>
-          </div>
+            <label className="fld">
+              <span>What it does</span>
+              <span className="hint">The one line a lead reads before handing it work.</span>
+              <span className="box">
+                <input
+                  value={does}
+                  onChange={(e) => setDoes(e.target.value)}
+                  placeholder="Reads a finished branch and reports what is wrong with it."
+                />
+              </span>
+            </label>
 
-          <div className="dsec">
-            <button
-              type="button"
-              onClick={() => setOpen(!open)}
-              aria-expanded={open}
-              className="flex items-center gap-1.5 text-meta text-dim hover:text-bone"
-            >
-              <Icon of={open ? ChevronDown : ChevronRight} size={14} />
-              Advanced
-              {!open && <span className="text-mute">— instructions, engine, placement</span>}
-            </button>
+            {/* **Two fields and a fold.** Everything behind it is a
+                commitment the profile may simply not make — an unset engine,
+                an unset placement and empty instructions are all real,
+                working answers. */}
+            <div className="fld">
+              <button
+                type="button"
+                onClick={() => setOpen(!open)}
+                aria-expanded={open}
+                className="flex items-center gap-1.5 self-start text-meta text-dim hover:text-bone"
+              >
+                <Icon of={open ? ChevronDown : ChevronRight} size={14} />
+                Advanced
+                {!open && <span className="text-mute">— instructions, engine, placement</span>}
+              </button>
+            </div>
 
             {open && (
-              <div className="mt-3 flex flex-col gap-4">
-                <div>
-                  <span className="lb">Instructions</span>
-                  <textarea
-                    value={instructions}
-                    onChange={(e) => setInstructions(e.target.value)}
-                    rows={6}
-                    placeholder={"# Reviewer\n\nYou review. You do not fix."}
-                    className="field"
-                  />
-                  <span className="said">
-                    Composed into its prompt, in every team. Markdown.
+              <>
+                <label className="fld">
+                  <span>Instructions</span>
+                  <span className="hint">Composed into its prompt, in every team. Markdown.</span>
+                  <span className="box mono">
+                    <textarea
+                      value={instructions}
+                      onChange={(e) => setInstructions(e.target.value)}
+                      rows={6}
+                      placeholder={"# Reviewer\n\nYou review. You do not fix."}
+                    />
                   </span>
-                </div>
+                </label>
 
-                <div>
-                  <span className="lb">Engine</span>
-                  <div className="flex flex-wrap gap-1.5">
+                <div role="group" aria-label="Engine" className="fld">
+                  <span>Engine</span>
+                  <span className="hint">Leave it open and the lead’s agent runs it.</span>
+                  <div className="pickrow">
                     <button
                       type="button"
                       aria-pressed={agent === null}
                       onClick={() => setAgent(null)}
-                      className="pill"
+                      className="pk"
                     >
-                      <Icon of={CircleDashed} size={14} />
+                      <span className="ic">
+                        <Icon of={CircleDashed} size={14} />
+                      </span>
                       Let the lead choose
                     </button>
                     {agents.data
@@ -701,21 +707,23 @@ function NewProfile({
                           type="button"
                           aria-pressed={agent === a.kind}
                           onClick={() => setAgent(a.kind as string)}
-                          className="pill"
+                          className="pk"
                         >
-                          <AgentMark agent={a.kind as Agent} size={13} />
+                          <span className="ic">
+                            <AgentMark agent={a.kind as Agent} size={14} />
+                          </span>
                           {a.label}
                         </button>
                       ))}
                   </div>
                 </div>
 
-                <div>
-                  <span className="lb">Where a child runs</span>
-                  <div className="flex flex-wrap gap-1.5">
+                <div role="group" aria-label="Where a child runs" className="fld">
+                  <span>Where a child runs</span>
+                  <div className="pickrow">
                     {[
                       ["lead", "Let the lead choose"],
-                      ["here", "The lead's workspace"],
+                      ["here", "The lead’s workspace"],
                       ["new", "Its own workspace"],
                     ].map(([value, label]) => (
                       <button
@@ -723,22 +731,18 @@ function NewProfile({
                         type="button"
                         aria-pressed={placement === value}
                         onClick={() => setPlacement(value!)}
-                        className="pill"
+                        className="pk"
                       >
                         {label}
                       </button>
                     ))}
                   </div>
                 </div>
-              </div>
+              </>
             )}
-          </div>
 
-          {trouble && (
-            <div className="dsec">
-              <p className="text-ui text-brick">{trouble}</p>
-            </div>
-          )}
+            {trouble && <p className="bad">{trouble}</p>}
+          </div>
         </div>
 
         <div className="sh-foot">
@@ -763,8 +767,27 @@ function NewProfile({
 
 /* ── The map ───────────────────────────────────────────────────────────── */
 
+/** How far the canvas goes either way. Below a third the name on a card is
+ *  six pixels, which is a drawing of a team rather than a team. */
+const MIN_ZOOM = 0.35;
+const MAX_ZOOM = 2;
+
+/**
+ * One team, drawn on a canvas you drag.
+ *
+ * **The map is the page.** It was a boxed canvas in `.pg`'s 1000px column,
+ * which gave a thing you arrange less room than the window it is in, and
+ * answered a tree wider than the box by scrolling — so opening a card on the
+ * right sliced the card on the left in half, with a connector running off the
+ * edge into nothing. There is no column here: the canvas is the body, it pans
+ * and zooms, and the chrome floats on it.
+ *
+ * **The drawer is an overlay, not a column.** A column takes width from the
+ * map permanently and reflows the drawing every time one opens. This takes
+ * none, and the map underneath does not move — except for the one nudge in
+ * `clearOf`, when the card the drawer is about would otherwise be behind it.
+ */
 function Map({ team }: { team: AgentTeam }) {
-  const roles = useListRoles();
   const [draft, setDraft] = useState<Draft>(() => draftOf(team));
   const [selected, setSelected] = useState<string | null>(null);
   const [adding, setAdding] = useState<{ parent: string; at: HTMLElement } | null>(null);
@@ -775,10 +798,10 @@ function Map({ team }: { team: AgentTeam }) {
   const changes = useMemo(() => pending(team, draft), [team, draft]);
   const dirty = changes.length > 0;
 
-  /* The stored team is the draft's base, so a team changed on the server while
-     this was open re-bases rather than silently fighting the save. Only while
-     nothing is pending: taking somebody's unsaved work away because a
-     colleague renamed the team would be worse than a stale base. */
+  /* The stored team is the draft's base, so a team changed on the server
+     while this was open re-bases rather than silently fighting the save.
+     Only while nothing is pending: taking somebody's unsaved work away
+     because a colleague renamed the team would be worse than a stale base. */
   useEffect(() => {
     if (!dirty) setDraft(draftOf(team));
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -786,55 +809,239 @@ function Map({ team }: { team: AgentTeam }) {
 
   const laid = useMemo(() => layout(treeOf(draft.positions)), [draft]);
 
-  /* **The tree is fitted to the canvas, not clipped by it.**
-     Eight positions three levels deep is wider than the pane once the drawer
-     has taken its share, and the first cut answered that by scrolling — so
-     opening a card on the right sliced the card on the left in half, with a
-     connector running off the edge into nothing. A reader cannot hold a shape
-     they can only ever see two thirds of.
-
-     So it scales down to fit, and stops at 0.72: below that the 13.5px name
-     on a card is 9px, which is a drawing of a team rather than a team. Past
-     that it scrolls, which is the honest answer for a genuinely huge one. It
-     never scales *up* — a team of two is two cards, not two posters. */
+  /* ── Pan and zoom ──────────────────────────────────────────────────
+     The view lives in a ref and is written straight to the one element that
+     carries the transform. Keeping it in state would re-render every card on
+     every pointer move to change a number no card reads. */
   const canvas = useRef<HTMLDivElement>(null);
-  const [room, setRoom] = useState({ w: 0, h: 0 });
+  const world = useRef<HTMLDivElement>(null);
+  const view = useRef({ x: 0, y: 0, k: 1 });
+  const drag = useRef<{ x: number; y: number; id: number } | null>(null);
+  /** Whether a person has moved the view themselves. See the observer below. */
+  const touched = useRef(false);
+  const plan = useRef(laid);
+  plan.current = laid;
+  // The percentage on the toolbar is the one thing that does read it.
+  const [zoom, setZoom] = useState(1);
+
+  const apply = useCallback(() => {
+    const w = world.current;
+    if (!w) return;
+    const { x, y, k } = view.current;
+    w.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
+  }, []);
+
+  /** One move, animated. Cleared afterwards so dragging stays immediate. */
+  const ease = useCallback(() => {
+    const w = world.current;
+    if (!w) return;
+    w.style.transition = "transform 260ms var(--ease-swift)";
+    window.setTimeout(() => {
+      if (world.current) world.current.style.transition = "";
+    }, 280);
+  }, []);
+
+  const fit = useCallback(
+    (animate?: boolean) => {
+      const el = canvas.current;
+      if (!el) return;
+      const box = el.getBoundingClientRect();
+      const { w, h } = plan.current;
+      if (!w || !box.width) return;
+      // Never above 1: a team of two is two cards, not two posters.
+      const k = Math.max(MIN_ZOOM, Math.min(1, (box.width - 48) / w, (box.height - 48) / h));
+      /* **Centred on each axis it fits on, pinned on one it does not.**
+         Independently, because a tree is routinely wider than the room and
+         shorter than it. A big team in a narrow pane hits the zoom floor and
+         still overflows — centred, that cuts it off on *both* sides with the
+         lead nowhere near where you would look for it. Pinned, it starts at
+         the top left and the rest is a drag away. */
+      const wide = w * k > box.width - 48;
+      const tall = h * k > box.height - 48;
+      view.current = {
+        k,
+        x: wide ? 24 : (box.width - w * k) / 2,
+        y: tall ? 24 : (box.height - h * k) / 2,
+      };
+      if (animate) ease();
+      apply();
+      setZoom(k);
+    },
+    [apply, ease],
+  );
+
+  const zoomAt = useCallback(
+    (cx: number, cy: number, next: number) => {
+      const k = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
+      const v = view.current;
+      // The point under the cursor stays under the cursor.
+      view.current = { k, x: cx - (cx - v.x) * (k / v.k), y: cy - (cy - v.y) * (k / v.k) };
+      touched.current = true;
+      apply();
+      setZoom(k);
+    },
+    [apply],
+  );
+
+  const zoomMid = useCallback(
+    (by: number) => {
+      const el = canvas.current;
+      if (!el) return;
+      zoomAt(el.clientWidth / 2, el.clientHeight / 2, by);
+    },
+    [zoomAt],
+  );
+
+  // The transform belongs to this element and React does not write it, so it
+  // is re-asserted after every render rather than only when the view changes.
+  useLayoutEffect(apply);
+
+  /* **Fitted when the room changes, unless somebody has moved the view.**
+     Refitting unconditionally yanks a person back to the middle every time
+     the window is resized or the rail's panel is collapsed, undoing a pan
+     they chose. Refitting never leaves a map off screen after the pane
+     halves in width. This is the line between the two. */
   useEffect(() => {
     const el = canvas.current;
     if (!el) return;
-    const watch = new ResizeObserver(([entry]) => {
-      const box = entry?.contentRect;
-      if (box) setRoom({ w: box.width, h: box.height });
+    const watch = new ResizeObserver(() => {
+      if (!touched.current) fit(false);
     });
     watch.observe(el);
     return () => watch.disconnect();
-  }, []);
-  const scale = useMemo(() => {
-    if (!room.w || !laid.w) return 1;
-    return Math.max(0.72, Math.min(1, room.w / laid.w, room.h / laid.h));
-  }, [room, laid.w, laid.h]);
+  }, [fit]);
 
-  /* Opening a card brings it into view, for the case scrolling is still the
-     answer. `nearest` so a card already visible does not move — the map
-     jumping on every click would be worse than the overlap. */
+  // A different team is a different drawing: start it fitted, whatever the
+  // last one was left at.
+  useEffect(() => {
+    touched.current = false;
+    fit(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [team.id]);
+
+  /* **Wheel is attached by hand, and only to the canvas.** React routes
+     `onWheel` through a passive listener at the root, so `preventDefault` is
+     ignored there and the whole app scrolls behind the map. Scoped to this
+     element rather than the document, because a global wheel handler would
+     swallow the gesture the annotation layer is driven by. */
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      touched.current = true;
+      const box = el.getBoundingClientRect();
+      if (e.ctrlKey || e.metaKey) {
+        /* **Exponential, not linear.** `k * (1 - deltaY/100)` is smooth for a
+           trackpad pinch, where `deltaY` arrives a point or two at a time,
+           and absurd for a wheel, where one notch is 120 and takes 100% to
+           220% in a single click. A ratio per unit of scroll is the same
+           gesture at both scales, and it cannot invert at large deltas. */
+        zoomAt(
+          e.clientX - box.left,
+          e.clientY - box.top,
+          view.current.k * Math.exp(-e.deltaY * 0.0022),
+        );
+        return;
+      }
+      view.current = { ...view.current, x: view.current.x - e.deltaX, y: view.current.y - e.deltaY };
+      apply();
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [apply, zoomAt]);
+
+  /* **The drawer comes over the canvas, so the card it is about can end up
+     under it.** A panel that hides the thing it describes is the failure an
+     overlay invites. Move the map by the overlap, and only when there is
+     one — a map that jumps on every click would be worse. */
+  const clearOf = useCallback(
+    (key: string) => {
+      const el = canvas.current;
+      const card = plan.current.cards.find((c) => c.key === key);
+      if (!el || !card) return;
+      const box = el.getBoundingClientRect();
+      // `offsetWidth`, not the rect: the drawer is mid-slide and its rect
+      // still says it is off the right edge covering nothing.
+      const panel = document.querySelector<HTMLElement>(".mapdrawer");
+      const wide = panel?.offsetWidth ?? 0;
+      const covered = Math.max(0, box.right - (window.innerWidth - wide));
+      if (covered <= 0 || covered >= box.width - CW) return;
+      const over = view.current.x + (card.x + card.w) * view.current.k - (box.width - covered - 28);
+      if (over > 0) {
+        view.current = { ...view.current, x: view.current.x - over };
+        touched.current = true;
+        ease();
+        apply();
+      }
+    },
+    [apply, ease],
+  );
+
+  const open = (key: string) => {
+    if (selected === key) {
+      setSelected(null);
+      return;
+    }
+    setSelected(key);
+    // After the drawer is in the DOM and has a width to measure.
+    window.requestAnimationFrame(() => clearOf(key));
+  };
+
+  // Escape closes the drawer, wherever the focus is.
   useEffect(() => {
     if (!selected) return;
-    const card = canvas.current?.querySelector<HTMLElement>(`[data-key="${selected}"]`);
-    card?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelected(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [selected]);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 90 : 28;
+    const go: Record<string, [number, number]> = {
+      ArrowLeft: [step, 0],
+      ArrowRight: [-step, 0],
+      ArrowUp: [0, step],
+      ArrowDown: [0, -step],
+    };
+    if (go[e.key]) {
+      e.preventDefault();
+      const [dx, dy] = go[e.key]!;
+      view.current = { ...view.current, x: view.current.x + dx, y: view.current.y + dy };
+      touched.current = true;
+      apply();
+      return;
+    }
+    if (e.key === "0") {
+      e.preventDefault();
+      touched.current = false;
+      fit(true);
+    }
+    if (e.key === "+" || e.key === "=") {
+      e.preventDefault();
+      zoomMid(view.current.k * 1.2);
+    }
+    if (e.key === "-") {
+      e.preventDefault();
+      zoomMid(view.current.k / 1.2);
+    }
+  };
+
   const chosen = draft.positions.find((p) => p.id === selected) ?? null;
   const deep = laid.cards.reduce((d, c) => Math.max(d, c.depth + 1), 0);
+  const lead = leadOf(team);
 
   const save = async () => {
     setBusy(true);
     setTrouble(null);
     try {
       /* **Re-based from what came back, not from the refetch.** A position
-         the map added carries a `draft:` key and comes back with a minted id,
-         so comparing the draft against the saved team reads as one added and
-         one removed — which leaves the map permanently dirty and the effect
-         below permanently unable to re-base it. The response is the team as
-         written, so it is what the draft becomes. */
+         the map added carries a `draft:` key and comes back with a minted
+         id, so comparing the draft against the saved team reads as one added
+         and one removed — which leaves the map permanently dirty and the
+         effect above permanently unable to re-base it. */
       const saved = await updateAgentTeam(team.id, toWrite(draft));
       setDraft(draftOf(saved));
       await cache.invalidateQueries({ queryKey: getListAgentTeamsQueryKey() });
@@ -846,132 +1053,192 @@ function Map({ team }: { team: AgentTeam }) {
   };
 
   return (
-    <Section
-      title={team.name}
-      note={`Led by ${leadOf(team)?.name ?? "nobody"} · ${team.positions.length} agents`}
-      action={
-        <button onClick={() => navigate("/configuration/agent-teams")} className="btn plain">
-          <Icon of={ChevronLeft} size={14} />
-          All teams
-        </button>
-      }
-    >
-      {/* **The action row appears when there is something to commit.** A Save
-          that is disabled most of the time is a control that mostly says no;
-          the strip under the map already says that nothing writes until Save,
-          so the button arrives with the first change and the row takes no
-          height before that. `--row-tight`, because a 30px control cannot
-          live in the 22px strip. */}
-      {dirty && (
-        <div className="maprow">
-          <span className="pend">
-            {changes.length} change{changes.length === 1 ? "" : "s"} not saved
+    <div className="mappage">
+      <div className="maphead">
+        <span className="tx">
+          <h1>{team.name}</h1>
+          <span className="sub">
+            Led by {lead?.name ?? "nobody"} · {draft.positions.length} agents
           </span>
-          <span className="flex-1" />
-          <button onClick={() => setDraft(draftOf(team))} disabled={busy} className="btn quiet">
-            Discard
+        </span>
+        <span className="acts">
+          {/* **Arrives with the first change.** A Save that is disabled most
+              of the time is a control that mostly says no, and the strip
+              below already says nothing writes until Save. */}
+          {dirty && (
+            <>
+              <span className="pendpill">
+                {changes.length} change{changes.length === 1 ? "" : "s"} not saved
+              </span>
+              <button onClick={() => setDraft(draftOf(team))} disabled={busy} className="btn quiet">
+                Discard
+              </button>
+              <button
+                onClick={save}
+                disabled={busy || !team.mayWrite}
+                className="btn primary disabled:opacity-40"
+              >
+                {busy ? "Saving…" : "Save"}
+              </button>
+            </>
+          )}
+          <button onClick={() => navigate("/configuration/agent-teams")} className="btn plain">
+            <Icon of={ChevronLeft} size={14} />
+            All teams
+          </button>
+        </span>
+      </div>
+
+      {/* Only ever drawn when there is something to say. The canvas is the
+          page the rest of the time. */}
+      {(trouble || !team.mayWrite || (dirty && team.schedules > 0)) && (
+        <div className="mapnotes">
+          {trouble && <Note icon={TriangleAlert}>{trouble}</Note>}
+          {/* **What Save does to the schedules that pin this team**, said
+              before Save rather than discovered by a run being refused. */}
+          {dirty && team.schedules > 0 && (
+            <Note icon={TriangleAlert}>
+              Saving pauses {team.schedules} schedule{team.schedules === 1 ? "" : "s"} that pin
+              this team. The next run of each is refused until somebody approves the new shape.
+            </Note>
+          )}
+          {!team.mayWrite && (
+            <WhereTo>
+              <b>You can read this team and not change it.</b> Whoever administers the directory
+              it is filed in can.
+            </WhereTo>
+          )}
+        </div>
+      )}
+
+      <div className="canvaswrap">
+        <div
+          ref={canvas}
+          className="mapcanvas"
+          tabIndex={0}
+          role="application"
+          aria-label="Team map. Drag to pan, hold command and scroll to zoom."
+          onKeyDown={onKeyDown}
+          onPointerDown={(e) => {
+            // A card's own controls are not a handle to drag the map by.
+            if ((e.target as HTMLElement).closest("button")) return;
+            drag.current = { x: e.clientX - view.current.x, y: e.clientY - view.current.y, id: e.pointerId };
+            canvas.current?.setPointerCapture(e.pointerId);
+            canvas.current?.classList.add("dragging");
+          }}
+          onPointerMove={(e) => {
+            const d = drag.current;
+            if (!d || e.pointerId !== d.id) return;
+            view.current = { ...view.current, x: e.clientX - d.x, y: e.clientY - d.y };
+            touched.current = true;
+            apply();
+          }}
+          onPointerUp={() => {
+            drag.current = null;
+            canvas.current?.classList.remove("dragging");
+          }}
+          onPointerCancel={() => {
+            drag.current = null;
+            canvas.current?.classList.remove("dragging");
+          }}
+        >
+          <div ref={world} className="mapworld" style={{ width: laid.w, height: laid.h }}>
+            <Wires laid={laid} team={team} draft={draft} />
+            {laid.cards.map((c) => (
+              <MapCard
+                key={c.key}
+                card={c}
+                mark={markOf(team, draft, c.key)}
+                selected={selected === c.key}
+                writable={team.mayWrite}
+                under={subtreeOf(c).length}
+                onOpen={() => open(c.key)}
+                onAdd={(at) => setAdding({ parent: c.key, at })}
+                onRemove={() => {
+                  setDraft((d) => remove(d, c.key));
+                  if (selected === c.key) setSelected(null);
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Floating on the canvas rather than in the header: these are about
+            what you are looking at, not about the team, and they belong
+            beside the thing they move. */}
+        <div className="maptools" role="toolbar" aria-label="View">
+          <button
+            className="maptool"
+            title="Zoom out"
+            aria-label="Zoom out"
+            onClick={() => zoomMid(view.current.k / 1.2)}
+          >
+            <Icon of={Minus} size={14} />
+          </button>
+          <button className="maptool wide" title="Back to 100%" onClick={() => zoomMid(1)}>
+            {Math.round(zoom * 100)}%
           </button>
           <button
-            onClick={save}
-            disabled={busy || !team.mayWrite}
-            className="btn primary disabled:opacity-40"
+            className="maptool"
+            title="Zoom in"
+            aria-label="Zoom in"
+            onClick={() => zoomMid(view.current.k * 1.2)}
           >
-            {busy ? "Saving…" : "Save"}
+            <Icon of={Plus} size={14} />
+          </button>
+          <span className="maptoolsep" />
+          <button
+            className="maptool wide"
+            title="Fit the whole team"
+            onClick={() => {
+              touched.current = false;
+              fit(true);
+            }}
+          >
+            Fit
           </button>
         </div>
-      )}
+      </div>
 
-      {trouble && <Note icon={TriangleAlert}>{trouble}</Note>}
-      {/* **What Save does to the schedules that pin this team**, said before
-          Save rather than discovered by a run being refused. Editing a team
-          clears its approval, which pauses every schedule naming it. */}
-      {dirty && team.schedules > 0 && (
-        <Note icon={TriangleAlert}>
-          Saving pauses {team.schedules} schedule{team.schedules === 1 ? "" : "s"} that pin this
-          team. The next run of each is refused until somebody approves the new shape.
-        </Note>
-      )}
-      {!team.mayWrite && (
-        <WhereTo>
-          <b>You can read this team and not change it.</b> Whoever administers the directory it is
-          filed in can.
-        </WhereTo>
-      )}
+      {/* Counts and a sentence. No controls, ever. */}
+      <div className="mapstrip">
+        <span>
+          {draft.positions.length} position{draft.positions.length === 1 ? "" : "s"} · {deep} level
+          {deep === 1 ? "" : "s"} deep
+        </span>
+        <span className="flex-1" />
+        <span className="says">
+          {dirty
+            ? changes.map(said).join(" · ")
+            : "Drag to pan · ⌘-scroll to zoom · nothing writes until Save."}
+        </span>
+      </div>
 
-      {/* **Two columns, not a panel under the map.** The drawer is the only
-          full editor and it is read *against* the card it was opened from, so
-          it docks beside the map in the app's own right-rail geometry rather
-          than below it — where opening one pushes the thing it is about off
-          the screen. Under 900px of pane there is no room for both and it
-          stacks, which is the band rule the rest of the app keeps. */}
-      {/* **The map takes the page's height, not the tree's.** Sizing the box
-          to the drawing left the bottom half of the screen empty under a
-          small team and gave a large one no more room than a small one. The
-          box is the window; the tree is fitted into it. */}
-      <div className="mapsplit" data-open={!!chosen}>
-        <div className="mapbox">
-          {/* Centred on each axis it fits on, and pinned on one it does not.
-              Independently, because a tree is routinely wider than the room
-              and shorter than it: all-or-nothing left a small team sitting in
-              the top-left corner of a box twice its height. A scroll that
-              starts in the middle is a tree you have to go and find, so the
-              axis that scrolls pins. */}
-          <div
-            ref={canvas}
-            className="mapcanvas scroll-slim"
-            data-fits-x={laid.w * scale <= room.w + 1}
-            data-fits-y={laid.h * scale <= room.h + 1}
-          >
-            {/* Centred when it fits, left-aligned when it does not — a tree
-                that starts in the middle of a scroll is a tree you have to
-                find. */}
-            <div
-              className="mapinner"
-              style={{ width: laid.w, height: laid.h, transform: `scale(${scale})` }}
-            >
-              <Wires laid={laid} />
-              {laid.cards.map((c) => (
-                <MapCard
-                  key={c.key}
-                  card={c}
-                  mark={markOf(team, draft, c.key)}
-                  selected={selected === c.key}
-                  writable={team.mayWrite}
-                  under={subtreeOf(c).length}
-                  onOpen={() => setSelected(selected === c.key ? null : c.key)}
-                  onAdd={(at) => setAdding({ parent: c.key, at })}
-                  onRemove={() => {
-                    setDraft((d) => remove(d, c.key));
-                    if (selected === c.key) setSelected(null);
-                  }}
-                />
-              ))}
-            </div>
-          </div>
-          {/* 22px. Counts and a sentence, and no controls at all. */}
-          <div className="mapstrip">
-            <span>
-              {draft.positions.length} position{draft.positions.length === 1 ? "" : "s"} · {deep}{" "}
-              level{deep === 1 ? "" : "s"} deep
-            </span>
-            <span className="flex-1" />
-            <span className="truncate">
-              {dirty
-                ? changes.map(said).join(" · ")
-                : "Adding, removing and moving write nothing until Save."}
-            </span>
-          </div>
-        </div>
-
-        {chosen && (
+      {chosen && (
+        <>
+          {/* **A pointer convenience, and not a tab stop.** Clicking the
+              scrim closes the drawer; a keyboard has Escape and the Close
+              button in the head, which are better routes than a focus ring
+              drawn around the whole window. */}
+          <button
+            className="dveil"
+            tabIndex={-1}
+            aria-hidden
+            onClick={() => setSelected(null)}
+          />
           <Drawer
             team={team}
             position={chosen}
             kids={draft.positions.filter((p) => p.parent === chosen.id)}
+            /* **The one it reports to is in this list, and pressed.** It was
+               filtered out as "nowhere to move to", which left a field
+               labelled *Reports to* showing three names with none chosen —
+               a picker that cannot answer its own label. Only the two that
+               are not a tree are excluded: itself, and anything beneath
+               it. */
             elsewhere={draft.positions.filter(
               (p) =>
                 p.id !== chosen.id &&
-                p.id !== chosen.parent &&
                 !descendants(draft.positions, chosen.id).some((x) => x.id === p.id),
             )}
             parentName={draft.positions.find((p) => p.id === chosen.parent)?.name ?? null}
@@ -980,16 +1247,19 @@ function Map({ team }: { team: AgentTeam }) {
             onMove={(parent) => setDraft((d) => reparent(d, chosen.id, parent))}
             onClose={() => setSelected(null)}
           />
-        )}
-      </div>
+        </>
+      )}
 
       {adding && (
         <Pop anchor={adding.at} onClose={() => setAdding(null)} width={320}>
-          <div className="flex flex-col gap-2.5 p-2.5">
-            <p className="text-micro text-mute">
+          {/* A `.fld`, because the picker is a field: it is the same label,
+              hint and box stack here as it is in the new-team sheet, and
+              `.box` is styled as a field's box. */}
+          <div role="group" aria-label="Put a profile under this one" className="fld p-2.5">
+            <span className="hint">
               Under {draft.positions.find((p) => p.id === adding.parent)?.name ?? "the lead"}. A
               profile that leads another team arrives here with nothing under it.
-            </p>
+            </span>
             <PickProfile
               chosen={null}
               under={draft.positions.find((p) => p.id === adding.parent)?.name}
@@ -1001,7 +1271,7 @@ function Map({ team }: { team: AgentTeam }) {
           </div>
         </Pop>
       )}
-    </Section>
+    </div>
   );
 }
 
@@ -1026,28 +1296,39 @@ function said(c: Change): string {
 /**
  * The connectors.
  *
- * An elbow where children spread — down from the parent's bottom centre, along
- * the row, and down into each child's top centre — and a bracket where they
- * indent. One SVG behind the cards rather than borders on them, so a card's
- * own box is never part of the drawing and a card can move without the line
- * following it a frame late.
+ * An elbow where children spread — down from the parent's bottom centre,
+ * along the row, and down into each child's top centre — and a bracket where
+ * they indent. **Both corners are rounded**, by the same radius the cards
+ * are: a tree of square corners under cards of round ones reads as two
+ * drawings. One SVG behind the cards rather than borders on them, so a card's
+ * own box is never part of the drawing.
  */
-function Wires({ laid }: { laid: Plan }) {
+function Wires({ laid, team, draft }: { laid: Plan; team: AgentTeam; draft: Draft }) {
   return (
     <svg className="mapwires" width={laid.w} height={laid.h} aria-hidden="true">
       {laid.links.map((l, i) => {
+        // Drafted, and not yet written — the line arrives dashed with the card.
+        const fresh = markOf(team, draft, l.to.key) === "add" ? "fresh" : undefined;
         if (l.kind === "indent") {
           const x = l.from.x + IND / 2;
           const y1 = l.from.y + l.from.h;
           const y2 = l.to.y + l.to.h / 2;
-          return <path key={i} d={`M ${x} ${y1} V ${y2} H ${l.to.x}`} fill="none" />;
+          return (
+            <path key={i} className={fresh} d={`M ${x} ${y1} V ${y2 - 7} q 0 7 7 7 H ${l.to.x}`} />
+          );
         }
         const fx = l.from.x + CW / 2;
         const fy = l.from.y + l.from.h;
         const tx = l.to.x + CW / 2;
         const ty = l.to.y;
         const mid = fy + (ty - fy) / 2;
-        return <path key={i} d={`M ${fx} ${fy} V ${mid} H ${tx} V ${ty}`} fill="none" />;
+        const s = Math.sign(tx - fx);
+        const r = Math.min(10, Math.abs(tx - fx) / 2);
+        const bend =
+          r > 1
+            ? `V ${mid - r} q 0 ${r} ${s * r} ${r} H ${tx - s * r} q ${s * r} 0 ${s * r} ${r} V ${ty}`
+            : `V ${ty}`;
+        return <path key={i} className={fresh} d={`M ${fx} ${fy} ${bend}`} />;
       })}
     </svg>
   );
@@ -1056,11 +1337,11 @@ function Wires({ laid }: { laid: Plan }) {
 /**
  * One card.
  *
- * Two controls, and **neither is reachable by hover alone**: `+` at the bottom
- * centre, on the connector trunk, because that is where the child appears; and
- * the destructive one at the top right, which states its blast radius in its
- * own label before it is pressed. The lead has no destructive control —
- * removing it would remove the team, which is done from the list.
+ * Two controls, and **neither is reachable by hover alone**: `+` at the
+ * bottom centre, on the connector trunk, because that is where the child
+ * appears; and the destructive one at the top right, which states its blast
+ * radius in its own label before it is pressed. The lead has no destructive
+ * control — removing it would remove the team, which is done from the list.
  */
 function MapCard({
   card,
@@ -1108,9 +1389,9 @@ function MapCard({
         <span className="ocrow">
           <span className="g">
             {!p.redacted && agent ? (
-              <AgentMark agent={agent} size={13} />
+              <AgentMark agent={agent} size={14} />
             ) : (
-              <CircleDashed className="h-3.5 w-3.5 text-mute" strokeWidth={1.75} />
+              <Icon of={CircleDashed} size={14} />
             )}
           </span>
           <span className="nm">{p.redacted ? "Not yours to see" : p.name}</span>
@@ -1152,13 +1433,19 @@ function MapCard({
  * **Two tabs, because there are two objects and they reach differently.**
  * *Extra instructions* is this position in this team; *Profile* is the thing
  * every team that uses it shares. Drawn as one panel because you open it by
- * pressing one card and the question "is this mine or everyone's" is the one
- * a person gets wrong — so the panel answers it in a word, at the top, rather
- * than in a sentence nobody re-reads.
+ * pressing one card, and the question "is this mine or everyone's" is the one
+ * a person gets wrong — so each tab opens with a band answering it, rather
+ * than a sentence under a field that nobody re-reads.
+ *
+ * **It is the profile editor's form, at 392px.** `.form` → `.fld` → label,
+ * hint, `.box`/`.pickrow`, and `.sh-foot` under it: the same components
+ * `/configuration/roles/<id>` is built from, because two surfaces editing the
+ * same two objects should not be two designs — and the only way they stay
+ * that way as either changes is to be the same components rather than two
+ * that match today.
  *
  * **A position never replaces a profile field. It only adds.** So there is no
- * resolution order to define and no override semantics to explain — which is
- * why the first tab holds *extra* instructions rather than overrides.
+ * resolution order to define and no override semantics to explain.
  */
 function Drawer({
   team,
@@ -1185,7 +1472,6 @@ function Drawer({
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"here" | "profile">("here");
-  const [moving, setMoving] = useState<HTMLElement | null>(null);
   const teams = useAgentTeams();
   // Every team holding this profile — the consequence of editing the Profile
   // tab, which is not visible from here and is the thing somebody gets wrong.
@@ -1194,19 +1480,17 @@ function Drawer({
   return (
     <aside className="mapdrawer" aria-label={`${position.name}, a position in ${team.name}`}>
       <div className="dhead">
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-ui text-bone">
-            {position.redacted ? "Not yours to see" : position.name}
-          </span>
-          <span className="block truncate text-micro text-mute">
+        <span className="tx">
+          <span className="nm">{position.redacted ? "Not yours to see" : position.name}</span>
+          <span className="where">
             {team.name} · {position.parent ? "a position" : "the lead"}
           </span>
         </span>
         <IconButton of={PanelRightClose} label="Close" onClick={onClose} />
       </div>
 
-      {/* The app's own right-rail index: plain text with an underline, not
-          boxed chips. The index of a panel should not compete with it. */}
+      {/* The app's own index: plain text with an underline, not boxed chips.
+          The index of a panel should not compete with it. */}
       <div className="itabs" role="tablist">
         <button
           role="tab"
@@ -1228,95 +1512,109 @@ function Drawer({
         </button>
       </div>
 
-      <div className="dbody scroll-slim">
-        {tab === "here" ? (
-          <>
-            <div className="dsec">
-              <span className="lb">What it is told here</span>
-              <textarea
-                value={position.extraInstructions}
-                onChange={(e) => onTell(e.target.value)}
-                rows={7}
-                disabled={!writable}
-                placeholder={"Owns the web client.\nFollow the design system in docs/."}
-                className="field"
-              />
-              <span className="said">
-                Added to {position.name}’s own instructions, in {team.name} only.
-              </span>
-            </div>
+      {tab === "here" ? (
+        <>
+          <div className="dbody scroll-slim">
+            <div className="form">
+              <div className="scope">
+                <span className="g" aria-hidden>
+                  <Icon of={Info} size={16} />
+                </span>
+                <p>
+                  <b>This team only.</b> Everything here applies to {position.name} in {team.name},
+                  and nowhere else.
+                </p>
+              </div>
 
-            {position.parent && (
-              <div className="dsec">
-                <span className="lb">Reports to</span>
-                {writable && elsewhere.length > 0 ? (
-                  <>
-                    <button
-                      type="button"
-                      className="field flex items-center justify-between text-left"
-                      onClick={(e) => setMoving(moving ? null : e.currentTarget)}
-                    >
-                      {parentName ?? "the lead"}
-                      <Icon of={ChevronDown} size={12} className="text-mute" />
-                    </button>
-                    {moving && (
-                      <Pop anchor={moving} onClose={() => setMoving(null)} width={240}>
-                        <div className="py-1">
-                          {elsewhere.map((p) => (
-                            <button
-                              key={p.id}
-                              type="button"
-                              className="mi"
-                              onClick={() => {
-                                onMove(p.id);
-                                setMoving(null);
-                              }}
-                            >
-                              <span className="min-w-0 flex-1 truncate text-left text-ui text-bone">
-                                {p.name}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </Pop>
-                    )}
-                    <span className="said">Moving it takes everything under it along.</span>
-                  </>
+              <label className="fld">
+                <span>Extra instructions</span>
+                <span className="hint">
+                  Added to {position.name}’s own instructions when it runs here. It never replaces
+                  them — and it is what tells two positions of one profile apart.
+                </span>
+                <span className="box mono">
+                  <textarea
+                    value={position.extraInstructions}
+                    onChange={(e) => onTell(e.target.value)}
+                    rows={7}
+                    disabled={!writable}
+                    placeholder={"Owns the web client.\nFollow the design system in docs/."}
+                  />
+                </span>
+              </label>
+
+              {position.parent && (
+                <div role="group" aria-label="Reports to" className="fld">
+                  <span>Reports to</span>
+                  <span className="hint">
+                    Moving it takes everything under it along. It cannot go under something
+                    already beneath it.
+                  </span>
+                  {writable && elsewhere.length > 0 ? (
+                    /* Every destination at once rather than behind a menu: the
+                       whole choice is short, it is the profile editor's own
+                       `.pickrow`, and a menu would hide the one fact that
+                       matters — that there is somewhere else to go. */
+                    <div className="pickrow">
+                      {elsewhere.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className="pk"
+                          aria-pressed={p.id === position.parent}
+                          onClick={() => onMove(p.id)}
+                        >
+                          {p.name}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="nobody">{parentName ?? "the lead"}</p>
+                  )}
+                </div>
+              )}
+
+              <div role="group" aria-label="Hands work to" className="fld">
+                <span>Hands work to</span>
+                <span className="hint">
+                  The positions directly under this one, and nothing else. This is the whole of
+                  what it may start.
+                </span>
+                {kids.length === 0 ? (
+                  <p className="nobody">
+                    Nobody yet. Press <b>+</b> on its card.
+                  </p>
                 ) : (
-                  <p className="text-ui text-text">{parentName ?? "the lead"}</p>
+                  <div className="kidlist">
+                    {kids.map((p) => (
+                      <span key={p.id} className="kidrow">
+                        <span className="g">
+                          {p.agent ? (
+                            <AgentMark agent={p.agent as Agent} size={14} />
+                          ) : (
+                            <Icon of={CircleDashed} size={14} />
+                          )}
+                        </span>
+                        <span className="n">{p.name}</span>
+                      </span>
+                    ))}
+                  </div>
                 )}
               </div>
-            )}
-
-            <div className="dsec">
-              <span className="lb">
-                Hands work to{kids.length > 0 ? ` · ${kids.length}` : ""}
-              </span>
-              {kids.length === 0 ? (
-                <p className="text-ui text-mute">
-                  Nobody. Press <b className="text-dim">+</b> on its card.
-                </p>
-              ) : (
-                <ul className="flex flex-col gap-1">
-                  {kids.map((p) => (
-                    <li key={p.id} className="flex items-center gap-2 text-ui text-text">
-                      <span className="text-mute">
-                        {p.agent ? <AgentMark agent={p.agent as Agent} size={12} /> : <Icon of={CircleDashed} size={12} />}
-                      </span>
-                      <span className="min-w-0 truncate">{p.name}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <span className="said">
-                The positions directly under this one, and nothing else.
-              </span>
             </div>
-          </>
-        ) : (
-          <ProfileTab profile={position.profile} alsoIn={alsoIn} team={team} />
-        )}
-      </div>
+          </div>
+          {/* **`.sh-foot`, not `.formfoot`.** A page's foot sticks to the
+              bottom of a scroll it belongs to; a sheet's is pinned outside
+              one. A drawer is a sheet. */}
+          <div className="sh-foot">
+            <span className="where">
+              Written when you press <b>Save</b> on the map.
+            </span>
+          </div>
+        </>
+      ) : (
+        <ProfileTab profile={position.profile} alsoIn={alsoIn} team={team} />
+      )}
     </aside>
   );
 }
@@ -1330,9 +1628,9 @@ function Drawer({
  * person cannot see from the card they pressed.
  *
  * The three fields a profile cannot be without are here; the rest — the
- * engine, the machine, the skills, the limits — stay on Agent profiles, where
- * there is room to explain them. A link, rather than a second copy of a form
- * that is already long.
+ * engine, the machine, the skills, the limits — stay on the profile editor,
+ * where there is room to explain them, and its foot is the door to it. Not a
+ * second copy of a form that is already long.
  */
 function ProfileTab({
   profile,
@@ -1345,7 +1643,9 @@ function ProfileTab({
 }) {
   const roles = useListRoles();
   const role = (roles.data ?? []).find((r) => r.id === profile);
-  const [draft, setDraft] = useState<{ name: string; does: string; instructions: string } | null>(null);
+  const [draft, setDraft] = useState<{ name: string; does: string; instructions: string } | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [trouble, setTrouble] = useState<string | null>(null);
   const cache = useQueryClient();
@@ -1360,11 +1660,17 @@ function ProfileTab({
   }, [role?.id]);
 
   if (!role || !draft) {
-    return <p className="pt-3 text-ui text-mute">Reading the profile…</p>;
+    return (
+      <div className="dbody">
+        <p className="nobody">Reading the profile…</p>
+      </div>
+    );
   }
 
   const changed =
-    draft.name !== role.name || draft.does !== role.does || draft.instructions !== role.instructions;
+    draft.name !== role.name ||
+    draft.does !== role.does ||
+    draft.instructions !== role.instructions;
 
   const save = async () => {
     setBusy(true);
@@ -1398,101 +1704,116 @@ function ProfileTab({
 
   return (
     <>
-      <div className="dsec">
-        <p className="text-micro leading-relaxed text-mute">
-          {others.length > 0 ? (
-            <>
-              <b className="font-medium text-dim">Shared.</b> {role.name} also holds a position in{" "}
-              {others.join(", ")} — this changes it there too.
-            </>
-          ) : (
-            <>
-              <b className="font-medium text-dim">The profile, not this position.</b> Anything
-              that puts {role.name} in another team carries these words with it.
-            </>
+      <div className="dbody scroll-slim">
+        <div className="form">
+          <div className="scope">
+            <span className="g" aria-hidden>
+              <Icon of={Info} size={16} />
+            </span>
+            <p>
+              {others.length > 0 ? (
+                <>
+                  <b>Shared.</b> {role.name} also holds a position in {others.join(", ")} — this
+                  changes it there too.
+                </>
+              ) : (
+                <>
+                  <b>The profile, not this position.</b> {role.name} is what it is in every team
+                  that holds it; what it is told <i>here</i> is the other tab.
+                </>
+              )}
+            </p>
+          </div>
+
+          <label className="fld">
+            <span>Name</span>
+            <span className="hint">What you start it as, and what a lead names to hand to it.</span>
+            <span className="box">
+              <input
+                value={draft.name}
+                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                disabled={!role.mayWrite}
+                placeholder="Reviewer"
+              />
+            </span>
+          </label>
+
+          <label className="fld">
+            <span>What it does</span>
+            <span className="hint">
+              What it does and when to reach for it — the line a lead reads to decide whether to
+              hand it work.
+            </span>
+            <span className="box brief">
+              <textarea
+                value={draft.does}
+                onChange={(e) => setDraft({ ...draft, does: e.target.value })}
+                rows={2}
+                disabled={!role.mayWrite}
+                placeholder="Reads a finished branch and reports problems as file:line."
+              />
+            </span>
+          </label>
+
+          <label className="fld">
+            <span>Instructions</span>
+            <span className="hint">
+              Composed into its prompt, in every team. Markdown; the agent reads all of it.
+            </span>
+            <span className="box mono">
+              <textarea
+                value={draft.instructions}
+                onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
+                rows={8}
+                disabled={!role.mayWrite}
+              />
+            </span>
+          </label>
+
+          {trouble && <p className="bad">{trouble}</p>}
+
+          {team.mayShare && (
+            <div className="fld">
+              <span>Who can see this team</span>
+              <span>
+                <WhoCanAccess
+                  kind="agentTeam"
+                  id={team.id}
+                  path={team.path}
+                  look="chip"
+                  label="Sharing"
+                />
+              </span>
+            </div>
           )}
-        </p>
-      </div>
-
-      <div className="dsec">
-        <span className="lb">Name</span>
-        <input
-          value={draft.name}
-          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-          disabled={!role.mayWrite}
-          className="field"
-        />
-      </div>
-
-      <div className="dsec">
-        <span className="lb">What it does</span>
-        <input
-          value={draft.does}
-          onChange={(e) => setDraft({ ...draft, does: e.target.value })}
-          disabled={!role.mayWrite}
-          className="field"
-        />
-        <span className="said">The one line a lead reads before handing it work.</span>
-      </div>
-
-      <div className="dsec">
-        <span className="lb">Instructions</span>
-        <textarea
-          value={draft.instructions}
-          onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
-          rows={8}
-          disabled={!role.mayWrite}
-          className="field"
-        />
-      </div>
-
-      {trouble && (
-        <div className="dsec">
-          <p className="text-ui text-brick">{trouble}</p>
         </div>
-      )}
-
-      <div className="dsec flex items-center gap-2">
-        {role.mayWrite ? (
-          /* **Its own Save.** The map's Save writes the team and must not
-             write a profile — a map action that changed a profile would be
-             the model leaking. Two objects, two commits, two buttons. */
-          <>
-            <button
-              onClick={save}
-              disabled={busy || !changed}
-              className="btn primary disabled:opacity-40"
-            >
-              {busy ? "Saving…" : "Save profile"}
-            </button>
-            {changed && (
-              <button
-                onClick={() =>
-                  setDraft({ name: role.name, does: role.does, instructions: role.instructions })
-                }
-                className="btn quiet"
-              >
-                Revert
-              </button>
-            )}
-          </>
-        ) : (
-          <p className="text-micro text-mute">
-            Read-only. Whoever administers the directory it is filed in can change it.
-          </p>
-        )}
       </div>
 
-      <div className="dsec flex flex-wrap items-center gap-x-4 gap-y-2">
+      <div className="sh-foot">
+        <span className="where">
+          {role.mayWrite ? "Changes every team." : "Read-only. An administrator of its directory can change it."}
+        </span>
+        {/* **The door to the rest of it**, rather than a second copy of a
+            form that is already long. The engine, the machine, the skills
+            and the limits are all there. */}
         <button
           type="button"
           onClick={() => navigate(`/configuration/roles/${role.id}`)}
-          className="text-meta text-dim underline underline-offset-2 hover:text-bone"
+          className="btn quiet"
         >
-          Engine, skills and the rest
+          Full editor
         </button>
-        {team.mayShare && (
-          <WhoCanAccess kind="agentTeam" id={team.id} path={team.path} look="chip" label="Sharing" />
+        {role.mayWrite && (
+          /* **Its own Save.** The map's Save writes the team and must not
+             write a profile — a map action that changed a profile would be
+             the model leaking. Two objects, two commits, two buttons. */
+          <button
+            onClick={save}
+            disabled={busy || !changed}
+            className="btn primary disabled:opacity-40"
+          >
+            {busy ? "Saving…" : "Save profile"}
+          </button>
         )}
       </div>
     </>

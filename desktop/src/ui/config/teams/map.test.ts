@@ -8,7 +8,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { AgentTeam, Position } from "~/api/generated/model";
-import { CH, CW, IND, layout, leadOf, depthOf, subtreeOf, treeOf } from "./layout";
+import { BRIEF_H, CH, CW, IND, layout, leadOf, depthOf, subtreeOf, treeOf } from "./layout";
 import { add, descendants, draftOf, markOf, pending, remove, reparent, tell, toWrite } from "./draft";
 
 const at = (over: Partial<Position> & { id: string }): Position => ({
@@ -107,7 +107,7 @@ describe("the layout", () => {
     expect(new Set(row.map((c) => c.h)).size).toBe(1);
     expect(new Set(row.map((c) => c.y + c.h)).size).toBe(1);
     // And the levelling takes the tallest rather than the first.
-    expect(row[0]!.h).toBe(CH + 16);
+    expect(row[0]!.h).toBe(CH + BRIEF_H);
   });
 
   it("leaves an indented stack to its own heights", () => {

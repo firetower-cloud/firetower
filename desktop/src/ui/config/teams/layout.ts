@@ -15,17 +15,23 @@
  */
 import type { AgentTeam, Position } from "~/api/generated/model";
 
-/** The card, and the space around it. The prototype's measurements. */
-export const CW = 176;
-export const CH = 34;
+/** The card, and the space around it. The prototype's measurements.
+ *
+ * **These grew.** The first cut drew a 176×34 card, which is the panel row's
+ * geometry — right for a list and wrong for a canvas, where a card is a thing
+ * you arrange rather than a line you read down. On a map there is no column
+ * to keep to, so the card is sized for the name it carries: 208×40, and a
+ * level of air between siblings that the eye can actually cross. */
+export const CW = 208;
+export const CH = 40;
 /** Gap between siblings that spread, across and down. */
-export const HG = 16;
-export const VG = 38;
+export const HG = 18;
+export const VG = 44;
 /** The canvas's own padding, so a card's controls are never against an edge. */
-export const PX = 22;
-export const PY = 30;
+export const PX = 28;
+export const PY = 34;
 /** One step of indent, below the level that stops spreading. */
-export const IND = 22;
+export const IND = 26;
 /**
  * Where spreading stops. The lead is depth 0, so the lead's own children are
  * drawn across under it with elbows, and everything from the grandchildren
@@ -34,7 +40,7 @@ export const IND = 22;
 export const SPREAD_TO = 2;
 
 /** A card that carries extra instructions is one line taller, and shows them. */
-export const BRIEF_H = 16;
+export const BRIEF_H = 17;
 
 /** A node of the drafted tree, before it has a position on the canvas. */
 export type Node = {
@@ -144,7 +150,7 @@ export function layout(root: Node | null): Laid {
       // Indented: the block is as wide as its widest child plus the step, and
       // as tall as the children stacked.
       const w = Math.max(CW, IND + Math.max(...kids.map((k) => k.w)));
-      const h = own + 10 + kids.reduce((s, k) => s + k.h + 8, 0) - 8;
+      const h = own + 12 + kids.reduce((s, k) => s + k.h + 9, 0) - 9;
       return { w, h, node, kids, indent: true };
     }
     const rw = kids.reduce((s, k) => s + k.w, 0) + (kids.length - 1) * HG;
@@ -165,11 +171,11 @@ export function layout(root: Node | null): Laid {
     const own = hOf(b.node);
     if (b.indent) {
       const self = card(b.node, x, y);
-      let yy = y + own + 10;
+      let yy = y + own + 12;
       for (const k of b.kids) {
         const child = place(k, x + IND, yy);
         links.push({ from: self, to: child, kind: "indent" });
-        yy += k.h + 8;
+        yy += k.h + 9;
       }
       return self;
     }
