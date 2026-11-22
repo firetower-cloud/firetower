@@ -69,7 +69,7 @@ import { canRun } from "~/components/WhereItRuns";
 import { useAgentControls } from "~/api/generated/agents/agents";
 import { getListRolesQueryKey } from "~/api/generated/roles/roles";
 import { useQueryClient } from "@tanstack/react-query";
-import { pinnedAccountFits, whatAChildGets } from "~/ui/config/Roles";
+import { pinnedAccountFits } from "~/ui/config/Roles";
 import type { Agent, Control, ControlKind, NewRole, Role } from "~/api/generated/model";
 
 /**
@@ -507,7 +507,7 @@ export function ProfileForm({
 
   return (
       <div className="form">
-        <Field label="Name" hint="What you start it as, and what a lead names to delegate to it — e.g. reviewer.">
+        <Field label="Name">
           <span className="box">
             <input
               value={draft.name}
@@ -519,7 +519,7 @@ export function ProfileForm({
 
         <Field
           label="Description"
-          hint="What it does and when to reach for it — the line a lead reads to decide whether to hand it work, like a skill's description. Name the trigger, and the case to skip it."
+          hint="What it does and when to use it"
         >
           <span className="box brief">
             <textarea
@@ -531,10 +531,7 @@ export function ProfileForm({
           </span>
         </Field>
 
-        <Group
-          label="Placement"
-          hint="Where a child runs when a lead delegates to it. Pin one and every spawn runs that way. Leave it open and the lead decides."
-        >
+        <Group label="Workspace">
           <Select
             ariaLabel="Placement"
             value={draft.placement ?? "lead"}
@@ -555,14 +552,7 @@ export function ProfileForm({
             to want: wherever the lead likes, but if it gets a workspace of its
             own it is on that machine. */}
         {draft.placement !== "here" && (
-          <Group
-            label="Machine"
-            hint={
-              draft.placement === "new"
-                ? "Which machine its own workspace runs on. Pin one and every spawn runs there. Leave it open and the lead decides."
-                : "Only reached if the lead gives it a workspace of its own — otherwise it runs wherever the lead does. Pin one, or leave it open and the lead decides."
-            }
-          >
+          <Group label="Machine">
             {machineRows.length > 0 ? (
               <>
                 {/* The engine's verdict rides in the option's own note —
@@ -626,10 +616,7 @@ export function ProfileForm({
           </Group>
         )}
 
-        <Group
-          label="Agent"
-          hint="Which engine it runs on. Pin one and every spawn uses it. Leave it open and the lead decides."
-        >
+        <Group label="Agent">
           {/* The open answer first, wearing the open mark — the order every
               field here repeats. */}
           <Select
@@ -657,7 +644,6 @@ export function ProfileForm({
         {controls.length > 0 && (
           <Group
             label="How it runs"
-            hint="Pin the model and run settings, or leave any on the engine's default. These override what you last used when a workspace starts as this profile."
           >
             <div className="flex flex-col gap-3">
               {controls.map((c) => {
@@ -696,10 +682,7 @@ export function ProfileForm({
             is nothing this field could hold: a visible picker here could only
             produce a refusal. It leaves, and the sentence below says why. */}
         {draft.agent !== null && (
-          <Group
-            label="Subscription"
-            hint="Which subscription its engine authenticates with when it runs."
-          >
+          <Group label="Subscription">
             {connected ? (
               <Select
                 ariaLabel="Subscription"
@@ -772,10 +755,7 @@ export function ProfileForm({
             latitude is not a value: "its lead may move it to another
             subscription" is as true of a child running whatever its lead runs
             as of one pinned to Claude Code. */}
-        <Group
-          label="If it reaches usage limit"
-          hint="What a lead may do about a child of this profile that has hit its usage limit. It is a grant, not a guarantee — the Manager has to be allowed too."
-        >
+        <Group label="If it reaches usage limit">
           {/* A ladder of three, so the order in the menu is the order of how
               much latitude each grants. */}
           <Select
@@ -806,11 +786,6 @@ export function ProfileForm({
           )}
         </Group>
 
-        {/* One sentence reading the three fields back as what a spawn gets.
-            The bug behind all of this is a lead reporting a build that never
-            happened; a form that says what a spawn will be is the cheapest
-            guard there is. */}
-        <WhereTo>{whatAChildGets(draft, machineRows)}</WhereTo>
 
         {/* **No delegation controls, and that is the change.** Who hands work
             to whom is a team — `/configuration/agent-teams` — so a profile
@@ -850,10 +825,7 @@ export function ProfileForm({
             have nowhere to answer this. Meaningless where it leads nothing,
             and that costs one row; hiding it behind a flag that no longer
             exists would cost the answer. */}
-        <Group
-          label="When a child runs out"
-          hint="Where this profile leads a team: whether it re-routes a spent child on its own, or stops and asks you which subscription to use."
-        >
+        <Group label="When a child reaches usage limit">
           <Select
             ariaLabel="When a child runs out"
             value={draft.onChildLimit ?? "ask"}
@@ -865,11 +837,6 @@ export function ProfileForm({
             }))}
             onChange={(v) => set("onChildLimit", v ?? "ask")}
           />
-          <WhereTo className="aside">
-            <b>Both have to agree.</b> A lead set to <i>Re-route it</i> still cannot move a child
-            whose own profile says <i>Wait for human action</i> — the profile grants the latitude
-            and this decides whether the lead uses it.
-          </WhereTo>
         </Group>
 
         <SkillSources r={skills} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
@@ -878,7 +845,7 @@ export function ProfileForm({
             door to a room big enough for one. The box stays live and stays
             the source of truth — the editor writes through to the same
             string, so there is nothing to commit and nothing to lose. */}
-        <Field label="Instructions" hint="Composed into its prompt. Markdown; the agent reads all of it.">
+        <Field label="Instructions">
           <BigText
             title="Instructions"
             value={draft.instructions ?? ""}
@@ -890,7 +857,7 @@ export function ProfileForm({
 
         {existing ? (
           <>
-            <Field label="Who can use it" hint="A profile in a directory can be used by anyone who can reach it.">
+            <Field label="Who can use it">
               <WhoCanAccess kind="role" id={state.id!} path={state.path} look="chip" />
             </Field>
             <Field
