@@ -7436,4 +7436,184 @@ html:not([data-platform="macos"]) {
       padding: 14px 16px;
     }
   }
+@layer components {
+  /* ── The plugin library ─────────────────────────────────────────
+     Two shapes on one screen, and the shift between them is the signal
+     that you have crossed from what you manage into what you are
+     browsing. `Yours` reuses `.r` above; this is the shelf.
+
+     **Neither draws a box.** A cell fills on hover and its control
+     lifts, which is this system's way of expressing elevation — a
+     rounded card around every object flattens the hierarchy it was
+     supposed to express. */
+  .pgrid {
+    margin: 10px -14px 0;
+    width: calc(100% + 28px);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 8px 16px;
+  }
+  .pcard {
+    display: flex;
+    flex-direction: column;
+    padding: 13px 14px 14px;
+    border-radius: 13px;
+    text-align: left;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .pcard:hover {
+    background: var(--color-raise);
+  }
+  .pcard .top {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    min-width: 0;
+  }
+  /* Held at a fixed height whether or not there is a second line, so every
+     description in a row still starts on the same baseline. */
+  .pcard .nm {
+    min-width: 0;
+    flex: 1;
+    height: 34px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .pcard .nm b {
+    display: block;
+    font-size: var(--text-title);
+    font-weight: 500;
+    color: var(--color-bone);
+    letter-spacing: -0.005em;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  /* Two lines, clamped, with the box holding its height — a one-line
+     description must not raise the footer above its neighbour's. */
+  .pcard .desc {
+    margin-top: 8px;
+    font-size: var(--text-ui);
+    line-height: 1.5;
+    color: var(--color-dim);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    min-height: 42px;
+  }
+  .pcard .foot {
+    margin-top: 11px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+  }
+  .pcard .chip3 {
+    flex: none;
+    padding: 3px 9px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+    white-space: nowrap;
+  }
+  .pcard:hover .chip3,
+  .pcard:hover .plg {
+    background: var(--color-overlay);
+  }
+  /* Present at rest so a shelf never reads as inert, and filled only once
+     the pointer is on the cell it belongs to — twenty filled pills is a
+     toolbar, not a library. */
+  .pcard .add {
+    margin-left: auto;
+    flex: none;
+    height: 28px;
+    padding: 0 11px;
+    border-radius: 99px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .pcard:hover .add {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .pcard .add[disabled] {
+    opacity: 0.5;
+  }
+
+  /* A plugin's mark. A monogram is the fallback where a bundle ships no
+     logo of its own, which until a marketplace lands is all of them. */
+  .plg {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    background: var(--color-raise);
+    color: var(--color-dim);
+    font-family: var(--font-narrow);
+    font-size: var(--text-meta);
+    font-weight: 530;
+    letter-spacing: 0.02em;
+  }
+  .r:hover .plg {
+    background: var(--color-overlay);
+  }
+
+  /* On, and off, in the same box — so the column does not move when one
+     row is on and the next is not. */
+  .on {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 11px 0 9px;
+    border-radius: 99px;
+    font-size: var(--text-ui);
+    color: var(--color-text);
+    flex: none;
+    white-space: nowrap;
+    background: var(--color-raise);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .r:hover .on {
+    background: var(--color-overlay);
+  }
+  .on[disabled] {
+    opacity: 0.5;
+  }
+  .on.off {
+    background: transparent;
+    color: var(--color-mute);
+  }
+
+  /* The search field on a library's header. */
+  .srch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: var(--control);
+    padding: 0 13px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    min-width: 230px;
+  }
+  .srch input {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-ui);
+    background: transparent;
+    border: 0;
+    outline: none;
+    color: var(--color-text);
+  }
 }

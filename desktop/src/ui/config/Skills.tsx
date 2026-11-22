@@ -53,7 +53,15 @@ export function Skills({ open: asked = null }: { open?: string | null }) {
      only readable while the event is being handled, so the read starts here
      and the promise is handed on. */
   const seed = useRef<ReturnType<typeof readDrop> | null>(null);
-  const feed = useSkills();
+  const all = useSkills();
+  /* **Plugins have their own pane and must not appear in both.** One library
+     call answers for every bundle — a plugin is a row in the same table — so
+     the split is here rather than in a second endpoint. See `config/Plugins`,
+     where the other half is drawn with a shelf under it. */
+  const feed = useMemo(
+    () => ({ ...all, data: all.data.filter((s) => s.kind !== "plugin") }),
+    [all],
+  );
   const cache = useQueryClient();
   const confirm = useConfirm();
   const start = useStart();

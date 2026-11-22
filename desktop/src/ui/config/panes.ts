@@ -54,6 +54,11 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
       // *people* and is in the Access group below.
       { at: "agent-teams", label: "Agent teams" },
       { at: "skills", label: "Skills" },
+      // A plugin is a bundle that may hold several components — skills, a
+      // connector, commands. Its own pane rather than a filter on Skills:
+      // the two lists answer different questions and one of them has a
+      // shelf in it.
+      { at: "plugins", label: "Plugins" },
     ],
   },
   {

@@ -492,15 +492,24 @@ function Place({ place, places, every, on }: { place: Workspace; places: Workspa
 function Customize() {
   const path = usePathname();
   const skills = useSkills();
+  /* The quick list under Skills is skills. A plugin lands under Plugins, and
+     a name appearing in both columns is the thing that makes somebody think
+     there are two of it. */
+  const lone = skills.data.filter((s) => s.kind !== "plugin");
   return (
     <>
       <Row label="Skills" icon={Puzzle} on={pane(path) === "skills"} to="/configuration/skills" />
+      {/* A plugin is a bundle that may hold several components — skills, a
+          connector, commands — so it is its own destination rather than a
+          filter on Skills: the two lists answer different questions, and one
+          of them has a shelf in it. */}
+      <Row label="Plugins" icon={Blocks} on={pane(path) === "plugins"} to="/configuration/plugins" />
       <Row label="Agent profiles" icon={UsersRound} on={pane(path) === "roles"} to="/configuration/roles" />
       {/* Directly after Agent profiles: a profile is what an agent is, and a
           team is where it sits and who is under it. */}
       <Row label="Agent teams" icon={Network} on={pane(path) === "agent-teams"} to="/configuration/agent-teams" />
       <Row label="Agents" icon={Blocks} on={pane(path) === "agents"} to="/configuration/agents" />
-      {skills.data.length > 0 && (
+      {lone.length > 0 && (
         <>
           <Label>Your skills</Label>
           {/* **Not monospace, and no monogram tile.** A skill's name is read
@@ -508,7 +517,7 @@ function Customize() {
               handoff now gives for the mono voice. The six tiles that used to
               sit here decoded to nothing (`it` for incident-timeline); a 17px
               spacer keeps the column aligned with the rows above. */}
-          {skills.data.slice(0, 8).map((s) => (
+          {lone.slice(0, 8).map((s) => (
             <button key={s.id} onClick={() => navigate(`/configuration/skills/${s.id}`)} className="prow">
               <span className="w-[17px] shrink-0" />
               <span className="lbl">{s.name}</span>
