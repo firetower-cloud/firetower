@@ -744,9 +744,7 @@ function NewProfile({
         </div>
 
         <div className="sh-foot">
-          <span className="where">
-            {open ? "" : "Advanced can be set later on Agent profiles."}
-          </span>
+          <span className="where" />
           <button onClick={onClose} className="btn quiet">
             Cancel
           </button>

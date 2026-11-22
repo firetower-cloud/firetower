@@ -6759,16 +6759,12 @@ html:not([data-platform="macos"]) {
   .oc:hover {
     background: var(--color-overlay);
   }
-  /* **The lead is heavier, not coloured.** Colour is spent; a thing that is
-     different in kind is identified by weight and position. */
-  .oc[data-lead="true"] {
-    background: var(--color-overlay);
-    outline-color: var(--color-line);
-  }
-  [data-theme="light"] .oc[data-lead="true"] {
-    background: var(--color-panel);
-    box-shadow: var(--shadow-raise);
-  }
+  /* **The lead is not drawn differently at all.** It was the sheet's white
+     with a lift under it, on the reasoning that a thing different in kind
+     should read as one. But every card here is the same kind of thing — a
+     profile standing in a position — and the lead is already the one at the
+     top of the tree with nothing above it and no control to remove it. A
+     second signal for a fact the drawing already states is noise. */
   .oc[data-on="true"] {
     outline: 1.5px solid var(--color-bone);
   }
@@ -6838,7 +6834,6 @@ html:not([data-platform="macos"]) {
   [data-theme="light"] .oc .cnt {
     background: var(--color-overlay);
   }
-  [data-theme="light"] .oc[data-lead="true"] .cnt,
   [data-theme="light"] .oc[data-on="true"] .cnt {
     background: var(--color-raise);
   }
