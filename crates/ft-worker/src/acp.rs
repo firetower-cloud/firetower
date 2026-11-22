@@ -357,6 +357,21 @@ where
     // RPC starts a browser login; that belongs only to AgentLoginStart.
     let can_load = init["agentCapabilities"]["loadSession"] == true;
     let cwd = workspace.canonicalize()?.to_string_lossy().into_owned();
+    // The connectors this session's plugins declare. Kimi and Cursor have no
+    // plugin concept and no `mcp` subcommand, so `session/new` is the only
+    // way a server reaches them — this field was `[]` here from the day it
+    // was written, which is exactly as far as a connector got on either.
+    //
+    // Read off the disk rather than carried, so the one place a server is
+    // written down is the file an agent that *could* read it would have read.
+    let servers = crate::plugins::acp_mcp_servers(
+        workspace,
+        &ft_core::SessionId::from_stored(session),
+    )
+    .await;
+    if !servers.is_empty() {
+        tracing::info!(count = servers.len(), "handing ACP its MCP servers");
+    }
     let mut loaded = false;
     if let Some(saved) = &previous {
         if can_load {
@@ -367,7 +382,7 @@ where
                 rpc(
                     2,
                     "session/load",
-                    json!({"sessionId":saved.session, "cwd":cwd, "mcpServers":[]}),
+                    json!({"sessionId":saved.session, "cwd":cwd, "mcpServers":servers}),
                 ),
                 true,
             )
@@ -400,7 +415,7 @@ where
             stdin,
             stdout,
             out,
-            rpc(3, "session/new", json!({"cwd":cwd, "mcpServers":[]})),
+            rpc(3, "session/new", json!({"cwd":cwd, "mcpServers":servers})),
             false,
         )
         .await?;
