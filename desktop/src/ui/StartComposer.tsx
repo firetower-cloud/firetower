@@ -1269,7 +1269,11 @@ export function ProfileMenu({
           is not visible anywhere else on the screen — the chip shows a name,
           and a name says nothing about how many agents a send will start. */}
       <div className="pkfoot">
-        <p>{consequence(profiles, teams, profileId, teamId)}</p>
+        {/* Empty when nothing is picked: `consequence` is about a choice, and
+            before one is made there is no consequence to state. */}
+        {consequence(profiles, teams, profileId, teamId) && (
+          <p>{consequence(profiles, teams, profileId, teamId)}</p>
+        )}
         {profiles.length === 0 && (
           <button
             onClick={() => navigate("/configuration/roles")}
@@ -1313,5 +1317,9 @@ export function consequence(
   if (profiles.length === 0 && teams.length === 0) {
     return "You can create agent profiles to divide your work across teams of agents (e.g. a designer, an engineer, a security advisor, a QA, etc.)";
   }
-  return "A profile is one agent. A team is a lead with others under it, and picking one starts that lead.";
+  /* **Nothing when nothing is chosen.** The line used to explain what a
+     profile and a team are, to somebody who is looking at a list of their
+     own profiles and teams and has not picked one yet. The other branches
+     all say something about a *choice*; this one had nothing to say. */
+  return "";
 }

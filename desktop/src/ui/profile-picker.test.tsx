@@ -125,6 +125,13 @@ describe("what the footer says will happen", () => {
 
   it("tells somebody with nothing yet what these are for, and offers the way in", () => {
     expect(consequence([], [], null, null)).toContain("divide your work across teams of agents");
+  });
+
+  it("says nothing at all when there is a choice and none is made", () => {
+    // The line is about a consequence. Before anything is picked there is
+    // none, and explaining what a profile and a team *are* to somebody
+    // looking at a list of their own is furniture.
+    expect(consequence([ada], [product], null, null)).toBe("");
     expect(draw([])).toContain("Create a profile");
   });
 

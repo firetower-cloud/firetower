@@ -1614,7 +1614,7 @@ pub(super) async fn persona_for(
     the first line of its extra instructions, and is exactly what `spawn`
     takes back as `role`. */
     if let Some((team, here)) = standing {
-        let under = team.children_of(&here.id);
+
         text.push('\n');
         text.push_str(ft_core::DELEGATION_GUIDANCE);
         text.push_str(match profile.on_child_limit.as_str() {
@@ -1632,43 +1632,11 @@ pub(super) async fn persona_for(
                  description. Then `switch` the child onto the one they pick."
             }
         });
-        if under.is_empty() {
-            text.push_str(&format!(
-                "\n\nNothing sits under you in the {} team, so there is nobody to hand to — do \
-                 the work yourself, or describe any one-off work in `goal`.",
-                team.name
-            ));
-        } else {
-            text.push_str(&format!(
-                "\n\nYou lead the {} team from here. The positions directly under you — pass \
-                 the name as `role`, exactly as it is written:\n",
-                team.name
-            ));
-            for p in &under {
-                let repeated = under
-                    .iter()
-                    .filter(|q| q.name.eq_ignore_ascii_case(&p.name))
-                    .count()
-                    > 1;
-                if p.redacted {
-                    text.push_str("- a position on a profile you cannot see\n");
-                    continue;
-                }
-                let role = state.roles.unscoped(&p.profile).await?;
-                text.push_str(&format!(
-                    "- **{}** — {}{}{}\n",
-                    crate::delegate::position_label(p, repeated),
-                    p.does,
-                    role.as_ref()
-                        .map(crate::delegate::left_open)
-                        .unwrap_or_default(),
-                    match team.children_of(&p.id).len() {
-                        0 => String::new(),
-                        n => format!(" It leads {n} of its own."),
-                    },
-                ));
-            }
-        }
+        /* **The same sentence a child gets.** `delegate::reports_of` writes
+           it for both, because a lead and a position three levels down are
+           the same situation — somebody standing somewhere with things under
+           them — and when they were two texts only this one existed. */
+        text.push_str(&crate::delegate::reports_of(state, team, here, true).await?);
     } else if profile.can_delegate {
         /* ── the compatibility window ───────────────────────────────────
         Deprecated, read here and written nowhere. A profile that still

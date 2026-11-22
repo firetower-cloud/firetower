@@ -146,7 +146,10 @@ Returns the child's id and name at once; the child takes its own time. \
 Its result arrives in THIS conversation as a message when it hands back — \
 between your turns, never inside one — so dispatch, do what does not depend \
 on it, then end your turn with a one-line status. \
-A child cannot spawn, cannot ask the person, and cannot message or schedule. \
+A child can hand work on in turn, to whatever sits under *its* position in the \
+team — its own prompt names them if there are any, and a session with nothing \
+under it has nobody to hand to. A child cannot ask the person, and cannot \
+message or schedule. \
 A question it has comes to you as a message; a command it needs permission \
 for goes to the person. There is no cap on how many you start or how many run \
 at once — dispatch what the work actually needs, and no more, since each one \

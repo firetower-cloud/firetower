@@ -923,12 +923,20 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     }
     let name = text(&request.input, "name").or_else(|| role.as_ref().map(|r| r.name.clone()));
     let reason = text(&request.input, "reason").or_else(|| role.as_ref().map(|r| r.does.clone()));
+    /* What the child itself will lead. Read from the child's position, not
+       the lead's — this is the line that makes a team as deep as it was
+       drawn rather than one level. */
+    let reports = match (&position, &standing) {
+        (Some(position), Some((team, _))) => reports_of(state, team, position, false).await?,
+        _ => String::new(),
+    };
     let prompt = brief(
         &lead,
         &goal,
         text(&request.input, "context").as_deref(),
         role.as_ref(),
         position.as_ref(),
+        &reports,
     );
 
     // Built the way the API builds one, so every default and every check that
@@ -1309,6 +1317,71 @@ fn offering(reach: &Reach) -> String {
     format!("Subagents you can use: {}.", names.join(", "))
 }
 
+
+/// Who a session standing at this position may hand work to, as a prompt
+/// says it.
+///
+/// **One description, two readers.** A lead started by a person reads this in
+/// its persona; a child started by [`spawn`] reads it in its brief. They were
+/// two texts and only the first existed — so a position three levels down
+/// could delegate in the code and was never told it could, and the `spawn`
+/// tool's own description said flatly that a child cannot spawn. A team drawn
+/// three deep worked everywhere except in the one place that decides what an
+/// agent does.
+///
+/// Returns the empty string when nothing sits under the position *and* the
+/// caller is a child: a child with no reports does not need to be told about
+/// delegation at all, and a lead does, because a lead with an empty team is a
+/// thing somebody should fix.
+pub(crate) async fn reports_of(
+    state: &AppState,
+    team: &crate::agent_teams::AgentTeam,
+    here: &crate::agent_teams::Position,
+    // Whether to say so when there is nobody. A lead is told; a child is not.
+    say_when_empty: bool,
+) -> Result<String> {
+    let under = team.children_of(&here.id);
+    if under.is_empty() {
+        return Ok(match say_when_empty {
+            false => String::new(),
+            true => format!(
+                "\n\nNothing sits under you in the {} team, so there is nobody to hand to — do \
+                 the work yourself, or describe any one-off work in `goal`.",
+                team.name
+            ),
+        });
+    }
+
+    let mut text = format!(
+        "\n\nYou lead part of the {} team from here. The positions directly under you — pass \
+         the name as `role`, exactly as it is written:\n",
+        team.name
+    );
+    for p in &under {
+        let repeated = under
+            .iter()
+            .filter(|q| q.name.eq_ignore_ascii_case(&p.name))
+            .count()
+            > 1;
+        if p.redacted {
+            text.push_str("- a position on a profile you cannot see\n");
+            continue;
+        }
+        let role = state.roles.unscoped(&p.profile).await?;
+        text.push_str(&format!(
+            "- **{}** — {}{}{}\n",
+            position_label(p, repeated),
+            p.does,
+            role.as_ref().map(left_open).unwrap_or_default(),
+            match team.children_of(&p.id).len() {
+                0 => String::new(),
+                n => format!(" It leads {n} of its own."),
+            },
+        ));
+    }
+    Ok(text)
+}
+
 /// What the child is first told.
 ///
 /// The goal as the task, the context beneath it, the role it is acting as if
@@ -1321,6 +1394,9 @@ fn brief(
     context: Option<&str>,
     role: Option<&crate::roles::Role>,
     position: Option<&crate::agent_teams::Position>,
+    // Who sits under the child's own position, from `reports_of`. Empty when
+    // nothing does.
+    reports: &str,
 ) -> String {
     let mut text = format!("Task: {goal}");
     if let Some(context) = context {
@@ -1351,12 +1427,30 @@ fn brief(
         }
     }
 
+    /* **A child is told what it leads, if it leads anything.** Depth was
+    always in the data — a child inherits the position it was spawned into,
+    and `reach_of` reads that position's children — but nothing said so in
+    the prompt, so the only children that ever delegated were the ones whose
+    extra instructions happened to mention it. */
+    if !reports.is_empty() {
+        text.push('\n');
+        text.push_str(ft_core::DELEGATION_GUIDANCE);
+        text.push_str(reports);
+    }
+
     text.push_str(&format!(
         "\n\nYou were started by another agent — the session \"{}\" — to do this part of its \
          work. It will read what you say when you finish. End with a short summary of what you \
-         did, what you found, and anything it should look at. You cannot ask the person \
+         did, what you found, and anything it should look at.{} You cannot ask the person \
          questions: if something is unclear, say what you assumed and carry on.",
-        lead.name
+        lead.name,
+        match reports.is_empty() {
+            true => "",
+            // Said here because it is the one thing a middle of a tree gets
+            // wrong: it handed back before its own children had answered.
+            false => " If you hand work to the agents under you, wait for them to report before \
+                      you finish — handing back first loses their answers.",
+        }
     ));
     text.push_str(
         "\n\nWhile you work you may post a short progress note to it with `update` — at a real \
@@ -3755,6 +3849,7 @@ mod tests {
             Some("Use the token bucket in api/."),
             None,
             None,
+            "",
         );
         assert!(text.starts_with("Task: Add a limiter"));
         assert!(text.contains("Context:\nUse the token bucket"));
@@ -3792,7 +3887,7 @@ mod tests {
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
-        let text = brief(&lead, "Review it", None, Some(&role), None);
+        let text = brief(&lead, "Review it", None, Some(&role), None, "");
         assert!(text.contains("acting as the \"reviewer\" subagent"));
         assert!(text.contains("reads a branch and reports problems"));
         assert!(text.contains("Report findings as path:line."));
@@ -4845,6 +4940,88 @@ mod tests {
             .expect_err("her own draft is still waiting on her")
         );
         assert!(why.contains("approve or discard"), "{why}");
+    }
+
+    // ── depth ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn a_child_in_the_middle_of_a_tree_is_told_what_it_leads() {
+        /* **Reported from a real run.** A team three deep: the lead spawned
+           Engineer, QA and Designer; Engineer spawned two advisors and the
+           other two reported back that "a child session can't spawn".
+
+           Nothing was wrong with the rules — a child inherits the position
+           it was spawned into and `reach_of` reads that position's children.
+           What was wrong is that nothing *said* so: only a lead's persona
+           listed its reports, so the only children that ever delegated were
+           the ones whose extra instructions happened to mention it, and the
+           `spawn` tool's own description told the rest they could not. */
+        let (state, db, admin) = library().await;
+        let (host, lead) = lead_for(&db, &admin).await;
+
+        for (name, does) in [
+            ("Boss", "Leads."),
+            ("Engineer", "Builds."),
+            ("Advisor", "Advises."),
+        ] {
+            handle(
+                &state,
+                &call(
+                    host.clone(),
+                    &lead,
+                    "create_profile",
+                    json!({ "name": name, "does": does }),
+                ),
+            )
+            .await
+            .unwrap();
+        }
+        handle(
+            &state,
+            &call(
+                host.clone(),
+                &lead,
+                "create_team",
+                json!({
+                    "name": "Deep",
+                    "lead": "Boss",
+                    "members": [
+                        { "profile": "Engineer" },
+                        { "profile": "Advisor", "under": "Engineer" },
+                    ],
+                }),
+            ),
+        )
+        .await
+        .unwrap();
+
+        let team = state
+            .agent_teams
+            .visible(&admin, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|t| t.name == "Deep")
+            .expect("the team");
+        let engineer = team
+            .positions
+            .iter()
+            .find(|p| p.name == "Engineer")
+            .expect("the middle position");
+
+        // The middle of the tree is told, in the words a lead is told in.
+        let said = reports_of(&state, &team, engineer, false).await.unwrap();
+        assert!(said.contains("Advisor"), "{said}");
+        assert!(said.contains("pass \nthe name as `role`") || said.contains("`role`"), "{said}");
+
+        // And a leaf is told nothing rather than told it cannot.
+        let advisor = team.positions.iter().find(|p| p.name == "Advisor").unwrap();
+        assert_eq!(reports_of(&state, &team, advisor, false).await.unwrap(), "");
+        // A *lead* with nothing under it is told, because that is worth fixing.
+        assert!(reports_of(&state, &team, advisor, true)
+            .await
+            .unwrap()
+            .contains("Nothing sits under you"));
     }
 
     // ── asking is not doing ────────────────────────────────────────────

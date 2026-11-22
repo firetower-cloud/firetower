@@ -43,6 +43,20 @@ reads back.
 
 ## What decides whether a `spawn` is refused
 
+**Depth is a property of the team, not a limit in the code.** A child is
+started standing on the position it was spawned into, and `reach_of` reads
+that position's children — so a team drawn three deep delegates three deep.
+
+That was true before anything said it, which is how it was reported: a team
+of three levels where the middle positions answered "a child session can't
+spawn". Nothing was wrong with the rules. The `spawn` tool's description said
+a child cannot spawn, and only a *lead's* persona ever listed its reports —
+so the only children that delegated were the ones whose extra instructions
+happened to mention it. `delegate::reports_of` writes that list once now, for
+a lead's persona and a child's brief alike, and a child that leads anything is
+also told to wait for its own children before handing back.
+
+
 The children of the position the session occupies. Nothing else.
 
 `sessions.position_id` says where a session stands. A child is started standing
