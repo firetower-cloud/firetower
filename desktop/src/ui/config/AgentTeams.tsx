@@ -65,10 +65,13 @@ import { useAgentTeams, useAgents, teamsUsing, why } from "~/data";
 import {
   createRole,
   getListRolesQueryKey,
+  setDefaultRole,
   updateRole,
   useListRoles,
 } from "~/api/generated/roles/roles";
-import type { Agent, AgentTeam, Position, Role } from "~/api/generated/model";
+import { ProfileForm } from "~/ui/config/profile/ProfileForm";
+import { toDraft } from "~/ui/config/Roles";
+import type { Agent, AgentTeam, NewRole, Position, Role } from "~/api/generated/model";
 import {
   CW,
   IND,
@@ -1551,17 +1554,19 @@ function Drawer({
 }
 
 /**
- * The profile under this position, edited where it is read.
+ * The profile under this position — **the same form the page renders.**
  *
- * **It says what it reaches before it is changed, not after.** Editing here
- * changes the profile in every team that holds it, and the other teams are
- * not on this screen — so the band names them. That is the one consequence a
- * person cannot see from the card they pressed.
+ * It was three fields and a *Full editor* button that sent you to
+ * `/configuration/roles/<id>` for the other nine. A panel that has to send
+ * you somewhere else for most of what you came for is a panel missing the
+ * thing you came for, and two forms over one object are two designs that
+ * agree until one of them changes. So this renders `ProfileForm`, which the
+ * page renders too, and the button is gone because there is nowhere left to
+ * send anybody.
  *
- * The three fields a profile cannot be without are here; the rest — the
- * engine, the machine, the skills, the limits — stay on the profile editor,
- * where there is room to explain them, and its foot is the door to it. Not a
- * second copy of a form that is already long.
+ * What this surface owns is the commit: a drawer saves and **stays**, where
+ * the page saves and closes. The map is still behind it and the position you
+ * pressed is still the subject.
  */
 function ProfileTab({
   profile,
@@ -1574,18 +1579,19 @@ function ProfileTab({
 }) {
   const roles = useListRoles();
   const role = (roles.data ?? []).find((r) => r.id === profile);
-  const [draft, setDraft] = useState<{ name: string; does: string; instructions: string } | null>(
-    null,
-  );
+  const [draft, setDraft] = useState<NewRole | null>(null);
   const [busy, setBusy] = useState(false);
   const [trouble, setTrouble] = useState<string | null>(null);
+  const [isDefault, setIsDefault] = useState(false);
+  const [defaulting, setDefaulting] = useState(false);
   const cache = useQueryClient();
 
   // Re-read when the profile arrives, or when another screen changed it —
   // but never over an edit in progress.
   useEffect(() => {
     if (role && !draft) {
-      setDraft({ name: role.name, does: role.does, instructions: role.instructions });
+      setDraft(toDraft(role));
+      setIsDefault(role.isDefault ?? false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [role?.id]);
@@ -1598,30 +1604,28 @@ function ProfileTab({
     );
   }
 
-  const changed =
-    draft.name !== role.name ||
-    draft.does !== role.does ||
-    draft.instructions !== role.instructions;
+  const changed = JSON.stringify(draft) !== JSON.stringify(toDraft(role));
+
+  const toggleDefault = async () => {
+    const next = !isDefault;
+    setDefaulting(true);
+    setTrouble(null);
+    try {
+      await setDefaultRole(role.id, { on: next });
+      setIsDefault(next);
+      await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+    } catch (e) {
+      setTrouble(why(e));
+    } finally {
+      setDefaulting(false);
+    }
+  };
 
   const save = async () => {
     setBusy(true);
     setTrouble(null);
     try {
-      await updateRole(role.id, {
-        name: draft.name,
-        does: draft.does,
-        instructions: draft.instructions,
-        placement: role.placement,
-        agent: role.agent,
-        machine: role.machine,
-        account: role.account,
-        settings: role.settings,
-        onUsageLimit: role.onUsageLimit,
-        onChildLimit: role.onChildLimit,
-        includeAlwaysOn: role.includeAlwaysOn,
-        includeRepoDefaults: role.includeRepoDefaults,
-        skillScope: role.skillScope ?? [],
-      });
+      await updateRole(role.id, { ...draft, agent: draft.agent || null });
       await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
       await cache.invalidateQueries({ queryKey: getListAgentTeamsQueryKey() });
     } catch (e) {
@@ -1636,69 +1640,16 @@ function ProfileTab({
   return (
     <>
       <div className="dbody scroll-slim">
-        <div className="form">
-          <label className="fld">
-            <span>Name</span>
-            <span className="hint">What you start it as, and what a lead names to hand to it.</span>
-            <span className="box">
-              <input
-                value={draft.name}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                disabled={!role.mayWrite}
-                placeholder="Reviewer"
-              />
-            </span>
-          </label>
-
-          <label className="fld">
-            <span>What it does</span>
-            <span className="hint">
-              What it does and when to reach for it — the line a lead reads to decide whether to
-              hand it work.
-            </span>
-            <span className="box brief">
-              <textarea
-                value={draft.does}
-                onChange={(e) => setDraft({ ...draft, does: e.target.value })}
-                rows={2}
-                disabled={!role.mayWrite}
-                placeholder="Reads a finished branch and reports problems as file:line."
-              />
-            </span>
-          </label>
-
-          <label className="fld">
-            <span>Instructions</span>
-            <span className="hint">
-              Composed into its prompt, in every team. Markdown; the agent reads all of it.
-            </span>
-            <span className="box mono">
-              <textarea
-                value={draft.instructions}
-                onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
-                rows={8}
-                disabled={!role.mayWrite}
-              />
-            </span>
-          </label>
-
-          {trouble && <p className="bad">{trouble}</p>}
-
-          {team.mayShare && (
-            <div className="fld">
-              <span>Who can see this team</span>
-              <span>
-                <WhoCanAccess
-                  kind="agentTeam"
-                  id={team.id}
-                  path={team.path}
-                  look="chip"
-                  label="Sharing"
-                />
-              </span>
-            </div>
-          )}
-        </div>
+        <ProfileForm
+          draft={draft}
+          setDraft={setDraft as React.Dispatch<React.SetStateAction<NewRole>>}
+          role={role}
+          state={{ id: role.id, path: role.placement }}
+          isDefault={isDefault}
+          defaulting={defaulting}
+          onToggleDefault={toggleDefault}
+        />
+        {trouble && <p className="bad px-0">{trouble}</p>}
       </div>
 
       <div className="sh-foot">
@@ -1709,16 +1660,6 @@ function ProfileTab({
               ? `Changes it in ${others.join(", ")} too.`
               : "Changes every team."}
         </span>
-        {/* **The door to the rest of it**, rather than a second copy of a
-            form that is already long. The engine, the machine, the skills
-            and the limits are all there. */}
-        <button
-          type="button"
-          onClick={() => navigate(`/configuration/roles/${role.id}`)}
-          className="btn quiet"
-        >
-          Full editor
-        </button>
         {role.mayWrite && (
           /* **Its own Save.** The map's Save writes the team and must not
              write a profile — a map action that changed a profile would be

@@ -7174,6 +7174,155 @@ html:not([data-platform="macos"]) {
     color: var(--color-mute);
   }
 
+  /* The page's wrapper around the shared form: it owns the width, and the
+     foot that follows the form is its own. */
+  .pf {
+    display: contents;
+  }
+
+  /* ── A field with a door, and the room behind it ─────────────────
+     Instructions is Markdown composed into an agent's prompt, and it is
+     routinely longer than the rows a form can spare — in a 392px drawer it
+     is a window onto a document rather than a place to write one. */
+  .fld .box.bigtext {
+    position: relative;
+    align-items: stretch;
+    padding-bottom: 34px;
+  }
+  /* The grip goes off: a field that is resizable *and* has a full-screen
+     door has two answers to one question, and they disagree. */
+  .fld .box.bigtext textarea {
+    resize: none;
+  }
+  /* Inside the box rather than beside it — it is about this text, and a
+     control an inch from what it acts on is a control you have to aim. */
+  .bigopen {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 7px;
+    background: var(--color-overlay);
+    font-size: var(--text-micro);
+    color: var(--color-dim);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .bigopen:hover {
+    background: var(--color-line);
+    color: var(--color-bone);
+  }
+  [data-theme="light"] .bigopen {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* **The room.** Over everything, including the drawer it may have been
+     opened from — it is the same field at the size the text deserves, so
+     nothing it covers is anything you need while you are in it. Below the
+     title bar for the same reason the drawer is: the window's own controls
+     are at the top right on two of the three platforms. */
+  .bigroom {
+    position: fixed;
+    top: var(--chrome-title);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-panel);
+    animation: bigroom-in var(--dur-native) var(--ease-swift);
+  }
+  @keyframes bigroom-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bigroom {
+      animation: none;
+    }
+  }
+  .bighead {
+    display: flex;
+    justify-content: center;
+    flex: none;
+    padding: 18px 28px 14px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  /* The measure every row of this room keeps. */
+  .bighead .in,
+  .bigfoot .in {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 90ch;
+  }
+  .bighead .in {
+    align-items: flex-start;
+  }
+  .bighead .tx {
+    flex: 1;
+    min-width: 0;
+  }
+  .bighead .nm {
+    display: block;
+    font-size: 1.1875rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.014em;
+    color: var(--color-bone);
+  }
+  .bighead .where {
+    display: block;
+    margin-top: 3px;
+    font-size: 0.84375rem;
+    color: var(--color-mute);
+  }
+  /* One measure, centred: a prompt read at the window's full width is a
+     line nobody can track back the start of. */
+  .bigbody {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+    padding: 20px 28px;
+  }
+  .bigbody textarea {
+    width: 100%;
+    max-width: 90ch;
+    height: 100%;
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    line-height: 1.75;
+    color: var(--color-bone);
+    resize: none;
+    outline: none;
+  }
+  .bigbody textarea::placeholder {
+    color: var(--color-mute);
+  }
+  .bigfoot {
+    display: flex;
+    justify-content: center;
+    flex: none;
+    padding: 12px 28px 16px;
+    border-top: 1px solid var(--color-line);
+  }
+  .bigfoot .where {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.8125rem;
+    color: var(--color-mute);
+  }
+
   /* A refusal in a form, where there is no one field to hang it on.
      `.fld .bad` is the same sentence against a field that caused it. */
   .form > .bad {
