@@ -83,12 +83,10 @@ import {
 } from "~/ui/config/teams/layout";
 import {
   add,
-  descendants,
   draftOf,
   markOf,
   pending,
   remove,
-  reparent,
   tell,
   toWrite,
   type Change,
@@ -1229,22 +1227,8 @@ function Map({ team }: { team: AgentTeam }) {
           <Drawer
             team={team}
             position={chosen}
-            kids={draft.positions.filter((p) => p.parent === chosen.id)}
-            /* **The one it reports to is in this list, and pressed.** It was
-               filtered out as "nowhere to move to", which left a field
-               labelled *Reports to* showing three names with none chosen —
-               a picker that cannot answer its own label. Only the two that
-               are not a tree are excluded: itself, and anything beneath
-               it. */
-            elsewhere={draft.positions.filter(
-              (p) =>
-                p.id !== chosen.id &&
-                !descendants(draft.positions, chosen.id).some((x) => x.id === p.id),
-            )}
-            parentName={draft.positions.find((p) => p.id === chosen.parent)?.name ?? null}
             writable={team.mayWrite}
             onTell={(text) => setDraft((d) => tell(d, chosen.id, text))}
-            onMove={(parent) => setDraft((d) => reparent(d, chosen.id, parent))}
             onClose={() => setSelected(null)}
           />
         </>
@@ -1431,11 +1415,12 @@ function MapCard({
  * The drawer: where a position, and the profile under it, are edited.
  *
  * **Two tabs, because there are two objects and they reach differently.**
- * *Extra instructions* is this position in this team; *Profile* is the thing
- * every team that uses it shares. Drawn as one panel because you open it by
- * pressing one card, and the question "is this mine or everyone's" is the one
- * a person gets wrong — so each tab opens with a band answering it, rather
- * than a sentence under a field that nobody re-reads.
+ * *Extra instructions* is this position in this team, and it is one field:
+ * who it reports to and what it hands work to are the map, drawn an inch
+ * away, and a list of them beside it was the same thing said twice.
+ * *Profile* is the thing every team that uses it shares — that one keeps its
+ * band, because the reach it has is the consequence a person cannot see from
+ * the card they pressed.
  *
  * **It is the profile editor's form, at 392px.** `.form` → `.fld` → label,
  * hint, `.box`/`.pickrow`, and `.sh-foot` under it: the same components
@@ -1450,25 +1435,14 @@ function MapCard({
 function Drawer({
   team,
   position,
-  kids,
-  elsewhere,
-  parentName,
   writable,
   onTell,
-  onMove,
   onClose,
 }: {
   team: AgentTeam;
   position: Position;
-  /** What it hands work to, as the draft now stands. */
-  kids: Position[];
-  /** Everywhere it could be moved to: not itself, not where it already is,
-   *  and nothing beneath it — which is the one move that is not a tree. */
-  elsewhere: Position[];
-  parentName: string | null;
   writable: boolean;
   onTell: (text: string) => void;
-  onMove: (parent: string) => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"here" | "profile">("here");
@@ -1515,92 +1489,27 @@ function Drawer({
       {tab === "here" ? (
         <>
           <div className="dbody scroll-slim">
+            {/* **One field, and nothing else.** The band said in a sentence
+                what the tab says in its name; *Reports to* and *Hands work
+                to* were the map drawn again in a list, next to the map. A
+                position is moved and given children on the canvas, which is
+                where both already read at a glance. */}
             <div className="form">
-              <div className="scope">
-                <span className="g" aria-hidden>
-                  <Icon of={Info} size={16} />
-                </span>
-                <p>
-                  <b>This team only.</b> Everything here applies to {position.name} in {team.name},
-                  and nowhere else.
-                </p>
-              </div>
-
-              <label className="fld">
+              <label className="fld grows">
                 <span>Extra instructions</span>
                 <span className="hint">
-                  Added to {position.name}’s own instructions when it runs here. It never replaces
-                  them — and it is what tells two positions of one profile apart.
+                  Added to {position.name}’s own instructions when it runs in this team.
                 </span>
                 <span className="box mono">
                   <textarea
                     value={position.extraInstructions}
                     onChange={(e) => onTell(e.target.value)}
-                    rows={7}
+                    rows={10}
                     disabled={!writable}
                     placeholder={"Owns the web client.\nFollow the design system in docs/."}
                   />
                 </span>
               </label>
-
-              {position.parent && (
-                <div role="group" aria-label="Reports to" className="fld">
-                  <span>Reports to</span>
-                  <span className="hint">
-                    Moving it takes everything under it along. It cannot go under something
-                    already beneath it.
-                  </span>
-                  {writable && elsewhere.length > 0 ? (
-                    /* Every destination at once rather than behind a menu: the
-                       whole choice is short, it is the profile editor's own
-                       `.pickrow`, and a menu would hide the one fact that
-                       matters — that there is somewhere else to go. */
-                    <div className="pickrow">
-                      {elsewhere.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className="pk"
-                          aria-pressed={p.id === position.parent}
-                          onClick={() => onMove(p.id)}
-                        >
-                          {p.name}
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="nobody">{parentName ?? "the lead"}</p>
-                  )}
-                </div>
-              )}
-
-              <div role="group" aria-label="Hands work to" className="fld">
-                <span>Hands work to</span>
-                <span className="hint">
-                  The positions directly under this one, and nothing else. This is the whole of
-                  what it may start.
-                </span>
-                {kids.length === 0 ? (
-                  <p className="nobody">
-                    Nobody yet. Press <b>+</b> on its card.
-                  </p>
-                ) : (
-                  <div className="kidlist">
-                    {kids.map((p) => (
-                      <span key={p.id} className="kidrow">
-                        <span className="g">
-                          {p.agent ? (
-                            <AgentMark agent={p.agent as Agent} size={14} />
-                          ) : (
-                            <Icon of={CircleDashed} size={14} />
-                          )}
-                        </span>
-                        <span className="n">{p.name}</span>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           </div>
           {/* **`.sh-foot`, not `.formfoot`.** A page's foot sticks to the
