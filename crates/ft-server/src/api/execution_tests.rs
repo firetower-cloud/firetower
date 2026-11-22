@@ -2679,14 +2679,15 @@ async fn another_persons_repository_cannot_be_added_to_a_session_of_mine() {
 /// what puts a folder on its disk — a pin that never becomes a bundle is the
 /// same silence this whole feature is about.
 ///
-/// What this would have caught: `skills_at_spawn` was handed
-/// `WorkspacePlace::repo`, the first checkout's caption, where
-/// `skill_defaults.repo_id` is an id. Nothing matched, nothing was logged, and
-/// `include_repo_defaults` read on while delivering none of them. The unit
-/// tests over `skills_for` could not see it — they are handed ids — and the
-/// test for the arm that was missing only asserts which arm is chosen.
+/// **It used to assert the opposite**, and the history is the argument. A
+/// profile resolved the union of three sources, and two of them — the
+/// starter's always-on set and their defaults for the checkout — belonged to
+/// whoever began the run rather than to the profile. So the same profile gave
+/// two people two different agents, which is not a saved kind of agent. The
+/// closed set is what makes a second agent reproducible, and this is where
+/// that is checked end to end rather than over `skills_for` alone.
 #[tokio::test]
-async fn a_profile_hands_a_second_agent_the_repositorys_defaults_too() {
+async fn a_profile_hands_a_second_agent_its_own_list_and_nothing_else() {
     use crate::skills::{IncomingFile, NewSkill};
 
     let (state, principal, host, ready, owner, launched) = watched_fixture().await;
@@ -2825,13 +2826,16 @@ async fn a_profile_hands_a_second_agent_the_repositorys_defaults_too() {
             .unwrap();
     assert_ne!(child.id, lead, "a second run, not the lead");
 
-    let mut pinned = state.skills.of_session(child.id.as_str()).await.unwrap();
-    pinned.sort();
-    let mut expected = vec![always, in_repo, ticked];
-    expected.sort();
+    let pinned = state.skills.of_session(child.id.as_str()).await.unwrap();
     assert_eq!(
-        pinned, expected,
-        "all three sources, including the repository's defaults"
+        pinned,
+        vec![ticked.clone()],
+        "a profile loads its own list; the starter's always-on set and their \
+         repository defaults are what an *ad-hoc* session opens with"
+    );
+    assert!(
+        !pinned.contains(&always) && !pinned.contains(&in_repo),
+        "neither of the starter's two lists reaches a profile"
     );
 
     // And through to what the worker is told to write, which is the folder on
@@ -2843,9 +2847,8 @@ async fn a_profile_hands_a_second_agent_the_repositorys_defaults_too() {
         .find(|s| s.session_id == child.id)
         .cloned()
         .expect("the child was launched");
-    let mut folders: Vec<&str> = spec.skills.iter().map(|b| b.name.as_str()).collect();
-    folders.sort();
-    assert_eq!(folders, vec!["qa-always", "qa-repo", "qa-ticked"]);
+    let folders: Vec<&str> = spec.skills.iter().map(|b| b.name.as_str()).collect();
+    assert_eq!(folders, vec!["qa-ticked"], "and through to the worker's disk");
     state.fleet.stop_supervising(&host.id).await;
 }
 

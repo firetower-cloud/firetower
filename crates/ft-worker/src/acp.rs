@@ -377,11 +377,8 @@ where
     // cannot receive, and the log line is where it lands until the session
     // panel carries it.
     let http_ok = init["agentCapabilities"]["mcpCapabilities"]["http"] == true;
-    let all = crate::plugins::acp_mcp_servers(
-        workspace,
-        &ft_core::SessionId::from_stored(session),
-    )
-    .await;
+    let all =
+        crate::plugins::acp_mcp_servers(workspace, &ft_core::SessionId::from_stored(session)).await;
     let (servers, refused) = crate::plugins::deliverable_mcp(all, http_ok);
     for one in &refused {
         tracing::warn!(

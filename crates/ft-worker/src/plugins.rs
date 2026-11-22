@@ -244,19 +244,21 @@ pub async fn acp_mcp_servers(workspace: &Path, id: &SessionId) -> Vec<Value> {
                     }))
                 }
                 // A stdio server, which ACP takes in its own shape.
-                None => server.get("command").and_then(Value::as_str).map(|command| {
-                    json!({
-                        "name": name,
-                        "command": command,
-                        "args": server.get("args").cloned().unwrap_or(json!([])),
-                        "env": server.get("env").cloned().unwrap_or(json!({})),
-                    })
-                }),
+                None => server
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .map(|command| {
+                        json!({
+                            "name": name,
+                            "command": command,
+                            "args": server.get("args").cloned().unwrap_or(json!([])),
+                            "env": server.get("env").cloned().unwrap_or(json!({})),
+                        })
+                    }),
             }
         })
         .collect()
 }
-
 
 /// Split this session's MCP servers into what an ACP agent will take and what
 /// it will not.
@@ -394,7 +396,6 @@ mod tests {
         assert_eq!(out[1].0, "patch-verifier");
     }
 
-
     #[test]
     fn an_agent_that_does_not_take_http_is_not_sent_one() {
         let http = json!({"type":"http","name":"github","url":"https://x/mcp"});
@@ -405,9 +406,17 @@ mod tests {
         assert!(refused.is_empty());
 
         let (sent, refused) = deliverable_mcp(vec![http, stdio], false);
-        assert_eq!(sent.len(), 1, "stdio needs no capability — the agent launches it");
+        assert_eq!(
+            sent.len(),
+            1,
+            "stdio needs no capability — the agent launches it"
+        );
         assert_eq!(sent[0]["name"], "postgres");
-        assert_eq!(refused.len(), 1, "and the one it cannot take comes back to be named");
+        assert_eq!(
+            refused.len(),
+            1,
+            "and the one it cannot take comes back to be named"
+        );
         assert_eq!(refused[0]["name"], "github");
     }
 

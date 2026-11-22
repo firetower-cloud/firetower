@@ -3327,16 +3327,27 @@ impl Skills {
         person: &str,
         repos: &[ft_core::RepoId],
     ) -> Result<Vec<String>> {
-        let ids: Vec<&str> = repos.iter().map(ft_core::RepoId::as_str).collect();
+        // **Always-on only. A repository's defaults are no longer read.**
+        //
+        // Per-repository assignment is deleted: what a repository needs, a
+        // repository *commits* — reviewed in a pull request, versioned with
+        // the code, and working in plain Claude Code. Whoever can merge to
+        // `main` decides, which is a model nobody has to be taught.
+        //
+        // `repos` stays in the signature because the callers have it and the
+        // route that writes these rows is still on the wire — the contract is
+        // additive-only, so it cannot be removed until a client that never
+        // read it is the oldest one in the field. Nothing reads what it
+        // writes from here.
+        let _ = repos;
         sqlx::query_scalar(
-            "SELECT DISTINCT sd.skill_id FROM skill_defaults sd \
-              WHERE sd.user_id = $1 AND (sd.repo_id IS NULL OR sd.repo_id = ANY($2))",
+            "SELECT sd.skill_id FROM skill_defaults sd \
+              WHERE sd.user_id = $1 AND sd.repo_id IS NULL",
         )
         .bind(person)
-        .bind(&ids)
         .fetch_all(&self.pool)
         .await
-        .context("reading somebody's default skills")
+        .context("reading somebody's always-on bundles")
     }
 
     /// The version each of these skills is on right now.

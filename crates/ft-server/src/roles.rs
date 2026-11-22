@@ -436,24 +436,30 @@ pub fn skills_for(
     repo_defaults: &[String],
     reachable: &std::collections::HashSet<String>,
 ) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for (include, ids) in [
-        (role.include_always_on, always_on),
-        (role.include_repo_defaults, repo_defaults),
-        // The list is not switchable: it is the profile's own decision, and
-        // "always include these" is what it says on the screen.
-        (true, role.skill_scope.as_slice()),
-    ] {
-        if !include {
-            continue;
-        }
-        for id in ids {
-            if reachable.contains(id) && !out.contains(id) {
-                out.push(id.clone());
-            }
-        }
-    }
-    out
+    // **A profile is a closed set.** Its own list, and nothing else.
+    //
+    // It used to be the union of three sources governed by two switches, and
+    // the arithmetic was hard enough to predict that the editor spent 925
+    // lines explaining it before anybody could act. Worse, it was not
+    // reproducible: the other two lists are the *starter's*, so two people
+    // beginning the same profile got two different agents — and "why does
+    // Rowan's QA agent behave differently from mine" is the support question
+    // that never ends.
+    //
+    // What a person's own defaults are for is the session they start without
+    // a profile. Both are **defaults** rather than layers: the set is
+    // prefilled when work starts and anybody may untick a row before they
+    // send, so there is nothing here to resolve.
+    //
+    // `always_on` and `repo_defaults` are still taken, and still ignored: the
+    // callers read them for the ad-hoc path, and a signature that kept only
+    // what this function uses would move the decision back out to them.
+    let _ = (always_on, repo_defaults);
+    role.skill_scope
+        .iter()
+        .filter(|id| reachable.contains(*id))
+        .cloned()
+        .collect()
 }
 
 /// [`skills_for`], with its three lists read for one person and one set of
@@ -1140,111 +1146,90 @@ mod tests {
         assert!(standing.path.contains('/'), "{}", standing.path);
     }
 
-    /// Criterion 11: an existing profile is unchanged by the migration.
+    /// **A profile is a closed set**, and these are what that means.
     ///
-    /// Both switches on and an empty list has to resolve to exactly what a
-    /// profile is handed today — the owner's always-on set plus their defaults
-    /// for the repositories the child checks out. This is the whole of why the
-    /// columns default `true` and there is no backfill.
+    /// They replace five tests that asserted the union of three sources
+    /// governed by two switches. That model is gone, and the reason is worth
+    /// keeping: the other two lists belong to whoever *starts* the profile,
+    /// so two people beginning the same one got two different agents. A saved
+    /// kind of agent that is not the same agent for everybody is not a saved
+    /// kind of agent.
     #[test]
-    fn both_sources_on_and_nothing_named_is_what_a_profile_already_loads() {
-        let got = skills_for(
-            &profile(),
-            &ids(&["dataviz", "treg"]),
-            &ids(&["rust-review"]),
-            &reachable(&["dataviz", "treg", "rust-review", "unused"]),
-        );
-        assert_eq!(got, ids(&["dataviz", "treg", "rust-review"]));
-    }
-
-    /// Criteria 3 and 4: a switch removes exactly its own source, and nothing
-    /// beside it.
-    #[test]
-    fn a_switch_removes_its_own_source_and_only_that() {
-        let seen = reachable(&["dataviz", "treg", "rust-review"]);
-
-        let mut no_always = profile();
-        no_always.include_always_on = false;
-        assert_eq!(
-            skills_for(
-                &no_always,
-                &ids(&["dataviz", "treg"]),
-                &ids(&["rust-review"]),
-                &seen
-            ),
-            ids(&["rust-review"]),
-        );
-
-        let mut no_repo = profile();
-        no_repo.include_repo_defaults = false;
-        assert_eq!(
-            skills_for(
-                &no_repo,
-                &ids(&["dataviz", "treg"]),
-                &ids(&["rust-review"]),
-                &seen
-            ),
-            ids(&["dataviz", "treg"]),
-        );
-    }
-
-    /// Criterion 8: a tick is a grant. Under the intersection this replaces, a
-    /// skill that was nobody's default could not be delivered at all — the
-    /// filter dropped it — which is the defect the whole model exists to fix.
-    #[test]
-    fn a_tick_introduces_a_skill_no_source_supplies() {
+    fn a_profile_loads_its_own_list_and_nothing_else() {
         let mut role = profile();
         role.skill_scope = ids(&["make-ugc"]);
         let got = skills_for(
             &role,
-            &ids(&["dataviz"]),
+            // Both still passed, and both ignored. The starter's own defaults
+            // are what an *ad-hoc* session opens with; a profile decides for
+            // itself or it is not a decision.
+            &ids(&["dataviz", "treg"]),
             &ids(&["rust-review"]),
-            &reachable(&["dataviz", "rust-review", "make-ugc"]),
+            &reachable(&["dataviz", "treg", "rust-review", "make-ugc"]),
         );
-        assert!(got.contains(&"make-ugc".to_string()));
-        assert_eq!(got, ids(&["dataviz", "rust-review", "make-ugc"]));
+        assert_eq!(got, ids(&["make-ugc"]));
     }
 
-    /// Criterion 5: naming one a switch already supplies adds nothing. The
-    /// screen promises its breakdown sums to the figure, so the set it is
-    /// counting has to be de-duplicated here too.
+    /// Two people, one profile, one answer. The property the union could not
+    /// hold, written as a test rather than as a comment.
     #[test]
-    fn naming_a_skill_a_source_already_supplies_adds_nothing() {
-        let plain = skills_for(
+    fn two_people_starting_one_profile_get_the_same_agent() {
+        let mut role = profile();
+        role.skill_scope = ids(&["make-ugc", "dataviz"]);
+        let seen = reachable(&["dataviz", "treg", "rust-review", "make-ugc"]);
+
+        let kevin = skills_for(
+            &role,
+            &ids(&["dataviz", "treg"]),
+            &ids(&["rust-review"]),
+            &seen,
+        );
+        let rowan = skills_for(&role, &ids(&[]), &ids(&[]), &seen);
+        assert_eq!(kevin, rowan);
+        assert_eq!(kevin, ids(&["make-ugc", "dataviz"]));
+    }
+
+    /// An empty list means nothing, and has to come back as an empty set
+    /// rather than as "no opinion" — `NewSession.skills` honours
+    /// `Some(vec![])` as nothing, which is what carries the decision.
+    #[test]
+    fn a_profile_that_names_nothing_loads_nothing() {
+        let got = skills_for(
             &profile(),
             &ids(&["dataviz"]),
             &ids(&["rust-review"]),
             &reachable(&["dataviz", "rust-review"]),
         );
-
-        let mut role = profile();
-        role.skill_scope = ids(&["dataviz", "rust-review"]);
-        let named = skills_for(
-            &role,
-            &ids(&["dataviz"]),
-            &ids(&["rust-review"]),
-            &reachable(&["dataviz", "rust-review"]),
-        );
-
-        assert_eq!(named.len(), plain.len());
-        assert_eq!(named, ids(&["dataviz", "rust-review"]));
+        assert!(got.is_empty(), "{got:?}");
     }
 
-    /// Criterion 10: both off and nothing named means none, and it has to come
-    /// back as an empty set rather than as "no opinion" — `NewSession.skills`
-    /// honours `Some(vec![])` as nothing, which is what carries the decision.
+    /// The order on the screen is the order it loads in.
     #[test]
-    fn both_switches_off_and_nothing_named_loads_nothing() {
+    fn the_list_keeps_the_order_it_was_written_in() {
         let mut role = profile();
-        role.include_always_on = false;
-        role.include_repo_defaults = false;
+        role.skill_scope = ids(&["treg", "dataviz"]);
         let got = skills_for(
             &role,
-            &ids(&["dataviz"]),
-            &ids(&["rust-review"]),
-            &reachable(&["dataviz", "rust-review"]),
+            &ids(&[]),
+            &ids(&[]),
+            &reachable(&["dataviz", "treg"]),
         );
-        assert!(got.is_empty());
+        assert_eq!(got, ids(&["treg", "dataviz"]));
+    }
+
+    /// One a person cannot reach is dropped however it got onto the profile.
+    ///
+    /// The case that makes this a security question rather than a tidiness
+    /// one: a profile is shareable, so a Writer on one filed in a directory
+    /// could otherwise tick something only they can see and have a colleague
+    /// materialise and run it on their own worker, under their own
+    /// credentials.
+    #[test]
+    fn a_bundle_the_starter_cannot_reach_is_never_in_the_set() {
+        let mut role = profile();
+        role.skill_scope = ids(&["treg", "theirs"]);
+        let got = skills_for(&role, &ids(&[]), &ids(&[]), &reachable(&["treg"]));
+        assert_eq!(got, ids(&["treg"]));
     }
 
     /// Criterion 9: a skill the person starting the run cannot see is never in
@@ -1444,19 +1429,22 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert!(
-            profile.include_always_on && profile.include_repo_defaults,
-            "a new profile inherits both sources"
-        );
-
-        // All three sources, counted once each — and the admin's skill absent,
-        // though it is named, because Ana cannot reach it.
+        // **Its own list, and nothing else.** `everywhere` is Ana's always-on
+        // and `in_repo` is her default for this repository; neither is on the
+        // profile, so neither loads. That is the closed set: a profile is the
+        // same agent whoever starts it, which it cannot be while two of its
+        // three sources belong to the starter.
+        //
+        // And the admin's skill is absent though it is named, because Ana
+        // cannot reach it — a tick introduces a bundle and a bundle is
+        // executable, so it is filtered against the starter either way.
         let resolved = skills_at_spawn(&skills, &profile, &ana, std::slice::from_ref(&repo_id))
             .await
             .unwrap();
-        assert_eq!(
-            resolved,
-            vec![everywhere.clone(), in_repo.clone(), named.clone()],
+        assert_eq!(resolved, vec![named.clone()]);
+        assert!(
+            !resolved.contains(&everywhere) && !resolved.contains(&in_repo),
+            "the starter's own defaults are what an ad-hoc session opens with, not a profile"
         );
 
         // Pinned, which is what puts a skill on a worker's disk.

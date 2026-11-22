@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
+  Check,
   ChevronDown,
   CircleAlert,
   ExternalLink,
@@ -34,6 +35,7 @@ import {
   GitBranch,
   Paperclip,
   Plus,
+  Puzzle,
   Server,
   ServerOff,
   Network,
@@ -71,28 +73,29 @@ import type { Agent, AgentTeam, Control, ControlKind, Role } from "~/api/generat
 type Checkout = { id: string; slug: string };
 
 /**
- * The skills a new workspace starts with: the always-on ones, plus the ones
- * this person has set as a default in a repository it checks out.
+ * What a new workspace opens with: this person's always-on bundles.
  *
- * **`defaultIn` is slugs.** The server builds it as `array_agg(r.slug)` over
- * `skill_defaults` joined to `repos` — a row stores `repo_id` and the read
- * translates it — so what arrives is `acme/web` and never `r_web`. Both
- * callers matched it against `checkout.id`, which can never be equal to a
- * slug, so a skill marked "use by default in this repository" was dropped
- * from every workspace started here and nothing said so.
+ * **A default, not a resolution.** It is the value the picker beside the
+ * composer opens with, and anybody may untick a row before they send — so
+ * there is no union to predict and no switch to explain. A session started
+ * from a profile takes that profile's closed set instead, which the server
+ * decides, because a profile is the same agent whoever starts it.
+ *
+ * **A repository's defaults are no longer part of this.** Per-repository
+ * assignment is deleted: what a repository needs, a repository commits —
+ * reviewed in a pull request and working in plain Claude Code. `checkouts` is
+ * still taken because both callers have it and the shape of the call is worth
+ * keeping while the route that wrote those rows is still on the wire.
  *
  * Exported for its own test, and shared with the schedule sheet rather than
- * written twice: the two copies of this line were wrong in the same way. It
- * hands back the skills and leaves the caller to take the ids, which is what
- * both of them already did.
+ * written twice: the two copies of this line were once wrong in the same way.
  */
 export function defaultSkills<S extends { alwaysOn: boolean; defaultIn: string[] }>(
   skills: S[],
   checkouts: { slug: string }[],
 ): S[] {
-  return skills.filter(
-    (s) => s.alwaysOn || s.defaultIn.some((r) => checkouts.some((c) => c.slug === r)),
-  );
+  void checkouts;
+  return skills.filter((s) => s.alwaysOn);
 }
 
 /* The engine and account last started with, kept on this machine so the New
@@ -388,11 +391,23 @@ export function StartComposer({
         .map((s) => s.id),
     [allSkills, checkouts],
   );
-  /* What the start payload carries. There is no picker here and the comment
-     beside the composer's controls says why — so this is the resolution and
-     nothing overrides it. It used to be `skillIds ?? defaultSkillIds` behind
-     a `useState` whose only setter lived in a popover nothing could open. */
-  const selectedSkills = defaultSkillIds;
+  /* **Unticked here, for this conversation only.** The prefill is a default
+     and not a decision: nothing in it is edited, nothing persists, and the
+     next session opens the same way. Held as what is *off* rather than as
+     the set, so a plugin turned on in the library while this page is open
+     still arrives — the alternative is a snapshot that silently goes stale
+     between opening the page and sending. */
+  const [muted, setMuted] = useState<Set<string>>(new Set());
+  const selectedSkills = useMemo(
+    () => defaultSkillIds.filter((id) => !muted.has(id)),
+    [defaultSkillIds, muted],
+  );
+  /* A profile replaces the selection rather than narrowing it, and the server
+     is where that happens — so the picker is drawn only when there is no
+     profile to decide instead. */
+  const prefilled = !profileId && !teamId
+    ? allSkills.filter((s) => defaultSkillIds.includes(s.id))
+    : [];
 
   const team = teams.find((t) => t.id === teamId);
   const lead = team?.positions.find((p) => !p.parent);
@@ -799,11 +814,30 @@ export function StartComposer({
                 <input type="file" multiple className="hidden" onChange={(e) => void take(e.target.files)} />
               </label>
 
-              {/* **No skills chip here.** The drawing has one in a workspace
-                  and not on the Dashboard, and the reason holds: starting
-                  something, the profile decides what it reads, and a count of
-                  skills is a number about a decision you have not made yet.
-                  Replying, you can see what it read and change it. */}
+              {/* **The prefill, where it can still be changed for nothing.**
+                  There used to be no chip here, on the reasoning that a
+                  count before you have chosen a profile is a number about a
+                  decision you have not made. That was right about a *count*
+                  and wrong about the field: this is what the session will
+                  open with, and before the first message changing it costs
+                  nothing — there is no prompt cache yet to invalidate. A
+                  profile decides instead, so the chip is absent when one is
+                  picked rather than showing a set it would override. */}
+              {prefilled.length > 0 && (
+                <button
+                  onClick={(e) => toggle("prefill", e.currentTarget)}
+                  data-set
+                  className="chip"
+                  title="What this session opens with. Untick for this conversation only."
+                >
+                  <span className="grid place-items-center text-mute">
+                    <Puzzle className="h-[15px] w-[15px]" strokeWidth={1.8} />
+                  </span>
+                  <span className="lbl">
+                    {selectedSkills.length} on
+                  </span>
+                </button>
+              )}
               <button
                 onClick={(e) => toggle("profile", e.currentTarget)}
                 data-set={!!profile || !!team}
@@ -903,6 +937,40 @@ export function StartComposer({
               close();
             }}
           />
+        </Pop>
+      )}
+
+      {open?.which === "prefill" && (
+        <Pop anchor={open.at} onClose={close} width={360}>
+          <Menu>
+            <p className="px-3 pb-2 pt-1 text-meta text-dim">
+              What this session opens with. Unticking is for this conversation only — your
+              always-on set is unchanged and the next one opens the same way.
+            </p>
+            {prefilled.map((s) => {
+              const on = !muted.has(s.id);
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="prow"
+                  onClick={() =>
+                    setMuted((m) => {
+                      const next = new Set(m);
+                      if (on) next.add(s.id);
+                      else next.delete(s.id);
+                      return next;
+                    })
+                  }
+                >
+                  <span className="grid h-4 w-4 place-items-center text-mute">
+                    {on ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2.25} /> : null}
+                  </span>
+                  <span className="lbl">{s.name}</span>
+                </button>
+              );
+            })}
+          </Menu>
         </Pop>
       )}
 

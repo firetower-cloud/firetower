@@ -40,9 +40,15 @@ fn a_plugin() -> SkillBundle {
                 ".claude-plugin/plugin.json",
                 r#"{"name":"security-review","description":"d","version":"1.0.0"}"#,
             ),
-            file("skills/review-the-diff/SKILL.md", "---\nname: review-the-diff\n---\nbody"),
+            file(
+                "skills/review-the-diff/SKILL.md",
+                "---\nname: review-the-diff\n---\nbody",
+            ),
             file("skills/review-the-diff/references/rust.md", "more"),
-            file("skills/patch-verifier/SKILL.md", "---\nname: patch-verifier\n---\nbody"),
+            file(
+                "skills/patch-verifier/SKILL.md",
+                "---\nname: patch-verifier\n---\nbody",
+            ),
             file("commands/review.md", "a command"),
             file(
                 ".mcp.json",
@@ -77,12 +83,18 @@ async fn claude_code_gets_a_folder_of_plugins_and_its_skills_stay_where_they_wer
 
     let plugins = ft_worker::plugins::root(dir.path(), &id);
     assert!(
-        plugins.join("security-review/.claude-plugin/plugin.json").is_file(),
+        plugins
+            .join("security-review/.claude-plugin/plugin.json")
+            .is_file(),
         "a plugin without its manifest is a folder Claude Code silently ignores"
     );
-    assert!(plugins.join("security-review/skills/review-the-diff/SKILL.md").is_file());
+    assert!(plugins
+        .join("security-review/skills/review-the-diff/SKILL.md")
+        .is_file());
     assert!(
-        plugins.join("security-review/skills/review-the-diff/references/rust.md").is_file(),
+        plugins
+            .join("security-review/skills/review-the-diff/references/rust.md")
+            .is_file(),
         "a skill's references travel with it"
     );
     assert!(plugins.join("security-review/commands/review.md").is_file());
@@ -116,7 +128,10 @@ async fn codex_gets_the_skills_out_of_the_plugin_and_the_connector_in_its_config
         "paths are rewritten relative to the skill, not left under skills/"
     );
     assert!(skills.join("patch-verifier/SKILL.md").is_file());
-    assert!(skills.join("code-review/SKILL.md").is_file(), "the lone skill too");
+    assert!(
+        skills.join("code-review/SKILL.md").is_file(),
+        "the lone skill too"
+    );
 
     let config = std::fs::read_to_string(
         ft_worker::agentd::dir_for(dir.path())
@@ -125,7 +140,10 @@ async fn codex_gets_the_skills_out_of_the_plugin_and_the_connector_in_its_config
     )
     .expect("codex gets a config.toml");
     assert!(config.contains("[mcp_servers.github]"), "{config}");
-    assert!(config.contains("https://api.githubcopilot.com/mcp/"), "{config}");
+    assert!(
+        config.contains("https://api.githubcopilot.com/mcp/"),
+        "{config}"
+    );
     assert!(
         config.contains("Bearer secret-token"),
         "the credential reaches the engine, or the connector is decoration"
@@ -220,7 +238,10 @@ async fn a_second_launch_replaces_the_token_rather_than_keeping_it() {
     let at = ft_worker::plugins::root(dir.path(), &id).join("security-review/.mcp.json");
     let text = std::fs::read_to_string(at).unwrap();
     assert!(text.contains("minted-just-now"), "{text}");
-    assert!(!text.contains("secret-token"), "the stale one is still there: {text}");
+    assert!(
+        !text.contains("secret-token"),
+        "the stale one is still there: {text}"
+    );
 }
 
 /// Every engine that runs an agent has somewhere for a plugin to go. The shell
