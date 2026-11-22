@@ -3209,6 +3209,50 @@ html:not([data-platform="macos"]) {
     padding-left: 13px;
     border-left: 1px solid var(--color-line);
   }
+  /* **A rail per level, and then it stops.** A team is a tree and the panel
+     draws it as one, but the panel is 300px wide with a name, an agent mark
+     and an age already in it — six levels of indentation is 78px of that and
+     every name past the third is an ellipsis. `MAX_DEPTH` is 6, so the bad
+     case is reachable rather than theoretical.
+
+     So: three levels indent, and past that the row carries `· under X`
+     instead. Written on the row rather than by nesting `.kids` inside
+     itself, because the tree arrives flat and in order — which is also what
+     keeps one scrolling list rather than a stack of nested scroll areas. */
+  /* **`.tier`, because `.lvl` was taken** — it is the access-level pill in
+     the sharing rows, an inline-flex 28px chip, and a team row that
+     inherited it was a row that would not indent. Second time a new class
+     has collided with an old one on this screen; the grep is cheap. */
+  .tier[data-depth="2"] {
+    padding-left: 15px;
+  }
+  .tier[data-depth="3"] {
+    padding-left: 30px;
+  }
+  /* The rail for the levels below the first, drawn on the row so it lines up
+     with the one `.kids` already draws above it. */
+  .tier[data-depth="2"],
+  .tier[data-depth="3"] {
+    background-image: linear-gradient(var(--color-line), var(--color-line));
+    background-size: 1px 100%;
+    background-repeat: no-repeat;
+  }
+  .tier[data-depth="2"] {
+    background-position: 1px 0;
+  }
+  .tier[data-depth="3"] {
+    background-position: 16px 0;
+  }
+
+  /* What a row says once the rail has stopped saying it. */
+  .tm .via {
+    flex: none;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .here-badge {
     flex: none;
     padding: 1px 7px;

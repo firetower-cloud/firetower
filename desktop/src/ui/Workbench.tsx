@@ -15,6 +15,7 @@ import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
 import { childrenElsewhere, group, placeOf } from "~/api/workspaces";
 import type { Backend } from "~/fleet";
 import { useHostOf, useSession, useSessions } from "~/data";
+import { teamUnder } from "~/ui/team-tree";
 import { navigate } from "~/shims/next-navigation";
 import { HostMark, IconButton } from "~/components/ui";
 import { Chat } from "~/ui/Chat";
@@ -420,15 +421,20 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   /* The Overview's team, from the point of view of the agent being read: the
      manager is this run when it leads, or the one that started it when this is
      a child — one level up. The team is every agent under that manager, so a
-     child sees the whole team it belongs to (its siblings), not just itself. */
+     child sees the whole team it belongs to (its siblings), not just itself.
+
+     **Every generation, not just the first.** This was a filter on
+     `parentId === managerRunId`, which is the manager's own children and
+     nobody else — so a team three deep showed four of its six agents and
+     gave no sign the other two existed. `teamUnder` walks it. */
   const lead = run.parentId ? (sessions?.find((s) => s.id === run.parentId) ?? null) : null;
   const managerRunId = run.parentId ?? run.id;
-  const team = (sessions ?? []).filter((s) => s.parentId === managerRunId);
+  const team = teamUnder(sessions ?? [], managerRunId);
   /* Artifacts from the whole team — the manager and every agent under it,
      wherever they ran — not just the runs in this one workspace. A sibling off
      in its own workspace produced its artifact there, so scoping to this
      workspace's runs hid all but the one made here. */
-  const familyIds = new Set<string>([managerRunId, ...team.map((t) => t.id)]);
+  const familyIds = new Set<string>([managerRunId, ...team.map((t) => t.session.id)]);
   const myArtifacts = (artifacts.data ?? []).filter((a) => a.fromSessionId && familyIds.has(a.fromSessionId));
 
   /* Checkouts belong to the workspace rather than to whichever agent is being
