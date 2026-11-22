@@ -257,6 +257,29 @@ pub async fn acp_mcp_servers(workspace: &Path, id: &SessionId) -> Vec<Value> {
         .collect()
 }
 
+
+/// Split this session's MCP servers into what an ACP agent will take and what
+/// it will not.
+///
+/// **ACP negotiates this.** The agent answers `initialize` with
+/// `agentCapabilities.mcpCapabilities`, and a client that sends an HTTP server
+/// to one which did not claim `http` is sending something the other end has no
+/// contract to read. Measured against Kimi Code 2.1.1, which answers
+/// `{"http": true, "sse": true}` — so the capability is real, and so is the
+/// case where it is absent.
+///
+/// A stdio server needs no capability: it is the transport every ACP agent has
+/// by construction, because the agent launches the process itself.
+///
+/// What is refused comes back rather than being discarded, so the caller can
+/// name it. A connector that silently did not arrive is the failure this whole
+/// design keeps trying to avoid.
+pub fn deliverable_mcp(servers: Vec<Value>, http_ok: bool) -> (Vec<Value>, Vec<Value>) {
+    servers
+        .into_iter()
+        .partition(|s| s["type"] != "http" || http_ok)
+}
+
 /// Codex's own MCP configuration, as a block in `$CODEX_HOME/config.toml`.
 ///
 /// **Appended inside a marker, never written over the file.** A credential
@@ -369,6 +392,23 @@ mod tests {
             "paths are relative to the skill's own folder, not the plugin's"
         );
         assert_eq!(out[1].0, "patch-verifier");
+    }
+
+
+    #[test]
+    fn an_agent_that_does_not_take_http_is_not_sent_one() {
+        let http = json!({"type":"http","name":"github","url":"https://x/mcp"});
+        let stdio = json!({"name":"postgres","command":"npx"});
+
+        let (sent, refused) = deliverable_mcp(vec![http.clone(), stdio.clone()], true);
+        assert_eq!(sent.len(), 2, "both, when it says it takes http");
+        assert!(refused.is_empty());
+
+        let (sent, refused) = deliverable_mcp(vec![http, stdio], false);
+        assert_eq!(sent.len(), 1, "stdio needs no capability — the agent launches it");
+        assert_eq!(sent[0]["name"], "postgres");
+        assert_eq!(refused.len(), 1, "and the one it cannot take comes back to be named");
+        assert_eq!(refused[0]["name"], "github");
     }
 
     #[test]

@@ -364,11 +364,31 @@ where
     //
     // Read off the disk rather than carried, so the one place a server is
     // written down is the file an agent that *could* read it would have read.
-    let servers = crate::plugins::acp_mcp_servers(
+    //
+    // **Asked, not assumed.** ACP negotiates this: the agent answers
+    // `initialize` with `agentCapabilities.mcpCapabilities`, and a client that
+    // sends an HTTP server to one which did not claim `http` is sending
+    // something the other end has no contract to read. Measured against Kimi
+    // Code 2.1.1, which answers `mcpCapabilities: {http: true, sse: true}` —
+    // so the capability is real, and so is the case where it is absent.
+    //
+    // A server this agent cannot take is **named**, never dropped quietly.
+    // That is the same rule the interface follows for a component an engine
+    // cannot receive, and the log line is where it lands until the session
+    // panel carries it.
+    let http_ok = init["agentCapabilities"]["mcpCapabilities"]["http"] == true;
+    let all = crate::plugins::acp_mcp_servers(
         workspace,
         &ft_core::SessionId::from_stored(session),
     )
     .await;
+    let (servers, refused) = crate::plugins::deliverable_mcp(all, http_ok);
+    for one in &refused {
+        tracing::warn!(
+            server = %one["name"].as_str().unwrap_or("?"),
+            "this agent does not take an HTTP MCP server, so its connector is not delivered"
+        );
+    }
     if !servers.is_empty() {
         tracing::info!(count = servers.len(), "handing ACP its MCP servers");
     }
