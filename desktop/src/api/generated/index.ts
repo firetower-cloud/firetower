@@ -1,5 +1,6 @@
 export * from './access/access.ts';
 export * from './accounts/accounts.ts';
+export * from './agent-teams/agent-teams.ts';
 export * from './agents/agents.ts';
 export * from './artifacts/artifacts.ts';
 export * from './auth/auth.ts';

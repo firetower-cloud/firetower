@@ -64,6 +64,7 @@ export const ListSessionsResponseItem = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('Which position of that team it occupies.\n\n**This is what decides who it may hand work to.** The children of this\nposition are the profiles `spawn` will resolve a name against, and a\nsession with no position cannot delegate at all — which is what\nreplaced a profile carrying its own reach. A child inherits the\nposition it was spawned into, which is how a team gets depth.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -77,6 +78,7 @@ export const ListSessionsResponseItem = zod.object({
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between "this\nis fetching a repository" and a blank page.'),
   "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
   "taskUrl": zod.string().nullish(),
+  "teamId": zod.string().nullish().describe('The agent team this session is running inside, when it is running\ninside one.'),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "usage": zod.union([zod.null(),zod.object({
@@ -98,7 +100,7 @@ export const CreateSessionBody = zod.object({
   "directoryId": zod.union([zod.null(),zod.string().describe('Which directory to file the workspace in, and therefore who will be able\nto see it.\n\nOmit for your own space, which is what a workspace has always been.\nNaming one hands it to that directory at the one moment when nobody has\nto be told it changed hands.')]).optional(),
   "hostId": zod.union([zod.null(),zod.string().describe('Omit to let the scheduler choose.')]).optional(),
   "name": zod.string().nullish().describe('What to call the workspace. Omit to derive one from the branch.\n\nThe name a person reads in the rail, not an identifier: it is free text,\nit can be changed afterwards, and two workspaces may share one. The\nbranch is what has to be unique, and git enforces that itself.'),
-  "profile": zod.string().nullish().describe('The profile to start as, by id. Omit for a plain agent with no persona.\n\nIt shapes the agent\'s system prompt, pins the engine when it names one,\nand decides whether this session may delegate — a Manager may, an\nOperator does the work itself.'),
+  "profile": zod.string().nullish().describe('The profile to start as, by id. Omit for a plain agent with no persona.\n\nIt shapes the agent\'s system prompt and pins the engine when it names\none. It no longer decides whether this session may delegate: that is\n`team` below, and a profile started on its own cannot hand work to\nanybody.'),
   "prompt": zod.string().nullish().describe('What to ask for first. Optional, because a workspace is a place before\nit is a task: you may want the branch checked out and an agent waiting\nin it, and to say what you want once you are looking at the files.\n\nAbsent means the agent starts and says nothing until you do.'),
   "repoId": zod.union([zod.null(),zod.string().describe('Omit for a bare agent: a workspace with nothing checked out.\n\nKept alongside `repos` so that anything holding one repository still\nworks; when both are given, this one goes first.')]).optional(),
   "repos": zod.array(zod.object({
@@ -116,6 +118,7 @@ export const CreateSessionBody = zod.object({
   "skills": zod.array(zod.string()).nullish().describe('The skills to start with, by id. Omit (null) to take your defaults for\nthe repositories; a list — including an empty one — overrides them.'),
   "taskKey": zod.string().nullish().describe('The task this is for, when it was started from one.'),
   "taskUrl": zod.string().nullish(),
+  "team": zod.string().nullish().describe('The agent team to start, by id.\n\n**You never talk to a team; you talk to its lead.** Naming one starts\nits lead profile with the team behind it — the session stands on the\nteam\'s root position, and the positions under that are what it may hand\nwork to. Naming a team and a profile that is not its lead is refused.'),
   "workspaceId": zod.union([zod.null(),zod.string().describe('A workspace to start this agent in, instead of making one.\n\nThe place already exists — its host, its repositories, its branch and\nits directory — so all of those are read from it and anything sent\nalongside is ignored. What is left is the agent and what to ask it.\n\nThis is how a workspace comes to hold two agents: they are two sessions\nnaming one `workspace_id`, each with its own conversation.')]).optional()
 }).describe('What the API accepts to launch one.')
 
@@ -160,6 +163,7 @@ export const CreateSessionResponse = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('Which position of that team it occupies.\n\n**This is what decides who it may hand work to.** The children of this\nposition are the profiles `spawn` will resolve a name against, and a\nsession with no position cannot delegate at all — which is what\nreplaced a profile carrying its own reach. A child inherits the\nposition it was spawned into, which is how a team gets depth.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -173,6 +177,7 @@ export const CreateSessionResponse = zod.object({
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between "this\nis fetching a repository" and a blank page.'),
   "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
   "taskUrl": zod.string().nullish(),
+  "teamId": zod.string().nullish().describe('The agent team this session is running inside, when it is running\ninside one.'),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "usage": zod.union([zod.null(),zod.object({
@@ -265,6 +270,7 @@ export const GetSessionResponse = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('Which position of that team it occupies.\n\n**This is what decides who it may hand work to.** The children of this\nposition are the profiles `spawn` will resolve a name against, and a\nsession with no position cannot delegate at all — which is what\nreplaced a profile carrying its own reach. A child inherits the\nposition it was spawned into, which is how a team gets depth.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -278,6 +284,7 @@ export const GetSessionResponse = zod.object({
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between "this\nis fetching a repository" and a blank page.'),
   "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
   "taskUrl": zod.string().nullish(),
+  "teamId": zod.string().nullish().describe('The agent team this session is running inside, when it is running\ninside one.'),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "usage": zod.union([zod.null(),zod.object({
@@ -356,6 +363,7 @@ export const RenameSessionResponse = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('Which position of that team it occupies.\n\n**This is what decides who it may hand work to.** The children of this\nposition are the profiles `spawn` will resolve a name against, and a\nsession with no position cannot delegate at all — which is what\nreplaced a profile carrying its own reach. A child inherits the\nposition it was spawned into, which is how a team gets depth.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -369,6 +377,7 @@ export const RenameSessionResponse = zod.object({
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between "this\nis fetching a repository" and a blank page.'),
   "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
   "taskUrl": zod.string().nullish(),
+  "teamId": zod.string().nullish().describe('The agent team this session is running inside, when it is running\ninside one.'),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "usage": zod.union([zod.null(),zod.object({
@@ -1210,6 +1219,7 @@ export const SetShareResponse = zod.object({
   "status": zod.enum(['Pending', 'InProgress', 'Completed']),
   "step": zod.string()
 }).describe('One line of the agent\'s plan.')).optional().describe('The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code\'s todo list and Codex\'s own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty.'),
+  "positionId": zod.string().nullish().describe('Which position of that team it occupies.\n\n**This is what decides who it may hand work to.** The children of this\nposition are the profiles `spawn` will resolve a name against, and a\nsession with no position cannot delegate at all — which is what\nreplaced a profile carrying its own reach. A child inherits the\nposition it was spawned into, which is how a team gets depth.'),
   "profileId": zod.string().nullish().describe('The profile this session was started as, by id, when it was started as\none. What decides whether it may delegate — a Manager may — and what the\nrail reads to say which kind of agent a workspace holds.'),
   "prompt": zod.string(),
   "proposedBody": zod.string().nullish(),
@@ -1223,6 +1233,7 @@ export const SetShareResponse = zod.object({
   "steps": zod.array(zod.enum(['Fetch', 'Worktree', 'Workspace', 'Setup', 'Launch']).describe('One stage of bringing a session up.\n\nThe point of naming them is that the whole list is knowable *before* any of\nit runs — so a session can show what it is going to do the moment it is\ncreated, rather than assembling a shape out of events as they arrive. A step\nnobody has reached yet is still worth showing.')).optional().describe('What this session is going to do, in order, decided when it was created.\n\nHere rather than inferred from events so the screen has something to\nshow before the worker has said a word — the difference between "this\nis fetching a repository" and a blank page.'),
   "taskKey": zod.string().nullish().describe('Short, derived from the prompt — the prompt itself lives in the transcript.\nThe task this worktree was cut for, if it came from one.\n\nSource-scoped — `github:acme/web#5138` — so a second tracker cannot\ncollide with the first. Everything else about the task is read from the\ntracker when somebody looks; these two are ours, and they are what lets\nthe rail show `#5138` and shipping offer to close it.'),
   "taskUrl": zod.string().nullish(),
+  "teamId": zod.string().nullish().describe('The agent team this session is running inside, when it is running\ninside one.'),
   "title": zod.string(),
   "updatedAt": zod.iso.datetime({"offset":true}),
   "usage": zod.union([zod.null(),zod.object({

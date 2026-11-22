@@ -135,7 +135,7 @@
           "warnings": []
         },
         {
-          "digest": "1e93f65433450f68077295d3623c96b6c59706095451b214b0f971732757ef89",
+          "digest": "9bb0573081241495ee1a808645becb21fa0ce24104c56d09aab05d4e8274a764",
           "key": "engineering-manager",
           "name": "Engineering Manager",
           "outcome": {
@@ -144,7 +144,20 @@
             "kind": "new"
           },
           "path": "profiles/engineering-manager/PROFILE.md",
-          "warnings": []
+          "warnings": [
+            {
+              "key": "can_delegate",
+              "line": 4,
+              "path": "profiles/engineering-manager/PROFILE.md",
+              "says": "`can_delegate` is deprecated: who hands work to whom is an agent team now, not a profile. This import still honours it and the profile will still delegate, until the column is dropped. Make a team on Agent teams with this profile as its lead, and the line can come out."
+            },
+            {
+              "key": "delegates_to",
+              "line": 5,
+              "path": "profiles/engineering-manager/PROFILE.md",
+              "says": "`delegates_to` is deprecated: the 2 profiles named here belong under this one in a team, where you can see the whole shape and give each its own instructions. This import still honours the list until the column is dropped."
+            }
+          ]
         },
         {
           "digest": "64ce6f431b846cadd084d6cd5cd42b248c53d2ff55a3e415ff673fe6c3b4340a",
@@ -667,7 +680,7 @@
           "warnings": []
         },
         {
-          "digest": "42370250eed9fe1a878f134ec57bfec98edf844999bf1ed5fc73073ab4fd815a",
+          "digest": "403bea4716d60675a4c040c70005f09f74ee1c70b69c6cacd8399d181deef27f",
           "key": "engineering-manager",
           "name": "Engineering Manager",
           "outcome": {
@@ -813,7 +826,20 @@
             }
           },
           "path": "profiles/engineering-manager/PROFILE.md",
-          "warnings": []
+          "warnings": [
+            {
+              "key": "can_delegate",
+              "line": 4,
+              "path": "profiles/engineering-manager/PROFILE.md",
+              "says": "`can_delegate` is deprecated: who hands work to whom is an agent team now, not a profile. This import still honours it and the profile will still delegate, until the column is dropped. Make a team on Agent teams with this profile as its lead, and the line can come out."
+            },
+            {
+              "key": "delegates_to",
+              "line": 5,
+              "path": "profiles/engineering-manager/PROFILE.md",
+              "says": "`delegates_to` is deprecated: the 3 profiles named here belong under this one in a team, where you can see the whole shape and give each its own instructions. This import still honours the list until the column is dropped."
+            }
+          ]
         },
         {
           "digest": "f692608b13f6427b363ee669f504a3c32919b0b1faed399d79f6e5654c161e75",
@@ -1427,7 +1453,7 @@
           "warnings": []
         },
         {
-          "digest": "42370250eed9fe1a878f134ec57bfec98edf844999bf1ed5fc73073ab4fd815a",
+          "digest": "403bea4716d60675a4c040c70005f09f74ee1c70b69c6cacd8399d181deef27f",
           "key": "engineering-manager",
           "name": "Engineering Manager",
           "outcome": {
@@ -1573,7 +1599,20 @@
             }
           },
           "path": "profiles/engineering-manager/PROFILE.md",
-          "warnings": []
+          "warnings": [
+            {
+              "key": "can_delegate",
+              "line": 4,
+              "path": "profiles/engineering-manager/PROFILE.md",
+              "says": "`can_delegate` is deprecated: who hands work to whom is an agent team now, not a profile. This import still honours it and the profile will still delegate, until the column is dropped. Make a team on Agent teams with this profile as its lead, and the line can come out."
+            },
+            {
+              "key": "delegates_to",
+              "line": 5,
+              "path": "profiles/engineering-manager/PROFILE.md",
+              "says": "`delegates_to` is deprecated: the 3 profiles named here belong under this one in a team, where you can see the whole shape and give each its own instructions. This import still honours the list until the column is dropped."
+            }
+          ]
         },
         {
           "digest": "43c52ae825ce50b0d08670f67a671249dce680e7f017521cd8c206187fe1a37b",

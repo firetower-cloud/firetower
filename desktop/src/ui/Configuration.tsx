@@ -35,6 +35,7 @@ import { Trackers } from "~/ui/config/Trackers";
 import { Agents } from "~/ui/config/Agents";
 import { Skills } from "~/ui/config/Skills";
 import { Roles } from "~/ui/config/Roles";
+import { AgentTeams } from "~/ui/config/AgentTeams";
 import { Secrets } from "~/ui/config/Secrets";
 import { People } from "~/ui/config/People";
 import { Teams } from "~/ui/config/Teams";
@@ -77,6 +78,8 @@ function Pane({ at, open, backend, onForgot }: { at: string; open: string | null
       return <Skills open={open} />;
     case "roles":
       return <Roles />;
+    case "agent-teams":
+      return <AgentTeams open={open} />;
     case "people":
       return <People backend={backend} />;
     case "teams":

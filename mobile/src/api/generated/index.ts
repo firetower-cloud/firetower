@@ -1,5 +1,6 @@
 export * from './access/access';
 export * from './accounts/accounts';
+export * from './agent-teams/agent-teams';
 export * from './agents/agents';
 export * from './artifacts/artifacts';
 export * from './auth/auth';

@@ -80,6 +80,16 @@ pub struct NewSchedule {
     pub timezone: String,
     #[serde(default)]
     pub profile: Option<String>,
+    /// The agent team to start, by id.
+    ///
+    /// **The whole tree is pinned at approval, not the id.** A team id
+    /// resolved at run time would let an edit between approval and 9am change
+    /// how many agents start with nobody watching — which is the mistake
+    /// pinning a profile's composed persona already exists to prevent, with a
+    /// larger blast radius. Editing a pinned team clears the approval, so the
+    /// next run is refused until somebody looks.
+    #[serde(default)]
+    pub team: Option<String>,
     #[serde(default = "default_agent")]
     pub agent: ft_core::Agent,
     #[serde(default)]
@@ -240,9 +250,14 @@ pub(crate) async fn write_one(
     owner_id: &str,
     created_by: &str,
     id: &ScheduleId,
-    req: NewSchedule,
+    mut req: NewSchedule,
     fresh: bool,
 ) -> ApiResult<()> {
+    // **Before anything reads `req`**, because naming a team settles the
+    // profile — and `name` below borrows the request for the rest of this
+    // function.
+    let standing = standing_for_schedule(state, owner_id, &mut req).await?;
+    let req = req;
     let name = req.name.trim();
     if name.is_empty() {
         return Err(ApiError::new(
@@ -300,7 +315,16 @@ pub(crate) async fn write_one(
     let profile = profile_for(state, owner_id, &req).await?;
     let agent = effective_agent(&req, profile.as_ref());
     let spec = spec_for(&req, agent);
-    let pins = pins_for(state, owner_id, &req, agent, profile.as_ref()).await?;
+    let pins = pins_for(
+        state,
+        owner_id,
+        &req,
+        agent,
+        profile.as_ref(),
+        standing.as_ref(),
+    )
+    .await?;
+
     let delete_clean_runs = !repos_asked(&req).is_empty() && req.delete_clean_runs;
 
     if fresh {
@@ -419,12 +443,14 @@ fn repos_asked(req: &NewSchedule) -> Vec<RepoId> {
 /// absent field means "whatever they were doing at 5pm yesterday" and would
 /// change what the 9am unattended run does. All four are written in
 /// explicitly, from the shipped defaults where the request left them unset.
+#[allow(clippy::type_complexity)]
 async fn pins_for(
     state: &AppState,
     owner_id: &str,
     req: &NewSchedule,
     agent: ft_core::Agent,
     profile: Option<&crate::roles::Role>,
+    standing: Option<&(crate::agent_teams::AgentTeam, crate::agent_teams::Position)>,
 ) -> ApiResult<serde_json::Value> {
     let mut settings = req.settings.clone();
 
@@ -676,8 +702,13 @@ async fn pins_for(
     let (persona, fingerprint) = match profile {
         None => (None, None),
         Some(role) => (
-            Some(super::sessions::persona_for(state, owner_id, role).await?),
-            Some(profile_fingerprint(role)),
+            Some(super::sessions::persona_for(state, owner_id, role, standing).await?),
+            // **The team's shape is in the fingerprint**, so editing a team
+            // clears the approval exactly as editing the profile does. The
+            // gate recomputes it and refuses rather than running a shape
+            // nobody approved — an unattended run cannot answer "is eight
+            // agents still what you meant".
+            Some(profile_fingerprint(role, standing.map(|(t, _)| t))),
         ),
     };
 
@@ -701,6 +732,13 @@ async fn pins_for(
         "skills": skills,
         "accountId": account,
         "profile": req.profile,
+        // The team, and how many agents a run of this can start. The number
+        // is pinned rather than counted later because it is what the
+        // schedule's own screen says out loud before Save — "up to 8 agents a
+        // run, with nobody watching" — and the only thing standing between a
+        // team schedule and a surprise.
+        "team": standing.map(|(t, _)| t.id.clone()),
+        "teamSize": standing.map(|(t, _)| t.size()),
         "skillVersionIds": versions,
         "persona": persona,
         "profileFingerprint": fingerprint,
@@ -1195,7 +1233,10 @@ async fn profile_for(
 ///
 /// `name` is in it deliberately: it is in the composed persona, so a rename
 /// changes what the agent is told it is.
-pub(crate) fn profile_fingerprint(role: &crate::roles::Role) -> String {
+pub(crate) fn profile_fingerprint(
+    role: &crate::roles::Role,
+    team: Option<&crate::agent_teams::AgentTeam>,
+) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     for part in [
@@ -1221,7 +1262,71 @@ pub(crate) fn profile_fingerprint(role: &crate::roles::Role) -> String {
             .unwrap_or_default()
             .as_slice(),
     );
+    // The whole tree, in the order the map draws it: every position's profile,
+    // where it sits and what it is told there. A team that gained a position,
+    // lost one, was re-parented or had one line of extra instructions changed
+    // is a different team, and the run it would produce is a different run.
+    if let Some(team) = team {
+        hasher.update(team.name.as_bytes());
+        hasher.update([0u8]);
+        for p in &team.positions {
+            for part in [
+                p.id.as_str(),
+                p.parent.as_deref().unwrap_or(""),
+                p.profile.as_str(),
+                p.extra_instructions.as_str(),
+            ] {
+                hasher.update(part.as_bytes());
+                hasher.update([0u8]);
+            }
+            hasher.update(p.ordinal.to_le_bytes());
+        }
+    }
     format!("{:x}", hasher.finalize())
+}
+
+/// The team a schedule names, and the lead it therefore starts.
+///
+/// `sessions::standing_for` with a `NewSchedule` in place of a `NewSession`:
+/// the same two refusals, and the same rule that naming a team settles the
+/// profile.
+#[allow(clippy::type_complexity)]
+async fn standing_for_schedule(
+    state: &AppState,
+    owner_id: &str,
+    req: &mut NewSchedule,
+) -> ApiResult<Option<(crate::agent_teams::AgentTeam, crate::agent_teams::Position)>> {
+    let Some(id) = req.team.clone() else {
+        return Ok(None);
+    };
+    let team = state
+        .agent_teams
+        .one(owner_id, &id, crate::access::Level::Viewer)
+        .await?
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidRequest,
+                "that team isn't one you can start",
+            )
+        })?;
+    let lead = team.lead().cloned().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that team has no lead, so there is nobody to start it as",
+        )
+    })?;
+    if req.profile.as_deref().is_some_and(|p| p != lead.profile) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "a schedule that names the {} team starts {}, its lead — it cannot be scheduled \
+                 as another profile.",
+                team.name, lead.name
+            ),
+        ));
+    }
+    req.profile = Some(lead.profile.clone());
+    Ok(Some((team, lead)))
 }
 
 /// Mine, or not found.
@@ -1320,6 +1425,12 @@ async fn assemble(state: &AppState, row: crate::db::ScheduleRow) -> ApiResult<Sc
             .get("profile")
             .and_then(|v| v.as_str())
             .map(str::to_string),
+        team: row
+            .pins
+            .get("team")
+            .and_then(|v| v.as_str())
+            .map(str::to_string),
+        team_size: row.pins.get("teamSize").and_then(|v| v.as_i64()),
         settings: row
             .pins
             .get("settings")

@@ -522,6 +522,8 @@ pub(crate) async fn create_session_as(
             .await;
     }
 
+    let standing = standing_for(&state, &owner, &mut req).await?;
+
     // The profile this is started as, if any. Resolved before anything is
     // chosen, because it may pin the engine — which the rest of this function
     // reads off `req.agent` — and it composes the persona the session carries.
@@ -552,7 +554,7 @@ pub(crate) async fn create_session_as(
     // [`Launch::persona`].
     let persona = match (&approved_persona, &profile) {
         (Some(approved), _) => Some(approved.clone()),
-        (None, Some(p)) => Some(persona_for(&state, &owner, p).await?),
+        (None, Some(p)) => Some(persona_for(&state, &owner, p, standing.as_ref()).await?),
         (None, None) => None,
     };
 
@@ -1099,6 +1101,11 @@ pub(crate) async fn create_session_as(
     if let Some(profile) = &profile {
         state.db.set_profile(&id, &profile.id).await?;
     }
+    // And where it stands, when it was started as a team. This is what every
+    // `spawn` from this session reads — see `delegate::reach_of`.
+    if let Some((team, here)) = &standing {
+        state.db.set_position(&id, &team.id, &here.id).await?;
+    }
     if let Some(persona) = &persona {
         state.db.set_persona(&id, persona).await?;
     }
@@ -1514,10 +1521,63 @@ pub(super) async fn relaunch_session(
 /// see both the profile and everything its owner can reach. The identity and
 /// the instructions always; the delegation guidance and the list of profiles
 /// to hand to only for a Manager, so an Operator is never told it can delegate.
+/// Where a launch stands, when a team was named — and the profile that pins.
+///
+/// **The team is resolved before the profile, because naming one decides the
+/// profile.** You never talk to a team; you talk to its lead. So picking a
+/// team starts its lead with the team behind it, and the session stands on the
+/// team's root position. What that position has under it is the whole of what
+/// the session may hand work to.
+///
+/// A `profile` sent alongside has to be the lead's. Refused rather than
+/// quietly overridden: the two readings — start the team, or start that
+/// profile bare — differ in whether seven other agents can be started, and
+/// picking either for somebody would be the misleading case the composer is
+/// shaped around.
+#[allow(clippy::type_complexity)]
+async fn standing_for(
+    state: &AppState,
+    owner: &str,
+    req: &mut NewSession,
+) -> ApiResult<Option<(crate::agent_teams::AgentTeam, crate::agent_teams::Position)>> {
+    let Some(id) = req.team.clone() else {
+        return Ok(None);
+    };
+    let team = state
+        .agent_teams
+        .one(owner, &id, crate::access::Level::Viewer)
+        .await?
+        .ok_or_else(|| {
+            ApiError::new(
+                ErrorCode::InvalidRequest,
+                "that team isn't one you can start",
+            )
+        })?;
+    let lead = team.lead().cloned().ok_or_else(|| {
+        ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that team has no lead, so there is nobody to start it as",
+        )
+    })?;
+    if req.profile.as_deref().is_some_and(|p| p != lead.profile) {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "starting the {} team starts {}, its lead — it cannot be started as another \
+                 profile. Start that profile on its own instead, and it hands work to nobody.",
+                team.name, lead.name
+            ),
+        ));
+    }
+    req.profile = Some(lead.profile.clone());
+    Ok(Some((team, lead)))
+}
+
 pub(super) async fn persona_for(
     state: &AppState,
     owner: &str,
     profile: &crate::roles::Role,
+    standing: Option<&(crate::agent_teams::AgentTeam, crate::agent_teams::Position)>,
 ) -> ApiResult<String> {
     let mut text = format!(
         "# You are the \"{}\" profile\n\n{}\n",
@@ -1528,14 +1588,34 @@ pub(super) async fn persona_for(
         text.push_str(profile.instructions.trim());
         text.push('\n');
     }
-    if profile.can_delegate {
+    /* **What this position adds, and only this position.** Appended after
+    the profile's own instructions rather than instead of them: a position
+    never replaces a profile field, so there is no resolution order to
+    define. The same rule `delegate::brief` keeps for a spawned child. */
+    if let Some((team, here)) = standing {
+        if !here.extra_instructions.trim().is_empty() {
+            text.push_str(&format!(
+                "\n## In the {} team\n\n{}\n",
+                team.name,
+                here.extra_instructions.trim()
+            ));
+        }
+    }
+
+    /* Who this session may hand work to.
+
+    **The positions directly under it, and nothing else.** Not what its
+    owner can see, not what the profile once listed — the scope is enforced
+    by what this prompt does and does not name, and by `delegate::reach_of`
+    refusing anything off it.
+
+    Two positions of one profile are the ordinary case, so where a name
+    repeats each is listed with the phrase that tells them apart — which is
+    the first line of its extra instructions, and is exactly what `spawn`
+    takes back as `role`. */
+    if let Some((team, here)) = standing {
         text.push('\n');
         text.push_str(ft_core::DELEGATION_GUIDANCE);
-        /* And this Manager's own answer to the question the guidance leaves
-        to it. Said here rather than in the shared text because it is the
-        one part of delegating that is per-profile: the guidance explains
-        both ways, and this is which of them this profile was told to take.
-        Only for a Manager, like everything else in this block. */
         text.push_str(match profile.on_child_limit.as_str() {
             "reroute" => {
                 "\n\n**When a child runs out, re-route it yourself.** Read `list_compute`, \
@@ -1544,7 +1624,6 @@ pub(super) async fn persona_for(
                  onto what — moving somebody's allowance and not mentioning it is the thing \
                  this is here to avoid."
             }
-            // `ask` and anything a newer build writes: the careful direction.
             _ => {
                 "\n\n**When a child runs out, ask before you move it.** Put the choice to the \
                  person as a question with one option per subscription, and carry each one's \
@@ -1552,10 +1631,32 @@ pub(super) async fn persona_for(
                  description. Then `switch` the child onto the one they pick."
             }
         });
-        // Its team: what the owner can see, minus itself, narrowed to the
-        // profile's `delegate_scope` when it has one. An off-team profile is
-        // never named here, so the agent cannot ask for it — the scope is
-        // enforced by what the prompt does and does not contain.
+        /* **The same sentence a child gets.** `delegate::reports_of` writes
+        it for both, because a lead and a position three levels down are
+        the same situation — somebody standing somewhere with things under
+        them — and when they were two texts only this one existed. */
+        text.push_str(&crate::delegate::reports_of(state, team, here, true).await?);
+    } else if profile.can_delegate {
+        /* ── the compatibility window ───────────────────────────────────
+        Deprecated, read here and written nowhere. A profile that still
+        carries the old reach goes on composing the prompt it always did,
+        so an installation that upgraded this morning does not find its
+        Managers mute this afternoon. `delegate::reach_of` keeps the other
+        half of this, and both go when the columns do. */
+        text.push('\n');
+        text.push_str(ft_core::DELEGATION_GUIDANCE);
+        text.push_str(match profile.on_child_limit.as_str() {
+            "reroute" => {
+                "\n\n**When a child runs out, re-route it yourself.** Read `list_compute`, \
+                 pick a subscription with allowance left, and `switch` the child onto it \
+                 without stopping to ask."
+            }
+            _ => {
+                "\n\n**When a child runs out, ask before you move it.** Put the choice to the \
+                 person as a question with one option per subscription, then `switch` the child \
+                 onto the one they pick."
+            }
+        });
         let scoped = !profile.delegate_scope.is_empty();
         let mut others: Vec<_> = state
             .roles
@@ -1769,7 +1870,11 @@ pub(crate) async fn relaunch(
             .one(owner, pid, crate::access::Level::Viewer)
             .await
         {
-            if let Ok(composed) = persona_for(state, owner, &profile).await {
+            let standing = match session.position_id.as_deref() {
+                Some(id) => state.agent_teams.at_position(id).await.ok().flatten(),
+                None => None,
+            };
+            if let Ok(composed) = persona_for(state, owner, &profile, standing.as_ref()).await {
                 persona = composed;
             }
         }
@@ -1893,10 +1998,13 @@ async fn start_another_agent(
     state: AppState,
     owner: String,
     workspace_id: ft_core::WorkspaceId,
-    req: NewSession,
+    mut req: NewSession,
     lineage: Option<Lineage>,
     inherit_settings: bool,
 ) -> ApiResult<Session> {
+    // A team started into a workspace that already exists stands exactly where
+    // one started into a new workspace does. See `standing_for`.
+    let standing = standing_for(&state, &owner, &mut req).await?;
     if !req.agent.speaks_a_protocol() {
         return Err(ApiError::new(
             ErrorCode::InvalidRequest,
@@ -2027,7 +2135,7 @@ async fn start_another_agent(
     )
     .await?;
     let persona = match &profile {
-        Some(p) => persona_for(&state, &owner, p).await?,
+        Some(p) => persona_for(&state, &owner, p, standing.as_ref()).await?,
         None => String::new(),
     };
 
@@ -2035,6 +2143,9 @@ async fn start_another_agent(
     // above, and for the same reason.
     if let Some(profile) = &profile {
         state.db.set_profile(&id, &profile.id).await?;
+    }
+    if let Some((team, here)) = &standing {
+        state.db.set_position(&id, &team.id, &here.id).await?;
     }
     if !persona.is_empty() {
         state.db.set_persona(&id, &persona).await?;

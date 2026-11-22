@@ -3209,6 +3209,50 @@ html:not([data-platform="macos"]) {
     padding-left: 13px;
     border-left: 1px solid var(--color-line);
   }
+  /* **A rail per level, and then it stops.** A team is a tree and the panel
+     draws it as one, but the panel is 300px wide with a name, an agent mark
+     and an age already in it — six levels of indentation is 78px of that and
+     every name past the third is an ellipsis. `MAX_DEPTH` is 6, so the bad
+     case is reachable rather than theoretical.
+
+     So: three levels indent, and past that the row carries `· under X`
+     instead. Written on the row rather than by nesting `.kids` inside
+     itself, because the tree arrives flat and in order — which is also what
+     keeps one scrolling list rather than a stack of nested scroll areas. */
+  /* **`.tier`, because `.lvl` was taken** — it is the access-level pill in
+     the sharing rows, an inline-flex 28px chip, and a team row that
+     inherited it was a row that would not indent. Second time a new class
+     has collided with an old one on this screen; the grep is cheap. */
+  .tier[data-depth="2"] {
+    padding-left: 15px;
+  }
+  .tier[data-depth="3"] {
+    padding-left: 30px;
+  }
+  /* The rail for the levels below the first, drawn on the row so it lines up
+     with the one `.kids` already draws above it. */
+  .tier[data-depth="2"],
+  .tier[data-depth="3"] {
+    background-image: linear-gradient(var(--color-line), var(--color-line));
+    background-size: 1px 100%;
+    background-repeat: no-repeat;
+  }
+  .tier[data-depth="2"] {
+    background-position: 1px 0;
+  }
+  .tier[data-depth="3"] {
+    background-position: 16px 0;
+  }
+
+  /* What a row says once the rail has stopped saying it. */
+  .tm .via {
+    flex: none;
+    font-size: var(--text-micro);
+    color: var(--color-mute);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   .here-badge {
     flex: none;
     padding: 1px 7px;
@@ -3458,19 +3502,33 @@ html:not([data-platform="macos"]) {
     line-height: 1.55;
     color: var(--color-dim);
   }
+  /* **One border, and it brightens on focus.** This is `ui/Field.tsx`'s
+     `BASE` — `border-line` on `bg-ground`, `focus:border-dim`,
+     `focus:outline-none` — which is what every other input in this app is.
+     It used to be a filled pill with an *inset* ring, and the control inside
+     it kept the global `:focus-visible` outline, so a focused field drew two
+     boxes: a heavy one at the pill's edge and a second one just inside it.
+     Reported, twice, and the screenshot was unambiguous.
+
+     The geometry stays the form's — `--row` tall, 12px radius — because a
+     field in a 640px column is not a filter bar's 32px control. The border
+     treatment is the shared one. */
   .fld .box {
     display: flex;
     align-items: center;
     gap: 10px;
     min-height: var(--row);
     padding: 9px 13px;
+    border: 1px solid var(--color-line);
     border-radius: 12px;
-    background: var(--color-raise);
-    transition: box-shadow var(--dur-native) var(--ease-swift);
+    background: var(--color-ground);
+    transition: border-color var(--dur-native) var(--ease-swift);
   }
   .fld .box:focus-within {
-    box-shadow: inset 0 0 0 1.5px var(--color-bone);
+    border-color: var(--color-dim);
   }
+  /* The box carries the focus, so the control inside it must not draw a
+     second one. This is the `focus:outline-none` half of the standard. */
   .fld .box input,
   .fld .box textarea {
     flex: 1;
@@ -3478,15 +3536,48 @@ html:not([data-platform="macos"]) {
     font-size: 0.96875rem;
     line-height: 1.6;
     color: var(--color-bone);
+    outline: none;
+  }
+  .fld .box input:focus,
+  .fld .box input:focus-visible,
+  .fld .box textarea:focus,
+  .fld .box textarea:focus-visible {
+    outline: none;
   }
   .fld .box textarea {
     min-height: 96px;
+  }
+  /* A field that is a sentence or two rather than a document: `rows` decides
+     it, and the floor that makes a long one obviously a textarea gets out of
+     the way. */
+  .fld .box.brief textarea {
+    min-height: 0;
+  }
+  /* The one tier reserved for text that is not yet there. Unset, a
+     placeholder inherited `--color-bone` and read as a filled field. */
+  .fld .box input::placeholder,
+  .fld .box textarea::placeholder {
+    color: var(--color-mute);
   }
   .fld .box.mono textarea,
   .fld .box.mono input {
     font-family: var(--font-mono);
     font-size: 0.875rem;
     line-height: 1.7;
+  }
+  /* A box that *is* the control — a dropdown trigger rather than a field
+     around an input. It takes a hover, because it is pressable. */
+  button.box {
+    cursor: pointer;
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      box-shadow var(--dur-native) var(--ease-swift);
+  }
+  button.box:hover {
+    background: var(--color-overlay);
+  }
+  [data-theme="light"] button.box:hover {
+    background: var(--color-overlay);
   }
   .fld .box[data-ro="true"] {
     background: transparent;
@@ -6527,5 +6618,822 @@ html:not([data-platform="macos"]) {
   }
   .s-sum dd {
     color: var(--color-text);
+  }
+}
+
+
+/* ── The agent-teams map ──────────────────────────────────────────────
+   A team drawn as a tree you can drag: the lead's children spread beneath it
+   with elbow connectors, and everything below that indents. The arrangement
+   was chosen by measuring both — a classic organigramme throughout is 4640px
+   wide on the hardest lane the prototype draws, and this is 504px and
+   complete.
+
+   **The map is the page.** It was a boxed canvas inside `.pg`'s 1000px
+   column, which gave a thing you arrange less room than the window it is in
+   and put a scrollbar around a drawing. There is no column here and no
+   padding: the canvas is the body, it pans and zooms, and the chrome floats
+   on top of it. The header and the 22px strip are the only fixed rows.
+
+   **Every size is the desk's own**, and every component is the app's: the
+   drawer is `.form` → `.fld` → `.box`, the same stack the profile editor on
+   `/configuration/roles/<id>` is built from, at a narrower width. Two
+   surfaces that edit the same two objects are not two designs — and the only
+   way they stay that way as either changes is for them to be the same
+   components rather than two that match today.
+
+   The layout maths is in `ui/config/teams/layout.ts`; this is only what the
+   cards and the chrome look like. */
+@layer components {
+  .mappage {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    position: relative;
+  }
+
+  /* The page's own head, at the map's width rather than `.pg`'s. The title
+     is a name: one line with an end to it, not a word-per-line column. */
+  .maphead {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    flex: none;
+    flex-wrap: wrap;
+    padding: 26px 28px 16px;
+  }
+  .maphead .tx {
+    flex: 1 1 240px;
+    min-width: 0;
+  }
+  .maphead h1 {
+    font-size: clamp(20px, 2.4vw, 27px);
+    line-height: 1.15;
+    letter-spacing: -0.022em;
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .maphead .sub {
+    margin-top: 5px;
+    font-size: 0.90625rem;
+    color: var(--color-dim);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .maphead .acts {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: none;
+    margin-left: auto;
+    padding-top: 3px;
+  }
+  /* **Arrives with the first change.** A Save that is disabled most of the
+     time is a control that mostly says no; the strip already says nothing
+     writes until Save. */
+  .pendpill {
+    display: inline-flex;
+    align-items: center;
+    height: 26px;
+    padding: 0 11px;
+    border-radius: 999px;
+    background: var(--color-sage-tint);
+    font-size: 0.84375rem;
+    color: var(--color-text);
+  }
+
+  /* **Only ever drawn when there is something to say.** A refusal, a
+     read-only notice, or what Save is about to do to the schedules that pin
+     this team. The canvas is the whole page the rest of the time, so this
+     row takes no height at all when it is empty — and its children are the
+     app's own `.note2` and `.whereto`, with their page margins taken off
+     because they are not on a page column here. */
+  .mapnotes {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    padding: 0 28px 12px;
+  }
+  .mapnotes > * {
+    margin-top: 0;
+  }
+  .mapnotes > * + * {
+    margin-top: 8px;
+  }
+
+  /* ── The canvas ──────────────────────────────────────────────────
+     A hairline dot grid, and it says what this is: a surface you arrange
+     things on. `overflow: hidden` rather than `auto` — nothing here is
+     reached by scrolling, it is reached by dragging. */
+  .canvaswrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+  }
+  .mapcanvas {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    cursor: grab;
+    touch-action: none;
+    background-image: radial-gradient(var(--color-line) 1.1px, transparent 1.1px);
+    background-size: 24px 24px;
+  }
+  [data-theme="light"] .mapcanvas {
+    background-image: radial-gradient(var(--color-overlay) 1.1px, transparent 1.1px);
+  }
+  .mapcanvas.dragging {
+    cursor: grabbing;
+  }
+  .mapcanvas:focus-visible {
+    outline: none;
+  }
+  /* What the transform is applied to. One element moves, so panning is one
+     composited layer rather than a reflow of every card. */
+  .mapworld {
+    position: absolute;
+    top: 0;
+    left: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+  }
+  .mapwires {
+    position: absolute;
+    top: 0;
+    left: 0;
+    overflow: visible;
+    pointer-events: none;
+  }
+  .mapwires path {
+    fill: none;
+    stroke: var(--color-line);
+    stroke-width: 1.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  /* Drafted, and not yet written. */
+  .mapwires path.fresh {
+    stroke: var(--color-sage);
+    stroke-dasharray: 3 3;
+  }
+
+  /* ── One card ──────────────────────────────────────────────────── */
+  /* **Filled, not outlined.** `--color-panel` is the one white in light, so
+     a white card on the sheet is a card you find by its shadow — which in
+     light is almost nothing. `--color-raise` is the token for exactly this:
+     a thing sitting *on* the page. */
+  .oc {
+    position: absolute;
+    border-radius: 12px;
+    background: var(--color-raise);
+    outline: 1px solid var(--color-line-soft);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      outline-color var(--dur-native) var(--ease-swift),
+      box-shadow var(--dur-native) var(--ease-swift);
+  }
+  [data-theme="light"] .oc {
+    outline: none;
+  }
+  .oc:hover {
+    background: var(--color-overlay);
+  }
+  /* **The lead is not drawn differently at all.** It was the sheet's white
+     with a lift under it, on the reasoning that a thing different in kind
+     should read as one. But every card here is the same kind of thing — a
+     profile standing in a position — and the lead is already the one at the
+     top of the tree with nothing above it and no control to remove it. A
+     second signal for a fact the drawing already states is noise. */
+  .oc[data-on="true"] {
+    outline: 1.5px solid var(--color-bone);
+  }
+  [data-theme="light"] .oc[data-on="true"] {
+    background: var(--color-panel);
+    outline: 1.5px solid var(--color-bone);
+    box-shadow: var(--shadow-raise);
+  }
+  /* Drafted. A ring rather than a fill: the card still has to read as the
+     same object it will be after Save. */
+  .oc[data-pend="add"],
+  .oc[data-pend="move"] {
+    outline: 1.5px solid var(--color-sage);
+  }
+
+  .ocopen {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    height: 100%;
+    padding: 0 12px;
+    text-align: left;
+  }
+  .oc .ocrow {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    height: 19px;
+  }
+  .oc .g {
+    display: grid;
+    place-items: center;
+    width: 16px;
+    flex-shrink: 0;
+    color: var(--color-dim);
+  }
+  .oc .nm {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.90625rem;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    color: var(--color-bone);
+  }
+  /* How many are directly under it *here*. Not a total: a profile's other
+     teams are not this team's business. */
+  .oc .cnt {
+    flex-shrink: 0;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: var(--color-ground);
+    font-size: 0.75rem;
+    line-height: 17px;
+    text-align: center;
+    color: var(--color-dim);
+    font-variant-numeric: tabular-nums;
+  }
+  [data-theme="light"] .oc .cnt {
+    background: var(--color-overlay);
+  }
+  [data-theme="light"] .oc[data-on="true"] .cnt {
+    background: var(--color-raise);
+  }
+  /* The first words of what this position is told — the only honest thing
+     that tells two positions of one profile apart. */
+  .oc .brf {
+    flex: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.78125rem;
+    line-height: 15px;
+    color: var(--color-mute);
+  }
+
+  /* **Bottom centre, on the connector trunk**, because that is where the
+     child appears. */
+  .oc .plus,
+  .oc .bin {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 999px;
+    background: var(--color-overlay);
+    outline: 1px solid var(--color-line);
+    color: var(--color-dim);
+    opacity: 0;
+    transition:
+      opacity var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  [data-theme="light"] .oc .plus,
+  [data-theme="light"] .oc .bin {
+    background: var(--color-panel);
+    outline: none;
+    box-shadow: var(--shadow-raise);
+  }
+  .oc .plus {
+    left: 50%;
+    bottom: -10px;
+    transform: translateX(-50%);
+  }
+  /* Top right, off the corner, away from the trunk so neither control's box
+     can intersect the other's. */
+  .oc .bin {
+    right: -9px;
+    top: -9px;
+  }
+  /* **Never hover alone.** Focus reaches both with no pointer at all, and
+     the selected card keeps them up. */
+  .oc:hover .plus,
+  .oc:hover .bin,
+  .oc:focus-within .plus,
+  .oc:focus-within .bin,
+  .oc[data-on="true"] .plus,
+  .oc[data-on="true"] .bin {
+    opacity: 1;
+  }
+  .oc .plus:hover {
+    color: var(--color-bone);
+  }
+  .oc .bin:hover {
+    color: var(--color-brick);
+  }
+  .oc .plus:focus-visible,
+  .oc .bin:focus-visible {
+    opacity: 1;
+    outline: 2px solid var(--color-bone);
+    outline-offset: 1px;
+  }
+
+  /* ── The view controls ───────────────────────────────────────────
+     Floating on the canvas rather than in the header: they are about what
+     you are looking at, not about the team, and they belong next to the
+     thing they move. Bottom left, out of the drawer's way. */
+  .maptools {
+    position: absolute;
+    left: 18px;
+    bottom: 18px;
+    z-index: 4;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    border-radius: 12px;
+    background: var(--color-raise);
+    box-shadow: var(--shadow-float);
+  }
+  [data-theme="light"] .maptools {
+    background: var(--color-panel);
+  }
+  .maptool {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    min-width: 28px;
+    padding: 0 8px;
+    border-radius: 8px;
+    font-size: 0.84375rem;
+    color: var(--color-dim);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .maptool:hover {
+    background: var(--color-overlay);
+    color: var(--color-bone);
+  }
+  .maptool.wide {
+    min-width: 52px;
+    font-variant-numeric: tabular-nums;
+  }
+  .maptoolsep {
+    width: 1px;
+    height: 17px;
+    margin: 0 4px;
+    background: var(--color-line);
+  }
+
+  /* 22px. Counts and a sentence. No controls, ever. */
+  .mapstrip {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: none;
+    height: 26px;
+    padding: 0 16px;
+    font-size: 0.8125rem;
+    color: var(--color-mute);
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .mapstrip span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* ── The drawer ──────────────────────────────────────────────────
+     Fixed to the window, over the canvas, rather than a column beside it.
+     A column takes width from the map permanently and reflows the drawing
+     every time one is opened; an overlay takes none and the map underneath
+     does not move — except by the one nudge in `clearOf`, when the card it
+     is about would otherwise be behind it.
+
+     **It starts below the title bar, not at 0.** The prototype runs the
+     full height because its window is a drawing. This one is a window, and
+     on Windows and Linux the minimise/maximise/close controls are at the
+     top right — which is precisely what a drawer at `top: 0` would cover. */
+  .dveil {
+    position: fixed;
+    top: var(--chrome-title);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 30;
+    background: rgb(0 0 0 / 0.46);
+    animation: dveil-in var(--dur-native) var(--ease-swift);
+  }
+  [data-theme="light"] .dveil {
+    background: rgb(22 22 23 / 0.28);
+  }
+  .mapdrawer {
+    position: fixed;
+    top: var(--chrome-title);
+    right: 0;
+    bottom: 0;
+    z-index: 31;
+    width: min(392px, 100%);
+    display: flex;
+    flex-direction: column;
+    /* `.lift`'s own two values: the sheet in light, a step up from it in
+       dark. Every card of its own size in this app is this pair. */
+    background: var(--color-raise);
+    box-shadow: var(--shadow-float);
+    animation: dslide-in 260ms var(--ease-swift);
+  }
+  [data-theme="light"] .mapdrawer {
+    background: var(--color-panel);
+  }
+
+  /* **A picker pill steps up one inside a lifted surface.**
+     `.lift`, `.pop` and the drawer are all `--color-raise` in dark — which
+     is also `.pk`'s own fill, so a row of choices in a dialog had no pills
+     in it at all. In light these surfaces are the sheet and the pill
+     already reads one step below it, so only dark moves.
+
+     Written here rather than on `.pk` because it is a fact about the
+     surface, not about the control: the same pill is correct on a page. */
+  .lift .pk,
+  .pop .pk,
+  .mapdrawer .pk {
+    background: var(--color-overlay);
+  }
+  .lift .pk:hover,
+  .pop .pk:hover,
+  .mapdrawer .pk:hover {
+    background: var(--color-line);
+  }
+  [data-theme="light"] .lift .pk,
+  [data-theme="light"] .pop .pk,
+  [data-theme="light"] .mapdrawer .pk {
+    background: var(--color-raise);
+  }
+  [data-theme="light"] .lift .pk:hover,
+  [data-theme="light"] .pop .pk:hover,
+  [data-theme="light"] .mapdrawer .pk:hover {
+    background: var(--color-overlay);
+  }
+  /* A pressed pill is ink either way, and must outrank the step above. */
+  .lift .pk[aria-pressed="true"],
+  .pop .pk[aria-pressed="true"],
+  .mapdrawer .pk[aria-pressed="true"] {
+    background: var(--color-bone);
+    color: var(--color-panel);
+  }
+  @keyframes dveil-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes dslide-in {
+    from {
+      transform: translateX(100%);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .dveil,
+    .mapdrawer {
+      animation: none;
+    }
+  }
+
+  .mapdrawer .dhead {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    flex: none;
+    padding: 20px 10px 14px 20px;
+  }
+  .mapdrawer .dhead .tx {
+    flex: 1;
+    min-width: 0;
+  }
+  .mapdrawer .dhead .nm {
+    display: block;
+    font-size: 1.1875rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.014em;
+    color: var(--color-bone);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mapdrawer .dhead .where {
+    display: block;
+    margin-top: 3px;
+    font-size: 0.84375rem;
+    color: var(--color-mute);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  /* The rail's tab strip is 52px against a full-height pane; in a drawer
+     that is a lot of chrome before the first field. */
+  .mapdrawer .itabs {
+    height: 38px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--color-line);
+  }
+
+  /* **The body is the profile editor's `.form`, narrower.** The same `.fld`
+     → label, hint, `.box`/`.pickrow` stack and the same 22px rhythm. */
+  .dbody {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 18px 20px;
+  }
+  .dbody .form {
+    max-width: none;
+    margin-top: 0;
+    flex: 1;
+  }
+  /* **A field does not shrink.** `.form` is a flex column, so its children
+     are shrinkable by default — which quietly squeezed a 96px instructions
+     box down to one line to make room for the foot. */
+  .dbody .form > * {
+    flex: none;
+  }
+  .dbody .fld .hint {
+    max-width: none;
+    font-size: 0.84375rem;
+  }
+  /* **The one field on a tab takes the room.** Extra instructions is the
+     whole of the first tab, and a 10-row box above 400px of nothing is a
+     smaller place to write than the drawer actually has. It is the only
+     exception to the `flex: none` above, which is why it asks by name. */
+  .dbody .form > .grows {
+    flex: 1;
+    min-height: 0;
+  }
+  .dbody .form > .grows .box {
+    flex: 1;
+    min-height: 0;
+  }
+  .dbody .form > .grows textarea {
+    height: 100%;
+    resize: none;
+  }
+
+  /* **The drawer's foot is `.sh-foot`, not `.formfoot`.** The design system
+     has both, for the two situations this is the difference between: a
+     page's foot sticks to the bottom of a scroll it belongs to, and a
+     sheet's is pinned outside one. A drawer is a sheet — a sticky bar with
+     a gradient over a 392px column wraps to three lines and sits on the
+     field above it. */
+  .mapdrawer .sh-foot {
+    flex: none;
+    flex-wrap: wrap;
+    padding: 12px 20px 16px;
+  }
+  .mapdrawer .sh-foot .where {
+    font-size: 0.8125rem;
+    color: var(--color-mute);
+  }
+  .mapdrawer .sh-foot .where b {
+    font-weight: 500;
+    color: var(--color-dim);
+  }
+
+  .nobody {
+    font-size: 0.90625rem;
+    color: var(--color-mute);
+  }
+
+  /* The page's wrapper around the shared form: it owns the width, and the
+     foot that follows the form is its own. */
+  .pf {
+    display: contents;
+  }
+
+  /* ── A field with a door, and the room behind it ─────────────────
+     Instructions is Markdown composed into an agent's prompt, and it is
+     routinely longer than the rows a form can spare — in a 392px drawer it
+     is a window onto a document rather than a place to write one. */
+  .fld .box.bigtext {
+    position: relative;
+    align-items: stretch;
+    padding-bottom: 34px;
+  }
+  /* The grip goes off: a field that is resizable *and* has a full-screen
+     door has two answers to one question, and they disagree. */
+  .fld .box.bigtext textarea {
+    resize: none;
+  }
+  /* Inside the box rather than beside it — it is about this text, and a
+     control an inch from what it acts on is a control you have to aim. */
+  .bigopen {
+    position: absolute;
+    right: 8px;
+    bottom: 8px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 7px;
+    background: var(--color-overlay);
+    font-size: var(--text-micro);
+    color: var(--color-dim);
+    transition:
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .bigopen:hover {
+    background: var(--color-line);
+    color: var(--color-bone);
+  }
+  [data-theme="light"] .bigopen {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
+  }
+
+  /* **The room.** Over everything, including the drawer it may have been
+     opened from — it is the same field at the size the text deserves, so
+     nothing it covers is anything you need while you are in it. Below the
+     title bar for the same reason the drawer is: the window's own controls
+     are at the top right on two of the three platforms. */
+  .bigroom {
+    position: fixed;
+    top: var(--chrome-title);
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    background: var(--color-panel);
+    animation: bigroom-in var(--dur-native) var(--ease-swift);
+  }
+  @keyframes bigroom-in {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .bigroom {
+      animation: none;
+    }
+  }
+  .bighead {
+    display: flex;
+    justify-content: center;
+    flex: none;
+    padding: 18px 28px 14px;
+    border-bottom: 1px solid var(--color-line);
+  }
+  /* The measure every row of this room keeps. */
+  .bighead .in,
+  .bigfoot .in {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    max-width: 90ch;
+  }
+  .bighead .in {
+    align-items: flex-start;
+  }
+  /* Split uses the whole window, so the rows above and below it do too —
+     a heading indented to a measure the body no longer keeps is a heading
+     in the wrong place. */
+  .bigroom[data-look="split"] .bighead .in,
+  .bigroom[data-look="split"] .bigfoot .in {
+    max-width: none;
+  }
+  .bighead .tx {
+    flex: 1;
+    min-width: 0;
+  }
+  .bighead .nm {
+    display: block;
+    font-size: 1.1875rem;
+    font-weight: var(--font-weight-mid);
+    letter-spacing: -0.014em;
+    color: var(--color-bone);
+  }
+  .bighead .where {
+    display: block;
+    margin-top: 3px;
+    font-size: 0.84375rem;
+    color: var(--color-mute);
+  }
+  /* One measure, centred: a prompt read at the window's full width is a
+     line nobody can track back the start of. */
+  .bigbody {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+    gap: 28px;
+    padding: 20px 28px;
+  }
+  .bigbody textarea {
+    width: 100%;
+    max-width: 90ch;
+    height: 100%;
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
+    line-height: 1.75;
+    color: var(--color-bone);
+    resize: none;
+    outline: none;
+  }
+  .bigbody textarea::placeholder {
+    color: var(--color-mute);
+  }
+  /* The rendering, in the app's own `Markdown` — the one the chat draws a
+     turn with. Its own scroll, because the two panes are rarely the same
+     height and tying them would mean one of them lies. */
+  .bigread {
+    width: 100%;
+    max-width: 90ch;
+    min-width: 0;
+    height: 100%;
+    overflow-y: auto;
+  }
+  /* **Split is two halves of one measure, not two full ones.** Each pane
+     takes half the room and caps at the measure, so the pair stays centred
+     and neither line runs past what an eye can track. A hairline between
+     them rather than a border on either: it is one surface in two columns. */
+  .bigbody[data-look="split"] {
+    gap: 0;
+  }
+  .bigbody[data-look="split"] > textarea {
+    max-width: calc(50% - 28px);
+    padding-right: 28px;
+    border-right: 1px solid var(--color-line);
+  }
+  .bigbody[data-look="split"] > .bigread {
+    max-width: calc(50% - 28px);
+    padding-left: 28px;
+  }
+  .bigfoot {
+    display: flex;
+    justify-content: center;
+    flex: none;
+    padding: 12px 28px 16px;
+    border-top: 1px solid var(--color-line);
+  }
+  .bigfoot .where {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.8125rem;
+    color: var(--color-mute);
+  }
+
+  /* A refusal in a form, where there is no one field to hang it on.
+     `.fld .bad` is the same sentence against a field that caused it. */
+  .form > .bad {
+    font-size: 0.875rem;
+    color: var(--color-brick);
+  }
+
+  /* A frame too narrow for a window: the page is the app. The header's
+     second line and the strip's sentence are the first things to go — a
+     count and a name survive at any width, an explanation does not need
+     to. */
+  @media (max-width: 620px) {
+    .maphead {
+      padding: 18px 16px 12px;
+    }
+    .mapcanvas {
+      background-size: 20px 20px;
+    }
+    .maptools {
+      left: 12px;
+      bottom: 12px;
+    }
+    .mapstrip {
+      padding: 0 12px;
+    }
+    .mapstrip .says {
+      display: none;
+    }
+    .mapdrawer {
+      width: 100%;
+    }
+    .dbody {
+      padding: 14px 16px;
+    }
   }
 }

@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight, FileCode2, FileDiff, FolderDown, FolderTree, Loader2, MessageSquarePlus, PanelRightClose, Ship as ShipIcon, TriangleAlert } from "lucide-react";
 import { useListFiles } from "~/api/generated/sessions/sessions";
 import type { Artifact, FileEntry, Session } from "~/api/generated/model";
+import type { Member } from "~/ui/team-tree";
 import { OverviewTab, OverviewIcon } from "~/ui/OverviewTab";
 import { sendTurn } from "~/api/generated/sessions/sessions";
 import { asMessage } from "~/api/notes";
@@ -103,7 +104,7 @@ export function Inspector({
   /** The manager that started this one, when it is a child — the level up. */
   lead?: Session | null;
   /** The children this workspace spawned, for the Overview tab. */
-  team?: Session[];
+  team?: Member[];
   /** Artifacts this workspace produced, for the Overview tab. */
   artifacts?: Artifact[];
   onOpenArtifact?: (id: string, title: string) => void;

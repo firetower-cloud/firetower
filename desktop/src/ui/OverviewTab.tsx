@@ -22,6 +22,7 @@ import { relays } from "~/api/relay";
 import { useHosts } from "~/data";
 import { whereItRuns } from "~/components/WhereItRuns";
 import type { Agent, Artifact, PlanStep, Session, SessionStatus } from "~/api/generated/model";
+import { CAP, working, type Member } from "~/ui/team-tree";
 
 /**
  * There is no token bar here, and that is deliberate.
@@ -37,8 +38,6 @@ import type { Agent, Artifact, PlanStep, Session, SessionStatus } from "~/api/ge
  * because it could only have been invented. It is a feature that may come
  * back somewhere it belongs, which is not the team rail.
  */
-
-const RANK: Record<string, number> = { Working: 0, Starting: 0, NeedsYou: 1, Ready: 2, HandedBack: 3, Failed: 4, Ended: 5 };
 
 /** A delegated child is named `"<lead> / <agent>"`; inside the lead's own rail
  *  the prefix is noise, so show just the agent part. */
@@ -158,7 +157,18 @@ export function ManagerRow({ manager, active }: { manager: Session; active: bool
 
 /** One agent on the team. The active one — the session you're reading — is a
  *  plain highlighted row; the rest are links to open them. */
-function MemberRow({ member, active, shared }: { member: Session; active: boolean; shared: boolean }) {
+function MemberRow({
+  member,
+  active,
+  shared,
+  under,
+}: {
+  member: Session;
+  active: boolean;
+  shared: boolean;
+  /** What started it, where the rail has stopped saying so. See `CAP`. */
+  under: string | null;
+}) {
   /* **One line, and the second one is gone entirely.**
      It was the branch, then what the agent was doing, then the status word
      in front of that. The branch said nothing — every child of one workspace
@@ -180,6 +190,9 @@ function MemberRow({ member, active, shared }: { member: Session; active: boolea
       <span className="tx one">
         <b>{label}</b>
         {active && <span className="here-badge">here</span>}
+        {/* Past the cap the rail stops moving right, so the row carries the
+            one fact the indentation was carrying. */}
+        {under && <span className="via">· under {agentName(under)}</span>}
       </span>
       <span className="rt">
         <span className="ag">
@@ -210,7 +223,7 @@ export function OverviewTab({
   session: Session;
   /** The manager that started this one, when it is a child. */
   lead: Session | null;
-  team: Session[];
+  team: Member[];
   artifacts: Artifact[];
   onOpenArtifact: (id: string, title: string) => void;
 }) {
@@ -224,13 +237,11 @@ export function OverviewTab({
   // The top of this local view: the workspace itself when it leads a team, or
   // the manager that started it when this is a child — one level up.
   const manager = lead ?? session;
-  const kids = [...team].sort(
-    (a, b) => (RANK[a.status] ?? 9) - (RANK[b.status] ?? 9) || a.name.localeCompare(b.name),
-  );
-  // Everyone under the manager — the whole team, whichever member you are
-  // reading. The one that is this session is just drawn as the active card.
-  const roster = kids;
-  const working = kids.filter((k) => k.status === "Working" || k.status === "Starting").length;
+  /* Everyone under the manager, every generation of them, already in tree
+     order and sorted within each sibling group — see `team-tree.ts`. The one
+     that is this session is just drawn as the active card. */
+  const roster = team;
+  const busy = working(team);
   const done = plan.filter((s) => String(s.status) === "Completed").length;
 
   const links: { icon: typeof GitBranch; label: string; href?: string }[] = [];
@@ -240,7 +251,7 @@ export function OverviewTab({
 
   // There is a tree to show whenever this workspace leads a team or hangs off
   // a manager; otherwise it is solo and the panel is skipped.
-  const hasTeam = !!lead || kids.length > 0;
+  const hasTeam = !!lead || roster.length > 0;
   const hosts = useHosts();
   const where = whereItRuns(hosts.data.find((h) => h.id === session.hostId), hosts.data);
 
@@ -282,24 +293,31 @@ export function OverviewTab({
       {hasTeam && (
         <Panel
           title="Team"
-          note={roster.length ? `${roster.length} agent${roster.length > 1 ? "s" : ""}${working ? ` · ${working} working` : ""}` : undefined}
+          note={roster.length ? `${roster.length} agent${roster.length > 1 ? "s" : ""}${busy ? ` · ${busy} working` : ""}` : undefined}
         >
           <div>
             <ManagerRow manager={manager} active={manager.id === session.id} />
             {/* Under the manager — the whole team, indented under a hairline.
                 The one you are reading is the active card; the rest are links
                 to open them. */}
+            {/* **One rail per level, up to `CAP`.** A team is a tree and the
+                panel draws it as one; past three levels the rail stops moving
+                right, because six of them is 78px of a 300px panel and every
+                name after that is an ellipsis. `data-depth` is what the
+                stylesheet reads to stop. */}
             <div className="kids">
               {roster.map((r) => (
-                <MemberRow
-                  key={r.id}
-                  member={r}
-                  active={r.id === session.id}
-                  // A child in the manager's own workspace shares its name, so
-                  // that name says nothing — use its session title, which the
-                  // control plane sets to the child's own name.
-                  shared={!!manager.workspaceId && r.workspaceId === manager.workspaceId}
-                />
+                <div key={r.session.id} data-depth={Math.min(r.depth, CAP)} className="tier">
+                  <MemberRow
+                    member={r.session}
+                    active={r.session.id === session.id}
+                    under={r.under}
+                    // A child in the manager's own workspace shares its name,
+                    // so that name says nothing — use its session title, which
+                    // the control plane sets to the child's own name.
+                    shared={!!manager.workspaceId && r.session.workspaceId === manager.workspaceId}
+                  />
+                </div>
               ))}
             </div>
           </div>

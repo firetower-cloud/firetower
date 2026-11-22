@@ -71,6 +71,16 @@ pub const UPDATE_PROFILE: &str = "update_profile";
 pub const LIST_PROFILES: &str = "list_profiles";
 /// The whole of one profile, enough to reproduce it.
 pub const GET_PROFILE: &str = "get_profile";
+/// Draw a team: a lead profile, and the profiles under it. **This is what
+/// delegation is now** — a profile carries no reach of its own.
+pub const CREATE_TEAM: &str = "create_team";
+/// Redraw a team, whole. What is sent is the team: anybody left out is taken
+/// out.
+pub const UPDATE_TEAM: &str = "update_team";
+/// List the teams, with each one's lead and how many agents it can run.
+pub const LIST_TEAMS: &str = "list_teams";
+/// One team whole, enough to redraw it.
+pub const GET_TEAM: &str = "get_team";
 /// What can run a child, and where: machines, engines and subscriptions, as
 /// one answer rather than three lists to correlate.
 pub const LIST_COMPUTE: &str = "list_compute";
@@ -92,6 +102,17 @@ pub const LIST_SCHEDULES: &str = "list_schedules";
 /// back on, which is the asymmetry — stopping is safe and starting is the act
 /// that needs a person.
 pub const PAUSE_SCHEDULE: &str = "pause_schedule";
+
+/// Delete teams and profiles — **after the person in the conversation says
+/// yes to the whole list.**
+///
+/// The one tool here that puts a question to somebody before it acts. It is
+/// asked through the ordinary permission path, so it arrives as the same
+/// card every other tool approval does, in the chat where the agent just
+/// explained itself — and one call is one card however many things are in
+/// it, because somebody who has to approve eight deletions one at a time
+/// would have done it by hand.
+pub const REQUEST_DELETION: &str = "request_deletion";
 
 /// What a delegation call is named on its way to the control plane.
 ///
@@ -125,7 +146,10 @@ Returns the child's id and name at once; the child takes its own time. \
 Its result arrives in THIS conversation as a message when it hands back — \
 between your turns, never inside one — so dispatch, do what does not depend \
 on it, then end your turn with a one-line status. \
-A child cannot spawn, cannot ask the person, and cannot message or schedule. \
+A child can hand work on in turn, to whatever sits under *its* position in the \
+team — its own prompt names them if there are any, and a session with nothing \
+under it has nobody to hand to. A child cannot ask the person, and cannot \
+message or schedule. \
 A question it has comes to you as a message; a command it needs permission \
 for goes to the person. There is no cap on how many you start or how many run \
 at once — dispatch what the work actually needs, and no more, since each one \
@@ -444,7 +468,7 @@ async fn answer(
                         },
                     }, {
                         "name": CREATE_PROFILE,
-                        "description": "Save a reusable agent profile — a persona a workspace can be started as, or a lead can delegate to. Each of the three things a profile says about where it runs — the engine, the placement, and the machine for its own workspace — is either a commitment or left open for whichever lead delegates to it. Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) Operator or Manager — may it hand work to other profiles, and if so which; (4) which engine it runs on, or open so each child runs on its lead's; (5) placement — the lead's own workspace (`here`), one of its own (`new`), or open so the lead decides; (6) kept yours, or filed in a directory a teammate can reach. LEAVING A FIELD OPEN IS THE DEFAULT, not a gap: omit `agent` and `placement` unless they asked for something particular, and a child then runs wherever and however its lead does. You CAN set its run settings, the skills it loads, a Manager's team, and what a lead may do if a child runs out — `get_profile` reports all of them for a profile you are copying. TWO THINGS YOU CANNOT SET: the subscription — a profile that pins an engine runs on the owner's default for it, and one that leaves the engine open has none to set — and whether it is the person's default for new workspaces, because setting one unsets another. If they asked for either, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it.",
+                        "description": "Save a reusable agent profile — a persona a workspace can be started as, or a team can hold a position on. A PROFILE IS WHAT AN AGENT IS: its name, what it does, its instructions, its skills, and how it runs. IT IS NOT WHO IT HANDS WORK TO — that is a team, and `create_team` is the tool for it. Each of the three things a profile says about where it runs — the engine, the placement, and the machine for its own workspace — is either a commitment or left open for whichever lead delegates to it. Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) which engine it runs on, or open so each child runs on its lead's; (4) placement — the lead's own workspace (`here`), one of its own (`new`), or open so the lead decides; (5) kept yours, or filed in a directory a teammate can reach. LEAVING A FIELD OPEN IS THE DEFAULT, not a gap: omit `agent` and `placement` unless they asked for something particular, and a child then runs wherever and however its lead does. You CAN set its run settings, the skills it loads, and what a lead may do if a child runs out — `get_profile` reports all of them for a profile you are copying. TWO THINGS YOU CANNOT SET: the subscription — a profile that pins an engine runs on the owner's default for it, and one that leaves the engine open has none to set — and whether it is the person's default for new workspaces, because setting one unsets another. If they asked for either, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it. IF THEY ASKED FOR SOMETHING THAT LEADS OTHERS, make the profiles first and then call `create_team` — passing `can_delegate` or `delegate_scope` here is refused.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -454,7 +478,6 @@ async fn answer(
                                 "agent": { "type": "string", "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent"], "description": "The engine it runs on. Omit to leave it open: every child then runs on whatever its lead is running, or on the engine the lead names." },
                                 "placement": { "type": "string", "enum": ["lead", "here", "new"], "description": "Where a delegated child runs: `here` shares the lead's workspace and branch, `new` gets its own, `lead` (the default) leaves it to whichever lead delegates." },
                                 "machine": { "type": "string", "description": "The host id of the machine its own workspace runs on, for a profile that wants a particular one. Omit to leave it open, and Firetower picks a machine that can run the engine — which is the right answer unless they named a machine. `list_compute` lists the host ids." },
-                                "can_delegate": { "type": "boolean", "description": "true makes it a Manager that can hand work to other profiles; false (default) an Operator that does the work itself." },
                                 "settings": { "type": "object", "description": "How it runs its engine, each optional: `model`, `effort`, `mode`, `sandbox`. Only for a profile that pins `agent` — these belong to one engine. A value the engine does not offer is refused, listing the ones it does.",
                                     "properties": {
                                         "model": { "type": "string" },
@@ -464,18 +487,17 @@ async fn answer(
                                     },
                                 },
                                 "skill_scope": { "type": "array", "items": { "type": "string" }, "description": "Skills this profile loads on top of the two switches below, BY NAME as `list_skills` shows them. A name the person cannot reach is refused, naming it." },
-                                "delegate_scope": { "type": "array", "items": { "type": "string" }, "description": "For a Manager: the profiles it may hand work to, BY NAME as `list_profiles` shows them. Empty means any profile its owner can reach. A name that does not resolve is refused, naming it." },
                                 "include_always_on": { "type": "boolean", "description": "Load the owner's always-on skills. Default true." },
                                 "include_repo_defaults": { "type": "boolean", "description": "Load the owner's defaults for the repositories the child checks out. Default true." },
                                 "on_usage_limit": { "type": "string", "enum": ["wait", "same", "engine"], "description": "What a lead may do about a child of this profile that hits its usage limit: `wait` (default — nobody moves it without a person), `same` (the lead may move it to another subscription for the same engine), `engine` (and to another engine). The third is the person's acknowledgement, given in advance, that another engine brings its own default permissions — do not choose it for them." },
-                                "on_child_limit": { "type": "string", "enum": ["ask", "reroute"], "description": "For a Manager: whether it re-routes a spent child itself (`reroute`) or stops and asks the person which subscription to spend (`ask`, the default)." },
+                                "on_child_limit": { "type": "string", "enum": ["ask", "reroute"], "description": "When this profile leads a team: whether it re-routes a spent child itself (`reroute`) or stops and asks the person which subscription to spend (`ask`, the default)." },
                                 "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
                             },
                             "required": ["name", "does"],
                         },
                     }, {
                         "name": UPDATE_PROFILE,
-                        "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\", \"stop pinning QA to Codex and let the lead decide\". Only the fields you pass change; everything else stays. Rename with `new_name`. To clear a pin back to open, pass that field as `null` — `agent: null` lets each child run on its lead's engine, `machine: null` lets Firetower pick one, `placement: \"lead\"` lets the lead choose. Omitting a field keeps it, so null is the only way to say \"stop pinning this\". When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. This CAN change the run settings, the skills it loads, a Manager's team, the two inheritance switches, what a lead may do if a child runs out, and which directory it is filed in — read `get_profile` first when the change depends on what it already says. TWO THINGS IT CANNOT CHANGE: the subscription, and whether the profile is the person's default for new workspaces. If they ask for either, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
+                        "description": "Change a saved profile, by name — \"make the reviewer stricter\", \"run QA on Codex\", \"stop pinning QA to Codex and let the lead decide\". Only the fields you pass change; everything else stays. Rename with `new_name`. To clear a pin back to open, pass that field as `null` — `agent: null` lets each child run on its lead's engine, `machine: null` lets Firetower pick one, `placement: \"lead\"` lets the lead choose. Omitting a field keeps it, so null is the only way to say \"stop pinning this\". When what they want changed is ambiguous, confirm it before you apply — a profile is something they rely on, not a scratch edit. This CAN change the run settings, the skills it loads, the two inheritance switches, what a lead may do if a child runs out, and which directory it is filed in. It CANNOT change who it hands work to — that is a team, and `update_team` is the tool for it — read `get_profile` first when the change depends on what it already says. TWO THINGS IT CANNOT CHANGE: the subscription, and whether the profile is the person's default for new workspaces. If they ask for either, say so and point them at Settings → Harness → Profiles instead of reporting a change you did not make.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -486,7 +508,6 @@ async fn answer(
                                 "agent": { "type": ["string", "null"], "enum": ["ClaudeCode", "Codex", "KimiCode", "CursorAgent", null], "description": "The engine it runs on. `null` clears the pin, so each child runs on its lead's engine." },
                                 "placement": { "type": "string", "enum": ["lead", "here", "new"], "description": "`lead` leaves it to whichever lead delegates." },
                                 "machine": { "type": ["string", "null"], "description": "The host id its own workspace runs on. `null` clears the pin, and Firetower picks a machine that can run the engine." },
-                                "can_delegate": { "type": "boolean" },
                                 "settings": { "type": "object", "description": "How it runs its engine, each optional: `model`, `effort`, `mode`, `sandbox`. Only for a profile that pins `agent` — these belong to one engine. A value the engine does not offer is refused, listing the ones it does.",
                                     "properties": {
                                         "model": { "type": "string" },
@@ -496,18 +517,17 @@ async fn answer(
                                     },
                                 },
                                 "skill_scope": { "type": "array", "items": { "type": "string" }, "description": "Skills this profile loads on top of the two switches below, BY NAME as `list_skills` shows them. A name the person cannot reach is refused, naming it." },
-                                "delegate_scope": { "type": "array", "items": { "type": "string" }, "description": "For a Manager: the profiles it may hand work to, BY NAME as `list_profiles` shows them. Empty means any profile its owner can reach. A name that does not resolve is refused, naming it." },
                                 "include_always_on": { "type": "boolean", "description": "Load the owner's always-on skills. Default true." },
                                 "include_repo_defaults": { "type": "boolean", "description": "Load the owner's defaults for the repositories the child checks out. Default true." },
                                 "on_usage_limit": { "type": "string", "enum": ["wait", "same", "engine"], "description": "What a lead may do about a child of this profile that hits its usage limit: `wait` (default — nobody moves it without a person), `same` (the lead may move it to another subscription for the same engine), `engine` (and to another engine). The third is the person's acknowledgement, given in advance, that another engine brings its own default permissions — do not choose it for them." },
-                                "on_child_limit": { "type": "string", "enum": ["ask", "reroute"], "description": "For a Manager: whether it re-routes a spent child itself (`reroute`) or stops and asks the person which subscription to spend (`ask`, the default)." },
+                                "on_child_limit": { "type": "string", "enum": ["ask", "reroute"], "description": "When this profile leads a team: whether it re-routes a spent child itself (`reroute`) or stops and asks the person which subscription to spend (`ask`, the default)." },
                                 "directory": { "type": ["string", "null"], "description": "Move it: a directory by name, so a teammate can reach it, or `null` to move it back into the person's own space. Omit to leave where it is filed alone." },
                             },
                             "required": ["name"],
                         },
                     }, {
                         "name": LIST_PROFILES,
-                        "description": "List the saved profiles the person can see — name, whether it's a Manager, and what it does. Read this before creating one, to build on what exists rather than make a near-duplicate.",
+                        "description": "List the saved profiles the person can see — name and what it does. Read this before creating one, to build on what exists rather than make a near-duplicate. A profile says nothing about who it hands work to; `list_teams` says that.",
                         "inputSchema": { "type": "object", "properties": {} },
                     }, {
                         "name": GET_PROFILE,
@@ -516,6 +536,72 @@ async fn answer(
                             "type": "object",
                             "properties": {
                                 "name": { "type": "string", "description": "The profile to read, by name, as `list_profiles` shows it." },
+                            },
+                            "required": ["name"],
+                        },
+                    }, {
+                        "name": CREATE_TEAM,
+                        "description": "Draw an agent team: a lead profile, and the profiles under it. THIS IS WHAT DELEGATION IS. A profile carries no reach of its own — it cannot hand work to anybody — so a team is the only thing that lets one agent start another. The positions DIRECTLY under a position are exactly what that agent may spawn, and nothing else; a team nests as deep as you draw it, so a member can lead members of its own. Reach for this whenever somebody describes agents working for other agents: \"a manager with a designer and two engineers\", \"a review team\", \"something that researches then writes\". AGREE ON THE SHAPE FIRST, in one short exchange — who leads, who is under whom, and what each one is for here — then call this once. Check `list_profiles` for what exists and `create_profile` for anything missing; a profile this names and cannot find is refused by name, and nothing is written. THE SAME PROFILE MAY HOLD TWO POSITIONS — two Engineers, one on the web client and one on the API — and `extra_instructions` is what tells them apart, both on the map and to the agent that hands them work. Adding a profile that leads another team brings NOTHING with it: it arrives bare, and the other team is untouched. Editing the profile later changes it in every team; editing a position changes one team. It appears on the Agent teams screen immediately.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "What the team is called, e.g. \"Product\". It is what the composer offers and what a schedule pins." },
+                                "lead": { "type": "string", "description": "The profile at the top, BY NAME as `list_profiles` shows it. Starting the team starts this profile, with the team behind it — you never talk to a team, you talk to its lead. Any profile can lead; there is no flag to set on it first." },
+                                "members": {
+                                    "type": "array",
+                                    "description": "Everybody else, in the order they should be drawn. Each is a profile name, or an object. Omit `under` for a position directly beneath the lead.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "profile": { "type": "string", "description": "The profile this position references, BY NAME." },
+                                            "under": { "type": "string", "description": "Whose `key` this sits under, or the lead's name. Omit for directly under the lead." },
+                                            "key": { "type": "string", "description": "A handle for this position, which anything under it names as `under`. Defaults to the profile's name — give one only when the same profile holds two positions, and then give both." },
+                                            "extra_instructions": { "type": "string", "description": "Markdown that applies to this profile IN THIS TEAM ONLY — \"Owns the web client. Follow the design system in docs/.\" It ADDS to the profile's own instructions and never replaces them, and it is what tells two positions of one profile apart." },
+                                        },
+                                        "required": ["profile"],
+                                    },
+                                },
+                                "directory": { "type": "string", "description": "A directory to file it in, by name, so a teammate can reach it. Omit for the person's own space." },
+                            },
+                            "required": ["name", "lead"],
+                        },
+                    }, {
+                        "name": UPDATE_TEAM,
+                        "description": "Redraw a team, by name. WHOLE, NOT A PATCH: `members` is who is in the team after this call, so anybody you leave out is taken out, with everything under them. Read `get_team` first and send it back with your change applied — that is the only safe way to use this. Rename with `new_name`; replace the lead with `lead`, which keeps the tree under it. Removing a position NEVER deletes the profile; it only stops it standing there. If schedules pin this team, saving pauses them and the answer says how many — their next run is refused until somebody approves the new shape.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The team to change, by its current name." },
+                                "new_name": { "type": "string", "description": "A new name, to rename it." },
+                                "lead": { "type": "string", "description": "The profile at the top, by name. Omit to keep the one it has." },
+                                "members": {
+                                    "type": "array",
+                                    "description": "The WHOLE team under the lead, after this call. Required — anybody left out is taken out.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "profile": { "type": "string" },
+                                            "under": { "type": "string" },
+                                            "key": { "type": "string" },
+                                            "extra_instructions": { "type": "string" },
+                                        },
+                                        "required": ["profile"],
+                                    },
+                                },
+                            },
+                            "required": ["name", "members"],
+                        },
+                    }, {
+                        "name": LIST_TEAMS,
+                        "description": "List the agent teams the person can see — each one's name, its lead, how many agents it can run and how deep it goes. Read this before drawing a team, so you extend one rather than make a near-duplicate beside it.",
+                        "inputSchema": { "type": "object", "properties": {} },
+                    }, {
+                        "name": GET_TEAM,
+                        "description": "One team whole: its lead, every position under it in order, and what each is told there. Read this before `update_team` — that one takes the whole team, so this is where the rest of it comes from.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The team to read, by name, as `list_teams` shows it." },
                             },
                             "required": ["name"],
                         },
@@ -617,6 +703,28 @@ async fn answer(
                             },
                             "required": ["name"],
                         },
+                    }, {
+                        "name": REQUEST_DELETION,
+                        "description": "Delete agent teams and agent profiles. THE PERSON IS ASKED FIRST and nothing happens unless they say yes — the question appears in this conversation with the whole list on it, and you are blocked until they answer. PUT EVERYTHING IN ONE CALL: if they asked you to remove five things, name all five in `items`, because they approve the operation once. Calling this five times asks them five times, which is worse than doing it by hand. Say what you are about to ask for before you call it. A profile that still holds a position in a team you are NOT also deleting cannot go, and you will be told which team instead of being asked.",
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "items": {
+                                    "type": "array",
+                                    "description": "Everything to delete, in one list.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "kind": { "type": "string", "enum": ["team", "profile"], "description": "Which kind of thing." },
+                                            "name": { "type": "string", "description": "What it is called, as `list_teams` or `list_profiles` shows it." },
+                                        },
+                                        "required": ["kind", "name"],
+                                    },
+                                },
+                                "reason": { "type": "string", "description": "Why, in one line. It is shown on the card next to what each one costs, so give them the fact that decides it." },
+                            },
+                            "required": ["items"],
+                        },
                     }]
                 }),
             ))
@@ -634,10 +742,14 @@ async fn answer(
                 .unwrap_or(TOOL);
             let text = match name {
                 SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
-                | LIST_PROFILES | GET_PROFILE | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL
-                | LIST_SKILLS | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
+                | LIST_PROFILES | GET_PROFILE | CREATE_TEAM | UPDATE_TEAM | LIST_TEAMS
+                | GET_TEAM | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS
+                | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
                     delegate(session_id, name, &id, &arguments).await
                 }
+                // **The one tool that asks a person before it acts**, and
+                // it asks about the whole list at once.
+                REQUEST_DELETION => request_deletion(session_id, &id, &arguments).await,
                 // Every call used to be a permission question, and an agent
                 // from before the other tools existed still only knows this
                 // one — so anything unnamed is still that.
@@ -717,6 +829,76 @@ async fn ask(
             })
         }
     }
+}
+
+/// Ask about a whole deletion, then carry it out if the answer is yes.
+///
+/// Three legs, and the middle one is the point:
+///
+/// 1. **`firetower:plan_deletion`** resolves every name and works out what
+///    each one costs. Refusals surface here — a profile a team stands on is
+///    named *before* anybody is asked, rather than after they have already
+///    agreed to a list containing it.
+/// 2. **The question**, through the same path every permission prompt takes:
+///    no `firetower:` prefix, so the control plane puts it to a person
+///    instead of acting on it. One card, carrying the whole list.
+/// 3. **`firetower:commit_deletion`**, with the ids the plan returned —
+///    never the names. Between the question and the answer somebody could
+///    rename a team, and what is deleted has to be what was approved.
+///
+/// The agent cannot skip leg 2, because leg 2 is what produces leg 3: there
+/// is no declared tool that commits, and a `tools/call` naming an undeclared
+/// one becomes a permission question rather than a delegation.
+async fn request_deletion(session_id: &str, id: &Value, arguments: &Value) -> String {
+    let plan = delegate(session_id, "plan_deletion", id, arguments).await;
+    let Ok(plan) = serde_json::from_str::<Value>(&plan) else {
+        // `plan_deletion` answers in words when it refuses, and those words
+        // are the thing the agent needs to read.
+        return plan;
+    };
+    let lines: Vec<String> = plan
+        .get("summary")
+        .and_then(Value::as_array)
+        .map(|v| {
+            v.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if lines.is_empty() {
+        return "There was nothing to delete.".into();
+    }
+
+    /* **What the card says.** The person sees this and nothing else, so it
+    carries the whole list and the agent's own reason — not an id, and not
+    a count on its own. `tool_name` is what the card is titled with. */
+    let asked = json!({
+        "deleting": lines,
+        "reason": arguments.get("reason").cloned().unwrap_or(json!(null)),
+        "irreversible": true,
+    });
+    let req = format!("{REQUEST_DELETION}-{}", id.to_string().trim_matches('"'));
+    let decision = match wait_for_a_decision(session_id, &req, REQUEST_DELETION, &asked).await {
+        Ok(d) => d,
+        Err(e) => return format!("Firetower could not ask anyone about this: {e:#}"),
+    };
+
+    if decision.get("behavior").and_then(Value::as_str) != Some("allow") {
+        let why = decision
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("They said no.");
+        return format!("Not deleted — {why} Nothing was touched.");
+    }
+
+    // Approved. The ids are the plan's, so this deletes what was described.
+    delegate(
+        session_id,
+        "commit_deletion",
+        id,
+        &json!({ "ids": plan.get("ids").cloned().unwrap_or(json!([])) }),
+    )
+    .await
 }
 
 /// Carry a delegation call to the control plane, and bring its answer back.
@@ -936,13 +1118,18 @@ mod tests {
                 UPDATE_PROFILE,
                 LIST_PROFILES,
                 GET_PROFILE,
+                CREATE_TEAM,
+                UPDATE_TEAM,
+                LIST_TEAMS,
+                GET_TEAM,
                 LIST_COMPUTE,
                 CREATE_SKILL,
                 UPDATE_SKILL,
                 LIST_SKILLS,
                 PROPOSE_SCHEDULE,
                 LIST_SCHEDULES,
-                PAUSE_SCHEDULE
+                PAUSE_SCHEDULE,
+                REQUEST_DELETION
             ]
         );
         assert_eq!(tool_name(), "mcp__firetower__approve");

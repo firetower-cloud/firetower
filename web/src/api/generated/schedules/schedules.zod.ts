@@ -71,7 +71,9 @@ export const ListSchedulesResponseItem = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.string().nullish().describe('The agent team each run starts, when the schedule names one. The\nprofile beside it is that team\'s lead, which is what actually runs.'),
+  "teamSize": zod.int().nullish().describe('How many agents a run of this can start: every position of the team,\nthe lead included. Pinned at approval rather than counted later,\nbecause it is what the screen says out loud before Save and it is the\nonly thing standing between a team schedule and a surprise.')
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -226,6 +228,7 @@ export const CreateScheduleBody = zod.object({
   "sandbox": zod.string().nullish()
 }).optional().describe('Model, effort, permissions and sandbox. **Pinned explicitly** — see\n[`pins_for`].'),
   "skills": zod.array(zod.string()).nullish().describe('The skills each run reads. `null` takes the repository\'s defaults *at\ncreation* and pins the result.'),
+  "team": zod.string().nullish().describe('The agent team to start, by id.\n\n**The whole tree is pinned at approval, not the id.** A team id\nresolved at run time would let an edit between approval and 9am change\nhow many agents start with nobody watching — which is the mistake\npinning a profile\'s composed persona already exists to prevent, with a\nlarger blast radius. Editing a pinned team clears the approval, so the\nnext run is refused until somebody looks.'),
   "timezone": zod.string().describe('An IANA name. Required, and not defaulted to the server\'s own zone:\n"09:00" means nothing without saying whose nine.')
 }).describe('What the API accepts to write one down.')
 
@@ -261,7 +264,9 @@ export const CreateScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.string().nullish().describe('The agent team each run starts, when the schedule names one. The\nprofile beside it is that team\'s lead, which is what actually runs.'),
+  "teamSize": zod.int().nullish().describe('How many agents a run of this can start: every position of the team,\nthe lead included. Pinned at approval rather than counted later,\nbecause it is what the screen says out loud before Save and it is the\nonly thing standing between a team schedule and a surprise.')
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -434,7 +439,9 @@ export const OneScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.string().nullish().describe('The agent team each run starts, when the schedule names one. The\nprofile beside it is that team\'s lead, which is what actually runs.'),
+  "teamSize": zod.int().nullish().describe('How many agents a run of this can start: every position of the team,\nthe lead included. Pinned at approval rather than counted later,\nbecause it is what the screen says out loud before Save and it is the\nonly thing standing between a team schedule and a surprise.')
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -594,6 +601,7 @@ export const UpdateScheduleBody = zod.object({
   "sandbox": zod.string().nullish()
 }).optional().describe('Model, effort, permissions and sandbox. **Pinned explicitly** — see\n[`pins_for`].'),
   "skills": zod.array(zod.string()).nullish().describe('The skills each run reads. `null` takes the repository\'s defaults *at\ncreation* and pins the result.'),
+  "team": zod.string().nullish().describe('The agent team to start, by id.\n\n**The whole tree is pinned at approval, not the id.** A team id\nresolved at run time would let an edit between approval and 9am change\nhow many agents start with nobody watching — which is the mistake\npinning a profile\'s composed persona already exists to prevent, with a\nlarger blast radius. Editing a pinned team clears the approval, so the\nnext run is refused until somebody looks.'),
   "timezone": zod.string().describe('An IANA name. Required, and not defaulted to the server\'s own zone:\n"09:00" means nothing without saying whose nine.')
 }).describe('What the API accepts to write one down.')
 
@@ -629,7 +637,9 @@ export const UpdateScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.string().nullish().describe('The agent team each run starts, when the schedule names one. The\nprofile beside it is that team\'s lead, which is what actually runs.'),
+  "teamSize": zod.int().nullish().describe('How many agents a run of this can start: every position of the team,\nthe lead included. Pinned at approval rather than counted later,\nbecause it is what the screen says out loud before Save and it is the\nonly thing standing between a team schedule and a surprise.')
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -767,7 +777,9 @@ export const ApproveScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.string().nullish().describe('The agent team each run starts, when the schedule names one. The\nprofile beside it is that team\'s lead, which is what actually runs.'),
+  "teamSize": zod.int().nullish().describe('How many agents a run of this can start: every position of the team,\nthe lead included. Pinned at approval rather than counted later,\nbecause it is what the screen says out loud before Save and it is the\nonly thing standing between a team schedule and a surprise.')
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -894,7 +906,9 @@ export const PauseScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.string().nullish().describe('The agent team each run starts, when the schedule names one. The\nprofile beside it is that team\'s lead, which is what actually runs.'),
+  "teamSize": zod.int().nullish().describe('How many agents a run of this can start: every position of the team,\nthe lead included. Pinned at approval rather than counted later,\nbecause it is what the screen says out loud before Save and it is the\nonly thing standing between a team schedule and a surprise.')
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),
@@ -1023,7 +1037,9 @@ export const ResumeScheduleResponse = zod.object({
   "model": zod.string().nullish(),
   "sandbox": zod.string().nullish()
 }).describe('Model, effort, permissions and sandbox, as approved. An absent field\nis one the agent decides for itself; see `agentDecides` in the pins.'),
-  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.')
+  "skills": zod.array(zod.string()).optional().describe('The skills each run reads, by id, resolved at approval.'),
+  "team": zod.string().nullish().describe('The agent team each run starts, when the schedule names one. The\nprofile beside it is that team\'s lead, which is what actually runs.'),
+  "teamSize": zod.int().nullish().describe('How many agents a run of this can start: every position of the team,\nthe lead included. Pinned at approval rather than counted later,\nbecause it is what the screen says out loud before Save and it is the\nonly thing standing between a team schedule and a surprise.')
 }).describe('What it will run, as approved. See [`ScheduleChoices`].'),
   "createdAt": zod.iso.datetime({"offset":true}),
   "deleteCleanRuns": zod.boolean().describe('Whether a clean run\'s workspace is deleted.\n\nAlways false, and not offered as a control, when there is no\nrepository: `session_work` answers an empty list for a workspace with\nnothing checked out, so "nothing uncommitted" is vacuously true and a\nclean-run rule would read a bare workspace as the safe case and delete\nevery file the agent made.'),

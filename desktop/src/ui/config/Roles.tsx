@@ -61,7 +61,7 @@ import {
   useRoleImportLimits,
 } from "~/api/generated/roles/roles";
 import { useAgentControls } from "~/api/generated/agents/agents";
-import { useAccounts, useAgents, useDirectories, useHosts, useSkills, why } from "~/data";
+import { useAccounts, useAgentTeams, useAgents, useDirectories, useHosts, useSkills, teamsUsing, why } from "~/data";
 import { quota, usable, type Account } from "~/api/accounts";
 import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
 import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
@@ -82,6 +82,7 @@ import { ImportProfiles } from "~/ui/config/ImportProfiles";
 import type { Selection } from "~/ui/config/import-plan";
 import { readProfileDrop, readProfileFiles, type Dropped } from "~/profiles";
 import { navigate } from "~/shims/next-navigation";
+import { ProfileForm } from "~/ui/config/profile/ProfileForm";
 import { useConfirm } from "~/ui/Confirm";
 import { Badge, IconButton } from "~/components/ui";
 
@@ -221,6 +222,10 @@ const BLANK: Settled = {
 export function Roles() {
   const start = useStart();
   const feed = useListRoles();
+  // Which teams hold a position on each profile — the reading that replaced
+  // "can delegate" on the row, and the thing a person needs before they delete
+  // one.
+  const teams = useAgentTeams();
   const rows = {
     data: feed.data ?? [],
     loading: feed.isLoading,
@@ -360,13 +365,19 @@ export function Roles() {
     },
   };
 
-  // By name only. A description search returned the whole roster, because these
-  // profiles reference each other ("hand off to the Security Advisor"), so the
-  // term is in every one. Managers first, then alphabetical.
+  /* By name only. A description search returned the whole roster, because
+     these profiles reference each other ("hand off to the Security Advisor"),
+     so the term is in every one.
+
+     **Alphabetical, with nothing before it.** This used to put Managers
+     first, and that column is gone: no profile delegates on its own any more,
+     so sorting by it would be sorting by a fact that is only true of profiles
+     nobody has moved into a team yet. Which teams use a profile is on the row
+     instead, where it is read rather than ranked. */
   const needle = q.trim().toLowerCase();
   const shown = rows.data
     .filter((r) => !needle || r.name.toLowerCase().includes(needle))
-    .sort((a, b) => Number(b.canDelegate) - Number(a.canDelegate) || a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   const removeRole = async (role: Role) => {
     const ok = await confirm({
@@ -404,7 +415,7 @@ export function Roles() {
        where it is changed. */
     const role = editing.id ? rows.data.find((r) => r.id === editing.id) : undefined;
     if (role && !role.mayWrite) return <Reading role={role} onClose={() => setEditing(null)} />;
-    return <Editor state={editing} all={rows.data} onClose={() => setEditing(null)} />;
+    return <Editor state={editing} all={rows.data} role={role} onClose={() => setEditing(null)} />;
   }
 
   /* **Nothing at all, and nothing wrong.** The header action and the
@@ -506,6 +517,7 @@ export function Roles() {
         </Note>
       )}
 
+
       <Rows
         feed={{ data: shown, loading: rows.loading, error: rows.error }}
         icon={UsersRound}
@@ -541,6 +553,7 @@ export function Roles() {
             <RoleRow
               key={role.id}
               role={role}
+              inTeams={teamsUsing(teams.data, role.id)}
               onOpen={() => setEditing({ id: role.id, path: role.path, draft: toDraft(role) })}
               onDelete={() => removeRole(role)}
             />
@@ -691,10 +704,13 @@ export const SERVER_OWNED = [
 /** One role in the list: its name, what it does, and the shape of it as chips. */
 function RoleRow({
   role,
+  inTeams,
   onOpen,
   onDelete,
 }: {
   role: Role;
+  /** The teams holding a position on it, by name. */
+  inTeams: string[];
   onOpen: () => void;
   onDelete: () => void;
 }) {
@@ -736,7 +752,12 @@ function RoleRow({
           <s>{role.does}</s>
         </span>
       </button>
-      {role.canDelegate && <Badge>can delegate</Badge>}
+      {/* Which teams hold a position on it — the reading that replaces
+          "can delegate". A profile has no reach; a team does, and a profile
+          in no team is simply one nothing has been built around yet. */}
+      {inTeams.length > 0 && (
+        <Badge>{inTeams.length === 1 ? inTeams[0] : `${inTeams.length} teams`}</Badge>
+      )}
       {role.isDefault && (
         <span className="said flex items-center gap-1">
           <Star className="h-3 w-3" strokeWidth={1.75} />
@@ -769,6 +790,8 @@ function RoleRow({
  * and Teams make for the administration site.
  */
 function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
+  const teams = useAgentTeams();
+  const inTeams = teamsUsing(teams.data, role.id);
   /* `new`, which is what the server stores and has always stored. This read
      `own`, a value nothing sends, so a profile committed to its own workspace
      fell through to the last branch — harmless while that branch described a
@@ -802,8 +825,10 @@ function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
             "whichever the lead is running"
           )}
         </Reads>
-        <Reads label="Hands work off">
-          {role.canDelegate ? `yes — to ${named(role.delegateScope)} profile${named(role.delegateScope) === 1 ? "" : "s"}` : "no"}
+        <Reads label="In teams">
+          {inTeams.length === 0
+            ? "none — it hands work to nobody until a team puts somebody under it"
+            : inTeams.join(", ")}
         </Reads>
         {/* **One sentence, in all three places** — here, the editor's label
             and its empty note. "Skills it may read" and "whatever the
@@ -961,18 +986,36 @@ export function pinnedAccountFits(
 function Editor({
   state,
   all,
+  role,
   onClose,
 }: {
   state: { id?: string; path?: string; draft: NewRole };
   all: Role[];
+  /** The stored profile, where one exists. Read for the deprecation notice,
+   *  which is about what is on the row rather than about the draft. */
+  role?: Role;
   onClose: () => void;
 }) {
+  /* **Whether this profile still carries the old per-profile reach.** A
+     profile made now never does; one made before teams existed may, and it
+     goes on working until the column is dropped. The notice is drawn only for
+     those, because telling everybody about a thing that is true of nobody is
+     how a deprecation becomes furniture. */
+  const oldReach = !!role?.canDelegate;
   const [draft, setDraft] = useState<NewRole>(state.draft);
   const [busy, setBusy] = useState(false);
   const [trouble, setTrouble] = useState<string | null>(null);
   const cache = useQueryClient();
   const confirm = useConfirm();
   const existing = !!state.id;
+  const refresh = () => cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+  /* Where this profile is filed decides whether the Skills section's count
+     is "yours" or everybody's: a profile in a directory is used by
+     colleagues, and the first two of its three sources resolve against
+     whoever starts it. The form reads this too; the foot reads it to say
+     whether Save is about to create a profile with no skills at all. */
+  const shared = existing ? !!state.path?.startsWith("d/") : !!draft.directory;
+  const skills = useSkillSources(draft, shared);
 
   // The default is its own action, saved the instant it is flipped rather than
   // on "Save changes" — it is a fact about this person, not a field of the
@@ -996,206 +1039,6 @@ function Editor({
       setDefaulting(false);
     }
   };
-
-  // The agents to pin to are the ones Firetower can actually drive, read from
-  // the server rather than listed here — so a fourth or a tenth agent turns up
-  // in this menu the moment it is supported, without a change to this screen.
-  const agents = useAgents();
-  const agentOptions: Opt[] = agents.data
-    .filter((a) => a.supported)
-    .map((a) => ({
-      value: a.kind as string | null,
-      icon: <AgentMark agent={a.kind} size={16} />,
-      label: a.label,
-    }));
-  // A role may already pin an agent that is no longer on offer; keep it
-  // nameable rather than dropping the pin.
-  if (draft.agent && !agentOptions.some((o) => o.value === draft.agent)) {
-    const pinned = draft.agent as Agent;
-    agentOptions.push({
-      value: pinned,
-      icon: <AgentMark agent={pinned} size={16} />,
-      label: AGENT_LABEL[pinned] ?? pinned,
-    });
-  }
-
-  /* The machines its own workspace can be pinned to, and the directories it
-     can be filed in at creation — both read from the server, both optional.
-
-     A row rather than a pill, which is the one place this form departs from the
-     drawing (`desktop-redesign.html:4454` draws `pk("build-01", "32 vCPU · 64
-     GB")`). A machine carries four facts — what it is called, what it is, how
-     it is, and whether the pinned engine runs there — and the list is
-     unbounded where the engines are four. So Machine takes the drawing's
-     *other* idiom, `.pickrows` / `.pr2` (`:1747`), which is already how it
-     draws a list of agents with a reason against each. */
-  const { data: hosts } = useHosts();
-  const machineRows = machines(hosts)
-    .map((m) => ({ m, host: m.hosts[0] }))
-    .filter((x) => !!x.host)
-    .map((x) => ({
-      id: x.host!.id,
-      label: machineLabel(x.m),
-      /* What you would choose by, as the host card says it: cores, memory,
-         and how the machine itself is — "ready", "not answering". */
-      says: [
-        x.host!.cpus ? `${x.host!.cpus} cores` : null,
-        x.host!.memoryMb ? `${Math.round(x.host!.memoryMb / 1024)} GB` : null,
-        stateLabel(x.host!),
-      ]
-        .filter(Boolean)
-        .join(" · "),
-    }));
-  /* Whether the engine this profile pins runs on a given machine — the same
-     question the person-facing picker asks (`WhereItRuns.tsx:266`). With the
-     engine open there is nothing to ask, and nothing is said. */
-  const pinnedEngine = agents.data.find((a) => a.kind === draft.agent);
-  const runsThere = (host: string) => (pinnedEngine ? canRun(pinnedEngine, host) : null);
-  // The subscriptions it can run its engine on — the owner's own plus any lent
-  // to them — narrowed to the chosen engine, since an account is per-engine.
-  const { data: accounts, loading: accountsLoading } = useAccounts();
-  /* The owner's default first, as a choice of its own rather than the absence
-     of one. `account: null` has always meant "the owner's default for the
-     engine, resolved when it launches" on the wire, and it is what every
-     agent-authored profile has — but this form required a concrete id, so a
-     profile pinned the subscription that *was* the default and went on
-     pointing at it after somebody changed which one that is. */
-  const accountOptions: Opt[] = [
-    {
-      value: null,
-      icon: <UserRound className="h-4 w-4" strokeWidth={1.75} />,
-      label: `Your default for ${draft.agent ? (AGENT_LABEL[draft.agent as Agent] ?? draft.agent) : "it"}`,
-      note: "resolved when it launches",
-    },
-    ...accounts
-      .filter((a) => a.kind === draft.agent && usable(a))
-      .map((a) => ({
-        value: a.id as string | null,
-        icon: <KeyRound className="h-4 w-4" strokeWidth={1.75} />,
-        label: a.name,
-        note: a.ownerName ? `${a.ownerName}'s subscription` : quota(a),
-      })),
-  ];
-  /* Whether there is a concrete one to offer at all, which is what decides
-     between the picker and the sentence under it. */
-  const connected = accountOptions.length > 1;
-
-  // The run controls the chosen engine offers — model, effort, permissions,
-  // sandbox. A profile may pin any of them or leave each on the engine's own
-  // default; what it pins becomes the child's starting settings. Read per
-  // engine, so the pickers match whatever that agent actually supports.
-  const controlsQ = useAgentControls(draft.agent ?? "", { query: { enabled: !!draft.agent } });
-  const controls = (draft.agent ? (controlsQ.data ?? []) : []) as Control[];
-
-  const { data: dirs } = useDirectories();
-  const dirOptions: Opt[] = [
-    { value: null, icon: <User className="h-4 w-4" strokeWidth={1.75} />, label: "Yours", note: "Only you, until you share it." },
-    ...dirs
-      .filter((d) => d.level === "writer" || d.level === "admin")
-      .map((d) => ({
-        value: d.id,
-        icon: <FolderGit2 className="h-4 w-4" strokeWidth={1.75} />,
-        label: d.name,
-      })),
-  ];
-
-  // What this profile can be scoped to reach — other profiles, and skills —
-  // each tagged with the directory it's filed in so the picker can group them.
-  const groupOf = (path: string) => {
-    const [root, label] = path.split("/");
-    return root === "u" ? "yours" : `d/${label}`;
-  };
-  const delegationItems: ScopeItem[] = all
-    .filter((r) => r.id !== state.id)
-    .map((r) => ({
-      id: r.id,
-      name: r.name,
-      desc: r.does,
-      group: groupOf(r.path),
-      badge: r.canDelegate ? { text: "manager", tone: "sage" } : undefined,
-    }));
-
-  /* Where this profile is filed decides whether the Skills section's count is
-     "yours" or everybody's: a profile in a directory is used by colleagues, and
-     the first two of its three sources resolve against whoever starts it. */
-  const shared = existing ? !!state.path?.startsWith("d/") : !!draft.directory;
-  const skills = useSkillSources(draft, shared);
-
-  const set = <K extends keyof NewRole>(k: K, v: NewRole[K]) => setDraft((d) => ({ ...d, [k]: v }));
-  // Pin one run control, or clear it back to the engine's default (null).
-  const setSetting = (kind: ControlKind, v: string | null) =>
-    setDraft((d) => {
-      const next = { ...(d.settings ?? {}) };
-      if (v == null) delete next[kind];
-      else next[kind] = v;
-      return { ...d, settings: next };
-    });
-  const refresh = () => cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
-
-  /* Placement, and the machine that may no longer mean anything.
-     *Same workspace* is the one placement where a machine can never apply — a
-     child there runs wherever its lead does — so the pin comes off with the
-     press. Nothing cleared it before, which is why the Machines screen's list
-     of "profiles pinned to that machine" held two populations at once: ones
-     where unpinning is what that button says, and `here` ones carrying a
-     machine that had stopped meaning anything. Not an effect: a press is one
-     change, and an effect that rewrites a field after a render is what made
-     the last pill here unpressable. */
-  const setPlacement = (to: string) =>
-    setDraft((d) => ({ ...d, placement: to, machine: to === "here" ? null : d.machine }));
-
-  /* **Three effects used to live here and all three are gone**, with the pills
-     that make them wrong:
-
-     - one force-picked the first engine on the list, so a new profile was
-       pinned to an engine nobody chose;
-     - one force-picked the first machine whenever the placement was `new`,
-       for the same reason and with the same result;
-     - one coerced any placement that was not `here` or `new` back to `here`
-       on every render, which is why *Let the lead choose* could not stay
-       pressed the last time somebody drew it.
-
-     They have to go in the same commit as their pills, not before and not
-     after: either half alone reproduces the defect for its field. What is left
-     below is the one effect that is still true — a pin for one engine means
-     nothing to another. */
-
-  // A subscription belongs to one engine, so when the engine changes (or the
-  // list loads) drop a pick that no longer fits. Not keyed on the account
-  // itself, so a manual pick sticks — and it falls back to the owner's default
-  // (`null`) rather than to whichever account happens to be first, which is now
-  // a choice the form can actually offer.
-  useEffect(() => {
-    if (draft.account && !pinnedAccountFits(draft.account, draft.agent, accounts, !accountsLoading))
-      set("account", null);
-  }, [draft.agent, accounts, accountsLoading]);
-
-  /* Run controls are per-engine, so a pin for one agent means nothing to
-     another. When the person switches engines — *including to no engine at
-     all* — drop the pins, but not on the first render, where an existing
-     profile is loading its own. A ref remembers the last engine to tell the
-     two apart.
-
-     What came off is said rather than left to be noticed: `dropped` feeds the
-     sentence that stands where Subscription and How it runs were, because
-     clearing is invisible and silently discarding a value is the whole bug
-     this screen is being changed for. */
-  const lastAgent = useRef(draft.agent);
-  const [dropped, setDropped] = useState<{ account: boolean; settings: number } | null>(null);
-  useEffect(() => {
-    if (lastAgent.current !== undefined && lastAgent.current !== draft.agent) {
-      if (draft.agent === null) {
-        setDropped({
-          account: !!draft.account,
-          settings: Object.values(draft.settings ?? {}).filter((v) => v != null).length,
-        });
-      } else {
-        setDropped(null);
-      }
-      set("settings", {});
-    }
-    lastAgent.current = draft.agent;
-  }, [draft.agent]);
 
   /* What a profile cannot do without, and nothing more. `valid` used to want
      an engine, a subscription and a machine-when-new, and all three are now
@@ -1265,509 +1108,21 @@ function Editor({
         </div>
       </div>
 
-      <div className="form">
-        <Field label="Name" hint="What you start it as, and what a lead names to delegate to it — e.g. reviewer.">
-          <input
-            value={draft.name}
-            onChange={(e) => set("name", e.target.value)}
-            placeholder="reviewer"
-            className="w-full rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
-          />
-        </Field>
-
-        <Field
-          label="Description"
-          hint="What it does and when to reach for it — the line a lead reads to decide whether to hand it work, like a skill's description. Name the trigger, and the case to skip it."
-        >
-          <textarea
-            value={draft.does}
-            onChange={(e) => set("does", e.target.value)}
-            rows={2}
-            placeholder="Reviews a finished branch and reports problems as file:line. Use after a developer hands back — not for a one-line fix."
-            className="w-full resize-y rounded-md border border-line bg-ground px-3 py-2 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
-          />
-        </Field>
-
-        <Group
-          label="Placement"
-          hint="Where a child runs when a lead delegates to it. Pin one and every spawn runs that way. Leave it open and the lead decides."
-        >
-          {/* **Pills, not a dropdown.** Three placements with a word of
-              explanation each is a thing you read once and then point at; a
-              select hides two of the three behind whichever is set. */}
-          <div className="pickrow">
-            {PLACEMENTS.map((p) => (
-              <button
-                key={p.value}
-                type="button"
-                aria-pressed={(draft.placement ?? "lead") === p.value}
-                onClick={() => setPlacement(p.value)}
-                className="pk"
-              >
-                <span className="ic">
-                  <p.icon className="h-4 w-4" strokeWidth={1.75} />
-                </span>
-                {p.label}
-                {p.note && <span className="sub">{p.note}</span>}
-              </button>
-            ))}
-          </div>
-        </Group>
-
-        {/* Shown whenever the child *could* get a workspace of its own — its
-            own, or the lead's to decide — and hidden only on *Same workspace*,
-            the one case where a machine can never apply. A profile may pin a
-            machine while leaving the placement open, which is a coherent thing
-            to want: wherever the lead likes, but if it gets a workspace of its
-            own it is on that machine. */}
-        {draft.placement !== "here" && (
-          <Group
-            label="Machine"
-            hint={
-              draft.placement === "new"
-                ? "Which machine its own workspace runs on. Pin one and every spawn runs there. Leave it open and the lead decides."
-                : "Only reached if the lead gives it a workspace of its own — otherwise it runs wherever the lead does. Pin one, or leave it open and the lead decides."
-            }
-          >
-            {machineRows.length > 0 ? (
-              <>
-                <div className="pickrows">
-                  <button
-                    type="button"
-                    aria-pressed={(draft.machine ?? null) === null}
-                    onClick={() => set("machine", null)}
-                    className="pr2"
-                  >
-                    <span className="g">
-                      <CircleDashed className="h-[17px] w-[17px]" strokeWidth={1.75} />
-                    </span>
-                    <span className="tx">
-                      <b>{OPEN}</b>
-                      <s>{OPEN_FALLBACK.machine}</s>
-                    </span>
-                    {(draft.machine ?? null) === null && (
-                      <span className="g tick">
-                        <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
-                      </span>
-                    )}
-                  </button>
-                  {machineRows.map((m) => {
-                    const ok = runsThere(m.id);
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        aria-pressed={draft.machine === m.id}
-                        data-off={ok === false ? "true" : undefined}
-                        onClick={() => set("machine", m.id)}
-                        className="pr2"
-                      >
-                        <span className="g">
-                          <Server className="h-[17px] w-[17px]" strokeWidth={1.75} />
-                        </span>
-                        <span className="tx">
-                          <b>{m.label}</b>
-                          <s>{m.says}</s>
-                        </span>
-                        {/* Marked rather than hidden, as every other picker
-                            marks it: gone from a list looks like gone. */}
-                        {ok === false && (
-                          <span className="why">
-                            {AGENT_LABEL[draft.agent as Agent] ?? draft.agent} is not installed
-                            there
-                          </span>
-                        )}
-                        {draft.machine === m.id && (
-                          <span className="g tick">
-                            <Check className="h-3.5 w-3.5" strokeWidth={2.5} />
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                {/* Whether a machine can run an engine depends on which engine,
-                    and this profile leaves that open — so the column that would
-                    say so is honestly missing rather than quietly absent. */}
-                {draft.agent === null && (
-                  <div className="inform">
-                    <p>
-                      Whether a machine can run an engine depends on which engine, and this profile
-                      leaves that open. The lead is told at launch, not here.
-                    </p>
-                  </div>
-                )}
-              </>
-            ) : (
-              /* Not the pickers' "No machine to run on" block: a profile with
-                 no machine is a state this screen produces and handles — the
-                 lead names one, or Firetower picks — so this is information
-                 rather than something in the way. */
-              <div className="inform">
-                <p>
-                  <b>No machines yet.</b> That leaves this open, so a lead may name one and
-                  Firetower picks otherwise — from whichever machines exist by then. Agents run on
-                  a machine you add over ssh; Firetower does not run them on itself.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => navigate("/configuration/machines/add")}
-                  className="btn plain"
-                >
-                  <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  Add a machine
-                </button>
-              </div>
-            )}
-          </Group>
-        )}
-
-        <Group
-          label="Agent"
-          hint="Which engine it runs on. Pin one and every spawn uses it. Leave it open and the lead decides."
-        >
-          {/* One flat row, the open answer first: having pressed *pin an
-              engine* the only thing left to say is which, so a two-step would
-              be a mode that carries no information. It also makes Agent read
-              exactly like Placement and Machine, which is the one thing this
-              change is for — `desktop-redesign.html:4458` draws it this way. */}
-          <div className="pickrow">
-            <button
-              type="button"
-              aria-pressed={(draft.agent ?? null) === null}
-              onClick={() => set("agent", null)}
-              className="pk"
-            >
-              <span className="ic">
-                <CircleDashed className="h-4 w-4" strokeWidth={1.75} />
-              </span>
-              {OPEN}
-              <span className="sub">{OPEN_FALLBACK.agent}</span>
-            </button>
-            {agentOptions.map((o) => (
-              <button
-                key={o.value ?? "__open"}
-                type="button"
-                aria-pressed={draft.agent === o.value}
-                onClick={() => set("agent", o.value)}
-                className="pk"
-              >
-                <span className="ic">{o.icon}</span>
-                {o.label}
-              </button>
-            ))}
-          </div>
-        </Group>
-
-        {/* **Above Subscription, below Agent.** Agent and How it runs are how
-            a child behaves; Subscription and what follows it are which
-            subscription pays. Grouping the pair that answers each question
-            puts the two fields that leave with the engine next to each other
-            too, so the note that replaces them stands in one place rather
-            than between two survivors. */}
-        {controls.length > 0 && (
-          <Group
-            label="How it runs"
-            hint="Pin the model and run settings, or leave any on the engine's default. These override what you last used when a workspace starts as this profile."
-          >
-            <div className="flex flex-col gap-3">
-              {controls.map((c) => {
-                const Icon = CONTROL_ICON[c.kind];
-                const options: Opt[] = [
-                  {
-                    value: null,
-                    icon: <Icon className="h-4 w-4" strokeWidth={1.75} />,
-                    label: "Engine default",
-                    note: "Whatever the agent starts on.",
-                  },
-                  ...c.choices.map((ch) => ({
-                    value: ch.value,
-                    icon: <Icon className="h-4 w-4" strokeWidth={1.75} />,
-                    label: ch.label,
-                    note: ch.note ?? undefined,
-                  })),
-                ];
-                return (
-                  <div key={c.kind} className="flex flex-col gap-1.5">
-                    <span className="text-micro font-medium text-mute">{c.fallback}</span>
-                    <Select
-                      ariaLabel={c.fallback}
-                      value={draft.settings?.[c.kind] ?? null}
-                      options={options}
-                      onChange={(v) => setSetting(c.kind, v)}
-                    />
-                  </div>
-                );
-              })}
-            </div>
-          </Group>
-        )}
-
-        {/* A subscription belongs to one engine, so with the engine open there
-            is nothing this field could hold: a visible picker here could only
-            produce a refusal. It leaves, and the sentence below says why. */}
-        {draft.agent !== null && (
-          <Group
-            label="Subscription"
-            hint="Which subscription its engine authenticates with when it runs."
-          >
-            {connected ? (
-              <div className="pickrow">
-                {accountOptions.map((o) => (
-                  <button
-                    key={o.value ?? "__default"}
-                    type="button"
-                    aria-pressed={(draft.account ?? null) === o.value}
-                    onClick={() => set("account", o.value)}
-                    className="pk"
-                  >
-                    <span className="ic">{o.icon}</span>
-                    {o.label}
-                    {o.note && <span className="sub">{o.note}</span>}
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="inform">
-                <p>
-                  <b>
-                    No subscription connected for{" "}
-                    {AGENT_LABEL[draft.agent as Agent] ?? draft.agent}.
-                  </b>{" "}
-                  You can save this profile — it will run on your default for{" "}
-                  {AGENT_LABEL[draft.agent as Agent] ?? draft.agent} once one exists. A child
-                  started before then is refused at launch, with nothing to authenticate with.
-                </p>
-                <button
-                  type="button"
-                  onClick={() => navigate("/configuration/agents")}
-                  className="btn plain"
-                >
-                  <KeyRound className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  Connect {AGENT_LABEL[draft.agent as Agent] ?? draft.agent}
-                </button>
-              </div>
-            )}
-          </Group>
-        )}
-
-        {/* **What stands where Subscription and How it runs were.**
-            They do not grey out and they do not linger: they leave. Under a
-            flat engine row that is not self-evidently cause and effect — the
-            four engines stay put and two fields below move — so this says why
-            they went, *and names what came off with them*. Clearing is
-            otherwise invisible, and silently discarding a value somebody chose
-            is the bug this whole screen is being changed for. */}
-        {draft.agent === null && (
-          <div className="fld">
-            <div className="inform">
-              <p>
-                <b>Subscription and run settings belong to an engine</b>, so a profile that leaves
-                the engine open carries neither. A child gets your default subscription for
-                whatever engine it runs, on that engine's own settings.
-                {dropped && (dropped.account || dropped.settings > 0) && (
-                  <>
-                    {" "}
-                    Its{" "}
-                    {[
-                      dropped.account ? "pinned subscription" : null,
-                      dropped.settings > 0
-                        ? `${dropped.settings} run setting${dropped.settings === 1 ? "" : "s"}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" and ")}{" "}
-                    came off with the engine.
-                  </>
-                )}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* **This one does not leave when the engine does**, and that is the
-            property the whole field turns on. Subscription and How it runs go
-            because they are *values belonging to an engine* — an account is
-            for one engine and a model name is one engine's. A grant of
-            latitude is not a value: "its lead may move it to another
-            subscription" is as true of a child running whatever its lead runs
-            as of one pinned to Claude Code. */}
-        <Group
-          label="If it reaches usage limit"
-          hint="What a lead may do about a child of this profile that has hit its usage limit. It is a grant, not a guarantee — the Manager has to be allowed too."
-        >
-          <div className="ladder">
-            {ON_LIMIT.map((o) => (
-              <button
-                key={o.value}
-                type="button"
-                aria-pressed={(draft.onUsageLimit ?? "wait") === o.value}
-                onClick={() => set("onUsageLimit", o.value)}
-                className="pk"
-              >
-                <span className="ic">
-                  <o.icon className="h-4 w-4" strokeWidth={1.75} />
-                </span>
-                <span className="tx">
-                  {o.label}
-                  {o.note && <span className="sub">{o.note}</span>}
-                </span>
-              </button>
-            ))}
-          </div>
-          {/* The consequence where it is being chosen, and only for the two
-              rungs that have one. Waiting is what everything does today and
-              needs no explaining. */}
-          {draft.onUsageLimit === "same" && (
-            <WhereTo className="aside">
-              Nothing about what the child may <i>do</i> changes — same engine, same permissions.
-              Only whose allowance pays for the rest of it.
-            </WhereTo>
-          )}
-          {draft.onUsageLimit === "engine" && (
-            <WhereTo className="aside">
-              Choosing this <b>is</b> the acknowledgement that a different engine brings its own
-              default permissions. Given here, once, instead of at the moment somebody is waiting.
-            </WhereTo>
-          )}
-        </Group>
-
-        {/* One sentence reading the three fields back as what a spawn gets.
-            The bug behind all of this is a lead reporting a build that never
-            happened; a form that says what a spawn will be is the cheapest
-            guard there is. */}
-        <WhereTo>{whatAChildGets(draft, machineRows)}</WhereTo>
-
-        <Group
-          label="Delegation"
-          hint="A Manager may hand work to any profile it can reach. Which one, and when, goes in the instructions below."
-        >
-          <Select
-            ariaLabel="Delegation"
-            value={draft.canDelegate ? "manager" : "operator"}
-            options={[
-              {
-                value: "operator",
-                icon: <User className="h-4 w-4" strokeWidth={1.75} />,
-                label: "Operator",
-                note: "Does the work and reports back. Can't delegate.",
-              },
-              {
-                value: "manager",
-                icon: <Users className="h-4 w-4" strokeWidth={1.75} />,
-                label: "Manager",
-                note: "Can hand work to any profile it can reach.",
-              },
-            ]}
-            onChange={(v) => set("canDelegate", v === "manager")}
-          />
-        </Group>
-
-        {draft.canDelegate && (
-          <ScopePicker
-            label="Can delegate to"
-            hint="The subagents this Manager may hand work to. Anything off the list it can't see at all."
-            items={delegationItems}
-            selected={draft.delegateScope ?? []}
-            onChange={(ids) => set("delegateScope", ids)}
-            searchPlaceholder="Search profiles…"
-            allNote="Any profile you can reach — and any you add later."
-          />
-        )}
-
-        {/* The Manager's own half, under Can delegate with the delegates list,
-            because it is a fact about handing work out rather than about this
-            profile's own children. Meaningless on an Operator, so it is not
-            drawn for one — and not cleared either: a profile made an Operator
-            and then a Manager again keeps the answer somebody gave. */}
-        {draft.canDelegate && (
-          <Group
-            label="When a child runs out"
-            hint="Whether this Manager re-routes a spent child on its own, or stops and asks you which subscription to use."
-          >
-            <div className="pickrow">
-              {ON_CHILD_LIMIT.map((o) => (
-                <button
-                  key={o.value}
-                  type="button"
-                  aria-pressed={(draft.onChildLimit ?? "ask") === o.value}
-                  onClick={() => set("onChildLimit", o.value)}
-                  className="pk"
-                >
-                  <span className="ic">
-                    <o.icon className="h-4 w-4" strokeWidth={1.75} />
-                  </span>
-                  {o.label}
-                  <span className="sub">{o.note}</span>
-                </button>
-              ))}
-            </div>
-            <WhereTo className="aside">
-              <b>Both have to agree.</b> A Manager set to <i>Re-route it</i> still cannot move a
-              child whose own profile says <i>Wait for human action</i> — the profile grants the
-              latitude and this decides whether the Manager uses it.
-            </WhereTo>
-          </Group>
-        )}
-
-        <SkillSources r={skills} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
-
-        <Field label="Instructions" hint="Composed into its prompt. Markdown; the agent reads all of it. A Manager names its delegates here.">
-          <textarea
-            value={draft.instructions}
-            onChange={(e) => set("instructions", e.target.value)}
-            rows={10}
-            placeholder={"# Reviewer\n\nYou review. You do not fix.\n\n## How to work\n- Read the diff and the tests first.\n- Report problems as `path:line — what, why`.\n\n## Don't\n- Don't edit files. Don't push."}
-            className="scroll-slim w-full resize-y rounded-md border border-line bg-ground px-3 py-2 font-mono text-code leading-relaxed text-text placeholder:text-mute focus:border-dim focus:outline-none"
-          />
-        </Field>
-
-        {existing ? (
-          <>
-            <Field label="Who can use it" hint="A profile in a directory can be used by anyone who can reach it.">
-              <WhoCanAccess kind="role" id={state.id!} path={state.path} look="chip" />
-            </Field>
-            <Field
-              label="Default"
-              hint="Start new workspaces as this profile unless you pick another. Only one profile can be the default."
-            >
-              <button
-                type="button"
-                role="switch"
-                aria-checked={isDefault}
-                onClick={toggleDefault}
-                disabled={defaulting}
-                className={`flex items-center gap-2.5 rounded-md border px-3 py-2 text-left text-ui transition-colors disabled:opacity-60 ${
-                  isDefault
-                    ? "border-sage-deep bg-sage-tint text-sage"
-                    : "border-line bg-ground text-dim hover:border-dim hover:text-bone"
-                }`}
-              >
-                <span
-                  className={`grid h-4 w-4 place-items-center rounded-full border ${
-                    isDefault ? "border-sage bg-sage text-ground" : "border-mute"
-                  }`}
-                >
-                  {isDefault && <Check className="h-3 w-3" strokeWidth={3.5} />}
-                </span>
-                {isDefault ? "Your default for new workspaces" : "Make this the default"}
-              </button>
-            </Field>
-          </>
-        ) : (
-          <Group
-            label="Where it lives"
-            hint="Keep it yours, or file it in a directory so your team can use it too."
-          >
-            <Select
-              ariaLabel="Where it lives"
-              value={draft.directory ?? null}
-              options={dirOptions}
-              onChange={(v) => set("directory", v)}
-            />
-          </Group>
-        )}
-
+      {/* **The form is not written here.** It is `profile/ProfileForm`,
+          which the team map's drawer renders too — one form over one object,
+          so the two surfaces cannot say different things about it. What this
+          screen owns is the page around it: the heading, the width, and a
+          Save that closes. */}
+      <div className="pf">
+        <ProfileForm
+          draft={draft}
+          setDraft={setDraft}
+          role={role}
+          state={state}
+          isDefault={isDefault}
+          defaulting={defaulting}
+          onToggleDefault={toggleDefault}
+        />
         {trouble && (
           <p className="rounded-md border border-brick-deep bg-brick-tint px-3 py-2 font-mono text-meta text-brick">
             {trouble}
@@ -1827,152 +1182,5 @@ function Editor({
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * A labelled input, with its hint **above** the control.
- *
- * The hint sat underneath, which puts the explanation after the decision —
- * and in a form of eight fields it reads as a footnote to the thing above
- * rather than an introduction to the thing below. The drawing's `.fld` has
- * label, hint, box, in that order.
- */
-function Field({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <label className="fld">
-      <span>{label}</span>
-      {hint && <span className="hint">{hint}</span>}
-      {children}
-    </label>
-  );
-}
-
-/**
- * Field, for a group of buttons rather than one input.
- *
- * The same heading and hint, but a `div` with a labelled group — a `label`
- * around a set of buttons hands every click to the first one, which is wrong
- * for a picker where each tile is its own control.
- */
-function Group({
-  label,
-  hint,
-  children,
-}: {
-  label: string;
-  hint?: string;
-  children: ReactNode;
-}) {
-  return (
-    <div role="group" aria-label={label} className="fld">
-      <span>{label}</span>
-      {hint && <span className="hint">{hint}</span>}
-      {children}
-    </div>
-  );
-}
-
-/**
- * What a Manager can currently hand work to — a reference, not an editor.
- *
- * The team is not a list you curate; it is every profile you can reach, and
- * which to use for what is said in the instructions. So this just names them,
- * so you know what handles exist to write down. It reaches out of the card the
- * way the lead reaches out of its own: by what the person can see.
- */
-/** One option in a {@link Select}: what it is worth, and how it reads. */
-type Opt = { value: string | null; icon: ReactNode; label: string; note?: string };
-
-/**
- * A dropdown that shows a mark, not just a word.
- *
- * The one control both the Agent and the Placement fields use: a trigger that
- * wears the current choice, and a menu — the app's own `Pop`, so it escapes
- * this card's clipping and matches every other menu — that lists the rest. A
- * dropdown rather than a row of tiles because the list is open-ended: a new
- * supported agent is one more row here, not a reflow of the form.
- */
-function Select({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-}: {
-  value: string | null;
-  options: Opt[];
-  onChange: (v: string | null) => void;
-  ariaLabel: string;
-}) {
-  const [open, setOpen] = useState<HTMLElement | null>(null);
-  const current = options.find((o) => o.value === value) ?? options[0];
-
-  // Nothing to pick yet — the list is still loading, or there is genuinely
-  // nothing. A placeholder rather than a crash on `current.icon`.
-  if (!current) {
-    return (
-      <div className="flex w-full items-center rounded-md border border-line bg-ground px-3 py-2 text-ui text-mute">
-        —
-      </div>
-    );
-  }
-
-  return (
-    <>
-      <button
-        type="button"
-        aria-haspopup="listbox"
-        aria-label={ariaLabel}
-        onClick={(e) => setOpen(open ? null : e.currentTarget)}
-        className="flex w-full items-center gap-2.5 rounded-md border border-line bg-ground px-3 py-2 text-left transition-colors hover:border-dim focus:border-dim focus:outline-none"
-      >
-        <span className="shrink-0 text-dim">{current.icon}</span>
-        <span className="min-w-0 flex-1 truncate text-ui text-bone">{current.label}</span>
-        <ChevronDown
-          className={`h-4 w-4 shrink-0 text-mute transition-transform ${open ? "rotate-180" : ""}`}
-          strokeWidth={1.75}
-        />
-      </button>
-      {open && (
-        <Pop anchor={open} onClose={() => setOpen(null)} width={open.offsetWidth}>
-          <div role="listbox" className="max-h-72 min-h-0 overflow-y-auto py-1">
-            {options.map((o) => {
-              const on = o.value === value;
-              return (
-                <button
-                  key={o.value ?? "__open"}
-                  type="button"
-                  role="option"
-                  aria-selected={on}
-                  onClick={() => {
-                    onChange(o.value);
-                    setOpen(null);
-                  }}
-                  className="flex w-full items-start gap-2.5 px-3 py-2 text-left hover:bg-raise"
-                >
-                  <span className={`mt-px shrink-0 ${on ? "text-bone" : "text-dim"}`}>{o.icon}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-ui text-bone">{o.label}</span>
-                    {o.note && <span className="block text-micro text-mute">{o.note}</span>}
-                  </span>
-                  <Check
-                    className={`mt-px h-4 w-4 shrink-0 ${on ? "text-slate" : "text-transparent"}`}
-                    strokeWidth={2.5}
-                  />
-                </button>
-              );
-            })}
-          </div>
-        </Pop>
-      )}
-    </>
   );
 }

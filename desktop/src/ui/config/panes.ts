@@ -48,6 +48,11 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
       // is worn by a workspace's own agent as much as by a delegate; `roles` on
       // the wire, because the API and the spawn tool still say role.
       { at: "roles", label: "Profiles" },
+      // Directly after Profiles, because it is the other half of the same
+      // idea: a profile is what an agent is, and a team is where it sits and
+      // who is under it. `agent-teams`, never `teams` — that one is teams of
+      // *people* and is in the Access group below.
+      { at: "agent-teams", label: "Agent teams" },
       { at: "skills", label: "Skills" },
     ],
   },

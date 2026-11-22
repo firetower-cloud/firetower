@@ -1168,6 +1168,7 @@ fn classify(
     }
 
     let mut warnings = said_about_settings(bundle, said);
+    warnings.extend(said_about_delegation(bundle, said));
     let mut write = None;
     let outcome = match matched {
         Matched::Create { answered } => {
@@ -2491,6 +2492,60 @@ fn kind_of(setting: Setting) -> ft_core::controls::ControlKind {
 /// **A model or an effort outside the picker's list is not one of them**, which
 /// is the correction #426 made: there the list is knowable and simply is not
 /// the accepted set, so there is no unknown to report. See `resolve`.
+/// What a bundle still saying `can_delegate` or `delegates_to` is told.
+///
+/// **A warning, and the plan stays appliable.** Both keys are deprecated and
+/// still read — see `docs/agent-teams.md` — so a bundle that carries them goes
+/// on behaving exactly as it did, and an organisation's own profile repository
+/// does not break on the morning of the upgrade. What it must not do is be
+/// silent: a profile imported now carries reach the editor will not show and
+/// no team explains, and the person importing it is the one who can draw the
+/// team instead.
+///
+/// Refusing and offering the conversion — reading the bundle's `delegates_to`
+/// as a team and writing one — is the shape the specification settles on and
+/// is deliberately not in this slice. It is the same two-pass resolution the
+/// team already does, pointed at `agent_teams` instead of `delegate_scope`,
+/// and it needs the import surface to be able to show a team in its plan.
+fn said_about_delegation(bundle: &Bundle, said: &Reading) -> Vec<PlanProblem> {
+    let mut out = Vec::new();
+    let at = |field: Field, says: String| {
+        PlanProblem::at(
+            &bundle.path,
+            line_of(&said.spelled, Spot::Field(field)),
+            Some(field.spelling().to_string()),
+            says,
+        )
+    };
+    if said.spelled.wrote(Spot::Field(Field::CanDelegate)) && said.profile.can_delegate {
+        out.push(at(
+            Field::CanDelegate,
+            "`can_delegate` is deprecated: who hands work to whom is an agent team now, not a \
+             profile. This import still honours it and the profile will still delegate, until \
+             the column is dropped. Make a team on Agent teams with this profile as its lead, \
+             and the line can come out."
+                .to_string(),
+        ));
+    }
+    if said.spelled.entries(Field::DelegatesTo) > 0 {
+        out.push(at(
+            Field::DelegatesTo,
+            format!(
+                "`delegates_to` is deprecated: the {} profile{} named here belong under this one \
+                 in a team, where you can see the whole shape and give each its own \
+                 instructions. This import still honours the list until the column is dropped.",
+                said.profile.delegates_to.len(),
+                if said.profile.delegates_to.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+            ),
+        ));
+    }
+    out
+}
+
 fn said_about_settings(bundle: &Bundle, said: &Reading) -> Vec<PlanProblem> {
     let mut out = Vec::new();
     for setting in Setting::all() {

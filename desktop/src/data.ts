@@ -10,6 +10,7 @@ import { useListAgents } from "~/api/generated/agents/agents";
 import { useListProviders } from "~/api/generated/providers/providers";
 import { useListAccounts } from "~/api/generated/accounts/accounts";
 import { useListDirectories } from "~/api/generated/access/access";
+import { useListAgentTeams } from "~/api/generated/agent-teams/agent-teams";
 import {
   useListSkills,
   useListVersions,
@@ -32,6 +33,7 @@ import { useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { tokenUsage } from "~/api/generated/sessions/sessions";
 import type {
+  AgentTeam,
   DiffSince,
   FileDiff,
   Host,
@@ -400,6 +402,23 @@ export function useSessionSkillIds(session: string) {
     loading: q.isPending,
     error: q.error ? why(q.error) : null,
   };
+}
+
+/**
+ * The agent teams: a lead profile and the tree of positions under it.
+ *
+ * Read in four places that have to agree — the Agent teams screen, the
+ * profiles library (which teams use each profile), the composer's picker, and
+ * the schedule editor — so it is one hook rather than four fetches.
+ */
+export function useAgentTeams() {
+  const q = useListAgentTeams();
+  return { data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null, trouble: trouble(q.error) };
+}
+
+/** The names of the teams holding a position on this profile, each once. */
+export function teamsUsing(teams: AgentTeam[], role: string): string[] {
+  return teams.filter((t) => t.positions.some((p) => p.profile === role)).map((t) => t.name);
 }
 
 export function useDirectories() {

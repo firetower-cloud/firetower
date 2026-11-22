@@ -229,6 +229,209 @@
         }
       }
     },
+    "/api/v1/agent-teams": {
+      "get": {
+        "tags": [
+          "agentTeams"
+        ],
+        "operationId": "list_agent_teams",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentTeam"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "agentTeams"
+        ],
+        "operationId": "create_agent_team",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewAgentTeam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTeam"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agent-teams/{id}": {
+      "get": {
+        "tags": [
+          "agentTeams"
+        ],
+        "operationId": "one_agent_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Agent team id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTeam"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "agentTeams"
+        ],
+        "operationId": "update_agent_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Agent team id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewAgentTeam"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentTeam"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "agentTeams"
+        ],
+        "operationId": "delete_agent_team",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Agent team id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents": {
       "get": {
         "tags": [
@@ -9768,6 +9971,60 @@
           }
         }
       },
+      "AgentTeam": {
+        "type": "object",
+        "description": "A team, as the map and the picker read it.",
+        "required": [
+          "id",
+          "path",
+          "name",
+          "positions",
+          "mayWrite",
+          "mayShare",
+          "schedules",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string"
+          },
+          "mayShare": {
+            "type": "boolean",
+            "description": "Whether they may move it into a directory, or out of one."
+          },
+          "mayWrite": {
+            "type": "boolean",
+            "description": "Whether the person asking may edit or delete it."
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Position"
+            },
+            "description": "The whole tree, flat and in sibling order. The lead is the one entry\nwith no `parent`, and it is always first."
+          },
+          "schedules": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many schedules pin this team. The team editor states this before\nSave, because saving pauses every one of them."
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
       "AgentView": {
         "type": "object",
         "description": "One agent kind, its configuration, and where it's actually present.\n\nJoined here rather than left to the interface: the screen shows one row per\nkind, so it should cost one request.",
@@ -11699,6 +11956,34 @@
           }
         }
       },
+      "DraftPosition": {
+        "type": "object",
+        "description": "One position as the caller draws it, before it has an id of its own.",
+        "required": [
+          "key",
+          "profile"
+        ],
+        "properties": {
+          "extraInstructions": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string",
+            "description": "The caller's own key for this position, which its children name as\ntheir `parent`. An existing position's id keeps that row — and keeps\nthe sessions standing on it; anything else mints a new one."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The key of the position above it. Null for the lead, and exactly one\nentry may say so."
+          },
+          "profile": {
+            "type": "string",
+            "description": "The profile it references, by id."
+          }
+        }
+      },
       "Drain": {
         "type": "object",
         "required": [
@@ -12437,6 +12722,7 @@
           "skill",
           "artifact",
           "role",
+          "agentTeam",
           "repository"
         ]
       },
@@ -13555,6 +13841,32 @@
           }
         }
       },
+      "NewAgentTeam": {
+        "type": "object",
+        "description": "What the API accepts to create or replace a team.\n\n**Declarative.** What is sent is the team: a position that is not in\n`positions` is removed, with its subtree. That is the same contract the\nYAML file has, which is what lets one round-trip into the other.",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "directory": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A directory to file it in, by id, so a teammate can reach it. Omit for\nyour own space. Only honoured at creation; move it later with sharing."
+          },
+          "name": {
+            "type": "string"
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DraftPosition"
+            },
+            "description": "The whole tree, flat. Exactly one entry has no `parent`: the lead.\nArray order is sibling order."
+          }
+        }
+      },
       "NewCheckout": {
         "type": "object",
         "description": "One repository to check out, as the API accepts it.",
@@ -14055,6 +14367,13 @@
             },
             "description": "The skills each run reads. `null` takes the repository's defaults *at\ncreation* and pins the result."
           },
+          "team": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The agent team to start, by id.\n\n**The whole tree is pinned at approval, not the id.** A team id\nresolved at run time would let an edit between approval and 9am change\nhow many agents start with nobody watching — which is the mistake\npinning a profile's composed persona already exists to prevent, with a\nlarger blast radius. Editing a pinned team clears the approval, so the\nnext run is refused until somebody looks."
+          },
           "timezone": {
             "type": "string",
             "description": "An IANA name. Required, and not defaulted to the server's own zone:\n\"09:00\" means nothing without saying whose nine."
@@ -14123,7 +14442,7 @@
               "string",
               "null"
             ],
-            "description": "The profile to start as, by id. Omit for a plain agent with no persona.\n\nIt shapes the agent's system prompt, pins the engine when it names one,\nand decides whether this session may delegate — a Manager may, an\nOperator does the work itself."
+            "description": "The profile to start as, by id. Omit for a plain agent with no persona.\n\nIt shapes the agent's system prompt and pins the engine when it names\none. It no longer decides whether this session may delegate: that is\n`team` below, and a profile started on its own cannot hand work to\nanybody."
           },
           "prompt": {
             "type": [
@@ -14183,6 +14502,13 @@
               "string",
               "null"
             ]
+          },
+          "team": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The agent team to start, by id.\n\n**You never talk to a team; you talk to its lead.** Naming one starts\nits lead profile with the team behind it — the session stands on the\nteam's root position, and the positions under that are what it may hand\nwork to. Naming a team and a profile that is not its lead is refused."
           },
           "workspaceId": {
             "oneOf": [
@@ -15060,6 +15386,63 @@
               "$ref": "#/components/schemas/Forwarded"
             },
             "description": "Ports already open on this machine for this session."
+          }
+        }
+      },
+      "Position": {
+        "type": "object",
+        "description": "One profile, where it sits in one team, and what is said to it only there.",
+        "required": [
+          "id",
+          "profile",
+          "name",
+          "does",
+          "redacted",
+          "extraInstructions",
+          "ordinal"
+        ],
+        "properties": {
+          "agent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The engine the profile pins, for the mark on the card. Absent when the\nprofile leaves it open, and when `redacted`."
+          },
+          "does": {
+            "type": "string",
+            "description": "The profile's one-liner, for the card's tooltip. Empty when `redacted`."
+          },
+          "extraInstructions": {
+            "type": "string",
+            "description": "Markdown that applies here and nowhere else. It never replaces a\nprofile field; it is composed after the profile's own instructions."
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "The profile's name, so the map draws a card without a request per card.\nEmpty when `redacted`."
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Authoritative sibling order. The map draws in it and export writes it."
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Null for the lead."
+          },
+          "profile": {
+            "type": "string",
+            "description": "The profile it references, by id."
+          },
+          "redacted": {
+            "type": "boolean",
+            "description": "The profile is real and in this team, and this person cannot see it.\n\nDrawn as a redacted card rather than left out. A gap would misrepresent\nthe team's shape, which is the thing the map exists to convey — and\nthe count under a parent would be wrong, which is worse than a card\nthat says it is not for you."
           }
         }
       },
@@ -16601,6 +16984,21 @@
               "type": "string"
             },
             "description": "The skills each run reads, by id, resolved at approval."
+          },
+          "team": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The agent team each run starts, when the schedule names one. The\nprofile beside it is that team's lead, which is what actually runs."
+          },
+          "teamSize": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "How many agents a run of this can start: every position of the team,\nthe lead included. Pinned at approval rather than counted later,\nbecause it is what the screen says out loud before Save and it is the\nonly thing standing between a team schedule and a surprise."
           }
         }
       },
@@ -17041,6 +17439,13 @@
             },
             "description": "The plan the agent is keeping, when it set one through `firetower:plan`.\n\nThe cross-engine fallback. Claude Code's todo list and Codex's own plan\nalready arrive live on the turn stream and are what the rail prefers;\nthis is for an engine with no plan tool of its own, and is read only\nwhen the live one is empty."
           },
+          "positionId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which position of that team it occupies.\n\n**This is what decides who it may hand work to.** The children of this\nposition are the profiles `spawn` will resolve a name against, and a\nsession with no position cannot delegate at all — which is what\nreplaced a profile carrying its own reach. A child inherits the\nposition it was spawned into, which is how a team gets depth."
+          },
           "profileId": {
             "type": [
               "string",
@@ -17113,6 +17518,13 @@
               "string",
               "null"
             ]
+          },
+          "teamId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The agent team this session is running inside, when it is running\ninside one."
           },
           "title": {
             "type": "string"

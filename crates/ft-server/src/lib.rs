@@ -10,6 +10,9 @@ use std::sync::Arc;
 
 pub mod access;
 pub mod accounts;
+/// Agent teams: delegation, as a thing you can see rather than a column on a
+/// profile.
+pub mod agent_teams;
 pub mod api;
 pub mod artifact;
 pub mod auth;
@@ -82,6 +85,9 @@ pub struct AppState {
     /// The skill library, and what each session is reading from it.
     pub skills: skills::Skills,
     pub roles: roles::Roles,
+    /// The teams between those profiles: who may hand work to whom, and what
+    /// is said to a profile only here.
+    pub agent_teams: agent_teams::AgentTeams,
     /// What this deployment will accept, so `/bootstrap` can say so.
     ///
     /// A copy rather than a reference to the gate's: the gate enforces it and
@@ -235,6 +241,7 @@ pub async fn run(config: Config) -> Result<()> {
         access: access::Access::new(db_pool.clone()),
         skills: skills::Skills::new(db_pool.clone()),
         roles: roles::Roles::new(db_pool.clone()),
+        agent_teams: agent_teams::AgentTeams::new(db_pool.clone()),
         forwards: Default::default(),
         previews: Default::default(),
         names,

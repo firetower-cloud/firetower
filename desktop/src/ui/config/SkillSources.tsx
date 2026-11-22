@@ -325,12 +325,7 @@ export function SkillSources({
       <span>Skills it loads</span>
       {/* **"loads", not "can load".** `can load` is a permission label, and
           under a union no permission is granted or withheld — the profile
-          names a set. The present tense also makes the sentence falsifiable,
-          which is what the resolved count is for. */}
-      <span className="hint">
-        Three sources, added together. Each one stays in the model's context on every turn. Nothing
-        here removes a skill — turning a source off is the only way to narrow it.
-      </span>
+          names a set. */}
 
       <div className="answer" data-tone={tone}>
         <div className="fig">{fig}</div>
@@ -641,37 +636,25 @@ export function SkillSources({
         </div>
       </div>
 
-      {/* A fact, not an alert. The words do not overclaim either way: not
-          "insecure", not "contained". */}
-      <div className="host">
-        <span className="g">
-          <Info className="h-[17px] w-[17px]" strokeWidth={1.5} />
-        </span>
-        <div className="min-w-0">
-          <b>The machine adds its own</b>
-          {r.readsHost ? (
-            <p>
-              {r.pinned ? r.agentLabel : "Claude Code"} also reads <code>~/.claude/skills</code> on
-              the machine, whatever is set here. Nothing on this screen pins, versions, scopes or
-              records what is in there. This decides what Firetower sends. It is not everything the
-              agent can read.
-            </p>
-          ) : (
-            <p>
-              {r.agentLabel} reads only the per-session directory Firetower writes, so the machine's
-              own <code>~/.claude/skills</code> does not reach this profile. That is true of Codex,
-              Kimi and Cursor and not of Claude Code.
-            </p>
-          )}
-          {empty && (
+      {/* **The explanation goes; the consequence stays.** What the machine
+          reads and what Firetower sends is background — true of every
+          profile, and a paragraph nobody re-reads. "This child will read no
+          skills at all" is not background: it is this profile, in the state
+          it is in now, and it is only ever drawn when that state is real. */}
+      {empty && (
+        <div className="host">
+          <span className="g">
+            <Info className="h-[17px] w-[17px]" strokeWidth={1.5} />
+          </span>
+          <div className="min-w-0">
             <p className="text-text">
               {r.readsHost
                 ? "Both switched off and nothing named, so ~/.claude/skills is the only place this child's skills will come from. It is not hermetic — it is unrecorded."
                 : "Both switched off and nothing named, so this child will read no skills at all."}
             </p>
-          )}
+          </div>
         </div>
-      </div>
+      )}
 
       {sheet && (
         <Picker

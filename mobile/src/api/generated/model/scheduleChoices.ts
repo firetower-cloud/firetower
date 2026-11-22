@@ -43,4 +43,18 @@ export interface ScheduleChoices {
   settings: Preferred;
   /** The skills each run reads, by id, resolved at approval. */
   skills?: string[];
+  /**
+     * The agent team each run starts, when the schedule names one. The
+     * profile beside it is that team's lead, which is what actually runs.
+     * @nullable
+     */
+  team?: string | null;
+  /**
+     * How many agents a run of this can start: every position of the team,
+     * the lead included. Pinned at approval rather than counted later,
+     * because it is what the screen says out loud before Save and it is the
+     * only thing standing between a team schedule and a surprise.
+     * @nullable
+     */
+  teamSize?: number | null;
 }

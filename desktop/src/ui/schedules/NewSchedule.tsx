@@ -49,7 +49,7 @@ import { canRun, NoMachine, resolve, type Where } from "~/components/WhereItRuns
 import { Readout } from "~/components/HostReadiness";
 import { machineLabel, machines } from "~/api/environments";
 import { usable } from "~/api/accounts";
-import { useAccounts, useAgents, useHosts, useRepos, useSkills } from "~/data";
+import { useAccounts, useAgentTeams, useAgents, useHosts, useRepos, useSkills } from "~/data";
 import { navigate } from "~/shims/next-navigation";
 import { useListRoles } from "~/api/generated/roles/roles";
 import { useAgentControls } from "~/api/generated/agents/agents";
@@ -125,6 +125,7 @@ export function NewSchedule({
   const { data: agents } = useAgents();
   const { data: accounts } = useAccounts();
   const profiles = useListRoles().data ?? [];
+  const teams = useAgentTeams().data;
 
   /* What this sheet opens on. An edit and a copy fill in from the same
      place; only where Save goes differs. */
@@ -139,6 +140,11 @@ export function NewSchedule({
     like ? like.repos.map((r) => ({ id: r.id, slug: r.slug })) : [],
   );
   const [profileId, setProfileId] = useState<string | null>(like?.choices.profile ?? null);
+  /* **A team is a thing a schedule may name**, and it pins the whole tree at
+     approval rather than the id: editing the team clears that approval, so an
+     edit between approval and 9am cannot change how many agents start with
+     nobody watching. */
+  const [teamId, setTeamId] = useState<string | null>(like?.choices.team ?? null);
   const [base, setBase] = useState(like?.base ?? "");
   // Open where there is something in it to see.
   const [advanced, setAdvanced] = useState(!!like?.base);
@@ -189,7 +195,11 @@ export function NewSchedule({
     setWhere((w) => ({ ...w, machine: its.key, hostId: named }));
   }, [all, like?.hostId]);
 
-  const profile = profiles.find((p) => p.id === profileId);
+  const team = teams.find((t) => t.id === teamId);
+  const lead = team?.positions.find((p) => !p.parent);
+  // A team is started as its lead, so the engine, the settings and the skills
+  // are read off the lead's profile.
+  const profile = profiles.find((p) => p.id === (lead?.profile ?? profileId));
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
   const picked = agents.some((a) => a.kind === where.agent) ? (where.agent as Agent) : undefined;
   const kind = (pinned ||
@@ -359,7 +369,8 @@ export function NewSchedule({
         base: base || undefined,
         cadence,
         timezone: zone,
-        profile: profileId || undefined,
+        profile: teamId ? undefined : profileId || undefined,
+        team: teamId || undefined,
         agent: kind,
         accountId: accountId || undefined,
         /* What this engine actually offers, at the value this sheet is
@@ -487,7 +498,7 @@ export function NewSchedule({
                 <div className="bar">
                   <button
                     onClick={(e) => toggle("profile", e.currentTarget)}
-                    data-set={!!profile}
+                    data-set={!!profile || !!team}
                     className="chip"
                     title="Which profile the agent wears"
                   >
@@ -498,7 +509,9 @@ export function NewSchedule({
                         <UserRound className="h-[15px] w-[15px]" strokeWidth={1.8} />
                       )}
                     </span>
-                    <span className="lbl">{profile ? profile.name : "Just an agent"}</span>
+                    <span className="lbl">
+                      {team ? team.name : profile ? profile.name : "Just an agent"}
+                    </span>
                     <Icon of={ChevronDown} size={12} className="text-mute" />
                   </button>
                   {/* The engine, the account, the model, the effort, the
@@ -790,6 +803,15 @@ export function NewSchedule({
 
         <div className="sh-foot">
           <span className="where">
+            {/* **How many agents a run starts, when it is a team.** The one
+                fact here that no control above discloses: the chip says
+                "Product", and a name says nothing about eight agents on
+                somebody's subscription with nobody at the keyboard. Firetower
+                does not cap this, so this sentence is the whole of what
+                stands between a team schedule and a surprise. */}
+            {team
+              ? `Up to ${team.positions.length} agent${team.positions.length === 1 ? "" : "s"} a run, with nobody watching. `
+              : ""}
             {all.length === 0
               ? "No machine to run on yet."
               : editing
@@ -863,9 +885,12 @@ export function NewSchedule({
         <Pop anchor={open.at} onClose={close} width={320}>
           <ProfileMenu
             profiles={profiles}
+            teams={teams}
             profileId={profileId}
-            onPick={(id) => {
+            teamId={teamId}
+            onPick={(id, pickedTeam) => {
               setProfileId(id);
+              setTeamId(pickedTeam ?? null);
               close();
             }}
           />
