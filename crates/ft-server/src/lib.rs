@@ -27,7 +27,6 @@ pub mod oauth;
 pub mod preview;
 pub mod providers;
 pub mod reclaim;
-pub mod removals;
 pub mod roles;
 pub mod schedules;
 pub mod skills;
@@ -89,12 +88,6 @@ pub struct AppState {
     /// The teams between those profiles: who may hand work to whom, and what
     /// is said to a profile only here.
     pub agent_teams: agent_teams::AgentTeams,
-    /// Deletions an agent asked for and a person has not answered yet.
-    ///
-    /// There is no tool that deletes — see [`removals`]. This is where the
-    /// asking goes, and the answering is a REST call only a signed-in person
-    /// can reach.
-    pub removals: removals::Removals,
     /// What this deployment will accept, so `/bootstrap` can say so.
     ///
     /// A copy rather than a reference to the gate's: the gate enforces it and
@@ -249,7 +242,6 @@ pub async fn run(config: Config) -> Result<()> {
         skills: skills::Skills::new(db_pool.clone()),
         roles: roles::Roles::new(db_pool.clone()),
         agent_teams: agent_teams::AgentTeams::new(db_pool.clone()),
-        removals: removals::Removals::new(db_pool.clone()),
         forwards: Default::default(),
         previews: Default::default(),
         names,

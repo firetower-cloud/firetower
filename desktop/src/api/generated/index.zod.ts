@@ -6,7 +6,6 @@ export * from './artifacts/artifacts.zod.ts';
 export * from './auth/auth.zod.ts';
 export * from './consumption/consumption.zod.ts';
 export * from './conversation/conversation.zod.ts';
-export * from './deletions/deletions.zod.ts';
 export * from './events/events.zod.ts';
 export * from './hosts/hosts.zod.ts';
 export * from './meta/meta.zod.ts';

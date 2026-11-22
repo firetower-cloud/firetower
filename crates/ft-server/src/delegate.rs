@@ -19,7 +19,6 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::api::sessions::{create_session_as, Lineage};
-use crate::removals::Kind;
 use crate::AppState;
 
 /// What a delegation call is named on the wire, before the tool's own name.
@@ -109,129 +108,203 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "propose_schedule" => propose_schedule(state, request).await,
         "list_schedules" => list_schedules(state, request).await,
         "pause_schedule" => pause_schedule(state, request).await,
-        "request_deletion" => request_deletion(state, request).await,
+        "plan_deletion" => plan_deletion(state, request).await,
+        "commit_deletion" => commit_deletion(state, request).await,
         other => bail!("`{other}` is not something a session can ask Firetower for"),
     }
 }
 
 // ── deleting things ────────────────────────────────────────────────────
 //
-// **There is no tool that deletes.** This one asks, and a person answers on
-// the screen that owns the object. That is the condition the feature was
-// asked for under, and the shape is what enforces it rather than a check:
-// an agent's only door to the control plane is the dispatch above, and
-// approving is a REST call that is not on it.
+// **The agent asks in the conversation, and the control plane deletes.**
 //
-// The same asymmetry `propose_schedule` has, for the same reason — an agent
-// may write a thing down, and a person turns it on.
+// Deleting is irreversible, so the person has to say yes — and the place to
+// say it is the chat they are already in, where the agent just explained
+// what it wants and why. The first cut put it on the Agent teams screen
+// instead and it was wrong twice over: the question was divorced from the
+// conversation that raised it, and a batch arrived as one row per thing, so
+// approving eight deletions was eight presses. Somebody who has to press
+// eight times would have done it by hand.
+//
+// So: **one call, one question, one answer, whole.** The agent names
+// everything it wants gone in a single `request_deletion`; the worker asks
+// about the lot through the ordinary permission path — the same card every
+// other tool approval uses — and on a yes it comes back here to commit.
+//
+// Neither half is a tool an agent can reach on its own. `plan_deletion` and
+// `commit_deletion` are delegations the worker sends; the MCP server
+// declares `request_deletion` and nothing else, and a `tools/call` naming
+// anything undeclared becomes a permission question rather than a
+// delegation. The agent cannot skip the asking because the asking is what
+// produces the call that deletes.
 
-/// Ask a person to delete a team or a profile.
+/// One thing somebody is being asked about.
+struct Doomed {
+    kind: &'static str,
+    id: String,
+    name: String,
+    /// What it takes with it, as the person reads it.
+    takes: String,
+}
+
+/// Resolve every name, and work out what going through with it would cost.
 ///
-/// Returns what it would take with it, so the agent can report the cost
-/// without having to ask a second question — and so the sentence it writes
-/// back to the person matches the one on the screen they will decide on.
-async fn request_deletion(state: &AppState, request: &AgentRequest) -> Result<String> {
-    let session = authoring_session(state, request).await?;
-    let owner = session.owner.as_str().to_string();
-    let user = state
-        .accounts
-        .user_by_id(&session.owner)
-        .await?
-        .context("the person this session runs as no longer exists")?;
+/// **Refusals come out here, before anybody is asked.** A profile a team
+/// stands on cannot be deleted at all, so it is named now rather than
+/// discovered after a person has already said yes to a list containing it.
+async fn doomed(state: &AppState, owner: &str, input: &Value) -> Result<Vec<Doomed>> {
+    let items = input
+        .get("items")
+        .and_then(Value::as_array)
+        .context("say what to delete, in `items` — a list of {kind, name}")?;
+    if items.is_empty() {
+        bail!("`items` is empty; there is nothing to ask about");
+    }
 
-    let name = text(&request.input, "name").context("name what should be deleted")?;
-    let reason = text(&request.input, "reason");
-
-    let (kind, target, target_name, consequence) =
-        match text(&request.input, "kind").unwrap_or_default().to_lowercase().as_str() {
+    let mut out: Vec<Doomed> = Vec::new();
+    for item in items {
+        let name = item
+            .get("name")
+            .and_then(Value::as_str)
+            .context("every item needs a `name`")?
+            .trim();
+        match item
+            .get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_lowercase()
+            .as_str()
+        {
             "team" | "agentteam" | "agent_team" => {
-                let team = the_team_named(state, &owner, &name).await?;
+                let team = the_team_named(state, owner, name).await?;
                 let count = team.positions.len();
-                (
-                    Kind::AgentTeam,
-                    team.id.clone(),
-                    team.name.clone(),
-                    format!(
-                        "{} and its {count} position{}. Every profile in it is left alone.",
-                        team.name,
+                out.push(Doomed {
+                    kind: "team",
+                    id: team.id.clone(),
+                    takes: format!(
+                        "{count} position{} — every profile in it is left alone",
                         if count == 1 { "" } else { "s" }
                     ),
-                )
+                    name: team.name,
+                });
             }
             "profile" | "role" => {
                 let role = state
                     .roles
-                    .by_name(&owner, &name)
+                    .by_name(owner, name)
                     .await?
                     .with_context(|| format!("there is no profile called \"{name}\""))?;
-                /* **Said now, not discovered at approval.** A profile a team
-                   stands on cannot be deleted at all, so an agent that asks
-                   about one is told here — otherwise a person approves a
-                   thing that then refuses, and the refusal is the first
-                   anybody hears of the team. */
-                let (held, teams) = state.agent_teams.standing_on(&owner, &role.id).await?;
-                if held > 0 {
+                let (held, teams) = state.agent_teams.standing_on(owner, &role.id).await?;
+                /* Counted against what is *also* going: deleting a team and
+                   the profile it holds in one operation is coherent, and
+                   refusing it would be refusing the obvious tidy-up. The
+                   order is handled in `commit_deletion`. */
+                let surviving = teams
+                    .iter()
+                    .filter(|t| !out.iter().any(|d| d.kind == "team" && &d.name == *t))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                if held > 0 && !surviving.is_empty() {
                     bail!(
-                        "\"{}\" holds {held} position{} in {}. A profile a team stands on cannot \
-                         be deleted — take it out of {} first, and then ask again.",
+                        "\"{}\" holds a position in {}. A profile a team stands on cannot be \
+                         deleted — take it out of {} first, or ask to delete {} too.",
                         role.name,
-                        if held == 1 { "" } else { "s" },
-                        if teams.is_empty() {
-                            "teams you cannot see".to_string()
-                        } else {
-                            teams.join(", ")
-                        },
-                        if teams.len() == 1 { "that team" } else { "those teams" }
+                        surviving.join(", "),
+                        if surviving.len() == 1 { "that team" } else { "those teams" },
+                        if surviving.len() == 1 { "that team" } else { "those teams" }
                     );
                 }
-                (
-                    Kind::Role,
-                    role.id.clone(),
-                    role.name.clone(),
-                    format!("{}. No team stands on it, so nothing else changes.", role.name),
-                )
+                out.push(Doomed {
+                    kind: "profile",
+                    id: role.id.clone(),
+                    takes: if held > 0 {
+                        "its position goes with the team above".to_string()
+                    } else {
+                        "no team stands on it".to_string()
+                    },
+                    name: role.name,
+                });
             }
-            other if other.is_empty() => bail!("say whether it is a `team` or a `profile`, in `kind`"),
-            other => bail!("`{other}` is not something this can ask about. Use `team` or `profile`."),
-        };
+            "" => bail!("every item needs a `kind` — `team` or `profile`"),
+            other => bail!("`{other}` is not something this can delete. Use `team` or `profile`."),
+        }
+    }
+    Ok(out)
+}
 
-    // One open question per thing. Asking twice is answered with the one
-    // already waiting rather than a second row somebody has to decide twice.
-    if let Some(open) = state.removals.pending_for(kind, &target).await? {
-        return Ok(format!(
-            "Already asked. \"{}\" is waiting for somebody to approve deleting it — asked {}. \
-             Nothing has been deleted, and nothing will be until a person says so.",
-            open.target_name, open.asked_at
-        ));
+/// What the person will be shown, and what `commit_deletion` will act on.
+///
+/// The ids travel so the commit acts on what was *described*, not on a name
+/// re-resolved afterwards — between the question and the answer somebody
+/// could rename a team, and the thing deleted has to be the thing approved.
+async fn plan_deletion(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str().to_string();
+    let going = doomed(state, &owner, &request.input).await?;
+
+    Ok(serde_json::json!({
+        "ids": going.iter().map(|d| serde_json::json!({ "kind": d.kind, "id": d.id })).collect::<Vec<_>>(),
+        // One line per thing, for the card. Written here because this is the
+        // side that knows what each one costs.
+        "summary": going
+            .iter()
+            .map(|d| format!("{} “{}” — {}", d.kind, d.name, d.takes))
+            .collect::<Vec<_>>(),
+        "count": going.len(),
+    })
+    .to_string())
+}
+
+/// Do it, having been told somebody said yes.
+///
+/// **Teams first.** A profile and the team holding it can go in one
+/// operation, and that only works in that order — `team_positions.role_id`
+/// is `on delete restrict`, so a profile deleted first would be refused by
+/// the database rather than by anything that could explain itself.
+async fn commit_deletion(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str().to_string();
+
+    let ids = request
+        .input
+        .get("ids")
+        .and_then(Value::as_array)
+        .context("nothing to delete")?;
+    let of = |kind: &str| -> Vec<String> {
+        ids.iter()
+            .filter(|i| i.get("kind").and_then(Value::as_str) == Some(kind))
+            .filter_map(|i| i.get("id").and_then(Value::as_str).map(str::to_string))
+            .collect()
+    };
+
+    let mut done: Vec<String> = Vec::new();
+    let mut missing = 0usize;
+    for id in of("team") {
+        match state.agent_teams.delete(&owner, &id).await? {
+            true => done.push(format!("team {id}")),
+            false => missing += 1,
+        }
+    }
+    for id in of("profile") {
+        match state.roles.delete(&owner, &id).await? {
+            true => done.push(format!("profile {id}")),
+            false => missing += 1,
+        }
     }
 
-    let made = state
-        .removals
-        .ask(
-            user.org_id.as_str(),
-            kind,
-            &target,
-            &target_name,
-            &consequence,
-            reason.as_deref(),
-            &owner,
-            Some(request.session_id.as_str()),
-        )
-        .await?
-        .context("somebody else asked about the same thing a moment ago")?;
-
     Ok(format!(
-        "Asked. Nothing has been deleted.\n\n\
-         A person has to approve this on the {} screen before anything happens, and they may \
-         refuse. What it would take: {}\n\n\
-         Tell them what you asked for and why, rather than waiting on this — the request id is \
-         {}.",
-        match kind {
-            Kind::AgentTeam => "Agent teams",
-            Kind::Role => "Agent profiles",
+        "Deleted {}.{}",
+        match done.len() {
+            0 => "nothing".to_string(),
+            n => format!("{n} thing{}", if n == 1 { "" } else { "s" }),
         },
-        made.consequence,
-        made.id
+        match missing {
+            0 => String::new(),
+            n => format!(
+                " {n} {} already gone or not yours to delete.",
+                if n == 1 { "was" } else { "were" }
+            ),
+        }
     ))
 }
 
@@ -3828,7 +3901,6 @@ mod tests {
             skills: crate::skills::Skills::new(db.pool().clone()),
             roles: crate::roles::Roles::new(db.pool().clone()),
             agent_teams: crate::agent_teams::AgentTeams::new(db.pool().clone()),
-            removals: crate::removals::Removals::new(db.pool().clone()),
             updates: crate::updates::Updates::new(db.pool().clone()),
             policy: crate::auth::Policy::open(),
             access: crate::access::Access::new(db.pool().clone()),
@@ -4777,9 +4849,12 @@ mod tests {
 
     // ── asking is not doing ────────────────────────────────────────────
     //
-    // The whole feature is one property. These are the tests that hold it:
-    // if one starts failing because a tool was added to the dispatch, that
-    // is the test working.
+    // The whole feature is one property: **the agent cannot delete without a
+    // person saying yes, and it asks once for the whole operation.** The
+    // asking itself happens on the worker (`approver::request_deletion`),
+    // because that is the side that can put a question to a person. What is
+    // testable here is the two halves it calls — and that neither is
+    // reachable as a tool an agent could name instead.
 
     /// A profile and a team to ask about, built through the tools a person's
     /// agent would actually use — so the fixture cannot drift from the path.
@@ -4813,120 +4888,157 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn asking_to_delete_a_team_writes_a_question_and_deletes_nothing() {
+    async fn planning_a_deletion_costs_it_and_deletes_nothing() {
         let (state, db, admin) = library().await;
         let (host, lead) = lead_for(&db, &admin).await;
         a_shipping_team(&state, &host, &lead).await;
 
-        let said = handle(
+        let plan: Value = serde_json::from_str(
+            &handle(
+                &state,
+                &call(
+                    host,
+                    &lead,
+                    "plan_deletion",
+                    json!({ "items": [{ "kind": "team", "name": "Shipping" }] }),
+                ),
+            )
+            .await
+            .unwrap(),
+        )
+        .unwrap();
+
+        // It says what it costs, by name, for the card.
+        let lines = plan["summary"].as_array().unwrap();
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].as_str().unwrap().contains("Shipping"), "{lines:?}");
+        assert!(lines[0].as_str().unwrap().contains("1 position"), "{lines:?}");
+        // And planning on its own deletes nothing.
+        assert_eq!(
+            state
+                .agent_teams
+                .visible(&admin, crate::access::Level::Viewer)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn one_call_carries_the_whole_operation() {
+        // **The point of the list.** Somebody approving eight deletions one
+        // at a time would have done it by hand, so a batch is one plan, one
+        // card and one commit.
+        let (state, db, admin) = library().await;
+        let (host, lead) = lead_for(&db, &admin).await;
+        a_shipping_team(&state, &host, &lead).await;
+        handle(
             &state,
             &call(
-                host,
+                host.clone(),
                 &lead,
-                "request_deletion",
-                json!({ "kind": "team", "name": "Shipping", "reason": "the job shipped" }),
+                "create_team",
+                json!({ "name": "Spare", "lead": "Reviewer" }),
             ),
         )
         .await
         .unwrap();
 
-        // The agent is told, in the first line, that nothing happened.
-        assert!(said.contains("Nothing has been deleted"), "{said}");
-        // And nothing did: the team is still there to be read.
-        let still = state
-            .agent_teams
-            .visible(&admin, crate::access::Level::Viewer)
-            .await
-            .unwrap();
-        assert_eq!(still.len(), 1);
-        // The question is waiting, carrying the agent's own reason.
-        let open = state
-            .removals
-            .pending_for(crate::removals::Kind::AgentTeam, &still[0].id)
-            .await
-            .unwrap()
-            .expect("a pending request");
-        assert_eq!(open.target_name, "Shipping");
-        assert_eq!(open.reason.as_deref(), Some("the job shipped"));
-    }
-
-    #[tokio::test]
-    async fn asking_twice_is_answered_with_the_question_already_waiting() {
-        let (state, db, admin) = library().await;
-        let (host, lead) = lead_for(&db, &admin).await;
-        a_shipping_team(&state, &host, &lead).await;
-        let org = db.org().await.unwrap();
-
-        for _ in 0..2 {
-            handle(
+        let plan: Value = serde_json::from_str(
+            &handle(
                 &state,
                 &call(
                     host.clone(),
                     &lead,
-                    "request_deletion",
-                    json!({ "kind": "team", "name": "Shipping" }),
+                    "plan_deletion",
+                    json!({ "items": [
+                        { "kind": "team", "name": "Shipping" },
+                        { "kind": "team", "name": "Spare" },
+                    ] }),
                 ),
             )
             .await
-            .unwrap();
-        }
-        let again = handle(
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(plan["count"], 2);
+
+        let said = handle(
             &state,
-            &call(
-                host,
-                &lead,
-                "request_deletion",
-                json!({ "kind": "team", "name": "Shipping" }),
-            ),
+            &call(host, &lead, "commit_deletion", json!({ "ids": plan["ids"] })),
         )
         .await
         .unwrap();
-        assert!(again.contains("Already asked"), "{again}");
-        // One row, not three — a person decides this once.
-        assert_eq!(state.removals.waiting(&org).await.unwrap().len(), 1);
+        assert!(said.contains("Deleted 2 things"), "{said}");
+        assert!(state
+            .agent_teams
+            .visible(&admin, crate::access::Level::Viewer)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
-    async fn a_profile_a_team_stands_on_is_refused_where_it_is_asked_about() {
-        // Not at approval. A person who approved it would meet the refusal
-        // the profile's own delete gives, and the team it names would be the
-        // first anybody had heard of it.
+    async fn a_profile_a_surviving_team_stands_on_is_refused_before_anybody_is_asked() {
+        // Refused at plan time, so the person is never shown a list that
+        // would half-fail once they agreed to it.
         let (state, db, admin) = library().await;
         let (host, lead) = lead_for(&db, &admin).await;
         a_shipping_team(&state, &host, &lead).await;
-        let org = db.org().await.unwrap();
 
         let no = handle(
             &state,
             &call(
-                host,
+                host.clone(),
                 &lead,
-                "request_deletion",
-                json!({ "kind": "profile", "name": "Reviewer" }),
+                "plan_deletion",
+                json!({ "items": [{ "kind": "profile", "name": "Reviewer" }] }),
             ),
         )
         .await
         .unwrap_err()
         .to_string();
         assert!(no.contains("Shipping"), "{no}");
-        assert!(no.contains("cannot \nbe deleted") || no.contains("cannot be deleted"), "{no}");
-        assert!(state.removals.waiting(&org).await.unwrap().is_empty());
+
+        // And the tidy-up that *is* coherent is allowed: the team and the
+        // profile it holds, together, in one operation.
+        let plan: Value = serde_json::from_str(
+            &handle(
+                &state,
+                &call(
+                    host.clone(),
+                    &lead,
+                    "plan_deletion",
+                    json!({ "items": [
+                        { "kind": "team", "name": "Shipping" },
+                        { "kind": "profile", "name": "Reviewer" },
+                    ] }),
+                ),
+            )
+            .await
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(plan["count"], 2);
+        let said = handle(
+            &state,
+            &call(host, &lead, "commit_deletion", json!({ "ids": plan["ids"] })),
+        )
+        .await
+        .unwrap();
+        assert!(said.contains("Deleted 2 things"), "{said}");
     }
 
     #[tokio::test]
-    async fn there_is_no_tool_that_deletes_or_approves() {
+    async fn there_is_no_tool_that_deletes_without_asking() {
         // **The guarantee, as an assertion.** An agent reaches the control
-        // plane through `handle` and nowhere else, so a name this refuses
-        // cannot be called however the agent spells it.
+        // plane through `handle` and nowhere else, and the only name the MCP
+        // server declares is `request_deletion` — which asks. These are the
+        // names somebody might reach for instead.
         let (state, db, admin) = library().await;
         let (host, lead) = lead_for(&db, &admin).await;
-        for forbidden in [
-            "delete_team",
-            "delete_profile",
-            "delete_role",
-            "approve_deletion",
-            "refuse_deletion",
-        ] {
+        for forbidden in ["delete_team", "delete_profile", "delete_role", "request_deletion"] {
             let no = handle(&state, &call(host.clone(), &lead, forbidden, json!({})))
                 .await
                 .unwrap_err()

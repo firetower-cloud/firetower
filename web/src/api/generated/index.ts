@@ -6,7 +6,6 @@ export * from './artifacts/artifacts';
 export * from './auth/auth';
 export * from './consumption/consumption';
 export * from './conversation/conversation';
-export * from './deletions/deletions';
 export * from './events/events';
 export * from './hosts/hosts';
 export * from './meta/meta';

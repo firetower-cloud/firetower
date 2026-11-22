@@ -22,7 +22,6 @@ mod events;
 mod forwards;
 pub(crate) mod hosts;
 mod providers;
-pub(crate) mod removals;
 mod repos;
 mod roles;
 pub(crate) mod schedules;
@@ -441,8 +440,6 @@ async fn credential_on(
         crate::agent_teams::Position,
         crate::agent_teams::NewAgentTeam,
         crate::agent_teams::DraftPosition,
-        crate::removals::Request,
-        crate::removals::Kind,
         crate::roles::import::ProfileDrop,
         crate::roles::import::ImportPlan,
         crate::db::Bucket,
@@ -678,9 +675,6 @@ pub fn router() -> OpenApiRouter<AppState> {
             agent_teams::update_agent_team,
             agent_teams::delete_agent_team
         ))
-        .routes(routes!(removals::list_deletion_requests))
-        .routes(routes!(removals::approve_deletion))
-        .routes(routes!(removals::refuse_deletion))
         .routes(routes!(roles::list_roles, roles::create_role))
         .routes(routes!(roles::update_role, roles::delete_role))
         .routes(routes!(roles::set_default_role))

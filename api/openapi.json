@@ -1386,107 +1386,6 @@
         }
       }
     },
-    "/api/v1/deletion-requests": {
-      "get": {
-        "tags": [
-          "deletions"
-        ],
-        "summary": "Every deletion waiting on somebody in this organisation.",
-        "operationId": "list_deletion_requests",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Waiting"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/deletion-requests/{id}/approve": {
-      "post": {
-        "tags": [
-          "deletions"
-        ],
-        "summary": "Say yes, and delete it.",
-        "operationId": "approve_deletion",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Request"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": ""
-          }
-        }
-      }
-    },
-    "/api/v1/deletion-requests/{id}/refuse": {
-      "post": {
-        "tags": [
-          "deletions"
-        ],
-        "operationId": "refuse_deletion",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Refusal"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Request"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": ""
-          }
-        }
-      }
-    },
     "/api/v1/directories": {
       "get": {
         "tags": [
@@ -13528,14 +13427,6 @@
           }
         }
       },
-      "Kind": {
-        "type": "string",
-        "description": "What kind of thing a request is about.\n\nTwo, and a third needs a migration — the check constraint and this enum\nare the same statement, and the point of both is that adding a kind means\nlooking at what its delete does first.",
-        "enum": [
-          "agentTeam",
-          "role"
-        ]
-      },
       "KindInfo": {
         "type": "object",
         "description": "What can be added, for the kind picker on the add screen.",
@@ -16328,18 +16219,6 @@
           }
         }
       },
-      "Refusal": {
-        "type": "object",
-        "description": "Say no.\n\nThe note is carried back to the agent, which is why it is worth writing\none: a refusal with a reason is the difference between an agent that asks\nagain tomorrow and one that does not.",
-        "properties": {
-          "note": {
-            "type": [
-              "string",
-              "null"
-            ]
-          }
-        }
-      },
       "Release": {
         "type": "object",
         "description": "The newest release, as far as the last check knows.",
@@ -16567,72 +16446,6 @@
             "items": {
               "type": "string"
             }
-          }
-        }
-      },
-      "Request": {
-        "type": "object",
-        "description": "One question waiting for an answer.",
-        "required": [
-          "id",
-          "kind",
-          "target",
-          "targetName",
-          "consequence",
-          "askedAt",
-          "state"
-        ],
-        "properties": {
-          "askedAt": {
-            "type": "string"
-          },
-          "consequence": {
-            "type": "string",
-            "description": "What it takes with it, as computed when asked. Re-computed before the\ndelete actually happens — this is the version the agent saw."
-          },
-          "decidedAt": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/Kind"
-          },
-          "note": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "What the person said when they refused."
-          },
-          "reason": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Why the agent says it should go, in its own words."
-          },
-          "session": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The session that asked, so the decision can be read back to the\nconversation that wanted it."
-          },
-          "state": {
-            "type": "string"
-          },
-          "target": {
-            "type": "string",
-            "description": "What it points at. Still here after a refusal, so the same thing is\nnot asked about twice without somebody noticing."
-          },
-          "targetName": {
-            "type": "string",
-            "description": "The name as it was when the request was written."
           }
         }
       },
@@ -20215,31 +20028,6 @@
             "description": "The ephemeral client secret, `ek_…`. Not the key, and not a secret this\ninstall stores: it is minted, handed over and forgotten."
           }
         }
-      },
-      "Waiting": {
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Request"
-          },
-          {
-            "type": "object",
-            "required": [
-              "takes",
-              "gone"
-            ],
-            "properties": {
-              "gone": {
-                "type": "boolean",
-                "description": "Whether the object is still there at all."
-              },
-              "takes": {
-                "type": "string",
-                "description": "What it takes with it **now**, re-read rather than replayed from the\nrow. The tree may have grown a branch since the agent asked, and the\nnumber somebody approves has to be the number that happens."
-              }
-            }
-          }
-        ],
-        "description": "What a person is asked to decide."
       },
       "Weekday": {
         "type": "string",

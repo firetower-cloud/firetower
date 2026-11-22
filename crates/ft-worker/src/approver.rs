@@ -103,15 +103,15 @@ pub const LIST_SCHEDULES: &str = "list_schedules";
 /// that needs a person.
 pub const PAUSE_SCHEDULE: &str = "pause_schedule";
 
-/// Ask a person to delete a team or a profile.
+/// Delete teams and profiles — **after the person in the conversation says
+/// yes to the whole list.**
 ///
-/// **It does not delete.** There is deliberately no tool that does: this one
-/// writes the question down and a person answers it on the screen that owns
-/// the object. Deleting is irreversible and an agent's judgement about what
-/// is no longer needed is exactly the judgement nobody wants acted on
-/// unattended — so the asymmetry is the same one `propose_schedule` has, and
-/// it is enforced by the control plane's dispatch rather than by this
-/// description.
+/// The one tool here that puts a question to somebody before it acts. It is
+/// asked through the ordinary permission path, so it arrives as the same
+/// card every other tool approval does, in the chat where the agent just
+/// explained itself — and one call is one card however many things are in
+/// it, because somebody who has to approve eight deletions one at a time
+/// would have done it by hand.
 pub const REQUEST_DELETION: &str = "request_deletion";
 
 /// What a delegation call is named on its way to the control plane.
@@ -702,15 +702,25 @@ async fn answer(
                         },
                     }, {
                         "name": REQUEST_DELETION,
-                        "description": "Ask the person to delete an agent team or an agent profile. THIS DOES NOT DELETE ANYTHING. It writes the request down; the person approves or refuses it on the Agent teams or Agent profiles screen, and nothing happens until they do. There is no tool that deletes and you cannot approve your own request. Use it when something you can see is clearly finished with — a team built for a job that shipped, a profile superseded by another — and SAY WHAT YOU ASKED FOR AND WHY in your reply, because they decide from that. Tell them the cost: the call returns what it would take with it. A profile that still holds a position in any team cannot be deleted at all, and you will be told so instead.",
+                        "description": "Delete agent teams and agent profiles. THE PERSON IS ASKED FIRST and nothing happens unless they say yes — the question appears in this conversation with the whole list on it, and you are blocked until they answer. PUT EVERYTHING IN ONE CALL: if they asked you to remove five things, name all five in `items`, because they approve the operation once. Calling this five times asks them five times, which is worse than doing it by hand. Say what you are about to ask for before you call it. A profile that still holds a position in a team you are NOT also deleting cannot go, and you will be told which team instead of being asked.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
-                                "kind": { "type": "string", "enum": ["team", "profile"], "description": "Which kind of thing." },
-                                "name": { "type": "string", "description": "What it is called, as `list_teams` or `list_profiles` shows it." },
-                                "reason": { "type": "string", "description": "Why it should go, in one line. The person reads this next to what it would take with it, so give them the fact that decides it rather than a summary of the object." },
+                                "items": {
+                                    "type": "array",
+                                    "description": "Everything to delete, in one list.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "kind": { "type": "string", "enum": ["team", "profile"], "description": "Which kind of thing." },
+                                            "name": { "type": "string", "description": "What it is called, as `list_teams` or `list_profiles` shows it." },
+                                        },
+                                        "required": ["kind", "name"],
+                                    },
+                                },
+                                "reason": { "type": "string", "description": "Why, in one line. It is shown on the card next to what each one costs, so give them the fact that decides it." },
                             },
-                            "required": ["kind", "name"],
+                            "required": ["items"],
                         },
                     }]
                 }),
@@ -731,9 +741,12 @@ async fn answer(
                 SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
                 | LIST_PROFILES | GET_PROFILE | CREATE_TEAM | UPDATE_TEAM | LIST_TEAMS
                 | GET_TEAM | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS
-                | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE | REQUEST_DELETION => {
+                | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
                     delegate(session_id, name, &id, &arguments).await
                 }
+                // **The one tool that asks a person before it acts**, and
+                // it asks about the whole list at once.
+                REQUEST_DELETION => request_deletion(session_id, &id, &arguments).await,
                 // Every call used to be a permission question, and an agent
                 // from before the other tools existed still only knows this
                 // one — so anything unnamed is still that.
@@ -813,6 +826,76 @@ async fn ask(
             })
         }
     }
+}
+
+/// Ask about a whole deletion, then carry it out if the answer is yes.
+///
+/// Three legs, and the middle one is the point:
+///
+/// 1. **`firetower:plan_deletion`** resolves every name and works out what
+///    each one costs. Refusals surface here — a profile a team stands on is
+///    named *before* anybody is asked, rather than after they have already
+///    agreed to a list containing it.
+/// 2. **The question**, through the same path every permission prompt takes:
+///    no `firetower:` prefix, so the control plane puts it to a person
+///    instead of acting on it. One card, carrying the whole list.
+/// 3. **`firetower:commit_deletion`**, with the ids the plan returned —
+///    never the names. Between the question and the answer somebody could
+///    rename a team, and what is deleted has to be what was approved.
+///
+/// The agent cannot skip leg 2, because leg 2 is what produces leg 3: there
+/// is no declared tool that commits, and a `tools/call` naming an undeclared
+/// one becomes a permission question rather than a delegation.
+async fn request_deletion(session_id: &str, id: &Value, arguments: &Value) -> String {
+    let plan = delegate(session_id, "plan_deletion", id, arguments).await;
+    let Ok(plan) = serde_json::from_str::<Value>(&plan) else {
+        // `plan_deletion` answers in words when it refuses, and those words
+        // are the thing the agent needs to read.
+        return plan;
+    };
+    let lines: Vec<String> = plan
+        .get("summary")
+        .and_then(Value::as_array)
+        .map(|v| {
+            v.iter()
+                .filter_map(|x| x.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    if lines.is_empty() {
+        return "There was nothing to delete.".into();
+    }
+
+    /* **What the card says.** The person sees this and nothing else, so it
+       carries the whole list and the agent's own reason — not an id, and not
+       a count on its own. `tool_name` is what the card is titled with. */
+    let asked = json!({
+        "deleting": lines,
+        "reason": arguments.get("reason").cloned().unwrap_or(json!(null)),
+        "irreversible": true,
+    });
+    let req = format!("{REQUEST_DELETION}-{}", id.to_string().trim_matches('"'));
+    let decision = match wait_for_a_decision(session_id, &req, REQUEST_DELETION, &asked).await {
+        Ok(d) => d,
+        Err(e) => return format!("Firetower could not ask anyone about this: {e:#}"),
+    };
+
+    if decision.get("behavior").and_then(Value::as_str) != Some("allow") {
+        let why = decision
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("They said no.");
+        return format!("Not deleted — {why} Nothing was touched.");
+    }
+
+    // Approved. The ids are the plan's, so this deletes what was described.
+    delegate(
+        session_id,
+        "commit_deletion",
+        id,
+        &json!({ "ids": plan.get("ids").cloned().unwrap_or(json!([])) }),
+    )
+    .await
 }
 
 /// Carry a delegation call to the control plane, and bring its answer back.

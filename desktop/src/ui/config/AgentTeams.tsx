@@ -48,7 +48,6 @@ import {
 import { Blank, Group as Rowset, Note, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { CreateMenu } from "~/ui/config/CreateMenu";
-import { AskedToDelete } from "~/ui/config/AskedToDelete";
 import { useStart } from "~/start";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
 import { Badge, Icon, IconButton } from "~/components/ui";
@@ -224,10 +223,6 @@ function TeamList({ feed }: { feed: ReturnType<typeof useAgentTeams> }) {
           {trouble}
         </Note>
       )}
-      {/* **Above the list, and only when there is one.** An agent can ask for
-          a deletion and cannot perform one; this is where the asking is
-          answered, on the screen that holds the thing being asked about. */}
-      <AskedToDelete of="agentTeam" />
       <Rows
         feed={{ data: shown, loading: feed.loading, error: feed.error }}
         icon={Network}

@@ -6,7 +6,6 @@ export * from './artifacts/artifacts.ts';
 export * from './auth/auth.ts';
 export * from './consumption/consumption.ts';
 export * from './conversation/conversation.ts';
-export * from './deletions/deletions.ts';
 export * from './events/events.ts';
 export * from './hosts/hosts.ts';
 export * from './meta/meta.ts';

@@ -139,34 +139,38 @@ full editor for the engine, the machine, the skills and the limits.
 
 ## Deleting
 
-**An agent may ask. It may not delete.** `request_deletion` is the only tool
-that mentions deletion and all it does is write the question down: the row
-lands in `deletion_requests`, pending, and the agent is told in its first
-line that nothing has happened. A person answers it on the Agent teams or
-Agent profiles screen — the screen that holds the thing being asked about,
-rather than a tray somewhere else, because an irreversible decision should be
-made with the object in front of you.
+**An agent asks in the conversation, and the person answers the whole thing
+at once.** `request_deletion` is the only tool that touches deletion, and
+calling it blocks the agent on an ordinary permission question — the same
+card every other tool approval uses, in the chat where the agent has just
+explained what it wants and why. Nothing happens unless the answer is yes.
 
-The guarantee is structural, not a check somebody remembers to write. An
-agent's only door to the control plane is `delegate.rs`'s tool dispatch; it
-has no API token, only a session id handed to a local worker. `approve` and
-`refuse` are REST paths that are not on that list, and
-`there_is_no_tool_that_deletes_or_approves` asserts it.
+**One call is one card, however many things are on it.** The tool takes a
+list. Somebody who has to approve eight deletions one at a time would have
+done it by hand, so a batch is one question with every line on it and one
+answer that settles the lot.
 
-Approve re-reads everything. A request records what was *asked*; it is not a
-capability to delete whatever that id now points at. The delete runs under
-the **approver's** grants, re-computes what it takes with it, and meets every
-refusal the person's own button meets — so a team that grew a branch since
-the ask is deleted with the branch, and the count on screen is the count that
-happens.
+Three legs, and the middle one is the point:
 
+1. `firetower:plan_deletion` resolves every name and works out what each
+   costs. **Refusals surface here**, before anybody is asked — a profile a
+   surviving team stands on is named now rather than discovered after
+   somebody has already agreed to a list containing it.
+2. The question, with no `firetower:` prefix, so the control plane puts it
+   to a person instead of acting on it.
+3. `firetower:commit_deletion`, with **the ids the plan returned, never the
+   names**: between the question and the answer somebody could rename a
+   team, and what is deleted has to be what was approved.
 
-Deleting a **team** takes its positions and leaves every profile alone.
+Teams are deleted before profiles, which is what lets a team and the profile
+it holds go in one operation — `team_positions.role_id` is `on delete
+restrict`, so the other order is refused by the database rather than by
+anything that could explain itself.
 
-Deleting a **profile** that a team stands on is refused, and the refusal names
-the teams and the count. `team_positions.role_id` is `on delete restrict`, so
-the database would refuse it anyway; `api::roles::delete_role` is what makes
-the refusal readable.
+The agent cannot skip the asking, because the asking is what produces the
+call that deletes: the MCP server declares `request_deletion` and nothing
+else, and a `tools/call` naming an undeclared tool becomes a permission
+question rather than a delegation.
 
 ## Limits
 
@@ -212,8 +216,8 @@ says so on the profile itself. Both halves go when the columns do —
 not take one away. That is the asymmetry `propose_schedule` already keeps, and
 it is sharper here: deleting a team silently mutes every lead standing in it.
 
-`request_deletion` asks a person to delete a team or a profile. There is no
-tool that deletes, and no tool that approves — see **Deleting** above.
+`request_deletion` deletes teams and profiles, after the person in the
+conversation says yes to the whole list — see **Deleting** above.
 
 ## Not yet
 
