@@ -7017,20 +7017,17 @@ html:not([data-platform="macos"]) {
     background: var(--color-panel);
   }
 
-  /* **A recessed thing steps up one inside a lifted surface.**
+  /* **A picker pill steps up one inside a lifted surface.**
      `.lift`, `.pop` and the drawer are all `--color-raise` in dark — which
-     is also what a field's box, a picker pill and a list row are filled
-     with, so every field in a dialog or a drawer had no box at all and the
-     text simply floated. In light these surfaces are the sheet and the
-     recess already reads one step below it, so only dark moves.
+     is also `.pk`'s own fill, so a row of choices in a dialog had no pills
+     in it at all. In light these surfaces are the sheet and the pill
+     already reads one step below it, so only dark moves.
 
-     Written here rather than on `.fld .box` because it is a fact about the
-     surface, not about the field: the same box is correct on a page. */
+     Written here rather than on `.pk` because it is a fact about the
+     surface, not about the control: the same pill is correct on a page. */
   .lift .pk,
   .pop .pk,
-  .mapdrawer .pk,
-  .lift .scope,
-  .mapdrawer .scope {
+  .mapdrawer .pk {
     background: var(--color-overlay);
   }
   .lift .pk:hover,
@@ -7040,9 +7037,7 @@ html:not([data-platform="macos"]) {
   }
   [data-theme="light"] .lift .pk,
   [data-theme="light"] .pop .pk,
-  [data-theme="light"] .mapdrawer .pk,
-  [data-theme="light"] .lift .scope,
-  [data-theme="light"] .mapdrawer .scope {
+  [data-theme="light"] .mapdrawer .pk {
     background: var(--color-raise);
   }
   [data-theme="light"] .lift .pk:hover,
@@ -7172,35 +7167,6 @@ html:not([data-platform="macos"]) {
   .mapdrawer .sh-foot .where b {
     font-weight: 500;
     color: var(--color-dim);
-  }
-
-  /* One band at the top of a tab, where the tab's scope is not in its name.
-     `.ro-note`'s shape, a size down: it is the same kind of sentence. */
-  .scope {
-    display: flex;
-    align-items: flex-start;
-    gap: 11px;
-    padding: 12px 14px;
-    border-radius: 12px;
-    background: var(--color-overlay);
-  }
-  .scope .g {
-    display: grid;
-    place-items: center;
-    flex: none;
-    margin-top: 1px;
-    color: var(--color-dim);
-  }
-  .scope p {
-    flex: 1;
-    min-width: 0;
-    font-size: 0.84375rem;
-    line-height: 1.55;
-    color: var(--color-text);
-  }
-  .scope p b {
-    font-weight: 500;
-    color: var(--color-bone);
   }
 
   .nobody {

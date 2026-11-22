@@ -36,7 +36,6 @@ import {
   ChevronRight,
   CircleDashed,
   Minus,
-  Info,
   Network,
   PanelRightClose,
   Plus,
@@ -815,6 +814,8 @@ function Map({ team }: { team: AgentTeam }) {
   const drag = useRef<{ x: number; y: number; id: number } | null>(null);
   /** Whether a person has moved the view themselves. See the observer below. */
   const touched = useRef(false);
+  /** Where the map was before the drawer pushed it aside, if it did. */
+  const nudged = useRef<number | null>(null);
   const plan = useRef(laid);
   plan.current = laid;
   // The percentage on the toolbar is the one thing that does read it.
@@ -965,8 +966,8 @@ function Map({ team }: { team: AgentTeam }) {
       if (covered <= 0 || covered >= box.width - CW) return;
       const over = view.current.x + (card.x + card.w) * view.current.k - (box.width - covered - 28);
       if (over > 0) {
+        nudged.current = view.current.x;
         view.current = { ...view.current, x: view.current.x - over };
-        touched.current = true;
         ease();
         apply();
       }
@@ -974,11 +975,33 @@ function Map({ team }: { team: AgentTeam }) {
     [apply, ease],
   );
 
+  /* **And put it back.** The nudge belongs to the drawer, so it is undone
+     with it — otherwise opening three cards in a row walks the map off to
+     the left and leaves it there, with the lead somewhere behind the rail.
+     Skipped if a person has dragged since, because then the view is theirs
+     and taking it back would be the map overruling them. */
+  const unnudge = useCallback(() => {
+    if (nudged.current === null) return;
+    const x = nudged.current;
+    nudged.current = null;
+    view.current = { ...view.current, x };
+    ease();
+    apply();
+  }, [apply, ease]);
+
+  const shut = useCallback(() => {
+    setSelected(null);
+    unnudge();
+  }, [unnudge]);
+
   const open = (key: string) => {
     if (selected === key) {
-      setSelected(null);
+      shut();
       return;
     }
+    // Back to where the map was before the last card pushed it, so two
+    // cards in a row do not add up to two nudges.
+    unnudge();
     setSelected(key);
     // After the drawer is in the DOM and has a width to measure.
     window.requestAnimationFrame(() => clearOf(key));
@@ -988,11 +1011,11 @@ function Map({ team }: { team: AgentTeam }) {
   useEffect(() => {
     if (!selected) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSelected(null);
+      if (e.key === "Escape") shut();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [selected]);
+  }, [selected, shut]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     const step = e.shiftKey ? 90 : 28;
@@ -1127,6 +1150,7 @@ function Map({ team }: { team: AgentTeam }) {
             if (!d || e.pointerId !== d.id) return;
             view.current = { ...view.current, x: e.clientX - d.x, y: e.clientY - d.y };
             touched.current = true;
+            nudged.current = null;
             apply();
           }}
           onPointerUp={() => {
@@ -1152,7 +1176,7 @@ function Map({ team }: { team: AgentTeam }) {
                 onAdd={(at) => setAdding({ parent: c.key, at })}
                 onRemove={() => {
                   setDraft((d) => remove(d, c.key));
-                  if (selected === c.key) setSelected(null);
+                  if (selected === c.key) shut();
                 }}
               />
             ))}
@@ -1220,14 +1244,14 @@ function Map({ team }: { team: AgentTeam }) {
             className="dveil"
             tabIndex={-1}
             aria-hidden
-            onClick={() => setSelected(null)}
+            onClick={shut}
           />
           <Drawer
             team={team}
             position={chosen}
             writable={team.mayWrite}
             onTell={(text) => setDraft((d) => tell(d, chosen.id, text))}
-            onClose={() => setSelected(null)}
+            onClose={shut}
           />
         </>
       )}
@@ -1613,25 +1637,6 @@ function ProfileTab({
     <>
       <div className="dbody scroll-slim">
         <div className="form">
-          <div className="scope">
-            <span className="g" aria-hidden>
-              <Icon of={Info} size={16} />
-            </span>
-            <p>
-              {others.length > 0 ? (
-                <>
-                  <b>Shared.</b> {role.name} also holds a position in {others.join(", ")} — this
-                  changes it there too.
-                </>
-              ) : (
-                <>
-                  <b>The profile, not this position.</b> {role.name} is what it is in every team
-                  that holds it; what it is told <i>here</i> is the other tab.
-                </>
-              )}
-            </p>
-          </div>
-
           <label className="fld">
             <span>Name</span>
             <span className="hint">What you start it as, and what a lead names to hand to it.</span>
@@ -1698,7 +1703,11 @@ function ProfileTab({
 
       <div className="sh-foot">
         <span className="where">
-          {role.mayWrite ? "Changes every team." : "Read-only. An administrator of its directory can change it."}
+          {!role.mayWrite
+            ? "Read-only. An administrator of its directory can change it."
+            : others.length > 0
+              ? `Changes it in ${others.join(", ")} too.`
+              : "Changes every team."}
         </span>
         {/* **The door to the rest of it**, rather than a second copy of a
             form that is already long. The engine, the machine, the skills
