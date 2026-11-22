@@ -16,6 +16,7 @@ pub mod agent_teams;
 pub mod api;
 pub mod artifact;
 pub mod auth;
+pub mod connectors;
 pub mod db;
 pub mod delegate;
 pub mod diagnose;
