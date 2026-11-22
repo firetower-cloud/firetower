@@ -29,13 +29,15 @@
  * own label states the count before it is pressed. Save sends the draft as one
  * `PUT`, so a team is never half-written.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleDashed,
   Info,
   Network,
+  PanelRightClose,
   Plus,
   Search,
   Sparkles,
@@ -59,8 +61,13 @@ import {
   getListAgentTeamsQueryKey,
   updateAgentTeam,
 } from "~/api/generated/agent-teams/agent-teams";
-import { useAgentTeams, why } from "~/data";
-import { useListRoles } from "~/api/generated/roles/roles";
+import { useAgentTeams, useAgents, teamsUsing, why } from "~/data";
+import {
+  createRole,
+  getListRolesQueryKey,
+  updateRole,
+  useListRoles,
+} from "~/api/generated/roles/roles";
 import type { Agent, AgentTeam, Position, Role } from "~/api/generated/model";
 import {
   CW,
@@ -319,20 +326,23 @@ function TeamRow({ team, onDelete }: { team: AgentTeam; onDelete: () => void }) 
 /* ── Making one ────────────────────────────────────────────────────────── */
 
 /**
- * A new team: a name and a lead, and nothing else.
+ * A new team: a name and a lead.
  *
  * **Any profile can lead.** There is no Manager flag to set first — that flag
  * is what this change removed — so the picker offers every profile, and the
  * team is drawn on the map afterwards.
+ *
+ * The lead is chosen through the same [`PickProfile`] the map's `+` uses, so
+ * searching for one and making one that does not exist yet work the same way
+ * in both places. A library of thirty profiles is a scroll otherwise, and
+ * "the one I want is not here" is a dead end otherwise.
  */
 function NewTeam({ onClose, onMade }: { onClose: () => void; onMade: (id: string) => void }) {
-  const roles = useListRoles();
   const [name, setName] = useState("");
-  const [lead, setLead] = useState<string | null>(null);
+  const [lead, setLead] = useState<Role | null>(null);
   const [busy, setBusy] = useState(false);
   const [trouble, setTrouble] = useState<string | null>(null);
   const cache = useQueryClient();
-  const chosen = roles.data?.find((r) => r.id === lead);
 
   const make = async () => {
     if (!lead || !name.trim() || busy) return;
@@ -341,7 +351,7 @@ function NewTeam({ onClose, onMade }: { onClose: () => void; onMade: (id: string
     try {
       const made = await createAgentTeam({
         name: name.trim(),
-        positions: [{ key: "lead", parent: null, profile: lead, extraInstructions: "" }],
+        positions: [{ key: "lead", parent: null, profile: lead.id, extraInstructions: "" }],
       });
       await cache.invalidateQueries({ queryKey: getListAgentTeamsQueryKey() });
       onMade(made.id);
@@ -353,7 +363,7 @@ function NewTeam({ onClose, onMade }: { onClose: () => void; onMade: (id: string
 
   return (
     <div
-      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[12vh] backdrop-blur-[2px]"
+      className="fixed inset-0 z-[60] grid place-items-start justify-center bg-scrim pt-[10vh] backdrop-blur-[2px]"
       onMouseDown={onClose}
     >
       <div
@@ -361,9 +371,9 @@ function NewTeam({ onClose, onMade }: { onClose: () => void; onMade: (id: string
         role="dialog"
         aria-modal
         aria-label="New agent team"
-        className="flex max-h-[76vh] w-[29rem] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
+        className="flex max-h-[80vh] w-[29rem] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
       >
-        <div className="flex items-start gap-2 border-b border-line px-3.5 py-2.5">
+        <div className="flex items-start gap-2 border-b border-line px-4 py-3">
           <span className="min-w-0 flex-1">
             <span className="block text-ui text-bone">New team</span>
             <span className="block truncate text-micro text-mute">
@@ -373,19 +383,18 @@ function NewTeam({ onClose, onMade }: { onClose: () => void; onMade: (id: string
           <IconButton of={X} label="Close" onClick={onClose} />
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3.5 py-3.5">
+        <div className="scroll-slim flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
           <label className="fld">
             <span>Name</span>
             <span className="hint">What you pick in the composer, and what a schedule pins.</span>
-            <span className="box">
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && make()}
-                placeholder="Product"
-                autoFocus
-              />
-            </span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && make()}
+              placeholder="Product"
+              autoFocus
+              className="field"
+            />
           </label>
 
           <div className="fld">
@@ -394,61 +403,358 @@ function NewTeam({ onClose, onMade }: { onClose: () => void; onMade: (id: string
               Starting the team starts this profile, with the team behind it. Any profile can
               lead.
             </span>
-            <div className="scroll-slim max-h-56 overflow-y-auto rounded-lg border border-line">
-              {(roles.data ?? []).map((r) => (
-                <button
-                  key={r.id}
-                  type="button"
-                  aria-pressed={lead === r.id}
-                  onClick={() => setLead(r.id)}
-                  className="mi w-full items-start"
-                >
-                  <span className="mt-0.5 shrink-0">
-                    {r.agent ? (
-                      <AgentMark agent={r.agent as Agent} size={14} />
-                    ) : (
-                      <CircleDashed className="h-3.5 w-3.5 text-mute" strokeWidth={1.75} />
-                    )}
-                  </span>
-                  <span className="min-w-0 flex-1 text-left">
-                    <span className="block text-ui text-bone">{r.name}</span>
-                    <span className="block truncate text-micro text-mute">{r.does}</span>
-                  </span>
-                  {lead === r.id && <Badge>lead</Badge>}
-                </button>
-              ))}
-              {(roles.data ?? []).length === 0 && (
-                <p className="p-3 text-micro text-mute">
-                  There are no profiles yet. Make one on Agent profiles first — a team is profiles
-                  and where they sit.
-                </p>
-              )}
-            </div>
+            <PickProfile chosen={lead?.id ?? null} onPick={setLead} />
           </div>
 
           {trouble && <p className="text-ui text-brick">{trouble}</p>}
-
-          <WhereTo>
-            {chosen ? (
-              <>
-                <b>Starts {chosen.name}.</b> It hands work to nobody until you put a profile under
-                it — which is the next screen.
-              </>
-            ) : (
-              <>
-                <b>You never talk to a team.</b> You talk to its lead, with the team behind it. So
-                pick the profile that should be in the conversation.
-              </>
-            )}
-          </WhereTo>
         </div>
 
-        <div className="dlgfoot">
+        {/* Its own padding and its own rule, rather than `.dlgfoot` — that one
+            is written to sit inside `.dlg`'s 18px of bottom padding, and this
+            sheet has none: it is a head, a scrolling body and a foot. */}
+        <div className="sh-foot">
+          <span className="where">
+            {lead ? `Starts ${lead.name}, with nothing under it yet.` : "Pick the profile that leads it."}
+          </span>
           <button onClick={onClose} className="btn quiet">
             Cancel
           </button>
-          <button onClick={make} disabled={busy || !lead || !name.trim()} className="btn primary disabled:opacity-50">
+          <button
+            onClick={make}
+            disabled={busy || !lead || !name.trim()}
+            className="btn primary disabled:opacity-50"
+          >
             {busy ? "Making…" : "Make team"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Pick a profile, search a library of them, or make one that is not there.
+ *
+ * One component for the two places a profile is chosen — the lead of a new
+ * team, and what goes under a card — because they are the same question and
+ * because "the one I want does not exist yet" is a dead end in both. Making
+ * one here creates it immediately and selects it: a profile is the library's,
+ * not this team's, so there is nothing to roll back if the team is never made.
+ */
+function PickProfile({
+  chosen,
+  onPick,
+  under,
+}: {
+  chosen: string | null;
+  onPick: (r: Role) => void;
+  /** Named when this is choosing what goes *under* something. */
+  under?: string;
+}) {
+  const roles = useListRoles();
+  const [q, setQ] = useState("");
+  const [making, setMaking] = useState(false);
+  const needle = q.trim().toLowerCase();
+  const all = roles.data ?? [];
+  const shown = all.filter(
+    (r) => !needle || r.name.toLowerCase().includes(needle) || (r.does ?? "").toLowerCase().includes(needle),
+  );
+
+  return (
+    <>
+      <div className="relative">
+        <Search
+          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mute"
+          strokeWidth={1.75}
+        />
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder={under ? `Search profiles to put under ${under}…` : "Search profiles…"}
+          aria-label="Search profiles"
+          className="field pl-8"
+        />
+      </div>
+
+      <div className="scroll-slim max-h-64 overflow-y-auto rounded-lg border border-line">
+        {/* **First, and not behind an empty state.** Somebody with thirty
+            profiles still reaches for one that is not among them, and a route
+            that only appears when the list is empty is a route they never
+            find. */}
+        <button type="button" onClick={() => setMaking(true)} className="mi w-full items-center">
+          <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md border border-line text-dim">
+            <Icon of={Plus} size={12} />
+          </span>
+          <span className="min-w-0 flex-1 text-left">
+            <span className="block text-ui text-bone">New profile</span>
+            <span className="block truncate text-micro text-mute">
+              {needle ? `Make one called “${q.trim()}”` : "Name it and say what it does"}
+            </span>
+          </span>
+        </button>
+
+        {shown.map((r) => (
+          <button
+            key={r.id}
+            type="button"
+            aria-pressed={chosen === r.id}
+            onClick={() => onPick(r)}
+            className="mi w-full items-start"
+          >
+            <span className="mt-0.5 shrink-0">
+              {r.agent ? (
+                <AgentMark agent={r.agent as Agent} size={14} />
+              ) : (
+                <CircleDashed className="h-3.5 w-3.5 text-mute" strokeWidth={1.75} />
+              )}
+            </span>
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block text-ui text-bone">{r.name}</span>
+              <span className="block truncate text-micro text-mute">{r.does}</span>
+            </span>
+            {chosen === r.id && <Badge>chosen</Badge>}
+          </button>
+        ))}
+
+        {shown.length === 0 && all.length > 0 && (
+          <p className="px-3 py-2.5 text-micro text-mute">
+            No profile matches “{q.trim()}”. Search reads the name and what it does.
+          </p>
+        )}
+        {all.length === 0 && (
+          <p className="px-3 py-2.5 text-micro text-mute">
+            There are no profiles yet. A team is profiles and where they sit, so make the first
+            one above.
+          </p>
+        )}
+      </div>
+
+      {making && (
+        <NewProfile
+          name={q.trim()}
+          onClose={() => setMaking(false)}
+          onMade={(r) => {
+            setMaking(false);
+            setQ("");
+            onPick(r);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Make a profile without leaving the team you are building.
+ *
+ * **Two fields and a fold.** A name and what it does are the two a profile
+ * cannot be saved without — the server refuses either empty — and everything
+ * else is a commitment the profile may simply not make: an unset engine, an
+ * unset placement and empty instructions are all real, working answers. So
+ * they are behind *Advanced*, open to anybody who wants them and skippable by
+ * everybody else, rather than a form that asks six questions to get two.
+ *
+ * It writes immediately. A profile belongs to the library rather than to the
+ * team being drawn, so there is nothing here to commit later and nothing to
+ * undo if the team is abandoned — it is on the Agent profiles screen either
+ * way, theirs to edit or delete.
+ */
+function NewProfile({
+  name: seeded,
+  onClose,
+  onMade,
+}: {
+  name?: string;
+  onClose: () => void;
+  onMade: (r: Role) => void;
+}) {
+  const [name, setName] = useState(seeded ?? "");
+  const [does, setDoes] = useState("");
+  const [instructions, setInstructions] = useState("");
+  const [agent, setAgent] = useState<string | null>(null);
+  const [placement, setPlacement] = useState("lead");
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  const agents = useAgents();
+  const cache = useQueryClient();
+
+  const make = async () => {
+    if (!name.trim() || !does.trim() || busy) return;
+    setBusy(true);
+    setTrouble(null);
+    try {
+      const made = await createRole({
+        name: name.trim(),
+        does: does.trim(),
+        instructions,
+        placement,
+        agent,
+        settings: {},
+        skillScope: [],
+      });
+      await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+      onMade(made);
+    } catch (e) {
+      setTrouble(why(e));
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] grid place-items-start justify-center bg-scrim pt-[10vh] backdrop-blur-[2px]"
+      onMouseDown={onClose}
+    >
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal
+        aria-label="New profile"
+        className="flex max-h-[80vh] w-[28rem] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
+      >
+        <div className="flex items-start gap-2 border-b border-line px-4 py-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-ui text-bone">New profile</span>
+            <span className="block truncate text-micro text-mute">
+              What an agent is. Where it sits is the team's business.
+            </span>
+          </span>
+          <IconButton of={X} label="Close" onClick={onClose} />
+        </div>
+
+        <div className="scroll-slim flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
+          <label className="fld">
+            <span>Name</span>
+            <span className="hint">What you start it as, and what a lead names to hand to it.</span>
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Reviewer"
+              autoFocus
+              className="field"
+            />
+          </label>
+
+          <label className="fld">
+            <span>What it does</span>
+            <span className="hint">
+              One line: what it does and when to reach for it. A lead reads this to decide whether
+              to hand it work.
+            </span>
+            <input
+              value={does}
+              onChange={(e) => setDoes(e.target.value)}
+              placeholder="Reads a finished branch and reports what is wrong with it."
+              className="field"
+            />
+          </label>
+
+          <div className="fld">
+            <button
+              type="button"
+              onClick={() => setOpen(!open)}
+              aria-expanded={open}
+              className="flex items-center gap-1.5 self-start text-ui text-dim hover:text-bone"
+            >
+              <Icon of={open ? ChevronDown : ChevronRight} size={14} />
+              Advanced
+              {!open && <span className="text-micro text-mute">— instructions, engine, placement</span>}
+            </button>
+
+            {open && (
+              <div className="mt-1 flex flex-col gap-5">
+                <label className="fld">
+                  <span>Instructions</span>
+                  <span className="hint">
+                    Composed into its prompt. Markdown; the agent reads all of it. A position in a
+                    team can add to this without changing it.
+                  </span>
+                  <textarea
+                    value={instructions}
+                    onChange={(e) => setInstructions(e.target.value)}
+                    rows={6}
+                    placeholder={"# Reviewer\n\nYou review. You do not fix."}
+                    className="field font-mono text-code leading-relaxed"
+                  />
+                </label>
+
+                <div className="fld">
+                  <span className="text-ui text-bone">Engine</span>
+                  <span className="hint">
+                    Pin one, or leave it open and every child runs on whatever its lead is
+                    running.
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    <button
+                      type="button"
+                      aria-pressed={agent === null}
+                      onClick={() => setAgent(null)}
+                      className="pill"
+                    >
+                      <Icon of={CircleDashed} size={14} />
+                      Let the lead choose
+                    </button>
+                    {agents.data
+                      .filter((a) => a.supported)
+                      .map((a) => (
+                        <button
+                          key={a.kind}
+                          type="button"
+                          aria-pressed={agent === a.kind}
+                          onClick={() => setAgent(a.kind as string)}
+                          className="pill"
+                        >
+                          <AgentMark agent={a.kind as Agent} size={13} />
+                          {a.label}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+
+                <div className="fld">
+                  <span className="text-ui text-bone">Where a child runs</span>
+                  <span className="hint">
+                    Pin one and every spawn runs that way. Leave it open and the lead decides.
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      ["lead", "Let the lead choose"],
+                      ["here", "The lead's workspace"],
+                      ["new", "Its own workspace"],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        aria-pressed={placement === value}
+                        onClick={() => setPlacement(value!)}
+                        className="pill"
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {trouble && <p className="text-ui text-brick">{trouble}</p>}
+        </div>
+
+        <div className="sh-foot">
+          <span className="where">
+            {open ? "" : "Everything under Advanced can be set later on Agent profiles."}
+          </span>
+          <button onClick={onClose} className="btn quiet">
+            Cancel
+          </button>
+          <button
+            onClick={make}
+            disabled={busy || !name.trim() || !does.trim()}
+            className="btn primary disabled:opacity-50"
+          >
+            {busy ? "Making…" : "Make profile"}
           </button>
         </div>
       </div>
@@ -480,6 +786,18 @@ function Map({ team }: { team: AgentTeam }) {
   }, [team]);
 
   const laid = useMemo(() => layout(treeOf(draft.positions)), [draft]);
+
+  /* **Opening a card scrolls it into view.** The drawer takes width from the
+     map, so a card near the right edge can end up behind it — and a panel
+     that hides the thing it is about is the failure this layout exists to
+     avoid. `nearest` so a card already visible does not move: the map
+     jumping on every click would be worse than the overlap. */
+  const canvas = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!selected) return;
+    const card = canvas.current?.querySelector<HTMLElement>(`[data-key="${selected}"]`);
+    card?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }, [selected]);
   const chosen = draft.positions.find((p) => p.id === selected) ?? null;
   const deep = laid.cards.reduce((d, c) => Math.max(d, c.depth + 1), 0);
 
@@ -556,75 +874,90 @@ function Map({ team }: { team: AgentTeam }) {
         </WhereTo>
       )}
 
-      <div className="mapbox">
-        <div
-          className="mapcanvas scroll-slim"
-          style={{ height: Math.min(560, Math.max(240, laid.h)) }}
-        >
-          <div className="mapinner" style={{ width: laid.w, height: laid.h }}>
-            <Wires laid={laid} />
-            {laid.cards.map((c) => (
-              <MapCard
-                key={c.key}
-                card={c}
-                mark={markOf(team, draft, c.key)}
-                selected={selected === c.key}
-                writable={team.mayWrite}
-                under={subtreeOf(c).length}
-                onOpen={() => setSelected(selected === c.key ? null : c.key)}
-                onAdd={(at) => setAdding({ parent: c.key, at })}
-                onRemove={() => {
-                  setDraft((d) => remove(d, c.key));
-                  if (selected === c.key) setSelected(null);
-                }}
-              />
-            ))}
+      {/* **Two columns, not a panel under the map.** The drawer is the only
+          full editor and it is read *against* the card it was opened from, so
+          it docks beside the map in the app's own right-rail geometry rather
+          than below it — where opening one pushes the thing it is about off
+          the screen. Under 900px of pane there is no room for both and it
+          stacks, which is the band rule the rest of the app keeps. */}
+      <div className="mapsplit" data-open={!!chosen}>
+        <div className="mapbox">
+          <div
+            ref={canvas}
+            className="mapcanvas scroll-slim"
+            style={{ height: Math.min(560, Math.max(240, laid.h)) }}
+          >
+            <div className="mapinner" style={{ width: laid.w, height: laid.h }}>
+              <Wires laid={laid} />
+              {laid.cards.map((c) => (
+                <MapCard
+                  key={c.key}
+                  card={c}
+                  mark={markOf(team, draft, c.key)}
+                  selected={selected === c.key}
+                  writable={team.mayWrite}
+                  under={subtreeOf(c).length}
+                  onOpen={() => setSelected(selected === c.key ? null : c.key)}
+                  onAdd={(at) => setAdding({ parent: c.key, at })}
+                  onRemove={() => {
+                    setDraft((d) => remove(d, c.key));
+                    if (selected === c.key) setSelected(null);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+          {/* 22px. Counts and a sentence, and no controls at all. */}
+          <div className="mapstrip">
+            <span>
+              {draft.positions.length} position{draft.positions.length === 1 ? "" : "s"} · {deep}{" "}
+              level{deep === 1 ? "" : "s"} deep
+            </span>
+            <span className="flex-1" />
+            <span className="truncate">
+              {dirty
+                ? changes.map(said).join(" · ")
+                : "Adding, removing and moving write nothing until Save."}
+            </span>
           </div>
         </div>
-        {/* 22px. Counts and a sentence, and no controls at all. */}
-        <div className="mapstrip">
-          <span>
-            {draft.positions.length} position{draft.positions.length === 1 ? "" : "s"} · {deep}{" "}
-            level{deep === 1 ? "" : "s"} deep
-          </span>
-          <span className="flex-1" />
-          <span className="truncate">
-            {dirty
-              ? changes.map(said).join(" · ")
-              : "Adding, removing and moving write nothing until Save."}
-          </span>
-        </div>
+
+        {chosen && (
+          <Drawer
+            team={team}
+            position={chosen}
+            kids={draft.positions.filter((p) => p.parent === chosen.id)}
+            elsewhere={draft.positions.filter(
+              (p) =>
+                p.id !== chosen.id &&
+                p.id !== chosen.parent &&
+                !descendants(draft.positions, chosen.id).some((x) => x.id === p.id),
+            )}
+            parentName={draft.positions.find((p) => p.id === chosen.parent)?.name ?? null}
+            writable={team.mayWrite}
+            onTell={(text) => setDraft((d) => tell(d, chosen.id, text))}
+            onMove={(parent) => setDraft((d) => reparent(d, chosen.id, parent))}
+            onClose={() => setSelected(null)}
+          />
+        )}
       </div>
 
-      {chosen && (
-        <Drawer
-          team={team}
-          position={chosen}
-          kids={draft.positions.filter((p) => p.parent === chosen.id)}
-          elsewhere={draft.positions.filter(
-            (p) =>
-              p.id !== chosen.id &&
-              p.id !== chosen.parent &&
-              !descendants(draft.positions, chosen.id).some((x) => x.id === p.id),
-          )}
-          parentName={draft.positions.find((p) => p.id === chosen.parent)?.name ?? null}
-          writable={team.mayWrite}
-          onTell={(text) => setDraft((d) => tell(d, chosen.id, text))}
-          onMove={(parent) => setDraft((d) => reparent(d, chosen.id, parent))}
-          onClose={() => setSelected(null)}
-        />
-      )}
-
       {adding && (
-        <Pop anchor={adding.at} onClose={() => setAdding(null)} width={300}>
-          <ProfilePicker
-            roles={roles.data ?? []}
-            under={draft.positions.find((p) => p.id === adding.parent)?.name ?? "the lead"}
-            onPick={(r) => {
-              setDraft((d) => add(d, adding.parent, r.id, r.name, r.does, r.agent ?? null));
-              setAdding(null);
-            }}
-          />
+        <Pop anchor={adding.at} onClose={() => setAdding(null)} width={320}>
+          <div className="flex flex-col gap-2.5 p-2.5">
+            <p className="text-micro text-mute">
+              Under {draft.positions.find((p) => p.id === adding.parent)?.name ?? "the lead"}. A
+              profile that leads another team arrives here with nothing under it.
+            </p>
+            <PickProfile
+              chosen={null}
+              under={draft.positions.find((p) => p.id === adding.parent)?.name}
+              onPick={(r) => {
+                setDraft((d) => add(d, adding.parent, r.id, r.name, r.does, r.agent ?? null));
+                setAdding(null);
+              }}
+            />
+          </div>
         </Pop>
       )}
     </Section>
@@ -719,6 +1052,7 @@ function MapCard({
   return (
     <div
       className="oc"
+      data-key={card.key}
       data-on={selected}
       data-lead={card.depth === 0}
       data-pend={mark ?? ""}
@@ -771,71 +1105,19 @@ function MapCard({
   );
 }
 
-/** The picker the `+` opens: any profile, including one that leads elsewhere. */
-function ProfilePicker({
-  roles,
-  under,
-  onPick,
-}: {
-  roles: Role[];
-  under: string;
-  onPick: (r: Role) => void;
-}) {
-  const [q, setQ] = useState("");
-  const needle = q.trim().toLowerCase();
-  const shown = roles.filter((r) => !needle || r.name.toLowerCase().includes(needle));
-  return (
-    <div className="py-1">
-      <div className="px-2.5 pb-1.5 pt-1">
-        <p className="text-micro text-mute">
-          Under {under}. A profile that leads another team arrives here with nothing under it.
-        </p>
-        <div className="relative mt-2">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-mute"
-            strokeWidth={1.75}
-          />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search profiles…"
-            aria-label="Search profiles"
-            autoFocus
-            className="w-full rounded-md border border-line bg-ground py-1.5 pr-2.5 pl-8 text-ui text-bone placeholder:text-mute focus:border-dim focus:outline-none"
-          />
-        </div>
-      </div>
-      <div className="scroll-slim max-h-72 overflow-y-auto">
-        {shown.map((r) => (
-          <button key={r.id} type="button" onClick={() => onPick(r)} className="mi items-start">
-            <span className="mt-0.5 shrink-0">
-              {r.agent ? (
-                <AgentMark agent={r.agent as Agent} size={14} />
-              ) : (
-                <CircleDashed className="h-3.5 w-3.5 text-mute" strokeWidth={1.75} />
-              )}
-            </span>
-            <span className="min-w-0 flex-1 text-left">
-              <span className="block text-ui text-bone">{r.name}</span>
-              <span className="block truncate text-micro text-mute">{r.does}</span>
-            </span>
-          </button>
-        ))}
-        {shown.length === 0 && <p className="p-3 text-micro text-mute">No profile of that name.</p>}
-      </div>
-    </div>
-  );
-}
-
 /**
- * The drawer: where a position is edited.
+ * The drawer: where a position, and the profile under it, are edited.
+ *
+ * **Two tabs, because there are two objects and they reach differently.**
+ * *Extra instructions* is this position in this team; *Profile* is the thing
+ * every team that uses it shares. Drawn as one panel because you open it by
+ * pressing one card and the question "is this mine or everyone's" is the one
+ * a person gets wrong — so the panel answers it in a word, at the top, rather
+ * than in a sentence nobody re-reads.
  *
  * **A position never replaces a profile field. It only adds.** So there is no
  * resolution order to define and no override semantics to explain — which is
- * why what it holds is *extra instructions* rather than overrides. The band at
- * the top says which object is open and what changing it reaches, because a
- * profile and a position carry the same name and different consequences, and
- * the other team is not on screen.
+ * why the first tab holds *extra* instructions rather than overrides.
  */
 function Drawer({
   team,
@@ -861,10 +1143,16 @@ function Drawer({
   onMove: (parent: string) => void;
   onClose: () => void;
 }) {
+  const [tab, setTab] = useState<"here" | "profile">("here");
   const [moving, setMoving] = useState<HTMLElement | null>(null);
+  const teams = useAgentTeams();
+  // Every team holding this profile — the consequence of editing the Profile
+  // tab, which is not visible from here and is the thing somebody gets wrong.
+  const alsoIn = teamsUsing(teams.data, position.profile);
+
   return (
     <aside className="mapdrawer" aria-label={`${position.name}, a position in ${team.name}`}>
-      <div className="flex items-start gap-2 border-b border-line px-3.5 py-2.5">
+      <div className="dhead">
         <span className="min-w-0 flex-1">
           <span className="block truncate text-ui text-bone">
             {position.redacted ? "Not yours to see" : position.name}
@@ -873,111 +1161,297 @@ function Drawer({
             {team.name} · {position.parent ? "a position" : "the lead"}
           </span>
         </span>
-        <IconButton of={X} label="Close" onClick={onClose} />
+        <IconButton of={PanelRightClose} label="Close" onClick={onClose} />
       </div>
 
-      <div className="scroll-slim flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-3.5 py-3.5">
-        <WhereTo icon={<Icon of={Info} size={16} />}>
-          <b>This team only.</b> What you type below is added to {position.name}’s own
-          instructions when it runs <i>here</i>. Its name, what it does, its instructions and its
-          skills belong to the profile, and changing those changes every team that uses it —{" "}
-          <button
-            type="button"
-            className="underline underline-offset-2"
-            onClick={() => navigate(`/configuration/roles/${position.profile}`)}
-          >
-            open the profile
-          </button>
-          .
-        </WhereTo>
+      {/* The app's own right-rail index: plain text with an underline, not
+          boxed chips. The index of a panel should not compete with it. */}
+      <div className="itabs" role="tablist">
+        <button
+          role="tab"
+          aria-selected={tab === "here"}
+          onClick={() => setTab("here")}
+          className="itab"
+        >
+          Extra instructions
+          {tab === "here" && <span className="ul" />}
+        </button>
+        <button
+          role="tab"
+          aria-selected={tab === "profile"}
+          onClick={() => setTab("profile")}
+          className="itab"
+        >
+          Profile
+          {tab === "profile" && <span className="ul" />}
+        </button>
+      </div>
 
-        <label className="fld">
-          <span>Extra instructions</span>
-          <span className="hint">
-            Markdown. It adds to the profile’s instructions and never replaces them — and it is
-            what tells two positions of one profile apart.
-          </span>
-          <span className="box">
-            <textarea
-              value={position.extraInstructions}
-              onChange={(e) => onTell(e.target.value)}
-              rows={8}
-              disabled={!writable}
-              placeholder={"Owns the web client.\nFollow the design system in docs/."}
-            />
-          </span>
-        </label>
+      <div className="scroll-slim min-h-0 flex-1 overflow-y-auto px-4 pb-5">
+        {tab === "here" ? (
+          <div className="flex flex-col gap-5 pt-1">
+            <label className="fld">
+              <span>In {team.name}</span>
+              <span className="hint">
+                Markdown, added to {position.name}’s own instructions when it runs here. It never
+                replaces them — and it is what tells two positions of one profile apart.
+              </span>
+              <textarea
+                value={position.extraInstructions}
+                onChange={(e) => onTell(e.target.value)}
+                rows={10}
+                disabled={!writable}
+                placeholder={"Owns the web client.\nFollow the design system in docs/."}
+                className="field font-mono text-code leading-relaxed"
+              />
+            </label>
 
-        {position.parent && writable && elsewhere.length > 0 && (
-          <div className="fld">
-            <span className="text-ui text-bone">Reports to</span>
-            <span className="hint">
-              Moving it takes everything under it along. It cannot go under something already
-              beneath it.
-            </span>
-            <button
-              type="button"
-              className="btn plain self-start"
-              onClick={(e) => setMoving(moving ? null : e.currentTarget)}
-            >
-              {parentName ?? "the lead"}
-            </button>
-            {moving && (
-              <Pop anchor={moving} onClose={() => setMoving(null)} width={248}>
-                <div className="py-1">
-                  {elsewhere.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      className="mi"
-                      onClick={() => {
-                        onMove(p.id);
-                        setMoving(null);
-                      }}
-                    >
-                      <span className="min-w-0 flex-1 truncate text-left text-ui text-bone">
-                        {p.name}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </Pop>
+            {position.parent && writable && elsewhere.length > 0 && (
+              <div className="fld">
+                <span className="text-ui text-bone">Reports to</span>
+                <span className="hint">
+                  Moving it takes everything under it along. It cannot go under something already
+                  beneath it.
+                </span>
+                <button
+                  type="button"
+                  className="btn plain self-start"
+                  onClick={(e) => setMoving(moving ? null : e.currentTarget)}
+                >
+                  {parentName ?? "the lead"}
+                </button>
+                {moving && (
+                  <Pop anchor={moving} onClose={() => setMoving(null)} width={248}>
+                    <div className="py-1">
+                      {elsewhere.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          className="mi"
+                          onClick={() => {
+                            onMove(p.id);
+                            setMoving(null);
+                          }}
+                        >
+                          <span className="min-w-0 flex-1 truncate text-left text-ui text-bone">
+                            {p.name}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  </Pop>
+                )}
+              </div>
             )}
-          </div>
-        )}
 
-        <div className="fld">
-          <span className="text-ui text-bone">Hands work to</span>
-          <span className="hint">
-            The positions directly under this one, and nothing else. This is the whole of what it
-            may start.
-          </span>
-          {kids.length === 0 ? (
-            <p className="text-ui text-dim">
-              Nobody yet. Press <b>+</b> on its card and it gains somebody to hand to.
-            </p>
-          ) : (
-            <ul>
-              {kids.map((p) => (
-                <li key={p.id} className="py-0.5 text-ui text-bone">
-                  {p.name}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        {team.mayShare && (
-          <div className="fld">
-            <span className="text-ui text-bone">Who can see this team</span>
-            <span className="hint">
-              A team is filed like a profile or a skill. Somebody who can see the team and not a
-              profile in it sees that card redacted, so the shape stays true.
-            </span>
-            <WhoCanAccess kind="agentTeam" id={team.id} path={team.path} look="chip" label="Sharing" />
+            <div className="fld">
+              <span className="text-ui text-bone">Hands work to</span>
+              <span className="hint">
+                The positions directly under this one, and nothing else. This is the whole of what
+                it may start.
+              </span>
+              {kids.length === 0 ? (
+                <p className="text-ui text-dim">
+                  Nobody yet. Press <b>+</b> on its card and it gains somebody to hand to.
+                </p>
+              ) : (
+                <ul>
+                  {kids.map((p) => (
+                    <li key={p.id} className="py-0.5 text-ui text-bone">
+                      {p.name}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
+        ) : (
+          <ProfileTab profile={position.profile} alsoIn={alsoIn} team={team} />
         )}
       </div>
     </aside>
+  );
+}
+
+/**
+ * The profile under this position, edited where it is read.
+ *
+ * **It says what it reaches before it is changed, not after.** Editing here
+ * changes the profile in every team that holds it, and the other teams are
+ * not on this screen — so the band names them. That is the one consequence a
+ * person cannot see from the card they pressed.
+ *
+ * The three fields a profile cannot be without are here; the rest — the
+ * engine, the machine, the skills, the limits — stay on Agent profiles, where
+ * there is room to explain them. A link, rather than a second copy of a form
+ * that is already long.
+ */
+function ProfileTab({
+  profile,
+  alsoIn,
+  team,
+}: {
+  profile: string;
+  alsoIn: string[];
+  team: AgentTeam;
+}) {
+  const roles = useListRoles();
+  const role = (roles.data ?? []).find((r) => r.id === profile);
+  const [draft, setDraft] = useState<{ name: string; does: string; instructions: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  const cache = useQueryClient();
+
+  // Re-read when the profile arrives, or when another screen changed it —
+  // but never over an edit in progress.
+  useEffect(() => {
+    if (role && !draft) {
+      setDraft({ name: role.name, does: role.does, instructions: role.instructions });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role?.id]);
+
+  if (!role || !draft) {
+    return <p className="pt-3 text-ui text-mute">Reading the profile…</p>;
+  }
+
+  const changed =
+    draft.name !== role.name || draft.does !== role.does || draft.instructions !== role.instructions;
+
+  const save = async () => {
+    setBusy(true);
+    setTrouble(null);
+    try {
+      await updateRole(role.id, {
+        name: draft.name,
+        does: draft.does,
+        instructions: draft.instructions,
+        placement: role.placement,
+        agent: role.agent,
+        machine: role.machine,
+        account: role.account,
+        settings: role.settings,
+        onUsageLimit: role.onUsageLimit,
+        onChildLimit: role.onChildLimit,
+        includeAlwaysOn: role.includeAlwaysOn,
+        includeRepoDefaults: role.includeRepoDefaults,
+        skillScope: role.skillScope ?? [],
+      });
+      await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+      await cache.invalidateQueries({ queryKey: getListAgentTeamsQueryKey() });
+    } catch (e) {
+      setTrouble(why(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const others = alsoIn.filter((n) => n !== team.name);
+
+  return (
+    <div className="flex flex-col gap-5 pt-1">
+      {/* The quiet form. A filled 30px-margin plate is for the foot of a
+          page; in a 300px drawer it is most of the first screen. */}
+      <WhereTo className="aside" icon={<Icon of={Info} size={16} />}>
+        {others.length > 0 ? (
+          <>
+            <b>Every team that uses it.</b> {role.name} also holds a position in{" "}
+            {others.join(", ")}, so what you change here changes it there too.
+          </>
+        ) : (
+          <>
+            <b>The profile, not this position.</b> {team.name} is the only team holding it today;
+            anything that puts it in another will carry these words with it.
+          </>
+        )}
+      </WhereTo>
+
+      <label className="fld">
+        <span>Name</span>
+        <span className="hint">What you start it as, and what a lead names to hand to it.</span>
+        <input
+          value={draft.name}
+          onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+          disabled={!role.mayWrite}
+          className="field"
+        />
+      </label>
+
+      <label className="fld">
+        <span>What it does</span>
+        <span className="hint">
+          The one line a lead reads to decide whether to hand it work.
+        </span>
+        <input
+          value={draft.does}
+          onChange={(e) => setDraft({ ...draft, does: e.target.value })}
+          disabled={!role.mayWrite}
+          className="field"
+        />
+      </label>
+
+      <label className="fld">
+        <span>Instructions</span>
+        <span className="hint">
+          Composed into its prompt, in every team. A position adds to this without changing it.
+        </span>
+        <textarea
+          value={draft.instructions}
+          onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
+          rows={10}
+          disabled={!role.mayWrite}
+          className="field font-mono text-code leading-relaxed"
+        />
+      </label>
+
+      {trouble && <p className="text-ui text-brick">{trouble}</p>}
+
+      {role.mayWrite ? (
+        /* **Its own Save.** The map's Save writes the team and must not write
+           a profile — a map action that changed a profile would be the model
+           leaking. Two objects, two commits, said by two buttons. */
+        <div className="flex items-center gap-2">
+          <button
+            onClick={save}
+            disabled={busy || !changed}
+            className="btn primary disabled:opacity-50"
+          >
+            {busy ? "Saving…" : "Save profile"}
+          </button>
+          {changed && (
+            <button
+              onClick={() => setDraft({ name: role.name, does: role.does, instructions: role.instructions })}
+              className="btn quiet"
+            >
+              Revert
+            </button>
+          )}
+        </div>
+      ) : (
+        <p className="text-ui text-dim">
+          You can read this profile and not change it. Whoever administers the directory it is
+          filed in can.
+        </p>
+      )}
+
+      <button
+        type="button"
+        onClick={() => navigate(`/configuration/roles/${role.id}`)}
+        className="self-start text-ui text-dim underline underline-offset-2 hover:text-bone"
+      >
+        Engine, skills and the rest, on Agent profiles
+      </button>
+
+      {team.mayShare && (
+        <div className="fld">
+          <span className="text-ui text-bone">Who can see this team</span>
+          <span className="hint">
+            A team is filed like a profile or a skill. Somebody who can see the team and not a
+            profile in it sees that card redacted, so the shape stays true.
+          </span>
+          <WhoCanAccess kind="agentTeam" id={team.id} path={team.path} look="chip" label="Sharing" />
+        </div>
+      )}
+    </div>
   );
 }

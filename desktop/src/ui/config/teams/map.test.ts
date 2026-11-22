@@ -193,3 +193,11 @@ describe("the draft", () => {
     expect(pending(team, d)).toEqual([{ kind: "lead", name: "Head of Platform" }]);
   });
 });
+
+/* The sheets are not rendered here. Drawing `AgentTeams` needs a query client,
+   a router and a confirm provider — a harness several times the size of what
+   it would assert — and what was wrong with those sheets was visual: a field
+   inside a field, an aside that said nothing, a foot against the edge. That
+   is `pnpm shoot`'s business and a person's eye, not an assertion about
+   markup. What is testable about the map is up there: the numbers, and what
+   Save would write. */
