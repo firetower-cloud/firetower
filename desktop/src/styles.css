@@ -7269,6 +7269,13 @@ html:not([data-platform="macos"]) {
   .bighead .in {
     align-items: flex-start;
   }
+  /* Split uses the whole window, so the rows above and below it do too —
+     a heading indented to a measure the body no longer keeps is a heading
+     in the wrong place. */
+  .bigroom[data-look="split"] .bighead .in,
+  .bigroom[data-look="split"] .bigfoot .in {
+    max-width: none;
+  }
   .bighead .tx {
     flex: 1;
     min-width: 0;
@@ -7293,6 +7300,7 @@ html:not([data-platform="macos"]) {
     min-height: 0;
     display: flex;
     justify-content: center;
+    gap: 28px;
     padding: 20px 28px;
   }
   .bigbody textarea {
@@ -7308,6 +7316,32 @@ html:not([data-platform="macos"]) {
   }
   .bigbody textarea::placeholder {
     color: var(--color-mute);
+  }
+  /* The rendering, in the app's own `Markdown` — the one the chat draws a
+     turn with. Its own scroll, because the two panes are rarely the same
+     height and tying them would mean one of them lies. */
+  .bigread {
+    width: 100%;
+    max-width: 90ch;
+    min-width: 0;
+    height: 100%;
+    overflow-y: auto;
+  }
+  /* **Split is two halves of one measure, not two full ones.** Each pane
+     takes half the room and caps at the measure, so the pair stays centred
+     and neither line runs past what an eye can track. A hairline between
+     them rather than a border on either: it is one surface in two columns. */
+  .bigbody[data-look="split"] {
+    gap: 0;
+  }
+  .bigbody[data-look="split"] > textarea {
+    max-width: calc(50% - 28px);
+    padding-right: 28px;
+    border-right: 1px solid var(--color-line);
+  }
+  .bigbody[data-look="split"] > .bigread {
+    max-width: calc(50% - 28px);
+    padding-left: 28px;
   }
   .bigfoot {
     display: flex;

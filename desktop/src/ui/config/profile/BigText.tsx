@@ -13,7 +13,8 @@
  */
 import { useEffect, useRef, useState } from "react";
 import { Expand, X } from "lucide-react";
-import { Icon, IconButton } from "~/components/ui";
+import { Icon, IconButton, Segmented } from "~/components/ui";
+import { Markdown } from "~/components/Markdown";
 
 export function BigText({
   value,
@@ -72,14 +73,29 @@ export function BigText({
   );
 }
 
+/** What the room is showing: the text, the rendering, or both. */
+type Look = "write" | "split" | "read";
+
 /**
  * The bigger room.
  *
- * **Not a preview, and not a toolbar.** What is being written is a prompt: an
- * agent reads the characters, not a rendering of them, so a rendered pane
- * beside the text would be a picture of something nobody downstream ever
- * sees. What a prompt is short of is width and height, and this is both —
- * a measure wide enough to read a paragraph of, monospaced, on the sheet.
+ * **It previews, and the preview is the app's own `Markdown`.** The one the
+ * chat renders a turn with and a skill renders its body with — so what you
+ * see here is what the heading, the fence and the list will look like
+ * everywhere else in Firetower, and there is no second renderer to keep in
+ * step. No toolbar: the text is the document, and a bold button is a worse
+ * way to type two asterisks.
+ *
+ * **Split by default where there is room for it**, which is the whole point
+ * of a full-screen room — write on the left, watch the structure on the
+ * right. Under 1000px there is not room for two measures, so it opens on the
+ * text and *Preview* is a press away. The cursor starts in the text either
+ * way: you came here to write.
+ *
+ * Worth saying plainly, because it decides what this is for: **the agent
+ * reads the characters, not the rendering.** The preview is for the author —
+ * to see that a heading is a heading and a fence is closed — not a promise
+ * about what the model receives.
  */
 function Editor({
   title,
@@ -95,6 +111,9 @@ function Editor({
   onClose: () => void;
 }) {
   const area = useRef<HTMLTextAreaElement>(null);
+  const [look, setLook] = useState<Look>(() =>
+    typeof window !== "undefined" && window.innerWidth >= 1000 ? "split" : "write",
+  );
   useEffect(() => {
     area.current?.focus();
     const onKey = (e: KeyboardEvent) => {
@@ -105,11 +124,25 @@ function Editor({
     return () => document.removeEventListener("keydown", onKey);
   }, [onClose]);
 
+  const [wide, setWide] = useState(
+    () => typeof window !== "undefined" && window.innerWidth >= 1000,
+  );
+  useEffect(() => {
+    const measure = () => setWide(window.innerWidth >= 1000);
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
+  // A window that narrows below two measures drops out of Split rather than
+  // leaving a mode on screen its own control no longer offers.
+  useEffect(() => {
+    if (!wide && look === "split") setLook("write");
+  }, [wide, look]);
+
   const lines = value ? value.split("\n").length : 0;
   const words = value.trim() ? value.trim().split(/\s+/).length : 0;
 
   return (
-    <div className="bigroom" role="dialog" aria-modal aria-label={`${title} — editor`}>
+    <div className="bigroom" data-look={look} role="dialog" aria-modal aria-label={`${title} — editor`}>
       {/* Head, text and foot share one measure, so the room reads as a
           column rather than a heading at the window's edge above a
           paragraph in the middle of it. */}
@@ -118,22 +151,45 @@ function Editor({
         <span className="tx">
           <span className="nm">{title}</span>
           <span className="where">
-            Markdown. The agent reads the characters, so there is nothing to preview.
+            Markdown, previewed the way Firetower renders it everywhere else. The agent reads
+            the characters, not the rendering.
           </span>
         </span>
+        <Segmented
+          label="What the room shows"
+          value={look}
+          onChange={setLook}
+          options={[
+            ["write", "Write", "The text only"],
+            // Two measures need the width for two measures.
+            ...(wide ? ([["split", "Split", "Text and preview"]] as const) : []),
+            ["read", "Preview", "The rendering only"],
+          ]}
+        />
         <IconButton of={X} label="Close the editor" onClick={onClose} />
         </span>
       </div>
-      <div className="bigbody">
-        <textarea
-          ref={area}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-          spellCheck={false}
-          placeholder="# Reviewer&#10;&#10;You review. You do not fix."
-          className="scroll-slim"
-        />
+      <div className="bigbody" data-look={look}>
+        {look !== "read" && (
+          <textarea
+            ref={area}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            disabled={disabled}
+            spellCheck={false}
+            placeholder="# Reviewer&#10;&#10;You review. You do not fix."
+            className="scroll-slim"
+          />
+        )}
+        {look !== "write" && (
+          <div className="bigread scroll-slim">
+            {value.trim() ? (
+              <Markdown>{value}</Markdown>
+            ) : (
+              <p className="nobody">Nothing written yet.</p>
+            )}
+          </div>
+        )}
       </div>
       <div className="bigfoot">
         <span className="in">
