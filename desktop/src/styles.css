@@ -6536,44 +6536,98 @@ html:not([data-platform="macos"]) {
    by measuring both — a classic organigramme throughout is 4640px wide on the
    hardest lane the prototype draws, and this is 504px and complete.
 
-   Every number here is the prototype's own, measured on the rendered card:
-   176 × 34, a line taller where a position carries extra instructions. The
-   layout maths is in `ui/config/teams/layout.ts`; this is only what the cards
-   and the chrome look like. */
+   **Every size here is the desk's own.** 30px controls, 32px chrome rows,
+   `--text-ui` for a value and `--text-meta` for the label over it. The first
+   cut of this screen invented a 41px field and paragraph-sized hints, which
+   is page-form geometry in a 300px drawer — it read as a different product
+   bolted to the side of this one.
+
+   The layout maths is in `ui/config/teams/layout.ts`; this is only what the
+   cards and the chrome look like. */
 @layer components {
-  /* The action row. `--row-tight` (36px), because Save is a 30px control and
-     a 30px control cannot live in the 22px status strip below. */
+  /* The action row. `--row-tight`, because Save is a 30px control and a 30px
+     control cannot live in the 22px status strip below. */
   .maprow {
     display: flex;
     align-items: center;
     gap: 8px;
     min-height: var(--row-tight);
-    margin-top: 18px;
+    margin-top: 16px;
   }
   .maprow .pend {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 2px 9px;
+    height: 22px;
+    padding: 0 9px;
     border-radius: 999px;
     background: var(--color-sage-tint);
-    font-size: 0.8125rem;
+    font-size: var(--text-meta);
     color: var(--color-text);
   }
 
+  /* **The map and its drawer, side by side.** The drawer is read against the
+     card it was opened from, so it docks beside the map rather than under it
+     — a panel below pushes the thing it is about off the screen the moment it
+     opens.
+
+     It wraps rather than asking a media query: what decides whether both fit
+     is the *pane*, not the window — Customize's index can be collapsed and
+     the desk can be any width — and a viewport query answers the wrong
+     question. Two flex bases and `wrap` answer the right one. */
+  .mapsplit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: stretch;
+    gap: 12px;
+    margin-top: 10px;
+  }
+  .mapsplit > .mapbox {
+    /* Grows three times as fast as the drawer: the map is the screen and the
+       drawer is the margin note. */
+    flex: 3 1 520px;
+    min-width: 0;
+  }
   .mapbox {
-    margin-top: 8px;
+    display: flex;
+    flex-direction: column;
+    /* The window, less the heading and the chrome above it. Clamped so a
+       short desk still gets a usable canvas and a tall one does not get an
+       acre of grid. */
+    height: clamp(300px, calc(100vh - 330px), 720px);
     border: 1px solid var(--color-line);
-    border-radius: 12px;
+    border-radius: 10px;
     overflow: hidden;
     background: var(--color-panel);
   }
+
+  /* **A canvas, and it says so.** A hairline dot grid under the tree: it
+     makes the empty half of a small team read as room rather than as a blank
+     card, and it is the one place on this screen that says "this is a thing
+     you arrange". Two tones so it holds up in both themes. */
   .mapcanvas {
     position: relative;
+    flex: 1;
+    min-height: 0;
     overflow: auto;
+    display: grid;
+    background-image: radial-gradient(var(--color-line-soft) 1px, transparent 1px);
+    background-size: 18px 18px;
+    background-position: -1px -1px;
   }
   .mapinner {
     position: relative;
+    transform-origin: top left;
+    justify-self: start;
+    align-self: start;
+  }
+  /* Centred on whichever axis it fits on. A tree is routinely wider than the
+     room and shorter than it, so the two are decided separately. */
+  .mapcanvas[data-fits-x="true"] .mapinner {
+    justify-self: center;
+  }
+  .mapcanvas[data-fits-y="true"] .mapinner {
+    align-self: center;
   }
   .mapwires {
     position: absolute;
@@ -6582,19 +6636,22 @@ html:not([data-platform="macos"]) {
   }
   .mapwires path {
     stroke: var(--color-line);
-    stroke-width: 1;
+    stroke-width: 1.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
   }
 
-  /* 22px, counts and a sentence. No controls, ever. */
+  /* 22px. Counts and a sentence. No controls, ever. */
   .mapstrip {
     display: flex;
     align-items: center;
     gap: 10px;
+    flex: none;
     height: 22px;
     padding: 0 10px;
     border-top: 1px solid var(--color-line-soft);
     background: var(--color-ground);
-    font-size: 0.75rem;
+    font-size: var(--text-micro);
     color: var(--color-mute);
   }
 
@@ -6602,52 +6659,50 @@ html:not([data-platform="macos"]) {
   .oc {
     position: absolute;
     border: 1px solid var(--color-line);
-    border-radius: 8px;
+    border-radius: 7px;
     background: var(--color-raise);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
     transition:
       border-color var(--dur-native) var(--ease-swift),
       box-shadow var(--dur-native) var(--ease-swift);
   }
+  /* **The lead is heavier, not coloured.** Colour is spent; a thing that is
+     different in kind is identified by weight and position. */
   .oc[data-lead="true"] {
     border-color: var(--color-dim);
   }
+  .oc:hover {
+    border-color: var(--color-dim);
+  }
   .oc[data-on="true"] {
-    box-shadow: inset 0 0 0 1.5px var(--color-bone);
+    border-color: var(--color-bone);
+    box-shadow: 0 0 0 1px var(--color-bone);
   }
   /* Drafted, and not yet written. A ring rather than a fill: the card still
      has to read as the same object it will be after Save. */
   .oc[data-pend="add"],
   .oc[data-pend="move"] {
-    box-shadow: 0 0 0 1.5px var(--color-sage-tint);
-    border-color: var(--color-sage-tint);
+    border-color: var(--color-sage);
+    box-shadow: 0 0 0 1px var(--color-sage-tint);
   }
 
   .ocopen {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    justify-content: center;
+    gap: 1px;
     width: 100%;
     height: 100%;
-    padding: 7px 9px;
+    padding: 0 9px;
     text-align: left;
   }
-  /* **`ocrow`, not `row`.** `.row` is the sidebar row — 36px of minimum
-     height and 10px of inline padding — and a card's name line inheriting
-     that pushed the instruction line clean out of the bottom of the card.
-     A generic class name is a collision waiting to happen; this one is the
-     card's own.
-
-     `flex: none` on both lines, because the card's height comes from the
-     layout: without it the name row takes the whole box and squeezes the
-     instruction line to nothing, which is the one thing on a card that tells
-     two positions of one profile apart. */
   .oc .ocrow {
     flex: none;
     display: flex;
     align-items: center;
     gap: 7px;
     min-width: 0;
-    height: 18px;
+    height: 17px;
   }
   .oc .g {
     display: grid;
@@ -6661,7 +6716,8 @@ html:not([data-platform="macos"]) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.8125rem;
+    font-size: var(--text-ui);
+    line-height: 17px;
     color: var(--color-bone);
   }
   /* How many are directly under it *here*. Not a total: a profile's other
@@ -6672,19 +6728,20 @@ html:not([data-platform="macos"]) {
     padding: 0 4px;
     border-radius: 999px;
     background: var(--color-overlay);
-    font-size: 0.6875rem;
+    font-size: var(--text-micro);
     line-height: 15px;
     text-align: center;
     color: var(--color-dim);
   }
-  /* The first line of what this position is told — the only honest thing that
-     tells two positions of one profile apart. */
+  /* The first words of what this position is told — the only honest thing
+     that tells two positions of one profile apart. Quiet, one line, and the
+     card is sized for it rather than clipping into it. */
   .oc .brf {
     flex: none;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 0.6875rem;
+    font-size: var(--text-micro);
     line-height: 14px;
     color: var(--color-mute);
   }
@@ -6692,15 +6749,13 @@ html:not([data-platform="macos"]) {
   /* **Bottom centre, on the connector trunk**, because that is where the
      child appears. Its centre is at half the card's width, on the bottom
      edge. */
-  .oc .plus {
+  .oc .plus,
+  .oc .bin {
     position: absolute;
-    left: 50%;
-    bottom: -9px;
-    transform: translateX(-50%);
     display: grid;
     place-items: center;
-    width: 18px;
-    height: 18px;
+    width: 17px;
+    height: 17px;
     border: 1px solid var(--color-line);
     border-radius: 999px;
     background: var(--color-overlay);
@@ -6708,22 +6763,16 @@ html:not([data-platform="macos"]) {
     opacity: 0;
     transition: opacity var(--dur-native) var(--ease-swift);
   }
-  /* **Top right, 9px outside the corner**, away from the trunk so neither
-     control's box can intersect the other's. */
+  .oc .plus {
+    left: 50%;
+    bottom: -9px;
+    transform: translateX(-50%);
+  }
+  /* Top right, off the corner, away from the trunk so neither control's box
+     can intersect the other's. */
   .oc .bin {
-    position: absolute;
-    right: -9px;
-    top: -9px;
-    display: grid;
-    place-items: center;
-    width: 18px;
-    height: 18px;
-    border: 1px solid var(--color-line);
-    border-radius: 999px;
-    background: var(--color-overlay);
-    color: var(--color-dim);
-    opacity: 0;
-    transition: opacity var(--dur-native) var(--ease-swift);
+    right: -8px;
+    top: -8px;
   }
   /* **Never hover alone.** Focus reaches both with no pointer at all, and the
      selected card keeps them up — which is what makes the map usable from a
@@ -6746,125 +6795,132 @@ html:not([data-platform="macos"]) {
   }
   .oc .plus:focus-visible,
   .oc .bin:focus-visible {
+    opacity: 1;
     outline: 2px solid var(--color-bone);
     outline-offset: 1px;
   }
 
-  /* **The map and its drawer, side by side.** The drawer is read against the
-     card it was opened from, so it docks beside the map rather than under it
-     — a panel below pushes the thing it is about off the screen the moment it
-     opens, which is what shipped first and was wrong.
-
-     Under 900px there is no room for both: the drawer would leave the map
-     narrower than one lane, so they stack. Same band rule the rest of the
-     app keeps, measured on the pane rather than the window. */
-  /* **It wraps rather than asking a media query.** The thing that decides
-     whether both fit is the *pane*, not the window — Customize's index can be
-     collapsed and the desk can be any width — and a viewport query answers
-     the wrong question. Two flex bases and `wrap` answer the right one with
-     no measurement: they sit side by side while there is room for both, and
-     the drawer drops below the map when there is not. */
-  .mapsplit {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 14px;
-    margin-top: 8px;
-  }
-  .mapsplit > .mapbox {
-    /* Grows three times as fast as the drawer: the map is the screen and the
-       drawer is the margin note. */
-    flex: 3 1 520px;
-    min-width: 0;
-    margin-top: 0;
-  }
+  /* ── The drawer ────────────────────────────────────────────────── */
   .mapdrawer {
     display: flex;
     flex-direction: column;
+    height: clamp(300px, calc(100vh - 330px), 720px);
     /* The right rail's own geometry: 368 wanted, 288 floor. It gives width
        back to the map rather than holding 368 and pushing a card off the
-       edge — a drawer that hides the thing it is about has the trade the
-       wrong way round. */
+       edge. */
     flex: 1 1 288px;
     max-width: 368px;
-    max-height: min(620px, 78vh);
     border: 1px solid var(--color-line);
-    border-radius: 12px;
+    border-radius: 10px;
     background: var(--color-panel);
     overflow: hidden;
-    /* It follows the map rather than scrolling off the top of it — the two
-       are read together. */
-    position: sticky;
-    top: 8px;
   }
-  /* Wrapped: it is under the map now, so it is as wide as the map and nothing
-     is sticky about it. */
-  .mapsplit > .mapdrawer:not(:nth-child(2)),
-  .mapsplit > .mapbox:only-child {
+  .mapsplit > .mapdrawer:not(:nth-child(2)) {
     max-width: none;
   }
   .mapdrawer .dhead {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 8px;
     flex: none;
-    padding: 11px 12px 11px 16px;
-    border-bottom: 1px solid var(--color-line);
-  }
-  /* The rail's tab strip is 52px tall against a full-height pane; in a
-     drawer that is a lot of chrome before the first field. */
-  .mapdrawer .itabs {
     height: 40px;
-    gap: 14px;
-    padding: 0 16px;
+    padding: 0 8px 0 12px;
     border-bottom: 1px solid var(--color-line-soft);
   }
+  /* The rail's tab strip is 52px against a full-height pane; in a drawer
+     that is a lot of chrome before the first field. */
+  .mapdrawer .itabs {
+    height: 32px;
+    gap: 14px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .mapdrawer .itab {
+    font-size: var(--text-meta);
+  }
+  .dbody {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+  }
+  /* A section of the drawer: a label, its field, and a hairline under it.
+     Hairlines rather than 20px of air — in 300px of width the air is what
+     makes a short form feel like a long one. */
+  .dsec {
+    padding: 12px;
+    border-bottom: 1px solid var(--color-line-soft);
+  }
+  .dsec:last-child {
+    border-bottom: 0;
+  }
+  .dsec .lb {
+    display: block;
+    margin-bottom: 6px;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  /* Only where the meaning is genuinely not in the label. One line, and it
+     goes under the field rather than between the label and it, so the eye
+     goes label → control without stepping over a paragraph. */
+  .dsec .said {
+    display: block;
+    margin-top: 6px;
+    font-size: var(--text-micro);
+    line-height: 1.5;
+    color: var(--color-mute);
+  }
 
-  /* ── One field, one border ─────────────────────────────────────────
-     `.fld .box` is a filled 12px pill with an *inset* focus ring, which on a
+  /* ── One field, one border, at the desk's control height ──────────
+     `.fld .box` is a 42px filled pill with an inset focus ring, which on a
      white sheet reads as a box drawn inside another box — reported, and the
-     screenshot is unambiguous. This is the shape the profile editor's own
-     Instructions field already has: one border, which thickens on focus.
-     Inputs and textareas share it so a sheet holding both does not look like
-     two different products. */
+     screenshot was unambiguous. This is one border that brightens on focus,
+     at `--control`, which is what every other control on this platform is. */
   .field {
+    display: block;
     width: 100%;
     min-width: 0;
-    padding: 8px 11px;
+    height: var(--control);
+    padding: 0 9px;
     border: 1px solid var(--color-line);
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     background: var(--color-ground);
-    font-size: 0.96875rem;
-    line-height: 1.5;
+    font-size: var(--text-ui);
     color: var(--color-bone);
     transition: border-color var(--dur-native) var(--ease-swift);
   }
   textarea.field {
+    height: auto;
+    padding: 7px 9px;
     resize: vertical;
+    font-family: var(--font-mono);
+    font-size: var(--text-code);
     line-height: 1.6;
   }
   .field::placeholder {
     color: var(--color-mute);
   }
   .field:focus {
-    border-color: var(--color-dim);
+    border-color: var(--color-bone);
     outline: none;
   }
   .field:disabled {
     opacity: 0.55;
   }
+  /* The search field in a picker: the glyph sits in the padding. */
+  .field.seeking {
+    padding-left: 29px;
+  }
 
-  /* A value among a few, chosen by pressing it. The advanced half of the new
-     profile sheet, where a segmented track would be three controls of
-     different widths in a row. */
+  /* A value among a few, chosen by pressing it. 30px like everything else. */
   .pill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 10px;
+    height: var(--control);
+    padding: 0 10px;
     border: 1px solid var(--color-line);
-    border-radius: 999px;
-    font-size: 0.875rem;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-ui);
     color: var(--color-dim);
     transition:
       border-color var(--dur-native) var(--ease-swift),

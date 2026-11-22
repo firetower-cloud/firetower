@@ -90,9 +90,35 @@ export function subtreeOf(node: Node): Node[] {
   return out;
 }
 
-/** How tall one card is: the base, plus a line when it carries instructions. */
+/** How tall one card wants to be: the base, plus a line for instructions. */
 export function heightOf(node: Node): number {
   return CH + (node.position.extraInstructions.trim() ? BRIEF_H : 0);
+}
+
+/**
+ * How tall each card actually is, with a spread row levelled off.
+ *
+ * **Siblings drawn across share a height.** Two of four carrying a line of
+ * instructions and two not left the row bottom-ragged — four cards on one
+ * level reading as four different kinds of thing, which is the opposite of
+ * what a level means. They are the same kind of thing and they sit on the
+ * same baseline.
+ *
+ * Only a spread row. Indented children are a stack, where each one's height
+ * is its own business and levelling them would add space to say nothing.
+ */
+function heights(root: Node): Map<string, number> {
+  const out = new Map<string, number>();
+  const walk = (node: Node) => {
+    if (!out.has(node.key)) out.set(node.key, heightOf(node));
+    if (node.kids.length && node.depth + 1 < SPREAD_TO) {
+      const tallest = Math.max(...node.kids.map(heightOf));
+      for (const kid of node.kids) out.set(kid.key, tallest);
+    }
+    node.kids.forEach(walk);
+  };
+  walk(root);
+  return out;
 }
 
 /**
@@ -106,10 +132,12 @@ export function layout(root: Node | null): Laid {
   if (!root) return { cards: [], links: [], w: PX * 2, h: PY * 2 };
   const links: Link[] = [];
   const at = new Map<string, { x: number; y: number }>();
+  const tall = heights(root);
+  const hOf = (node: Node) => tall.get(node.key) ?? heightOf(node);
 
   type Block = { w: number; h: number; node: Node; kids: Block[]; indent?: boolean; rw?: number };
   const block = (node: Node): Block => {
-    const own = heightOf(node);
+    const own = hOf(node);
     if (!node.kids.length) return { w: CW, h: own, node, kids: [] };
     const kids = node.kids.map(block);
     if (node.depth + 1 >= SPREAD_TO) {
@@ -126,7 +154,7 @@ export function layout(root: Node | null): Laid {
   const cards: Card[] = [];
   const made = new Map<string, Card>();
   const card = (node: Node, x: number, y: number): Card => {
-    const c: Card = { ...node, x, y, w: CW, h: heightOf(node) };
+    const c: Card = { ...node, x, y, w: CW, h: hOf(node) };
     cards.push(c);
     made.set(node.key, c);
     at.set(node.key, { x, y });
@@ -134,7 +162,7 @@ export function layout(root: Node | null): Laid {
   };
 
   const place = (b: Block, x: number, y: number): Card => {
-    const own = heightOf(b.node);
+    const own = hOf(b.node);
     if (b.indent) {
       const self = card(b.node, x, y);
       let yy = y + own + 10;
@@ -161,7 +189,14 @@ export function layout(root: Node | null): Laid {
 
   const measured = block(root);
   place(measured, PX, PY);
-  return { cards, links, w: measured.w + PX * 2, h: measured.h + PY * 2 };
+  /* **Measured off the cards, not off the blocks.** A block's height is the
+     room its subtree was *allowed*, and for an indented branch that is more
+     than the cards in it occupy — so sizing the canvas from it left a third
+     of the box empty under the tree. The cards are the drawing; they are
+     what it is measured by. */
+  const right = cards.reduce((x, c) => Math.max(x, c.x + c.w), 0);
+  const bottom = cards.reduce((y, c) => Math.max(y, c.y + c.h), 0);
+  return { cards, links, w: right + PX, h: bottom + PY };
 }
 
 /** How deep a team goes, the lead's level being the first. */

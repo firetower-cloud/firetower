@@ -383,11 +383,13 @@ function NewTeam({ onClose, onMade }: { onClose: () => void; onMade: (id: string
           <IconButton of={X} label="Close" onClick={onClose} />
         </div>
 
-        <div className="scroll-slim flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
-          <label className="fld">
-            <span>Name</span>
-            <span className="hint">What you pick in the composer, and what a schedule pins.</span>
+        <div className="dbody scroll-slim">
+          <div className="dsec">
+            <label className="lb" htmlFor="team-name">
+              Name
+            </label>
             <input
+              id="team-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && make()}
@@ -395,18 +397,21 @@ function NewTeam({ onClose, onMade }: { onClose: () => void; onMade: (id: string
               autoFocus
               className="field"
             />
-          </label>
-
-          <div className="fld">
-            <span className="text-ui text-bone">Lead</span>
-            <span className="hint">
-              Starting the team starts this profile, with the team behind it. Any profile can
-              lead.
-            </span>
-            <PickProfile chosen={lead?.id ?? null} onPick={setLead} />
           </div>
 
-          {trouble && <p className="text-ui text-brick">{trouble}</p>}
+          <div className="dsec">
+            <span className="lb">Lead</span>
+            <PickProfile chosen={lead?.id ?? null} onPick={setLead} />
+            <span className="said">
+              Starting the team starts this profile, with the team behind it.
+            </span>
+          </div>
+
+          {trouble && (
+            <div className="dsec">
+              <p className="text-ui text-brick">{trouble}</p>
+            </div>
+          )}
         </div>
 
         {/* Its own padding and its own rule, rather than `.dlgfoot` — that one
@@ -623,10 +628,9 @@ function NewProfile({
           <IconButton of={X} label="Close" onClick={onClose} />
         </div>
 
-        <div className="scroll-slim flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-4 py-4">
-          <label className="fld">
-            <span>Name</span>
-            <span className="hint">What you start it as, and what a lead names to hand to it.</span>
+        <div className="dbody scroll-slim">
+          <div className="dsec">
+            <span className="lb">Name</span>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -634,57 +638,51 @@ function NewProfile({
               autoFocus
               className="field"
             />
-          </label>
+          </div>
 
-          <label className="fld">
-            <span>What it does</span>
-            <span className="hint">
-              One line: what it does and when to reach for it. A lead reads this to decide whether
-              to hand it work.
-            </span>
+          <div className="dsec">
+            <span className="lb">What it does</span>
             <input
               value={does}
               onChange={(e) => setDoes(e.target.value)}
               placeholder="Reads a finished branch and reports what is wrong with it."
               className="field"
             />
-          </label>
+            <span className="said">
+              The one line a lead reads before handing it work.
+            </span>
+          </div>
 
-          <div className="fld">
+          <div className="dsec">
             <button
               type="button"
               onClick={() => setOpen(!open)}
               aria-expanded={open}
-              className="flex items-center gap-1.5 self-start text-ui text-dim hover:text-bone"
+              className="flex items-center gap-1.5 text-meta text-dim hover:text-bone"
             >
               <Icon of={open ? ChevronDown : ChevronRight} size={14} />
               Advanced
-              {!open && <span className="text-micro text-mute">— instructions, engine, placement</span>}
+              {!open && <span className="text-mute">— instructions, engine, placement</span>}
             </button>
 
             {open && (
-              <div className="mt-1 flex flex-col gap-5">
-                <label className="fld">
-                  <span>Instructions</span>
-                  <span className="hint">
-                    Composed into its prompt. Markdown; the agent reads all of it. A position in a
-                    team can add to this without changing it.
-                  </span>
+              <div className="mt-3 flex flex-col gap-4">
+                <div>
+                  <span className="lb">Instructions</span>
                   <textarea
                     value={instructions}
                     onChange={(e) => setInstructions(e.target.value)}
                     rows={6}
                     placeholder={"# Reviewer\n\nYou review. You do not fix."}
-                    className="field font-mono text-code leading-relaxed"
+                    className="field"
                   />
-                </label>
-
-                <div className="fld">
-                  <span className="text-ui text-bone">Engine</span>
-                  <span className="hint">
-                    Pin one, or leave it open and every child runs on whatever its lead is
-                    running.
+                  <span className="said">
+                    Composed into its prompt, in every team. Markdown.
                   </span>
+                </div>
+
+                <div>
+                  <span className="lb">Engine</span>
                   <div className="flex flex-wrap gap-1.5">
                     <button
                       type="button"
@@ -712,11 +710,8 @@ function NewProfile({
                   </div>
                 </div>
 
-                <div className="fld">
-                  <span className="text-ui text-bone">Where a child runs</span>
-                  <span className="hint">
-                    Pin one and every spawn runs that way. Leave it open and the lead decides.
-                  </span>
+                <div>
+                  <span className="lb">Where a child runs</span>
                   <div className="flex flex-wrap gap-1.5">
                     {[
                       ["lead", "Let the lead choose"],
@@ -739,12 +734,16 @@ function NewProfile({
             )}
           </div>
 
-          {trouble && <p className="text-ui text-brick">{trouble}</p>}
+          {trouble && (
+            <div className="dsec">
+              <p className="text-ui text-brick">{trouble}</p>
+            </div>
+          )}
         </div>
 
         <div className="sh-foot">
           <span className="where">
-            {open ? "" : "Everything under Advanced can be set later on Agent profiles."}
+            {open ? "" : "Advanced can be set later on Agent profiles."}
           </span>
           <button onClick={onClose} className="btn quiet">
             Cancel
@@ -787,12 +786,37 @@ function Map({ team }: { team: AgentTeam }) {
 
   const laid = useMemo(() => layout(treeOf(draft.positions)), [draft]);
 
-  /* **Opening a card scrolls it into view.** The drawer takes width from the
-     map, so a card near the right edge can end up behind it — and a panel
-     that hides the thing it is about is the failure this layout exists to
-     avoid. `nearest` so a card already visible does not move: the map
-     jumping on every click would be worse than the overlap. */
+  /* **The tree is fitted to the canvas, not clipped by it.**
+     Eight positions three levels deep is wider than the pane once the drawer
+     has taken its share, and the first cut answered that by scrolling — so
+     opening a card on the right sliced the card on the left in half, with a
+     connector running off the edge into nothing. A reader cannot hold a shape
+     they can only ever see two thirds of.
+
+     So it scales down to fit, and stops at 0.72: below that the 13.5px name
+     on a card is 9px, which is a drawing of a team rather than a team. Past
+     that it scrolls, which is the honest answer for a genuinely huge one. It
+     never scales *up* — a team of two is two cards, not two posters. */
   const canvas = useRef<HTMLDivElement>(null);
+  const [room, setRoom] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = canvas.current;
+    if (!el) return;
+    const watch = new ResizeObserver(([entry]) => {
+      const box = entry?.contentRect;
+      if (box) setRoom({ w: box.width, h: box.height });
+    });
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
+  const scale = useMemo(() => {
+    if (!room.w || !laid.w) return 1;
+    return Math.max(0.72, Math.min(1, room.w / laid.w, room.h / laid.h));
+  }, [room, laid.w, laid.h]);
+
+  /* Opening a card brings it into view, for the case scrolling is still the
+     answer. `nearest` so a card already visible does not move — the map
+     jumping on every click would be worse than the overlap. */
   useEffect(() => {
     if (!selected) return;
     const card = canvas.current?.querySelector<HTMLElement>(`[data-key="${selected}"]`);
@@ -824,7 +848,7 @@ function Map({ team }: { team: AgentTeam }) {
   return (
     <Section
       title={team.name}
-      note={`Led by ${leadOf(team)?.name ?? "nobody"}. What a card has directly under it is what that agent can hand work to.`}
+      note={`Led by ${leadOf(team)?.name ?? "nobody"} · ${team.positions.length} agents`}
       action={
         <button onClick={() => navigate("/configuration/agent-teams")} className="btn plain">
           <Icon of={ChevronLeft} size={14} />
@@ -832,30 +856,30 @@ function Map({ team }: { team: AgentTeam }) {
         </button>
       }
     >
-      {/* **The action row, at `--row-tight`.** Save and Discard live here and
-          not in the status strip: the desk has one control height, 30px, and a
-          30px control in 22px of chrome overhangs it top and bottom. The strip
-          under the canvas carries counts and a sentence, and no controls. */}
-      <div className="maprow">
-        {dirty && (
+      {/* **The action row appears when there is something to commit.** A Save
+          that is disabled most of the time is a control that mostly says no;
+          the strip under the map already says that nothing writes until Save,
+          so the button arrives with the first change and the row takes no
+          height before that. `--row-tight`, because a 30px control cannot
+          live in the 22px strip. */}
+      {dirty && (
+        <div className="maprow">
           <span className="pend">
             {changes.length} change{changes.length === 1 ? "" : "s"} not saved
           </span>
-        )}
-        <span className="flex-1" />
-        {dirty && (
+          <span className="flex-1" />
           <button onClick={() => setDraft(draftOf(team))} disabled={busy} className="btn quiet">
             Discard
           </button>
-        )}
-        <button
-          onClick={save}
-          disabled={busy || !dirty || !team.mayWrite}
-          className="btn primary disabled:opacity-50"
-        >
-          {busy ? "Saving…" : "Save"}
-        </button>
-      </div>
+          <button
+            onClick={save}
+            disabled={busy || !team.mayWrite}
+            className="btn primary disabled:opacity-40"
+          >
+            {busy ? "Saving…" : "Save"}
+          </button>
+        </div>
+      )}
 
       {trouble && <Note icon={TriangleAlert}>{trouble}</Note>}
       {/* **What Save does to the schedules that pin this team**, said before
@@ -880,14 +904,31 @@ function Map({ team }: { team: AgentTeam }) {
           than below it — where opening one pushes the thing it is about off
           the screen. Under 900px of pane there is no room for both and it
           stacks, which is the band rule the rest of the app keeps. */}
+      {/* **The map takes the page's height, not the tree's.** Sizing the box
+          to the drawing left the bottom half of the screen empty under a
+          small team and gave a large one no more room than a small one. The
+          box is the window; the tree is fitted into it. */}
       <div className="mapsplit" data-open={!!chosen}>
         <div className="mapbox">
+          {/* Centred on each axis it fits on, and pinned on one it does not.
+              Independently, because a tree is routinely wider than the room
+              and shorter than it: all-or-nothing left a small team sitting in
+              the top-left corner of a box twice its height. A scroll that
+              starts in the middle is a tree you have to go and find, so the
+              axis that scrolls pins. */}
           <div
             ref={canvas}
             className="mapcanvas scroll-slim"
-            style={{ height: Math.min(560, Math.max(240, laid.h)) }}
+            data-fits-x={laid.w * scale <= room.w + 1}
+            data-fits-y={laid.h * scale <= room.h + 1}
           >
-            <div className="mapinner" style={{ width: laid.w, height: laid.h }}>
+            {/* Centred when it fits, left-aligned when it does not — a tree
+                that starts in the middle of a scroll is a tree you have to
+                find. */}
+            <div
+              className="mapinner"
+              style={{ width: laid.w, height: laid.h, transform: `scale(${scale})` }}
+            >
               <Wires laid={laid} />
               {laid.cards.map((c) => (
                 <MapCard
@@ -1187,84 +1228,91 @@ function Drawer({
         </button>
       </div>
 
-      <div className="scroll-slim min-h-0 flex-1 overflow-y-auto px-4 pb-5">
+      <div className="dbody scroll-slim">
         {tab === "here" ? (
-          <div className="flex flex-col gap-5 pt-1">
-            <label className="fld">
-              <span>In {team.name}</span>
-              <span className="hint">
-                Markdown, added to {position.name}’s own instructions when it runs here. It never
-                replaces them — and it is what tells two positions of one profile apart.
-              </span>
+          <>
+            <div className="dsec">
+              <span className="lb">What it is told here</span>
               <textarea
                 value={position.extraInstructions}
                 onChange={(e) => onTell(e.target.value)}
-                rows={10}
+                rows={7}
                 disabled={!writable}
                 placeholder={"Owns the web client.\nFollow the design system in docs/."}
-                className="field font-mono text-code leading-relaxed"
+                className="field"
               />
-            </label>
+              <span className="said">
+                Added to {position.name}’s own instructions, in {team.name} only.
+              </span>
+            </div>
 
-            {position.parent && writable && elsewhere.length > 0 && (
-              <div className="fld">
-                <span className="text-ui text-bone">Reports to</span>
-                <span className="hint">
-                  Moving it takes everything under it along. It cannot go under something already
-                  beneath it.
-                </span>
-                <button
-                  type="button"
-                  className="btn plain self-start"
-                  onClick={(e) => setMoving(moving ? null : e.currentTarget)}
-                >
-                  {parentName ?? "the lead"}
-                </button>
-                {moving && (
-                  <Pop anchor={moving} onClose={() => setMoving(null)} width={248}>
-                    <div className="py-1">
-                      {elsewhere.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          className="mi"
-                          onClick={() => {
-                            onMove(p.id);
-                            setMoving(null);
-                          }}
-                        >
-                          <span className="min-w-0 flex-1 truncate text-left text-ui text-bone">
-                            {p.name}
-                          </span>
-                        </button>
-                      ))}
-                    </div>
-                  </Pop>
+            {position.parent && (
+              <div className="dsec">
+                <span className="lb">Reports to</span>
+                {writable && elsewhere.length > 0 ? (
+                  <>
+                    <button
+                      type="button"
+                      className="field flex items-center justify-between text-left"
+                      onClick={(e) => setMoving(moving ? null : e.currentTarget)}
+                    >
+                      {parentName ?? "the lead"}
+                      <Icon of={ChevronDown} size={12} className="text-mute" />
+                    </button>
+                    {moving && (
+                      <Pop anchor={moving} onClose={() => setMoving(null)} width={240}>
+                        <div className="py-1">
+                          {elsewhere.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className="mi"
+                              onClick={() => {
+                                onMove(p.id);
+                                setMoving(null);
+                              }}
+                            >
+                              <span className="min-w-0 flex-1 truncate text-left text-ui text-bone">
+                                {p.name}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      </Pop>
+                    )}
+                    <span className="said">Moving it takes everything under it along.</span>
+                  </>
+                ) : (
+                  <p className="text-ui text-text">{parentName ?? "the lead"}</p>
                 )}
               </div>
             )}
 
-            <div className="fld">
-              <span className="text-ui text-bone">Hands work to</span>
-              <span className="hint">
-                The positions directly under this one, and nothing else. This is the whole of what
-                it may start.
+            <div className="dsec">
+              <span className="lb">
+                Hands work to{kids.length > 0 ? ` · ${kids.length}` : ""}
               </span>
               {kids.length === 0 ? (
-                <p className="text-ui text-dim">
-                  Nobody yet. Press <b>+</b> on its card and it gains somebody to hand to.
+                <p className="text-ui text-mute">
+                  Nobody. Press <b className="text-dim">+</b> on its card.
                 </p>
               ) : (
-                <ul>
+                <ul className="flex flex-col gap-1">
                   {kids.map((p) => (
-                    <li key={p.id} className="py-0.5 text-ui text-bone">
-                      {p.name}
+                    <li key={p.id} className="flex items-center gap-2 text-ui text-text">
+                      <span className="text-mute">
+                        {p.agent ? <AgentMark agent={p.agent as Agent} size={12} /> : <Icon of={CircleDashed} size={12} />}
+                      </span>
+                      <span className="min-w-0 truncate">{p.name}</span>
                     </li>
                   ))}
                 </ul>
               )}
+              <span className="said">
+                The positions directly under this one, and nothing else.
+              </span>
             </div>
-          </div>
+          </>
         ) : (
           <ProfileTab profile={position.profile} alsoIn={alsoIn} team={team} />
         )}
@@ -1349,109 +1397,104 @@ function ProfileTab({
   const others = alsoIn.filter((n) => n !== team.name);
 
   return (
-    <div className="flex flex-col gap-5 pt-1">
-      {/* The quiet form. A filled 30px-margin plate is for the foot of a
-          page; in a 300px drawer it is most of the first screen. */}
-      <WhereTo className="aside" icon={<Icon of={Info} size={16} />}>
-        {others.length > 0 ? (
-          <>
-            <b>Every team that uses it.</b> {role.name} also holds a position in{" "}
-            {others.join(", ")}, so what you change here changes it there too.
-          </>
-        ) : (
-          <>
-            <b>The profile, not this position.</b> {team.name} is the only team holding it today;
-            anything that puts it in another will carry these words with it.
-          </>
-        )}
-      </WhereTo>
+    <>
+      <div className="dsec">
+        <p className="text-micro leading-relaxed text-mute">
+          {others.length > 0 ? (
+            <>
+              <b className="font-medium text-dim">Shared.</b> {role.name} also holds a position in{" "}
+              {others.join(", ")} — this changes it there too.
+            </>
+          ) : (
+            <>
+              <b className="font-medium text-dim">The profile, not this position.</b> Anything
+              that puts {role.name} in another team carries these words with it.
+            </>
+          )}
+        </p>
+      </div>
 
-      <label className="fld">
-        <span>Name</span>
-        <span className="hint">What you start it as, and what a lead names to hand to it.</span>
+      <div className="dsec">
+        <span className="lb">Name</span>
         <input
           value={draft.name}
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           disabled={!role.mayWrite}
           className="field"
         />
-      </label>
+      </div>
 
-      <label className="fld">
-        <span>What it does</span>
-        <span className="hint">
-          The one line a lead reads to decide whether to hand it work.
-        </span>
+      <div className="dsec">
+        <span className="lb">What it does</span>
         <input
           value={draft.does}
           onChange={(e) => setDraft({ ...draft, does: e.target.value })}
           disabled={!role.mayWrite}
           className="field"
         />
-      </label>
+        <span className="said">The one line a lead reads before handing it work.</span>
+      </div>
 
-      <label className="fld">
-        <span>Instructions</span>
-        <span className="hint">
-          Composed into its prompt, in every team. A position adds to this without changing it.
-        </span>
+      <div className="dsec">
+        <span className="lb">Instructions</span>
         <textarea
           value={draft.instructions}
           onChange={(e) => setDraft({ ...draft, instructions: e.target.value })}
-          rows={10}
+          rows={8}
           disabled={!role.mayWrite}
-          className="field font-mono text-code leading-relaxed"
+          className="field"
         />
-      </label>
+      </div>
 
-      {trouble && <p className="text-ui text-brick">{trouble}</p>}
+      {trouble && (
+        <div className="dsec">
+          <p className="text-ui text-brick">{trouble}</p>
+        </div>
+      )}
 
-      {role.mayWrite ? (
-        /* **Its own Save.** The map's Save writes the team and must not write
-           a profile — a map action that changed a profile would be the model
-           leaking. Two objects, two commits, said by two buttons. */
-        <div className="flex items-center gap-2">
-          <button
-            onClick={save}
-            disabled={busy || !changed}
-            className="btn primary disabled:opacity-50"
-          >
-            {busy ? "Saving…" : "Save profile"}
-          </button>
-          {changed && (
+      <div className="dsec flex items-center gap-2">
+        {role.mayWrite ? (
+          /* **Its own Save.** The map's Save writes the team and must not
+             write a profile — a map action that changed a profile would be
+             the model leaking. Two objects, two commits, two buttons. */
+          <>
             <button
-              onClick={() => setDraft({ name: role.name, does: role.does, instructions: role.instructions })}
-              className="btn quiet"
+              onClick={save}
+              disabled={busy || !changed}
+              className="btn primary disabled:opacity-40"
             >
-              Revert
+              {busy ? "Saving…" : "Save profile"}
             </button>
-          )}
-        </div>
-      ) : (
-        <p className="text-ui text-dim">
-          You can read this profile and not change it. Whoever administers the directory it is
-          filed in can.
-        </p>
-      )}
+            {changed && (
+              <button
+                onClick={() =>
+                  setDraft({ name: role.name, does: role.does, instructions: role.instructions })
+                }
+                className="btn quiet"
+              >
+                Revert
+              </button>
+            )}
+          </>
+        ) : (
+          <p className="text-micro text-mute">
+            Read-only. Whoever administers the directory it is filed in can change it.
+          </p>
+        )}
+      </div>
 
-      <button
-        type="button"
-        onClick={() => navigate(`/configuration/roles/${role.id}`)}
-        className="self-start text-ui text-dim underline underline-offset-2 hover:text-bone"
-      >
-        Engine, skills and the rest, on Agent profiles
-      </button>
-
-      {team.mayShare && (
-        <div className="fld">
-          <span className="text-ui text-bone">Who can see this team</span>
-          <span className="hint">
-            A team is filed like a profile or a skill. Somebody who can see the team and not a
-            profile in it sees that card redacted, so the shape stays true.
-          </span>
+      <div className="dsec flex flex-wrap items-center gap-x-4 gap-y-2">
+        <button
+          type="button"
+          onClick={() => navigate(`/configuration/roles/${role.id}`)}
+          className="text-meta text-dim underline underline-offset-2 hover:text-bone"
+        >
+          Engine, skills and the rest
+        </button>
+        {team.mayShare && (
           <WhoCanAccess kind="agentTeam" id={team.id} path={team.path} look="chip" label="Sharing" />
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </>
   );
 }

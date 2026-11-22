@@ -90,12 +90,31 @@ describe("the layout", () => {
 
   it("gives a card carrying extra instructions one more line, and no more width", () => {
     const laid = layout(treeOf(product().positions));
-    const bare = laid.cards.find((c) => c.key === "designer")!;
     const told = laid.cards.find((c) => c.key === "web")!;
-    expect(bare.h).toBe(CH);
+    const alone = layout(treeOf([at({ id: "solo", parent: null, name: "Alone" })]));
+    expect(alone.cards[0]!.h).toBe(CH);
     expect(told.h).toBeGreaterThan(CH);
     // **No card changes width.** Turning anything on grows a card downward.
     expect(laid.cards.every((c) => c.w === CW)).toBe(true);
+  });
+
+  it("levels a spread row, so four siblings sit on one baseline", () => {
+    // Two of the lead's three children carry instructions and one does not.
+    // Four cards on one level reading as different kinds of thing is the
+    // opposite of what a level means.
+    const laid = layout(treeOf(product().positions));
+    const row = ["designer", "web", "api"].map((k) => laid.cards.find((c) => c.key === k)!);
+    expect(new Set(row.map((c) => c.h)).size).toBe(1);
+    expect(new Set(row.map((c) => c.y + c.h)).size).toBe(1);
+    // And the levelling takes the tallest rather than the first.
+    expect(row[0]!.h).toBe(CH + 16);
+  });
+
+  it("leaves an indented stack to its own heights", () => {
+    // They are stacked, not ranked side by side, so levelling them would add
+    // space to say nothing.
+    const laid = layout(treeOf(product().positions));
+    expect(laid.cards.find((c) => c.key === "qa")!.h).toBe(CH);
   });
 
   it("draws one connector per edge, and none to a card that is not there", () => {
