@@ -870,8 +870,8 @@ async fn request_deletion(session_id: &str, id: &Value, arguments: &Value) -> St
     }
 
     /* **What the card says.** The person sees this and nothing else, so it
-       carries the whole list and the agent's own reason — not an id, and not
-       a count on its own. `tool_name` is what the card is titled with. */
+    carries the whole list and the agent's own reason — not an id, and not
+    a count on its own. `tool_name` is what the card is titled with. */
     let asked = json!({
         "deleting": lines,
         "reason": arguments.get("reason").cloned().unwrap_or(json!(null)),

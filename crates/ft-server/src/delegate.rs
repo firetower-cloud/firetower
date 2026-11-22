@@ -196,9 +196,9 @@ async fn doomed(state: &AppState, owner: &str, input: &Value) -> Result<Vec<Doom
                     .with_context(|| format!("there is no profile called \"{name}\""))?;
                 let (held, teams) = state.agent_teams.standing_on(owner, &role.id).await?;
                 /* Counted against what is *also* going: deleting a team and
-                   the profile it holds in one operation is coherent, and
-                   refusing it would be refusing the obvious tidy-up. The
-                   order is handled in `commit_deletion`. */
+                the profile it holds in one operation is coherent, and
+                refusing it would be refusing the obvious tidy-up. The
+                order is handled in `commit_deletion`. */
                 let surviving = teams
                     .iter()
                     .filter(|t| !out.iter().any(|d| d.kind == "team" && &d.name == *t))
@@ -210,8 +210,16 @@ async fn doomed(state: &AppState, owner: &str, input: &Value) -> Result<Vec<Doom
                          deleted — take it out of {} first, or ask to delete {} too.",
                         role.name,
                         surviving.join(", "),
-                        if surviving.len() == 1 { "that team" } else { "those teams" },
-                        if surviving.len() == 1 { "that team" } else { "those teams" }
+                        if surviving.len() == 1 {
+                            "that team"
+                        } else {
+                            "those teams"
+                        },
+                        if surviving.len() == 1 {
+                            "that team"
+                        } else {
+                            "those teams"
+                        }
                     );
                 }
                 out.push(Doomed {
@@ -924,8 +932,8 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
     let name = text(&request.input, "name").or_else(|| role.as_ref().map(|r| r.name.clone()));
     let reason = text(&request.input, "reason").or_else(|| role.as_ref().map(|r| r.does.clone()));
     /* What the child itself will lead. Read from the child's position, not
-       the lead's — this is the line that makes a team as deep as it was
-       drawn rather than one level. */
+    the lead's — this is the line that makes a team as deep as it was
+    drawn rather than one level. */
     let reports = match (&position, &standing) {
         (Some(position), Some((team, _))) => reports_of(state, team, position, false).await?,
         _ => String::new(),
@@ -1317,7 +1325,6 @@ fn offering(reach: &Reach) -> String {
     format!("Subagents you can use: {}.", names.join(", "))
 }
 
-
 /// Who a session standing at this position may hand work to, as a prompt
 /// says it.
 ///
@@ -1448,7 +1455,8 @@ fn brief(
             true => "",
             // Said here because it is the one thing a middle of a tree gets
             // wrong: it handed back before its own children had answered.
-            false => " If you hand work to the agents under you, wait for them to report before \
+            false =>
+                " If you hand work to the agents under you, wait for them to report before \
                       you finish — handing back first loses their answers.",
         }
     ));
@@ -4947,15 +4955,15 @@ mod tests {
     #[tokio::test]
     async fn a_child_in_the_middle_of_a_tree_is_told_what_it_leads() {
         /* **Reported from a real run.** A team three deep: the lead spawned
-           Engineer, QA and Designer; Engineer spawned two advisors and the
-           other two reported back that "a child session can't spawn".
+        Engineer, QA and Designer; Engineer spawned two advisors and the
+        other two reported back that "a child session can't spawn".
 
-           Nothing was wrong with the rules — a child inherits the position
-           it was spawned into and `reach_of` reads that position's children.
-           What was wrong is that nothing *said* so: only a lead's persona
-           listed its reports, so the only children that ever delegated were
-           the ones whose extra instructions happened to mention it, and the
-           `spawn` tool's own description told the rest they could not. */
+        Nothing was wrong with the rules — a child inherits the position
+        it was spawned into and `reach_of` reads that position's children.
+        What was wrong is that nothing *said* so: only a lead's persona
+        listed its reports, so the only children that ever delegated were
+        the ones whose extra instructions happened to mention it, and the
+        `spawn` tool's own description told the rest they could not. */
         let (state, db, admin) = library().await;
         let (host, lead) = lead_for(&db, &admin).await;
 
@@ -5012,7 +5020,10 @@ mod tests {
         // The middle of the tree is told, in the words a lead is told in.
         let said = reports_of(&state, &team, engineer, false).await.unwrap();
         assert!(said.contains("Advisor"), "{said}");
-        assert!(said.contains("pass \nthe name as `role`") || said.contains("`role`"), "{said}");
+        assert!(
+            said.contains("pass \nthe name as `role`") || said.contains("`role`"),
+            "{said}"
+        );
 
         // And a leaf is told nothing rather than told it cannot.
         let advisor = team.positions.iter().find(|p| p.name == "Advisor").unwrap();
@@ -5035,11 +5046,7 @@ mod tests {
 
     /// A profile and a team to ask about, built through the tools a person's
     /// agent would actually use — so the fixture cannot drift from the path.
-    async fn a_shipping_team(
-        state: &AppState,
-        host: &ft_core::HostId,
-        lead: &SessionId,
-    ) -> String {
+    async fn a_shipping_team(state: &AppState, host: &ft_core::HostId, lead: &SessionId) -> String {
         handle(
             state,
             &call(
@@ -5089,7 +5096,10 @@ mod tests {
         let lines = plan["summary"].as_array().unwrap();
         assert_eq!(lines.len(), 1);
         assert!(lines[0].as_str().unwrap().contains("Shipping"), "{lines:?}");
-        assert!(lines[0].as_str().unwrap().contains("1 position"), "{lines:?}");
+        assert!(
+            lines[0].as_str().unwrap().contains("1 position"),
+            "{lines:?}"
+        );
         // And planning on its own deletes nothing.
         assert_eq!(
             state
@@ -5143,7 +5153,12 @@ mod tests {
 
         let said = handle(
             &state,
-            &call(host, &lead, "commit_deletion", json!({ "ids": plan["ids"] })),
+            &call(
+                host,
+                &lead,
+                "commit_deletion",
+                json!({ "ids": plan["ids"] }),
+            ),
         )
         .await
         .unwrap();
@@ -5200,7 +5215,12 @@ mod tests {
         assert_eq!(plan["count"], 2);
         let said = handle(
             &state,
-            &call(host, &lead, "commit_deletion", json!({ "ids": plan["ids"] })),
+            &call(
+                host,
+                &lead,
+                "commit_deletion",
+                json!({ "ids": plan["ids"] }),
+            ),
         )
         .await
         .unwrap();
@@ -5215,7 +5235,12 @@ mod tests {
         // names somebody might reach for instead.
         let (state, db, admin) = library().await;
         let (host, lead) = lead_for(&db, &admin).await;
-        for forbidden in ["delete_team", "delete_profile", "delete_role", "request_deletion"] {
+        for forbidden in [
+            "delete_team",
+            "delete_profile",
+            "delete_role",
+            "request_deletion",
+        ] {
             let no = handle(&state, &call(host.clone(), &lead, forbidden, json!({})))
                 .await
                 .unwrap_err()

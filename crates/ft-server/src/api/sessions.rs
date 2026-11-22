@@ -1614,7 +1614,6 @@ pub(super) async fn persona_for(
     the first line of its extra instructions, and is exactly what `spawn`
     takes back as `role`. */
     if let Some((team, here)) = standing {
-
         text.push('\n');
         text.push_str(ft_core::DELEGATION_GUIDANCE);
         text.push_str(match profile.on_child_limit.as_str() {
@@ -1633,9 +1632,9 @@ pub(super) async fn persona_for(
             }
         });
         /* **The same sentence a child gets.** `delegate::reports_of` writes
-           it for both, because a lead and a position three levels down are
-           the same situation — somebody standing somewhere with things under
-           them — and when they were two texts only this one existed. */
+        it for both, because a lead and a position three levels down are
+        the same situation — somebody standing somewhere with things under
+        them — and when they were two texts only this one existed. */
         text.push_str(&crate::delegate::reports_of(state, team, here, true).await?);
     } else if profile.can_delegate {
         /* ── the compatibility window ───────────────────────────────────
