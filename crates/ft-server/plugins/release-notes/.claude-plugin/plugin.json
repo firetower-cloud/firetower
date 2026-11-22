@@ -1,0 +1,6 @@
+{
+  "name": "release-notes",
+  "description": "Write the commit the changelog will be built from, and the note that goes out with it.",
+  "version": "1.0.0",
+  "author": { "name": "Firetower" }
+}

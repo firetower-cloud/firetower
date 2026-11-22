@@ -1,0 +1,6 @@
+{
+  "name": "github",
+  "description": "Issues, pull requests, Actions and code search, as tools the agent can call.",
+  "version": "1.0.0",
+  "author": { "name": "Firetower" }
+}

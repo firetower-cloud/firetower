@@ -33,6 +33,7 @@ export interface Skill {
   defaultIn: string[];
   description: string;
   files: number;
+  hasConnector: boolean;
   /**
      * An agent wrote a version of this that ships an executable, and it is
      * waiting for the owner to approve it. Held content is never the current
@@ -42,6 +43,11 @@ export interface Skill {
   held: boolean;
   id: SkillId;
   /**
+     * What this bundle is: `skill` or `plugin`. Decides which home it lands
+     * in on a worker, and which list it appears in on a screen.
+     */
+  kind: string;
+  /**
      * Whether this person may move it to another directory or delete it.
      * The same rule as `api::access::may_share`, answered per row so a list
      * can say up front which skills it can act on.
@@ -49,6 +55,16 @@ export interface Skill {
   mayShare: boolean;
   /** Whether this person may make a version of it or rename it. */
   mayWrite: boolean;
+  nCommands: number;
+  /**
+     * How many skills, commands and connectors are inside it.
+     *
+     * Derived from the paths in the version rather than stored beside them,
+     * so a count cannot drift from the bytes it is counting. A lone skill
+     * reports zero of each: its own `SKILL.md` is the bundle, not a component
+     * within one.
+     */
+  nSkills: number;
   name: string;
   /** `u/kevin/rust_review` — slashes on the wire, dots in the database. */
   path: string;

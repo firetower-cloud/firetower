@@ -17887,6 +17887,10 @@
           "builtin",
           "held",
           "updatedAt",
+          "kind",
+          "nSkills",
+          "nCommands",
+          "hasConnector",
           "mayWrite",
           "mayShare",
           "defaultIn",
@@ -17926,12 +17930,19 @@
             "type": "integer",
             "format": "int32"
           },
+          "hasConnector": {
+            "type": "boolean"
+          },
           "held": {
             "type": "boolean",
             "description": "An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`."
           },
           "id": {
             "$ref": "#/components/schemas/SkillId"
+          },
+          "kind": {
+            "type": "string",
+            "description": "What this bundle is: `skill` or `plugin`. Decides which home it lands\nin on a worker, and which list it appears in on a screen."
           },
           "mayShare": {
             "type": "boolean",
@@ -17940,6 +17951,15 @@
           "mayWrite": {
             "type": "boolean",
             "description": "Whether this person may make a version of it or rename it."
+          },
+          "nCommands": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "nSkills": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many skills, commands and connectors are inside it.\n\nDerived from the paths in the version rather than stored beside them,\nso a count cannot drift from the bytes it is counting. A lone skill\nreports zero of each: its own `SKILL.md` is the bundle, not a component\nwithin one."
           },
           "name": {
             "type": "string"

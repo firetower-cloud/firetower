@@ -165,11 +165,24 @@ pub const KINDS: &[Kind] = &[
         // `repo` covers private repositories and ordinary branch pushes.
         // GitHub also requires `workflow` when a push adds or updates a file
         // under `.github/workflows/`, so request it with each new authorization.
-        scopes: "repo workflow",
+        //
+        // **`read:org` and `read:user` are the GitHub connector's, not git's.**
+        // Measured: GitHub's MCP server at `api.githubcopilot.com/mcp/` names
+        // `github.com/login/oauth` as its authorization server — the same
+        // application Firetower already registered — and its own
+        // protected-resource metadata asks for `repo`, `read:org` and
+        // `read:user`. So the token this already holds *is* the bearer that
+        // server wants, and the only thing missing was two scopes.
+        //
+        // Asked for here rather than on a second authorization: the two are
+        // one credential, and splitting them would mean two sign-ins for one
+        // account. The cost is that everybody re-authorizes once; the cost of
+        // doing it later is that everybody re-authorizes twice.
+        scopes: "repo workflow read:org read:user",
         git_username: "x-access-token",
         device_path: "/login/device/code",
         token_path: "/login/oauth/access_token",
-        token_page: "/settings/tokens/new?scopes=repo,workflow&description=Firetower",
+        token_page: "/settings/tokens/new?scopes=repo,workflow,read:org,read:user&description=Firetower",
         // The link carries the scopes already ticked, so there is nothing to
         // explain that the page does not arrive with.
         token_steps: &[],

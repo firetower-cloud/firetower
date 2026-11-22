@@ -401,6 +401,97 @@ pub(crate) async fn git_token(
     }
 }
 
+/// Give every plugin bundle the `.mcp.json` its connector needs, filled in
+/// with **this person's** credential.
+///
+/// Synthesised here rather than stored, and that is the whole of the design:
+/// no byte in `blobs` ever holds a secret, a bundle on a worker cannot outlive
+/// the authorization it was written with, and the connector travels through a
+/// directory or a profile while the token never does.
+///
+/// `borrow-git` is the path that needs no new authorization code. Measured:
+/// GitHub's MCP server names `github.com/login/oauth` as its authorization
+/// server and takes a bearer in the header — and that is the application
+/// Firetower already registered and already holds a per-person token from. So
+/// the first connector works on a credential this installation has had all
+/// along.
+///
+/// **A connector with no credential is not an error.** The plugin loads
+/// without it, its skills work, and the interface is where somebody is asked
+/// to connect — refusing the whole session here would make one unauthorized
+/// connector cost every other plugin in the set.
+pub(crate) async fn with_connectors(
+    state: &AppState,
+    session: &str,
+    owner: &str,
+    mut bundles: Vec<ft_proto::SkillBundle>,
+) -> Vec<ft_proto::SkillBundle> {
+    let connectors = match state.skills.connectors_for_session(session).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("reading this session's connectors: {e:#}");
+            return bundles;
+        }
+    };
+    if connectors.is_empty() {
+        return bundles;
+    }
+    let hosts = state.connections.all().await;
+
+    for c in connectors {
+        let Some(bundle) = bundles.iter_mut().find(|b| b.name == c.plugin) else {
+            continue;
+        };
+        let token = match c.auth.as_str() {
+            "borrow-git" => match c.borrow.as_deref().and_then(|kind| {
+                hosts
+                    .iter()
+                    .find(|h| h.kind.id == kind && h.configured())
+                    .cloned()
+            }) {
+                Some(conn) => {
+                    git_token(state, &conn, owner, "a plugin's connector asked for it").await
+                }
+                None => None,
+            },
+            // The broker's shapes. Until it lands these hold no credential, so
+            // the plugin arrives with its skills and without its tools — which
+            // is what the row on the screen already says about them.
+            _ => None,
+        };
+        let Some(token) = token else {
+            tracing::info!(
+                plugin = %c.plugin,
+                "nobody has authorized this connector yet; the plugin loads without it"
+            );
+            continue;
+        };
+
+        let doc = serde_json::json!({
+            "mcpServers": {
+                c.server.clone(): {
+                    "type": "http",
+                    "url": c.url,
+                    "headers": { "Authorization": format!("Bearer {}", token.as_str()) },
+                }
+            }
+        });
+        let Ok(text) = serde_json::to_string_pretty(&doc) else {
+            continue;
+        };
+        // Replaced, never appended to: a bundle that already carried one is
+        // holding a token from an earlier session.
+        bundle.files.retain(|f| f.path != ".mcp.json");
+        bundle.files.push(ft_proto::SkillFile {
+            path: ".mcp.json".to_string(),
+            contents: ft_proto::encode(text.as_bytes()),
+            executable: false,
+        });
+        tracing::info!(plugin = %c.plugin, server = %c.server, "this session's connector is authorized");
+    }
+    bundles
+}
+
 /// This person's token for one host, as git wants it.
 async fn credential_on(
     state: &AppState,

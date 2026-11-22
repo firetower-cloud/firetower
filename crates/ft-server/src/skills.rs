@@ -129,6 +129,18 @@ pub struct Skill {
     /// badge it. See `review`, `approve`, `discard`.
     pub held: bool,
     pub updated_at: DateTime<Utc>,
+    /// What this bundle is: `skill` or `plugin`. Decides which home it lands
+    /// in on a worker, and which list it appears in on a screen.
+    pub kind: String,
+    /// How many skills, commands and connectors are inside it.
+    ///
+    /// Derived from the paths in the version rather than stored beside them,
+    /// so a count cannot drift from the bytes it is counting. A lone skill
+    /// reports zero of each: its own `SKILL.md` is the bundle, not a component
+    /// within one.
+    pub n_skills: i64,
+    pub n_commands: i64,
+    pub has_connector: bool,
     /// Whether this person may make a version of it or rename it.
     pub may_write: bool,
     /// Whether this person may move it to another directory or delete it.
@@ -1972,6 +1984,12 @@ const COLUMNS: &str = "k.id, k.path::text AS path, k.name, k.slug, k.description
      v.version, v.tokens, v.files, v.bytes, v.frontmatter, v.body, \
      EXISTS (SELECT 1 FROM skill_files f \
               WHERE f.version_id = v.id AND f.path LIKE 'scripts/%') AS has_scripts, \
+     k.kind, \
+     (SELECT count(*) FROM skill_files f \
+       WHERE f.version_id = v.id AND f.path LIKE 'skills/%/SKILL.md') AS n_skills, \
+     (SELECT count(*) FROM skill_files f \
+       WHERE f.version_id = v.id AND f.path LIKE 'commands/%') AS n_commands, \
+     EXISTS (SELECT 1 FROM connectors c WHERE c.skill_id = k.id) AS has_connector, \
      (k.path <@ 'd.firetower'::ltree) AS builtin, \
      (k.held_version_id IS NOT NULL) AS held, \
      u.name AS author";
@@ -2665,18 +2683,26 @@ impl Skills {
         _directory: &str,
         one: &builtin::Builtin,
     ) -> Result<bool> {
-        let (name, description, body) = builtin::fields(one.markdown)?;
+        let (name, description, body) = one.describe()?;
         let new = NewSkill {
             name: name.clone(),
             description: description.clone(),
             frontmatter: serde_json::json!({ "name": name, "description": description }),
             body,
-            files: vec![IncomingFile {
-                path: "SKILL.md".to_string(),
-                contents: ft_proto::encode(one.markdown.as_bytes()),
-                executable: false,
-            }],
+            files: one
+                .files
+                .iter()
+                .map(|(path, contents)| IncomingFile {
+                    path: (*path).to_string(),
+                    contents: ft_proto::encode(contents.as_bytes()),
+                    executable: false,
+                })
+                .collect(),
             notes: None,
+        };
+        let kind = match one.kind {
+            builtin::Kind::Skill => "skill",
+            builtin::Kind::Plugin => "plugin",
         };
 
         let path = format!("{}{}", builtin::PATH_PREFIX, one.slug);
@@ -2691,8 +2717,8 @@ impl Skills {
             let id = SkillId::new();
             let mut tx = self.pool.begin().await?;
             sqlx::query(
-                "INSERT INTO skills (id, org_id, path, name, slug, description)
-                 VALUES ($1, $2, $3::ltree, $4, $5, $6)",
+                "INSERT INTO skills (id, org_id, path, name, slug, description, kind)
+                 VALUES ($1, $2, $3::ltree, $4, $5, $6, $7)",
             )
             .bind(id.as_str())
             .bind(org)
@@ -2700,14 +2726,25 @@ impl Skills {
             .bind(&new.name)
             .bind(one.slug)
             .bind(&new.description)
+            .bind(kind)
             .execute(&mut *tx)
             .await
-            .context("writing a built-in skill")?;
+            .context("writing a built-in bundle")?;
             // No `created_by`: nobody made this, Firetower ships it.
             write_version(&mut tx, id.as_str(), "", &new, 1, false).await?;
+            write_connector(&mut tx, id.as_str(), one).await?;
             tx.commit().await?;
             return Ok(true);
         };
+
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("UPDATE skills SET kind = $2 WHERE id = $1 AND kind <> $2")
+            .bind(&id)
+            .bind(kind)
+            .execute(&mut *tx)
+            .await?;
+        write_connector(&mut tx, &id, one).await?;
+        tx.commit().await?;
 
         // Content-addressed, so an unchanged bundle writes nothing at all.
         let want = Self::digest_of_new(&new)?;
@@ -3268,7 +3305,7 @@ impl Skills {
     /// this function's resolution order rather than here.
     pub async fn bundles_for_session(&self, session: &str) -> Result<Vec<ft_proto::SkillBundle>> {
         let rows = sqlx::query(
-            "SELECT p.skill_id, k.name, f.path, f.executable, b.bytes \
+            "SELECT p.skill_id, k.name, k.kind, f.path, f.executable, b.bytes \
                FROM skill_pins p \
                JOIN skills k ON k.id = p.skill_id \
                JOIN skill_files f ON f.version_id = p.version_id \
@@ -3303,12 +3340,46 @@ impl Skills {
                     last = Some(id);
                     out.push(ft_proto::SkillBundle {
                         name: row.get("name"),
+                        kind: match row.get::<String, _>("kind").as_str() {
+                            "plugin" => ft_proto::BundleKind::Plugin,
+                            _ => ft_proto::BundleKind::Skill,
+                        },
                         files: vec![file],
                     });
                 }
             }
         }
         Ok(out)
+    }
+
+    /// The connectors this session's plugins declare.
+    ///
+    /// Keyed on the plugin's folder name because that is what a bundle carries
+    /// — the caller has bundles in hand and no ids, and matching on the name
+    /// is what `deliverable` already guarantees is unique within one session.
+    pub async fn connectors_for_session(&self, session: &str) -> Result<Vec<SessionConnector>> {
+        let rows = sqlx::query(
+            "SELECT k.name AS plugin, c.server, c.url, c.auth, c.borrow \
+               FROM skill_pins p \
+               JOIN skills k ON k.id = p.skill_id \
+               JOIN connectors c ON c.skill_id = k.id \
+              WHERE p.session_id = $1 \
+              ORDER BY k.name",
+        )
+        .bind(session)
+        .fetch_all(&self.pool)
+        .await
+        .context("reading a session's connectors")?;
+        Ok(rows
+            .into_iter()
+            .map(|r| SessionConnector {
+                plugin: r.get("plugin"),
+                server: r.get("server"),
+                url: r.get("url"),
+                auth: r.get("auth"),
+                borrow: r.get("borrow"),
+            })
+            .collect())
     }
 
     /// Of what was handed over, what can actually become a folder on a
@@ -3515,6 +3586,59 @@ impl Skills {
     }
 }
 
+
+/// A plugin's connector row, written beside its bundle.
+///
+/// **Never its credential.** This is the endpoint and how it wants to be
+/// authorized; the token is in the vault, per person, and the `.mcp.json` a
+/// worker reads is synthesised at session start from the two together. So a
+/// bundle on disk cannot outlive the authorization it was written with, and
+/// no stored byte in `blobs` ever holds a secret.
+async fn write_connector(
+    tx: &mut Transaction<'_, Postgres>,
+    skill: &str,
+    one: &builtin::Builtin,
+) -> Result<()> {
+    let Some(c) = &one.connector else {
+        // A bundle that stops declaring one loses the row rather than keeping
+        // a server nothing points at any more.
+        sqlx::query("DELETE FROM connectors WHERE skill_id = $1")
+            .bind(skill)
+            .execute(&mut **tx)
+            .await?;
+        return Ok(());
+    };
+    sqlx::query(
+        "INSERT INTO connectors (skill_id, server, url, auth, borrow, scopes) \
+         VALUES ($1, $2, $3, $4, $5, $6) \
+         ON CONFLICT (skill_id) DO UPDATE SET \
+           server = excluded.server, url = excluded.url, auth = excluded.auth, \
+           borrow = excluded.borrow, scopes = excluded.scopes",
+    )
+    .bind(skill)
+    .bind(c.server)
+    .bind(c.url)
+    .bind(c.auth)
+    .bind(c.borrow)
+    .bind(c.scopes)
+    .execute(&mut **tx)
+    .await
+    .context("writing a connector")?;
+    Ok(())
+}
+
+/// One connector a session is pinned to.
+#[derive(Debug, Clone)]
+pub struct SessionConnector {
+    /// The plugin's folder name, which is what matches it to a bundle.
+    pub plugin: String,
+    /// What the agent calls this server.
+    pub server: String,
+    pub url: String,
+    pub auth: String,
+    pub borrow: Option<String>,
+}
+
 /// Write one version and its files, and point the skill at it.
 async fn write_version(
     tx: &mut Transaction<'_, Postgres>,
@@ -3651,6 +3775,10 @@ fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
 
     Ok(Skill {
         id: SkillId::from_stored(r.get::<String, _>("id")),
+        kind: r.try_get("kind").unwrap_or_else(|_| "skill".to_string()),
+        n_skills: r.try_get("n_skills").unwrap_or(0),
+        n_commands: r.try_get("n_commands").unwrap_or(0),
+        has_connector: r.try_get("has_connector").unwrap_or(false),
         path: ft_core::ResourcePath::from_stored(r.get::<String, _>("path")).to_string(),
         slug: r.get("slug"),
         version: r.try_get("version").unwrap_or(0),
@@ -6322,10 +6450,27 @@ mod tests {
     /// published skills.
     #[test]
     fn every_builtin_bundle_has_one_frontmatter() {
+        // **Every `SKILL.md` in every bundle**, not only a lone skill's own. A
+        // plugin's skills go through the same parser into the same system
+        // prompt, so a plugin shipping three of them is three files held to
+        // this rule — and before plugins there was one file per bundle, so
+        // walking `ALL` was walking files by accident.
+        let mut checked = 0;
         for one in builtin::ALL {
-            check_one_frontmatter(one.markdown)
-                .unwrap_or_else(|e| panic!("the {} bundle Firetower ships: {e}", one.slug));
+            for (path, contents) in one.files {
+                if !path.ends_with("SKILL.md") {
+                    continue;
+                }
+                check_one_frontmatter(contents).unwrap_or_else(|e| {
+                    panic!("{} in the {} bundle Firetower ships: {e}", path, one.slug)
+                });
+                checked += 1;
+            }
         }
+        assert!(
+            checked >= builtin::ALL.len(),
+            "every bundle contributes at least one SKILL.md; only {checked} were read"
+        );
     }
 
     /// A path long enough that no worker can write it.
