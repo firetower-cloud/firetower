@@ -50,6 +50,7 @@ import {
   RefreshCw,
   Server,
   ShieldCheck,
+  TriangleAlert,
   User,
   UserRound,
   X,
@@ -517,6 +518,18 @@ export function ProfileForm({
 
   return (
       <div className="form">
+        {/* **First, because it is the one thing on this form that is going to
+            stop working.** It sat between two run-limit fields, in the same
+            quiet band every other note uses, eleven fields down — which is
+            the shape of something nobody has to read. */}
+        {oldReach && (
+          <OldReach
+            role={role!}
+            all={(roles.data ?? []).filter((r) => r.id !== role!.id)}
+            onCleared={(next) => setDraft((d) => ({ ...d, ...next }))}
+          />
+        )}
+
         <Field label="Name">
           <span className="box">
             <input
@@ -792,14 +805,6 @@ export function ProfileForm({
             compatibility window closes, nothing writes it any more, and
             somebody looking at this profile has to be able to find out why it
             still delegates. */}
-        {oldReach && (
-          <OldReach
-            role={role!}
-            all={(roles.data ?? []).filter((r) => r.id !== role!.id)}
-            onCleared={(next) => setDraft((d) => ({ ...d, ...next }))}
-          />
-        )}
-
         {/* **Drawn for every profile now**, because any profile can lead a
             team — there is no Manager flag left to hide it behind, and a
             profile that is bare here and leads in another team would otherwise
@@ -1015,47 +1020,56 @@ function OldReach({
   };
 
   return (
-    <Group label="Delegation">
-      {/* One line. The label says what this is, the list says what it
-          holds, and the buttons say what can be done about it. A paragraph
-          between them was repeating all three. */}
-      <WhereTo className="aside">
-        <b>From before teams existed.</b> It still works, and nothing writes it any more.
-      </WhereTo>
+    <div className="warnbox">
+      <span className="g" aria-hidden>
+        <Icon of={TriangleAlert} size={16} />
+      </span>
+      <div className="say">
+        {/* **Amber, not ember.** Ember answers one question — is an agent
+            waiting on you — and spending it here would cost it the only
+            thing it is for. Amber is the step the other signals have no
+            word for: still working, but not for much longer. That is
+            exactly what this is. */}
+        <b>Old delegation</b>
+        <p>
+          {role.name} hands work to these from before teams existed. It still works, and
+          nothing writes it any more.
+        </p>
 
       {/* **Named, not counted.** The count was the whole of what the notice
           said, and a count is not something anybody can act on. */}
-      {reaches.length > 0 && (
-        <div className="kidlist mt-2.5">
-          {reaches.map((r) => (
-            <span key={r.id} className="kidrow">
-              <span className="g">
-                {r.agent ? (
-                  <AgentMark agent={r.agent as Agent} size={14} />
-                ) : (
-                  <CircleDashed className="h-3.5 w-3.5" strokeWidth={1.75} />
-                )}
+        {reaches.length > 0 && (
+          <div className="kidlist">
+            {reaches.map((r) => (
+              <span key={r.id} className="kidrow">
+                <span className="g">
+                  {r.agent ? (
+                    <AgentMark agent={r.agent as Agent} size={14} />
+                  ) : (
+                    <CircleDashed className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  )}
+                </span>
+                <span className="n">{r.name}</span>
               </span>
-              <span className="n">{r.name}</span>
-            </span>
-          ))}
+            ))}
+          </div>
+        )}
+
+        {trouble && <p className="bad">{trouble}</p>}
+
+        <div className="pickrow">
+          <button
+            type="button"
+            onClick={() => setNaming(role.name)}
+            disabled={!!busy}
+            className="btn primary"
+          >
+            {busy === "team" ? "Moving…" : "Move to a team (recommended)"}
+          </button>
+          <button type="button" onClick={justClear} disabled={!!busy} className="btn quiet">
+            {busy === "clear" ? "Removing…" : "Just remove old delegation"}
+          </button>
         </div>
-      )}
-
-      {trouble && <p className="bad">{trouble}</p>}
-
-      <div className="pickrow mt-1">
-        <button
-          type="button"
-          onClick={() => setNaming(role.name)}
-          disabled={!!busy}
-          className="btn primary"
-        >
-          {busy === "team" ? "Moving…" : "Move to a team (recommended)"}
-        </button>
-        <button type="button" onClick={justClear} disabled={!!busy} className="btn quiet">
-          {busy === "clear" ? "Removing…" : "Just remove old delegation"}
-        </button>
       </div>
 
       {naming !== null && (
@@ -1067,7 +1081,7 @@ function OldReach({
           onMake={() => makeTeam(naming)}
         />
       )}
-    </Group>
+    </div>
   );
 }
 
