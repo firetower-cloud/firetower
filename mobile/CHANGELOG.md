@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.18.0...mobile-v0.19.0) (2026-11-22)
+
+
+### Features
+
+* an agent can ask for a deletion, and cannot perform one ([33a1e96](https://github.com/firetower-cloud/firetower/commit/33a1e9613cf7f2d74380e19dc2e45a78ecd6c87b))
+* schedule a team, and say how many agents a run starts ([865fdd8](https://github.com/firetower-cloud/firetower/commit/865fdd896a360b43dea9156de37476581034e8b0))
+* **server:** agent teams — delegation as a tree you can see, not a column on a profile ([a557353](https://github.com/firetower-cloud/firetower/commit/a55735338003419218dddef9c9a78655d2af1e76))
+
+
+### Bug Fixes
+
+* the deletion question belongs in the conversation, and it is one question ([694f1fe](https://github.com/firetower-cloud/firetower/commit/694f1fe7c81448c8920b0b6d326e364356271e10))
+
 ## [0.18.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.17.0...mobile-v0.18.0) (2026-11-19)
 
 

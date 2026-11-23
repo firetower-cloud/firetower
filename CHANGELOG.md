@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.57.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.3...firetower-v0.57.0) (2026-11-22)
+
+
+### Features
+
+* an agent can ask for a deletion, and cannot perform one ([33a1e96](https://github.com/firetower-cloud/firetower/commit/33a1e9613cf7f2d74380e19dc2e45a78ecd6c87b))
+* **desktop:** the Agent teams screen, the map, and a profile editor with no delegation on it ([e725dc6](https://github.com/firetower-cloud/firetower/commit/e725dc6c9e77049224e38e388a4f755821783af3))
+* **desktop:** the team map as a canvas, and one form for the drawer and the profile editor ([42ffd94](https://github.com/firetower-cloud/firetower/commit/42ffd94d2f335e07df4040d9e4d8c660b84c49eb))
+* **release:** promote the beta pin without typing a version ([#487](https://github.com/firetower-cloud/firetower/issues/487)) ([513173c](https://github.com/firetower-cloud/firetower/commit/513173ce058cdd3d9e129a9ca0b79af4677b2d9d))
+* schedule a team, and say how many agents a run starts ([865fdd8](https://github.com/firetower-cloud/firetower/commit/865fdd896a360b43dea9156de37476581034e8b0))
+* **server:** agent teams — delegation as a tree you can see, not a column on a profile ([a557353](https://github.com/firetower-cloud/firetower/commit/a55735338003419218dddef9c9a78655d2af1e76))
+
+
+### Bug Fixes
+
+* a child is told what it leads, so a team is as deep as it was drawn ([6991308](https://github.com/firetower-cloud/firetower/commit/6991308d51f2c648c4bd96e0332d6f0f3aa99878))
+* the deletion question belongs in the conversation, and it is one question ([694f1fe](https://github.com/firetower-cloud/firetower/commit/694f1fe7c81448c8920b0b6d326e364356271e10))
+
 ## [0.56.3](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.2...firetower-v0.56.3) (2026-11-19)
 
 
