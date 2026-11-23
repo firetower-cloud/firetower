@@ -582,6 +582,7 @@ async fn connector_client(
     .ok()??;
     Some((
         crate::connectors::Discovered {
+            name: None,
             resource: r.get("resource"),
             authorize_url: r.get("authorize_url"),
             token_url: r.get("token_url"),

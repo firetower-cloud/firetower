@@ -74,6 +74,8 @@ pub struct Discovered {
     /// What the resource says it wants. Asking for what it published is
     /// narrower than asking for everything.
     pub scopes: Option<String>,
+    /// What the server calls itself, when it says.
+    pub name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -81,6 +83,12 @@ struct ProtectedResource {
     resource: Option<String>,
     authorization_servers: Option<Vec<String>>,
     scopes_supported: Option<Vec<String>>,
+    /// RFC 9728 §3.2 — what the server calls itself.
+    ///
+    /// Measured: 2 of the 4 servers checked publish one ("Zernio MCP Server",
+    /// "Notion MCP (Beta)"), and it is better than anything derivable from a
+    /// hostname. Where it is absent the name still comes from the address.
+    resource_name: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -166,6 +174,10 @@ pub async fn discover(url: &str) -> Result<Discovered> {
             .scopes_supported
             .map(|s| s.join(" "))
             .filter(|s| !s.is_empty()),
+        name: pr
+            .resource_name
+            .map(|n| n.trim().to_string())
+            .filter(|n| !n.is_empty()),
     })
 }
 
@@ -263,6 +275,146 @@ pub async fn register(at: &str, redirect: &str) -> Result<Registered> {
         client_id: out.client_id,
         client_secret: out.client_secret,
     })
+}
+
+
+/// How big a stored mark may be.
+///
+/// An apple-touch-icon is a 180×180 PNG and runs 5–15 KB; this is room for a
+/// generous one and a refusal for anything that is really a photograph. It is
+/// inlined into a library row, so the cap is what stops one server making the
+/// whole list slow to load.
+const BIGGEST_LOGO: usize = 96 * 1024;
+
+/// The mark a server's own site serves, as bytes and a content type.
+///
+/// **No MCP server publishes a logo.** Measured against Linear, Notion, Sentry
+/// and Zernio: not one carries `logo_uri` in its protected-resource document
+/// or in its authorization-server metadata, so there is nothing in the
+/// protocol to read. What every one of them *does* serve is an
+/// `apple-touch-icon` — a square PNG meant to be shown at size, which is
+/// exactly the shape a row wants.
+///
+/// Tried in the order of how much it is worth: the touch icon, then the
+/// ordinary `icon` link, then `/favicon.ico`. **`og:image` is deliberately
+/// not in that list** — it is a wide social card, and a 1200×630 banner
+/// squeezed into a 30px square is worse than a monogram.
+///
+/// Fetched from the *authorization server's* origin rather than the MCP
+/// endpoint's: `mcp.linear.app` is a subdomain that serves no site, and
+/// `linear.app` is the brand.
+pub async fn fetch_logo(origins: &[String]) -> Option<(Vec<u8>, String)> {
+    for origin in origins {
+        if let Some(found) = logo_at(origin).await {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Every mark one origin offers, best first, and the first that downloads.
+async fn logo_at(origin: &str) -> Option<(Vec<u8>, String)> {
+    let http = client().ok()?;
+    let page = http
+        .get(origin)
+        .send()
+        .await
+        .ok()
+        .filter(|r| r.status().is_success())?
+        .text()
+        .await
+        .unwrap_or_default();
+    let page: String = page.chars().take(200_000).collect();
+
+    let mut tries: Vec<String> = Vec::new();
+    for pattern in [r#"apple-touch-icon"#, r#"icon"#] {
+        if let Some(href) = link_href(&page, pattern) {
+            tries.push(absolute(origin, &href));
+        }
+    }
+    tries.push(format!("{}/favicon.ico", origin.trim_end_matches('/')));
+
+    for at in tries {
+        let Ok(r) = http.get(&at).send().await else {
+            continue;
+        };
+        if !r.status().is_success() {
+            continue;
+        }
+        let kind = r
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("image/png")
+            .split(';')
+            .next()
+            .unwrap_or("image/png")
+            .to_string();
+        if !kind.starts_with("image/") {
+            continue;
+        }
+        let Ok(bytes) = r.bytes().await else { continue };
+        if bytes.is_empty() || bytes.len() > BIGGEST_LOGO {
+            continue;
+        }
+        return Some((bytes.to_vec(), kind));
+    }
+    None
+}
+
+/// The `href` of the first `<link rel="…pattern…">` in a page.
+///
+/// Deliberately a scan and not a parser: this reads one attribute out of a
+/// document nobody controls, and a parser is a dependency and an attack
+/// surface for something a row shows a picture from.
+fn link_href(page: &str, pattern: &str) -> Option<String> {
+    for tag in page.split('<') {
+        let lower = tag.to_ascii_lowercase();
+        if !lower.starts_with("link") {
+            continue;
+        }
+        let rel = attr(&lower, "rel")?;
+        if !rel.contains(pattern) {
+            continue;
+        }
+        // `shortcut icon` and `icon` both match "icon"; `mask-icon` is a
+        // monochrome SVG stencil and is not a logo.
+        if rel.contains("mask-icon") {
+            continue;
+        }
+        if let Some(href) = attr(tag, "href") {
+            return Some(href);
+        }
+    }
+    None
+}
+
+fn attr(tag: &str, name: &str) -> Option<String> {
+    let at = tag.find(&format!("{name}="))?;
+    let rest = &tag[at + name.len() + 1..];
+    let quote = rest.chars().next()?;
+    if quote != '"' && quote != '\'' {
+        return None;
+    }
+    let rest = &rest[1..];
+    let end = rest.find(quote)?;
+    Some(rest[..end].to_string())
+}
+
+/// A possibly-relative href, against the origin it came from.
+fn absolute(origin: &str, href: &str) -> String {
+    if href.starts_with("http://") || href.starts_with("https://") {
+        return href.to_string();
+    }
+    let base = origin.trim_end_matches('/');
+    if let Some(rest) = href.strip_prefix("//") {
+        return format!("https://{rest}");
+    }
+    if href.starts_with('/') {
+        format!("{base}{href}")
+    } else {
+        format!("{base}/{href}")
+    }
 }
 
 /// A PKCE pair. `S256` only — `plain` is in the specification and is not a
@@ -493,6 +645,7 @@ mod tests {
             token_url: "https://mcp.linear.app/token".into(),
             register_url: None,
             scopes: Some("read write".into()),
+            name: None,
         };
         let pkce = Pkce::new();
         let url = authorize_url(&d, "client-1", "http://localhost:14400/cb", "st", &pkce);

@@ -328,6 +328,7 @@ async fn client_for(
         if let Some(client_id) = r.get::<Option<String>, _>("client_id") {
             return Ok((
                 Discovered {
+                    name: None,
                     resource: r.get("resource"),
                     authorize_url: r.get("authorize_url"),
                     token_url: r.get("token_url"),
@@ -419,6 +420,12 @@ pub struct Probed {
     pub host: String,
     /// What it publishes as its scopes, when it publishes any.
     pub scopes: Option<String>,
+    /// Its own mark, as a data URI, when its site serves one.
+    ///
+    /// Inline rather than a URL: this is shown in a review before anything is
+    /// stored, and the app must not be made to fetch from somebody else's
+    /// origin to draw a row.
+    pub logo: Option<String>,
 }
 
 /// A name from an address.
@@ -440,22 +447,83 @@ fn name_from(url: &str) -> String {
         [_, second, ..] if parts.len() >= 3 => second,
         [first, ..] => first,
     };
-    let slug: String = middle
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect();
-    let slug = slug.trim_matches('-').to_string();
-    if slug.is_empty() {
+    as_name(middle)
+}
+
+/// Free text as a skill name.
+///
+/// **Not `slug_of`.** That one joins words with an underscore, because it
+/// builds the segment of a placed path; a skill name forbids underscores, so
+/// routing a typed name through it rejected every name with a space or a
+/// hyphen in it — which is most of the names somebody would type.
+fn as_name(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.extend(ch.to_lowercase());
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let out = out.trim_matches('-');
+    if out.is_empty() {
         "connector".into()
     } else {
-        slug
+        out.chars().take(64).collect::<String>().trim_matches('-').to_string()
     }
+}
+
+/// The scheme and host of a URL, with nothing after it.
+fn origin_of(url: &str) -> Option<String> {
+    let u = reqwest::Url::parse(url).ok()?;
+    Some(format!("{}://{}", u.scheme(), u.host_str()?))
+}
+
+/// Where a brand's mark is likely to be, best guess first.
+///
+/// **The authorization server is not reliably the brand's site.** Linear's
+/// issuer is `mcp.linear.app`, which serves no page at all, while the mark is
+/// one label up at `linear.app`. So each origin is also tried with its leading
+/// label dropped, which turns `mcp.linear.app` into `linear.app` and
+/// `mcp.sentry.dev` into `sentry.dev`. Two-label hosts are left alone, because
+/// dropping a label there leaves a public suffix rather than a site.
+fn brand_origins(issuer: Option<&str>, endpoint: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for from in [issuer, Some(endpoint)].into_iter().flatten() {
+        let Some(origin) = origin_of(from) else { continue };
+        for at in [origin.clone()].into_iter().chain(parent_of(&origin)) {
+            if !out.contains(&at) {
+                out.push(at);
+            }
+        }
+    }
+    out
+}
+
+/// An origin with its leading hostname label removed, when there is one to spare.
+fn parent_of(origin: &str) -> Option<String> {
+    let (scheme, host) = origin.split_once("://")?;
+    let labels: Vec<&str> = host.split('.').collect();
+    if labels.len() < 3 {
+        return None;
+    }
+    Some(format!("{scheme}://{}", labels[1..].join(".")))
+}
+
+/// A published name, as somebody would say it.
+///
+/// Measured: the two servers that publish one call themselves "Zernio MCP
+/// Server" and "Notion MCP (Beta)". A library row is already a list of MCP
+/// servers, so repeating it on every row is noise — and a release qualifier
+/// belongs to a version rather than to a name.
+fn tidy(said: &str) -> String {
+    let mut out = said.trim().to_string();
+    for tail in [" MCP Server", " MCP server", " (Beta)", " (beta)", " MCP"] {
+        if let Some(rest) = out.strip_suffix(tail) {
+            out = rest.trim().to_string();
+        }
+    }
+    if out.is_empty() { said.trim().to_string() } else { out }
 }
 
 #[utoipa::path(
@@ -484,24 +552,39 @@ pub(super) async fn probe_url(
     // a pasted address that turns out to need none is a connector that works
     // immediately, and one that does is a Connect button on the row.
     let found = connectors::discover(&url).await;
-    let (auth, scopes) = match &found {
-        Ok(d) => ("oauth".to_string(), d.scopes.clone()),
+    let (auth, scopes, said, issuer) = match &found {
+        Ok(d) => (
+            "oauth".to_string(),
+            d.scopes.clone(),
+            d.name.clone(),
+            Some(d.authorize_url.clone()),
+        ),
         // Not an error. Plenty of servers are open, and the refusal to
         // discover is itself the answer: there is nothing to authorize.
         Err(e) => {
             tracing::info!("{url} published no authorization metadata: {e:#}");
-            ("none".to_string(), None)
+            ("none".to_string(), None, None, None)
         }
     };
 
+    // The brand's own site rather than the MCP endpoint's, when they differ.
+    let logo = connectors::fetch_logo(&brand_origins(issuer.as_deref(), &url))
+        .await
+        .map(|(bytes, kind)| format!("data:{kind};base64,{}", ft_proto::encode(&bytes)));
+
     Ok(Json(Probed {
-        name: name_from(&url),
+        // What the server calls itself, when it says so. Trimmed of the two
+        // words every one of them appends, because a row already knows these
+        // are MCP servers and "Notion MCP (Beta)" is not what somebody would
+        // call it out loud.
+        name: said.map(|n| tidy(&n)).unwrap_or_else(|| name_from(&url)),
         auth,
         host: reqwest::Url::parse(&url)
             .ok()
             .and_then(|u| u.host_str().map(str::to_owned))
             .unwrap_or_default(),
         scopes,
+        logo,
     }))
 }
 
@@ -529,7 +612,7 @@ pub(super) async fn add_from_url(
 ) -> ApiResult<(StatusCode, Json<crate::skills::Skill>)> {
     let me = whoever(&principal)?;
     let url = body.url.trim().to_string();
-    let name = crate::skills::slug_of(&body.name);
+    let name = as_name(&body.name);
     crate::skills::check_name(&name).map_err(|e| ApiError::new(ErrorCode::InvalidRequest, e.0))?;
 
     let found = connectors::discover(&url).await;
@@ -555,16 +638,44 @@ pub(super) async fn add_from_url(
     let manifest = serde_json::to_string_pretty(&manifest)
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;
 
+    let mut files = vec![crate::skills::IncomingFile {
+        path: ".claude-plugin/plugin.json".into(),
+        contents: ft_proto::encode(manifest.as_bytes()),
+        executable: false,
+    }];
+
+    // **The mark ships inside the bundle**, which is where a published plugin
+    // carries one. Stored rather than linked: a row must draw without
+    // reaching somebody else's origin, and a logo that 404s later is a broken
+    // image in a library rather than a monogram.
+    let issuer = found.as_ref().ok().map(|d| d.authorize_url.clone());
+    {
+        if let Some((bytes, kind)) =
+            connectors::fetch_logo(&brand_origins(issuer.as_deref(), &url)).await
+        {
+            let ext = if kind.contains("svg") {
+                "svg"
+            } else if kind.contains("icon") || kind.contains("ico") {
+                "ico"
+            } else if kind.contains("jpeg") || kind.contains("jpg") {
+                "jpg"
+            } else {
+                "png"
+            };
+            files.push(crate::skills::IncomingFile {
+                path: format!("assets/logo.{ext}"),
+                contents: ft_proto::encode(&bytes),
+                executable: false,
+            });
+        }
+    }
+
     let new = crate::skills::NewSkill {
         name: name.clone(),
         description: description.clone(),
         frontmatter: serde_json::json!({ "name": name, "description": description }),
         body: String::new(),
-        files: vec![crate::skills::IncomingFile {
-            path: ".claude-plugin/plugin.json".into(),
-            contents: ft_proto::encode(manifest.as_bytes()),
-            executable: false,
-        }],
+        files,
         notes: None,
         kind: Some("plugin".into()),
     };
@@ -603,7 +714,7 @@ pub(super) async fn add_from_url(
 
 #[cfg(test)]
 mod tests {
-    use super::name_from;
+    use super::{as_name, brand_origins, name_from};
 
     /// A name from a hostname, and the two prefixes that are noise.
     #[test]
@@ -619,5 +730,54 @@ mod tests {
         assert_eq!(name_from("https://example.com/mcp"), "example");
         // And nothing usable at all still produces a folder name.
         assert_eq!(name_from("not a url"), "connector");
+    }
+
+    /// The name field is editable, so most of what arrives here is typed.
+    ///
+    /// This used to run through `slug_of`, which writes `_` between words —
+    /// a character a skill name forbids. So "my linear" and "my-linear" were
+    /// both refused with "a name holds lowercase letters, digits and
+    /// hyphens", which is the one thing they already were.
+    #[test]
+    fn a_typed_name_becomes_one_a_skill_can_have() {
+        assert_eq!(as_name("linear"), "linear");
+        assert_eq!(as_name("my-linear"), "my-linear");
+        assert_eq!(as_name("My Linear"), "my-linear");
+        assert_eq!(as_name("Sentry (Beta)"), "sentry-beta");
+        assert_eq!(as_name("  spaced  out  "), "spaced-out");
+        assert_eq!(as_name("--trim--me--"), "trim-me");
+        assert_eq!(as_name(""), "connector");
+        assert_eq!(as_name("!!!"), "connector");
+        assert_eq!(as_name(&"a".repeat(80)).len(), 64);
+        // Every one of these passes the rule it is checked against next.
+        for typed in ["My Linear", "Sentry (Beta)", "  spaced  out  ", "!!!"] {
+            assert!(crate::skills::check_name(&as_name(typed)).is_ok(), "{typed}");
+        }
+    }
+
+    /// Where a brand's mark is, when the issuer is not the brand's site.
+    #[test]
+    fn the_logo_is_looked_for_one_label_up_as_well() {
+        // Linear's issuer *is* `mcp.linear.app`, which serves no page at all.
+        assert_eq!(
+            brand_origins(Some("https://mcp.linear.app/authorize"), "https://mcp.linear.app/mcp"),
+            ["https://mcp.linear.app", "https://linear.app"]
+        );
+        // A two-label host has no parent worth asking: dropping a label
+        // leaves `com`.
+        assert_eq!(
+            brand_origins(None, "https://example.com/mcp"),
+            ["https://example.com"]
+        );
+        // An issuer elsewhere is tried first, and the endpoint still follows.
+        assert_eq!(
+            brand_origins(Some("https://auth.acme.io/authorize"), "https://mcp.acme.dev/mcp"),
+            [
+                "https://auth.acme.io",
+                "https://acme.io",
+                "https://mcp.acme.dev",
+                "https://acme.dev"
+            ]
+        );
     }
 }

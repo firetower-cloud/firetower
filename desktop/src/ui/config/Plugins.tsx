@@ -22,7 +22,7 @@
  * send. It is `skill_defaults` with no repository against it — the same row
  * the skills library has always written, because it is the same question.
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, FolderDown, Link2, Loader2, Plus, Puzzle, Search, Square, Terminal } from "lucide-react";
 import { Blank, Dropping, Note, Row, Section } from "~/ui/config/bits";
 import { useSkills, why } from "~/data";
@@ -64,7 +64,22 @@ function mono(name: string): string {
   return (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toLowerCase();
 }
 
+/**
+ * A bundle's own mark, or a monogram.
+ *
+ * **The logo ships in the bundle**, so this draws from bytes Firetower holds
+ * rather than from somebody else's origin — the library works on a machine
+ * with no network, and a brand that moves its favicon does not leave a broken
+ * image in a list. A monogram is the fallback, which is the rule the design
+ * has always had: Firetower keeps no table of other people's logos.
+ */
 function Mark({ of }: { of: Skill }) {
+  if (of.logo)
+    return (
+      <span className="plg" data-brand>
+        <img src={of.logo} alt="" className="h-[18px] w-[18px] rounded-[4px] object-contain" />
+      </span>
+    );
   return <span className="plg">{mono(of.name)}</span>;
 }
 
@@ -327,6 +342,13 @@ function PasteAddress({ onClose, onDone }: { onClose: () => void; onDone: () => 
 
       {found && (
         <div className="mt-3 border-t border-line-soft pt-3">
+          {found.logo && (
+            <img
+              src={found.logo}
+              alt=""
+              className="mb-3 h-8 w-8 rounded-lg object-contain"
+            />
+          )}
           <dl className="grid grid-cols-[9rem_1fr] gap-y-1.5 text-ui">
             <dt className="text-dim">It reaches</dt>
             <dd className="font-mono text-code text-bone">{found.host}</dd>
@@ -400,10 +422,39 @@ function PasteAddress({ onClose, onDone }: { onClose: () => void; onDone: () => 
  *   control rather than hidden behind a menu.
  */
 function Connected({ of }: { of: Skill }) {
-  const q = useConnectorState(of.id);
   const cache = useQueryClient();
   const [busy, setBusy] = useState(false);
+  /* **The browser is somewhere else.** A connector is authorized in a tab
+     outside this app, and nothing in that tab can tell us it finished — so
+     this watches for the answer instead of waiting to be told. Without it the
+     row sat on "Connect" until somebody navigated away and back, which reads
+     as the connection having failed.
+
+     Two triggers, because either alone leaves a case: polling while the
+     authorization is outstanding catches somebody who finishes in the
+     background, and refetching when the window comes forward catches the
+     ordinary path of approving and switching straight back. The poll stops as
+     soon as it is connected, and gives up after five minutes rather than
+     asking forever. */
+  const [awaiting, setAwaiting] = useState(false);
+  const q = useConnectorState(of.id, {
+    query: {
+      refetchOnWindowFocus: true,
+      refetchInterval: awaiting ? 2000 : false,
+    },
+  });
   const state = q.data;
+
+  useEffect(() => {
+    if (state?.connected) setAwaiting(false);
+  }, [state?.connected]);
+
+  useEffect(() => {
+    if (!awaiting) return;
+    const stop = setTimeout(() => setAwaiting(false), 5 * 60 * 1000);
+    return () => clearTimeout(stop);
+  }, [awaiting]);
+
   const refresh = () =>
     cache.invalidateQueries({ queryKey: getConnectorStateQueryKey(of.id) });
 
@@ -447,6 +498,7 @@ function Connected({ of }: { of: Skill }) {
       type="button"
       className="on"
       disabled={busy}
+      title={awaiting ? "Finish in the browser; this updates itself" : undefined}
       onClick={async () => {
         setBusy(true);
         try {
@@ -454,16 +506,20 @@ function Connected({ of }: { of: Skill }) {
           /* The person's own browser, as them. Nothing is stored until it
              comes back to the callback. */
           await openExternal(opened.authorizeUrl);
+          setAwaiting(true);
         } catch (e) {
-          /* The server's own sentence, which says more than ours would. */
           window.alert(why(e));
         } finally {
           setBusy(false);
         }
       }}
     >
-      <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-      {busy ? "Opening…" : "Connect"}
+      {awaiting ? (
+        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+      ) : (
+        <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+      )}
+      {busy ? "Opening…" : awaiting ? "Waiting…" : "Connect"}
     </button>
   );
 }

@@ -15931,6 +15931,13 @@
             "type": "string",
             "description": "What it will reach, which is the one fact worth reading before saying yes."
           },
+          "logo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Its own mark, as a data URI, when its site serves one.\n\nInline rather than a URL: this is shown in a review before anything is\nstored, and the app must not be made to fetch from somebody else's\norigin to draw a row."
+          },
           "name": {
             "type": "string",
             "description": "The name the plugin will take, derived from the address."
@@ -18273,6 +18280,13 @@
           "kind": {
             "type": "string",
             "description": "What this bundle is: `skill` or `plugin`. Decides which home it lands\nin on a worker, and which list it appears in on a screen."
+          },
+          "logo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The mark this bundle ships, as a data URI.\n\n**Inline, and from the bundle's own bytes.** A plugin carries its logo\nin its own assets, so this is read from the version rather than held\nin a table of somebody else's brands — and a row draws without\nreaching the network, which is what makes the library work on a\nmachine that has none. Absent is a monogram, which is the fallback the\ndesign has always had."
           },
           "mayShare": {
             "type": "boolean",

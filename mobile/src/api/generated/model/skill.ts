@@ -48,6 +48,18 @@ export interface Skill {
      */
   kind: string;
   /**
+     * The mark this bundle ships, as a data URI.
+     *
+     * **Inline, and from the bundle's own bytes.** A plugin carries its logo
+     * in its own assets, so this is read from the version rather than held
+     * in a table of somebody else's brands — and a row draws without
+     * reaching the network, which is what makes the library work on a
+     * machine that has none. Absent is a monogram, which is the fallback the
+     * design has always had.
+     * @nullable
+     */
+  logo?: string | null;
+  /**
      * Whether this person may move it to another directory or delete it.
      * The same rule as `api::access::may_share`, answered per row so a list
      * can say up front which skills it can act on.

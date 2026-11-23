@@ -25,6 +25,7 @@ export const AddFromUrlResponse = zod.object({
   "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
   "kind": zod.string().describe('What this bundle is: `skill` or `plugin`. Decides which home it lands\nin on a worker, and which list it appears in on a screen.'),
+  "logo": zod.string().nullish().describe('The mark this bundle ships, as a data URI.\n\n**Inline, and from the bundle\'s own bytes.** A plugin carries its logo\nin its own assets, so this is read from the version rather than held\nin a table of somebody else\'s brands — and a row draws without\nreaching the network, which is what makes the library work on a\nmachine that has none. Absent is a monogram, which is the fallback the\ndesign has always had.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
   "nCommands": zod.int(),
@@ -51,6 +52,7 @@ export const ProbeUrlBody = zod.object({
 export const ProbeUrlResponse = zod.object({
   "auth": zod.string().describe('`oauth` or `none`, as the server itself answered.'),
   "host": zod.string().describe('What it will reach, which is the one fact worth reading before saying yes.'),
+  "logo": zod.string().nullish().describe('Its own mark, as a data URI, when its site serves one.\n\nInline rather than a URL: this is shown in a review before anything is\nstored, and the app must not be made to fetch from somebody else\'s\norigin to draw a row.'),
   "name": zod.string().describe('The name the plugin will take, derived from the address.'),
   "scopes": zod.string().nullish().describe('What it publishes as its scopes, when it publishes any.')
 }).describe('What the server turned out to be, before anybody commits to it.')

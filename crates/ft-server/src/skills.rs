@@ -141,6 +141,15 @@ pub struct Skill {
     pub n_skills: i64,
     pub n_commands: i64,
     pub has_connector: bool,
+    /// The mark this bundle ships, as a data URI.
+    ///
+    /// **Inline, and from the bundle's own bytes.** A plugin carries its logo
+    /// in its own assets, so this is read from the version rather than held
+    /// in a table of somebody else's brands — and a row draws without
+    /// reaching the network, which is what makes the library work on a
+    /// machine that has none. Absent is a monogram, which is the fallback the
+    /// design has always had.
+    pub logo: Option<String>,
     /// Whether this person may make a version of it or rename it.
     pub may_write: bool,
     /// Whether this person may move it to another directory or delete it.
@@ -2092,6 +2101,10 @@ const COLUMNS: &str = "k.id, k.path::text AS path, k.name, k.slug, k.description
      (SELECT count(*) FROM skill_files f \
        WHERE f.version_id = v.id AND f.path LIKE 'commands/%') AS n_commands, \
      EXISTS (SELECT 1 FROM connectors c WHERE c.skill_id = k.id) AS has_connector, \
+     (SELECT b.bytes FROM skill_files f JOIN blobs b ON b.hash = f.hash \
+       WHERE f.version_id = v.id AND f.path LIKE 'assets/logo.%' LIMIT 1) AS logo, \
+     (SELECT f.path FROM skill_files f \
+       WHERE f.version_id = v.id AND f.path LIKE 'assets/logo.%' LIMIT 1) AS logo_path, \
      (k.path <@ 'd.firetower'::ltree) AS builtin, \
      (k.held_version_id IS NOT NULL) AS held, \
      u.name AS author";
@@ -3949,6 +3962,20 @@ fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
         n_skills: r.try_get("n_skills").unwrap_or(0),
         n_commands: r.try_get("n_commands").unwrap_or(0),
         has_connector: r.try_get("has_connector").unwrap_or(false),
+        logo: r
+            .try_get::<Option<Vec<u8>>, _>("logo")
+            .ok()
+            .flatten()
+            .map(|bytes| {
+                let path: String = r.try_get("logo_path").unwrap_or_default();
+                let kind = match path.rsplit('.').next().unwrap_or("png") {
+                    "svg" => "image/svg+xml",
+                    "ico" => "image/x-icon",
+                    "jpg" | "jpeg" => "image/jpeg",
+                    _ => "image/png",
+                };
+                format!("data:{kind};base64,{}", ft_proto::encode(&bytes))
+            }),
         path: ft_core::ResourcePath::from_stored(r.get::<String, _>("path")).to_string(),
         slug: r.get("slug"),
         version: r.try_get("version").unwrap_or(0),
