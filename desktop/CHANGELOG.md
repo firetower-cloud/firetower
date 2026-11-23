@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.33.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.32.0...desktop-v0.33.0) (2026-11-23)
+
+
+### Features
+
+* **desktop:** a way off the old delegation, from the profile that has it ([25e0038](https://github.com/firetower-cloud/firetower/commit/25e0038417ee20ef0c0e311a2ba3928975d2df1a))
+* **desktop:** the old delegation is a warning, at the top of the form ([f4d6b5c](https://github.com/firetower-cloud/firetower/commit/f4d6b5cc15e07f29b7a1b2a36be06fddcee88824))
+
+
+### Bug Fixes
+
+* **desktop:** shorter labels on the old-reach notice, and ask what the team is called ([78214c2](https://github.com/firetower-cloud/firetower/commit/78214c2829887a6bc2cc82ca3a423a907eb403f9))
+
 ## [0.32.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.31.1...desktop-v0.32.0) (2026-11-22)
 
 
