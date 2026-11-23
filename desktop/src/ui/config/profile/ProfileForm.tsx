@@ -52,10 +52,11 @@ import {
   ShieldCheck,
   User,
   UserRound,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
-import { Icon } from "~/components/ui";
+import { Icon, IconButton } from "~/components/ui";
 import { Pop } from "~/ui/Pop";
 import { WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
@@ -920,6 +921,12 @@ function OldReach({
 }) {
   const [busy, setBusy] = useState<"team" | "clear" | null>(null);
   const [trouble, setTrouble] = useState<string | null>(null);
+  /* The team's name is asked for rather than taken from the profile. They
+     are different things — a profile is one agent and a team is a group —
+     and a team called the same as its lead reads as a duplicate in the
+     list. Prefilled with the profile's name, because that is the likeliest
+     answer and it makes the ask one keystroke to accept. */
+  const [naming, setNaming] = useState<string | null>(null);
   const cache = useQueryClient();
   const confirm = useConfirm();
 
@@ -930,7 +937,6 @@ function OldReach({
      column already does. */
   const scope = role.delegateScope ?? [];
   const reaches = scope.length ? all.filter((r) => scope.includes(r.id)) : all;
-  const unbounded = scope.length === 0;
 
   const clear = { canDelegate: false, delegateScope: [] as string[] };
   /* Written straight through rather than left for Save. The reach is not a
@@ -959,14 +965,15 @@ function OldReach({
     onCleared(clear);
   };
 
-  const makeTeam = async () => {
+  const makeTeam = async (teamName: string) => {
+    setNaming(null);
     setBusy("team");
     setTrouble(null);
     try {
       let made: { id: string } | null = null;
       await write(async () => {
         made = await createAgentTeam({
-          name: role.name,
+          name: teamName.trim(),
           positions: [
             { key: "lead", parent: null, profile: role.id, extraInstructions: "" },
             ...reaches.map((r, i) => ({
@@ -991,7 +998,7 @@ function OldReach({
   const justClear = async () => {
     const ok = await confirm({
       title: "Remove the old delegation?",
-      body: `${role.name} stops being able to hand work to ${reaches.length} profile${reaches.length === 1 ? "" : "s"}. The list is not kept — put it in a team instead if you want to keep it.`,
+      body: `${role.name} stops being able to hand work to ${reaches.length} profile${reaches.length === 1 ? "" : "s"}. The list is not kept.`,
       action: "Remove it",
       tone: "danger",
     });
@@ -1009,14 +1016,11 @@ function OldReach({
 
   return (
     <Group label="Delegation">
+      {/* One line. The label says what this is, the list says what it
+          holds, and the buttons say what can be done about it. A paragraph
+          between them was repeating all three. */}
       <WhereTo className="aside">
-        <b>Delegation moved to teams.</b> This profile still hands work to{" "}
-        {unbounded ? (
-          <>every profile you can see</>
-        ) : (
-          <>{reaches.length === 1 ? "one profile" : `${reaches.length} profiles`}</>
-        )}
-        , from before teams existed. It still works, and nothing writes it any more.
+        <b>From before teams existed.</b> It still works, and nothing writes it any more.
       </WhereTo>
 
       {/* **Named, not counted.** The count was the whole of what the notice
@@ -1041,15 +1045,98 @@ function OldReach({
       {trouble && <p className="bad">{trouble}</p>}
 
       <div className="pickrow mt-1">
-        <button type="button" onClick={makeTeam} disabled={!!busy} className="btn primary">
-          {busy === "team"
-            ? "Making…"
-            : `Make this a team of ${reaches.length + 1}`}
+        <button
+          type="button"
+          onClick={() => setNaming(role.name)}
+          disabled={!!busy}
+          className="btn primary"
+        >
+          {busy === "team" ? "Moving…" : "Move to a team (recommended)"}
         </button>
         <button type="button" onClick={justClear} disabled={!!busy} className="btn quiet">
-          {busy === "clear" ? "Removing…" : "Just remove it"}
+          {busy === "clear" ? "Removing…" : "Just remove old delegation"}
         </button>
       </div>
+
+      {naming !== null && (
+        <NameTheTeam
+          value={naming}
+          under={reaches.length}
+          onChange={setNaming}
+          onClose={() => setNaming(null)}
+          onMake={() => makeTeam(naming)}
+        />
+      )}
     </Group>
+  );
+}
+
+/** What the team is called, before it is made. */
+function NameTheTeam({
+  value,
+  under,
+  onChange,
+  onClose,
+  onMake,
+}: {
+  value: string;
+  /** How many go under the lead, for the foot to say what is about to exist. */
+  under: number;
+  onChange: (v: string) => void;
+  onClose: () => void;
+  onMake: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[70] grid place-items-start justify-center bg-scrim pt-[10vh] backdrop-blur-[2px]"
+      onMouseDown={onClose}
+    >
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal
+        aria-label="Name the team"
+        className="flex w-[26rem] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
+      >
+        <div className="flex items-start gap-2 border-b border-line px-4 py-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-ui text-bone">Move to a team</span>
+            <span className="block truncate text-micro text-mute">
+              What it is called in the list
+            </span>
+          </span>
+          <IconButton of={X} label="Close" onClick={onClose} />
+        </div>
+
+        <div className="dbody scroll-slim">
+          <div className="form">
+            <label className="fld">
+              <span>Name</span>
+              <span className="box">
+                <input
+                  value={value}
+                  onChange={(e) => onChange(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && value.trim() && onMake()}
+                  placeholder="Product"
+                  autoFocus
+                />
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div className="sh-foot">
+          <span className="where">
+            {under} profile{under === 1 ? "" : "s"} under the lead.
+          </span>
+          <button onClick={onClose} className="btn quiet">
+            Cancel
+          </button>
+          <button onClick={onMake} disabled={!value.trim()} className="btn primary disabled:opacity-50">
+            Make team
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
