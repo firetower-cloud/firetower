@@ -67,7 +67,13 @@ import { quota, usable } from "~/api/accounts";
 import { machineLabel, machines, stateLabel } from "~/api/environments";
 import { canRun } from "~/components/WhereItRuns";
 import { useAgentControls } from "~/api/generated/agents/agents";
-import { getListRolesQueryKey } from "~/api/generated/roles/roles";
+import { getListRolesQueryKey, updateRole, useListRoles } from "~/api/generated/roles/roles";
+import {
+  createAgentTeam,
+  getListAgentTeamsQueryKey,
+} from "~/api/generated/agent-teams/agent-teams";
+import { useConfirm } from "~/ui/Confirm";
+import { why } from "~/data";
 import { useQueryClient } from "@tanstack/react-query";
 import { pinnedAccountFits } from "~/ui/config/Roles";
 import type { Agent, Control, ControlKind, NewRole, Role } from "~/api/generated/model";
@@ -336,6 +342,9 @@ export function ProfileForm({
      nobody is how a deprecation becomes furniture. */
   const oldReach = !!role?.canDelegate;
   const cache = useQueryClient();
+  // The profiles the old reach names, so the notice can list them rather
+  // than count them.
+  const roles = useListRoles();
 
   // The agents to pin to are the ones Firetower can actually drive, read from
   // the server rather than listed here — so a fourth or a tenth agent turns up
@@ -783,28 +792,11 @@ export function ProfileForm({
             somebody looking at this profile has to be able to find out why it
             still delegates. */}
         {oldReach && (
-          <Group
-            label="Delegation"
-            hint="This profile carries the old per-profile reach. It is still read, and nothing writes it any more."
-          >
-            <WhereTo className="aside">
-              <b>Delegation moved to teams.</b> This profile still carries{" "}
-              {role?.delegateScope?.length
-                ? `a list of ${role.delegateScope.length} profile${role.delegateScope.length === 1 ? "" : "s"} it may hand work to`
-                : "reach over every profile you can see"}
-              , from before teams existed. It goes on working until the old column is dropped, and
-              saving this profile will not change it.{" "}
-              <button
-                type="button"
-                className="underline underline-offset-2"
-                onClick={() => navigate("/configuration/agent-teams")}
-              >
-                Make a team with {role?.name ?? "this profile"} as its lead
-              </button>{" "}
-              and start that instead — a team says who is under whom, and two teams can hold the
-              same profile with different reports in each.
-            </WhereTo>
-          </Group>
+          <OldReach
+            role={role!}
+            all={(roles.data ?? []).filter((r) => r.id !== role!.id)}
+            onCleared={(next) => setDraft((d) => ({ ...d, ...next }))}
+          />
         )}
 
         {/* **Drawn for every profile now**, because any profile can lead a
@@ -889,5 +881,175 @@ export function ProfileForm({
           </Group>
         )}
       </div>
+  );
+}
+
+/**
+ * A profile that still carries the old per-profile reach, and the way off it.
+ *
+ * **The notice was a dead end.** It said this profile reaches four others,
+ * did not say which four, and offered a link to a blank Agent teams screen —
+ * so the only way to act on it was to remember the list and rebuild it by
+ * hand. A message that names a problem and withholds both the detail and the
+ * fix is worse than no message: it is the same work plus an interruption.
+ *
+ * So it lists them, and it does the work:
+ *
+ * - **Make this a team** writes the team the notice was describing — this
+ *   profile as the lead, everything it reaches underneath — and clears the
+ *   old reach in the same press. Nothing is lost and nothing is left behind
+ *   to be deprecated a second time.
+ * - **Just remove it** is for a reach somebody no longer wants. It asks
+ *   first, because the list is not recoverable once it is gone.
+ *
+ * This is what makes dropping the columns possible later. They are still
+ * *read* — a profile carrying them still delegates by them — so dropping
+ * them today would take a working Manager's reach away with no warning. A
+ * column can only be dropped once the people holding it have somewhere to
+ * go, and this is that somewhere.
+ */
+function OldReach({
+  role,
+  all,
+  onCleared,
+}: {
+  role: Role;
+  /** Every other profile, for naming the ids the reach holds. */
+  all: Role[];
+  onCleared: (next: { canDelegate: boolean; delegateScope: string[] }) => void;
+}) {
+  const [busy, setBusy] = useState<"team" | "clear" | null>(null);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  const cache = useQueryClient();
+  const confirm = useConfirm();
+
+  /* **What it actually reaches, resolved now.** An empty scope meant "any
+     profile the owner can see" — the default before scope existed — so the
+     list is every other profile rather than nothing. An id whose profile has
+     since been deleted simply drops out, which is what every read of this
+     column already does. */
+  const scope = role.delegateScope ?? [];
+  const reaches = scope.length ? all.filter((r) => scope.includes(r.id)) : all;
+  const unbounded = scope.length === 0;
+
+  const clear = { canDelegate: false, delegateScope: [] as string[] };
+  /* Written straight through rather than left for Save. The reach is not a
+     field of this form — the form has no control for it and never sends it
+     changed — so leaving it in the draft would mean the button appeared to
+     do nothing until somebody pressed Save for an unrelated reason. */
+  const write = async (extra?: () => Promise<void>) => {
+    await updateRole(role.id, {
+      name: role.name,
+      does: role.does,
+      instructions: role.instructions,
+      placement: role.placement,
+      agent: role.agent,
+      machine: role.machine,
+      account: role.account,
+      settings: role.settings,
+      onUsageLimit: role.onUsageLimit,
+      onChildLimit: role.onChildLimit,
+      includeAlwaysOn: role.includeAlwaysOn,
+      includeRepoDefaults: role.includeRepoDefaults,
+      skillScope: role.skillScope ?? [],
+      ...clear,
+    });
+    await extra?.();
+    await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+    onCleared(clear);
+  };
+
+  const makeTeam = async () => {
+    setBusy("team");
+    setTrouble(null);
+    try {
+      let made: { id: string } | null = null;
+      await write(async () => {
+        made = await createAgentTeam({
+          name: role.name,
+          positions: [
+            { key: "lead", parent: null, profile: role.id, extraInstructions: "" },
+            ...reaches.map((r, i) => ({
+              key: `m${i}`,
+              parent: "lead",
+              profile: r.id,
+              extraInstructions: "",
+            })),
+          ],
+        });
+        await cache.invalidateQueries({ queryKey: getListAgentTeamsQueryKey() });
+      });
+      // Onto the map, which is the thing that now answers the question this
+      // notice was about.
+      if (made) navigate(`/configuration/agent-teams/${(made as { id: string }).id}`);
+    } catch (e) {
+      setTrouble(why(e));
+      setBusy(null);
+    }
+  };
+
+  const justClear = async () => {
+    const ok = await confirm({
+      title: "Remove the old delegation?",
+      body: `${role.name} stops being able to hand work to ${reaches.length} profile${reaches.length === 1 ? "" : "s"}. The list is not kept — put it in a team instead if you want to keep it.`,
+      action: "Remove it",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setBusy("clear");
+    setTrouble(null);
+    try {
+      await write();
+    } catch (e) {
+      setTrouble(why(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Group label="Delegation">
+      <WhereTo className="aside">
+        <b>Delegation moved to teams.</b> This profile still hands work to{" "}
+        {unbounded ? (
+          <>every profile you can see</>
+        ) : (
+          <>{reaches.length === 1 ? "one profile" : `${reaches.length} profiles`}</>
+        )}
+        , from before teams existed. It still works, and nothing writes it any more.
+      </WhereTo>
+
+      {/* **Named, not counted.** The count was the whole of what the notice
+          said, and a count is not something anybody can act on. */}
+      {reaches.length > 0 && (
+        <div className="kidlist mt-2.5">
+          {reaches.map((r) => (
+            <span key={r.id} className="kidrow">
+              <span className="g">
+                {r.agent ? (
+                  <AgentMark agent={r.agent as Agent} size={14} />
+                ) : (
+                  <CircleDashed className="h-3.5 w-3.5" strokeWidth={1.75} />
+                )}
+              </span>
+              <span className="n">{r.name}</span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {trouble && <p className="bad">{trouble}</p>}
+
+      <div className="pickrow mt-1">
+        <button type="button" onClick={makeTeam} disabled={!!busy} className="btn primary">
+          {busy === "team"
+            ? "Making…"
+            : `Make this a team of ${reaches.length + 1}`}
+        </button>
+        <button type="button" onClick={justClear} disabled={!!busy} className="btn quiet">
+          {busy === "clear" ? "Removing…" : "Just remove it"}
+        </button>
+      </div>
+    </Group>
   );
 }

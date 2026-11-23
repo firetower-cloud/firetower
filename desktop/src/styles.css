@@ -7213,6 +7213,44 @@ html:not([data-platform="macos"]) {
     color: var(--color-dim);
   }
 
+  /* A read-only list of profiles, in the row shape the rest of the app
+     reads lists in. **Removed once and brought back**: it went when the
+     drawer stopped listing what a position hands work to, and the profile
+     editor's old-reach notice wants exactly the same thing — a mark and a
+     name per row. */
+  .kidlist {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .kidrow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 34px;
+    padding: 0 11px;
+    border-radius: 10px;
+    background: var(--color-overlay);
+    font-size: 0.90625rem;
+    color: var(--color-text);
+  }
+  [data-theme="light"] .kidrow {
+    background: var(--color-raise);
+  }
+  .kidrow .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .kidrow .n {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .nobody {
     font-size: 0.90625rem;
     color: var(--color-mute);
