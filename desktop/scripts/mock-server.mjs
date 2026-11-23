@@ -21,14 +21,19 @@ const ORG = { id: "o_1", name: "Acme" };
    panel filed a whole fleet under "Shared with you". */
 const USER = { id: "u_1", orgId: "o_1", username: "kevin", slug: "kevin", email: "kevin@acme.co", role: "admin", mustChangePassword: false };
 
+/* `path` is required on `Repo` and was on none of these, so `where()`
+   answered the empty string and `mayMove` answered false for every
+   repository here — the filing chip was blank and *Move* was never
+   offered. Two of them are a directory's, which is the distinction the
+   chip exists to draw. */
 const REPOS = [
-  { id: "r_web", slug: "acme/web", remote: "git@github.com:acme/web.git", defaultBranch: "main", env: [] },
-  { id: "r_api", slug: "acme/api", remote: "git@github.com:acme/api.git", defaultBranch: "main", env: [] },
-  { id: "r_infra", slug: "acme/infra", remote: "git@github.com:acme/infra.git", defaultBranch: "main", env: [] },
-  { id: "r_ds", slug: "acme/design-system", remote: "git@github.com:acme/design-system.git", defaultBranch: "main", env: [] },
-  { id: "r_docs", slug: "acme/docs", remote: "git@github.com:acme/docs.git", defaultBranch: "trunk", env: [] },
-  { id: "r_mobile", slug: "acme/mobile", remote: "git@github.com:acme/mobile.git", defaultBranch: "main", env: [] },
-  { id: "r_jobs", slug: "acme/jobs", remote: "git@github.com:acme/jobs.git", defaultBranch: "main", env: [] },
+  { id: "r_web", slug: "acme/web", path: "u/kevin", remote: "git@github.com:acme/web.git", defaultBranch: "main", env: [] },
+  { id: "r_api", slug: "acme/api", path: "u/kevin", remote: "git@github.com:acme/api.git", defaultBranch: "main", env: [] },
+  { id: "r_infra", slug: "acme/infra", path: "d/platform", remote: "git@github.com:acme/infra.git", defaultBranch: "main", env: [] },
+  { id: "r_ds", slug: "acme/design-system", path: "d/design", remote: "git@github.com:acme/design-system.git", defaultBranch: "main", env: [] },
+  { id: "r_docs", slug: "acme/docs", path: "u/kevin", remote: "git@github.com:acme/docs.git", defaultBranch: "trunk", env: [] },
+  { id: "r_mobile", slug: "acme/mobile", path: "u/kevin", remote: "git@github.com:acme/mobile.git", defaultBranch: "main", env: [] },
+  { id: "r_jobs", slug: "acme/jobs", path: "u/kevin", remote: "git@github.com:acme/jobs.git", defaultBranch: "main", env: [] },
 ];
 
 const BRANCH = "agent/auth-refactor";
@@ -89,8 +94,13 @@ const session = () => ({
   branch: BRANCH,
   repo: checkouts[0]?.slug ?? null,
   checkouts,
+  path: "u/kevin",
   steps: ["Fetch", "Worktree", "Workspace", "Setup", "Launch"],
-  usage: { cpu: 1.4, memoryMb: 940 },
+  /* All four of `WorkspaceUsage`, not the two a meter happens to draw
+     first: `memoryPeakMb` is the number that goes beside a ceiling, and
+     `oomKills` is the one that says a workspace was killed rather than
+     merely busy. Both were missing, so neither could be drawn here. */
+  usage: { cpu: 1.4, memoryMb: 940, memoryPeakMb: 1180, memoryMaxMb: 4096, oomKills: 0 },
   note: null,
   pullRequest: null,
   proposedTitle: null,
@@ -109,6 +119,13 @@ const HOSTS = [
     id: "localhost",
     name: "localhost",
     state: "Online",
+    /* `path` is required on `Host`; these two are required on the
+       `HostTarget` the Updates screen maps every host into, and this row
+       was the only one without them — so `/api/v1/updates` answered a
+       shape the Updates screen was not generated against. */
+    path: "u/kevin",
+    drained: false,
+    reconnecting: false,
     compute: { type: "Local" },
     cpus: 8,
     memoryMb: 16384,
@@ -119,6 +136,10 @@ const HOSTS = [
     id: "h_1",
     name: "this Mac",
     state: "Online",
+    /* A directory's machine, which is what the items list below files it
+       as — and what makes the filing chip say something other than
+       "yours" on at least one row. */
+    path: "d/platform",
     /* **A machine somebody added, over ssh**, which is the only kind there
        is now. It was `Local` here, so after the retirement every picker read
        the fixture's one real machine as a retired one — which would have
@@ -148,6 +169,7 @@ const LONG_HOSTS = [
     id: "h_long",
     name: "Mac mini office",
     state: "Online",
+    path: "u/kevin",
     compute: { type: "Server", host: "100.113.135.95", user: "kevinpiacentini", port: 22 },
     cpus: 10,
     memoryMb: 32768,
@@ -165,6 +187,13 @@ const LONG_HOSTS = [
    against 2.1.285 published, which is a host that has quietly been behind
    since the day it was added. Codex is left current, so both states can be
    looked at on one screen. */
+/* `signsInWithACode` is required by `AgentView` and was on none of these.
+   `ConnectAccount` reads it as the whole condition for offering a browser
+   sign-in — `const device = agent.signsInWithACode` — so against this
+   fixture every agent offered the paste-a-token form and nothing else, on
+   the three that have no token command at all. It is
+   `Codex | KimiCode | CursorAgent` and nothing else
+   (`ft_core::Agent::signs_in_with_a_code`). */
 const AGENTS = [
   {
     kind: "ClaudeCode",
@@ -173,6 +202,7 @@ const AGENTS = [
     supported: true,
     needsCredential: true,
     credentialSet: true,
+    signsInWithACode: false,
     latestVersion: "2.1.285",
     hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "2.1.273 (Claude Code)", behind: true, mayUpdate: true }],
   },
@@ -183,6 +213,7 @@ const AGENTS = [
     supported: true,
     needsCredential: true,
     credentialSet: true,
+    signsInWithACode: true,
     latestVersion: "0.159.2",
     hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "0.159.2", behind: false, mayUpdate: true }],
   },
@@ -198,6 +229,7 @@ const AGENTS = [
     supported: true,
     needsCredential: true,
     credentialSet: true,
+    signsInWithACode: true,
     latestVersion: "1.4.0",
     hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "1.4.0", behind: false, mayUpdate: true }],
   },
@@ -208,6 +240,7 @@ const AGENTS = [
     supported: true,
     needsCredential: true,
     credentialSet: true,
+    signsInWithACode: true,
     latestVersion: "0.8.1",
     hosts: [{ hostId: "h_1", hostName: "this Mac", installed: true, coveredByToken: true, loggedIn: true, account: "kevin@acme.com", version: "0.8.1", behind: false, mayUpdate: true }],
   },
@@ -320,19 +353,58 @@ function poster(look) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400"><rect width="640" height="400" fill="#fff"/>${body}</svg>`;
 }
 
+/**
+ * The subscriptions a session can be started on.
+ *
+ * **`connected`, and nothing else will do.** Both of these said `"ready"`,
+ * which is a word no part of this product uses: `agent_accounts.state` is
+ * `pending` while a credential is being taken and `connected` once it is
+ * (`crates/ft-server/src/api/accounts.rs`), and `usable()` — byte-identical
+ * in `mobile/src/api/accounts.ts` and `desktop/src/api/accounts.ts` — is
+ * `enabled && state === "connected" && credentialSet`. So every account the
+ * mock served was unusable, and the composer correctly refused to start
+ * anything: on the phone, on the desk, and in the old New workspace dialog
+ * at once. The desk's own fixture in `account-switch.test.tsx` has said
+ * `connected` all along, which is how the two drifted apart unseen.
+ *
+ * `mode` is `Subscription`, capitalised, because the column holds the
+ * variant name — `format!("{:?}", req.mode)` — and `AccountSwitcher` asks
+ * `a.mode === "Subscription"` before it recommends one. Lower-cased, the
+ * recommendation never fired and the sheet offered nothing in bold.
+ *
+ * `path` is required by the contract and was absent, which is the quieter
+ * half of the same row: `mayMove` splits a path to decide whether to offer
+ * *Move* at all, so every account read as something nobody may file.
+ */
 const ACCOUNTS = [
-  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
-  { id: "a_2", kind: "Codex", name: "Acme · Plus", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
+  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "Subscription", isDefault: true, enabled: true, state: "connected", revision: 1, credentialSet: true, identity: "kevin@acme.com", path: "u/kevin", limits: [] },
+  { id: "a_2", kind: "Codex", name: "Acme · Plus", mode: "Subscription", isDefault: true, enabled: true, state: "connected", revision: 1, credentialSet: true, identity: "kevin@acme.com", path: "u/kevin", limits: [] },
 ];
 
+/** A window that has gone, as the agent reports one: see the `limit-hit` scene. */
+const SPENT = {
+  scope: "seven_day",
+  status: "rejected",
+  usedPercent: 100,
+  observedAt: minutesAgo(4),
+  resetsAt: Math.floor(Date.now() / 1000) + 3 * 3600,
+};
+
+/* **`AssistantText` and `UserText`, which are two of the five `StreamKind`
+   has.** Both of these said `"Content"`, a value no agent reports and no
+   client names: `conversation.ts` asks whether a delta is `ToolOutput` or
+   `ToolInput` and treats everything else as the item's text, so this
+   rendered by falling off the end of a chain rather than by matching it.
+   The desk's own `conversation.test.ts` has used `AssistantText` and
+   `UserText` since it was written. */
 const say = (item, text) => [
   { lineNo: 0, type: "ItemStarted", item, kind: "AssistantMessage", title: null, task: null },
-  { lineNo: 0, type: "ContentDelta", item, stream: "Content", delta: text },
+  { lineNo: 0, type: "ContentDelta", item, stream: "AssistantText", delta: text },
   { lineNo: 0, type: "ItemCompleted", item, status: "Completed" },
 ];
 const asked = (item, text) => [
   { lineNo: 0, type: "ItemStarted", item, kind: "UserMessage", title: null, task: null },
-  { lineNo: 0, type: "ContentDelta", item, stream: "Content", delta: text },
+  { lineNo: 0, type: "ContentDelta", item, stream: "UserText", delta: text },
   { lineNo: 0, type: "ItemCompleted", item, status: "Completed" },
 ];
 
@@ -501,8 +573,14 @@ const CODEX_DONE = JSON.parse(
   readFileSync(new URL("./codex-events-done.json", import.meta.url), "utf8"),
 );
 
+/* `firstLine` and `hasMore` are required beside `lastLine` and were both
+   absent — the pair a client reads to decide whether there is more
+   transcript above, which against this fixture was `undefined` and drew as
+   "no". */
 const conversation = () => ({
   lastLine: 42,
+  firstLine: 0,
+  hasMore: false,
   events:
     /* `scroll-idle`, `scroll-working`, `scroll-asking` — see `scrolling`. */
     scene.startsWith("scroll-")
@@ -666,10 +744,15 @@ const server = createServer(async (req, res) => {
 
   const items_of = /^\/api\/v1\/directories\/([^/]+)\/items$/.exec(path);
   if (items_of) {
+    /* `machine`, not `host`: `FiledKind` is
+       `workspace | machine | agentAccount | secret | skill | artifact |
+       role | repository`, and a row whose kind is outside it draws no mark
+       and no second line. `path` is required on every one of them and was
+       on none. */
     return json(res, [
-      { kind: "skill", id: "sk_6", name: "skill-creator" },
-      { kind: "secret", id: "se_3", name: "STAGING_DEPLOY_TOKEN" },
-      { kind: "host", id: "h_1", name: "this Mac" },
+      { kind: "skill", id: "sk_6", name: "skill-creator", path: "d/firetower", detail: "built in", ownerName: null },
+      { kind: "secret", id: "se_3", name: "STAGING_DEPLOY_TOKEN", path: "d/platform", detail: "d/platform", ownerName: "kevin" },
+      { kind: "machine", id: "h_1", name: "this Mac", path: "d/platform", detail: "ubuntu@10.4.0.21", ownerName: null },
     ]);
   }
 
@@ -691,6 +774,15 @@ const server = createServer(async (req, res) => {
         ? `.firetower/artifacts/${found.slug}/index.html`
         : `.firetower/attachments/${found.slug}-v${found.version}.${FILES_IN[found.id] > 1 ? "zip" : "html"}`;
     return json(res, { path: at, slug: found.slug, title: found.title, version: found.version });
+  }
+
+  /* The other half of the folder list above: `Workbench` publishes every
+     folder it has not seen and records the fingerprint **on success**, so a
+     path that does not answer is retried every three seconds for as long as
+     a workspace is open. Answered here with the artifact that folder is, as
+     `publish_artifact` does. */
+  if (req.method === "POST" && /^\/api\/v1\/sessions\/[^/]+\/artifacts$/.test(path)) {
+    return json(res, ARTIFACTS[0], 201);
   }
 
   const poster_of = /^\/api\/v1\/artifacts\/([^/]+)\/poster$/.exec(path);
@@ -747,7 +839,10 @@ const server = createServer(async (req, res) => {
     if (scene === "empty" || scene === "bare") return [];
     const working = [
       other({ id: "s_2", workspaceId: "w_2", number: 4, name: "Poke at the deploy script", status: "Working", repo: null, branch: null, createdAt: minutesAgo(8) }),
-      other({ id: "s_3", workspaceId: "w_3", number: 5, name: "Reconcile the webhook retries", status: "Working", agent: "Cursor", repo: "acme/api", branch: "fix/webhook-retry", createdAt: minutesAgo(120), path: "u/ana" }),
+      /* `CursorAgent`, which is the variant name. `Cursor` is outside
+         `Agent` altogether, so every screen that marks a row by its engine
+         had one row it could not mark. */
+      other({ id: "s_3", workspaceId: "w_3", number: 5, name: "Reconcile the webhook retries", status: "Working", agent: "CursorAgent", repo: "acme/api", branch: "fix/webhook-retry", createdAt: minutesAgo(120), path: "u/ana" }),
       other({ id: "s_4", workspaceId: "w_4", number: 6, name: "Backfill the invoice index", status: "Working", agent: "Codex", repo: "acme/jobs", branch: "chore/invoice-index", createdAt: minutesAgo(180) }),
       other({ id: "s_5", workspaceId: "w_5", number: 7, name: "Composer context meter", status: "Ready", repo: "acme/web", branch: "feat/context-meter", createdAt: minutesAgo(1440), path: "u/ana" }),
     ];
@@ -759,7 +854,43 @@ const server = createServer(async (req, res) => {
         session(),
         other({ id: "s_k1", workspaceId: "w_1", parentId: "s_1", number: 2, name: "Quota band thresholds", title: "Quota band thresholds", status: "NeedsYou", createdAt: minutesAgo(4), spawnReason: "decide whether a plan with no soft limit shows the band", note: "Should a plan with no soft limit show the band at all?" }),
         other({ id: "s_k2", workspaceId: "w_1", parentId: "s_1", number: 3, name: "Backfill the invoice index", title: "Backfill the invoice index", status: "Working", agent: "Codex", createdAt: minutesAgo(9), spawnReason: "writing the migration" }),
-        other({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", number: 4, name: "Token audit", title: "Token audit", status: "HandedBack", agent: "Cursor", createdAt: minutesAgo(62), spawnReason: "audit the token store" }),
+        other({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", number: 4, name: "Token audit", title: "Token audit", status: "HandedBack", agent: "CursorAgent", createdAt: minutesAgo(62), spawnReason: "audit the token store" }),
+      ];
+    }
+    /* **A team whose children have checkouts of their own**, which is the
+       case no scene here could produce and the one a display bug shipped
+       in.
+
+       A subagent started in the manager's own workspace carries the
+       *workspace's* name, so the roster reads its `title` — and a title
+       never carries a prefix. A child given a workspace of its own is
+       named by the server: `delegate.rs` composes
+       `format!("{} / {what}", lead.name)`, so its row reads
+       `auth refactor / verifier` and under the manager's own row says the
+       manager twice, once per member. Every scene above puts every child
+       at `workspaceId: "w_1"`, so every row went through `title` and that
+       second kind of row had never been on screen, before its fix or
+       after it — see #465.
+
+       Both kinds together, because the panel has to be read with both in
+       it: one subagent in the manager's checkout and two children with
+       their own. The one that is asking is the in-checkout one on
+       purpose, so the home's waiting chip still opens the *manager's*
+       workspace and `e2e/team.yaml` reaches this panel by the same path
+       it reaches `team`'s. `branch` is composed the way the server
+       composes a child's, from the lead's and the slug of what it was
+       sent to do.
+
+       `name` on the in-checkout row is the workspace's, which is what the
+       server would really have given it — the `team` scene above gives
+       each of its three a name of its own, which is why nothing there can
+       tell a row reading `title` from a row reading `name`. */
+    if (scene === "team-delegated") {
+      return [
+        session(),
+        other({ id: "s_k1", workspaceId: "w_1", parentId: "s_1", number: 2, name: "auth refactor", title: "Quota band thresholds", status: "NeedsYou", createdAt: minutesAgo(4), spawnReason: "decide whether a plan with no soft limit shows the band", note: "Should a plan with no soft limit show the band at all?" }),
+        other({ id: "s_d1", workspaceId: "w_d1", parentId: "s_1", number: 3, name: "auth refactor / edge-cache", title: "One key fetch for the edge check", status: "Working", agent: "Codex", branch: `${BRANCH}-edge-cache`, createdAt: minutesAgo(26), spawnReason: "fold the edge config's copy of the key set into the app's fetch" }),
+        other({ id: "s_d2", workspaceId: "w_d2", parentId: "s_1", number: 4, name: "auth refactor / verifier", title: "Accept both key ids until the window closes", status: "HandedBack", repo: "acme/api", branch: `${BRANCH}-verifier`, createdAt: minutesAgo(71), spawnReason: "accept the retired key for as long as the refresh window" }),
       ];
     }
     /* **A child that failed**, which the drawing added with `S.teamfail`
@@ -772,7 +903,7 @@ const server = createServer(async (req, res) => {
         session(),
         other({ id: "s_k1", workspaceId: "w_1", parentId: "s_1", number: 2, name: "Quota band thresholds", title: "Quota band thresholds", status: "NeedsYou", createdAt: minutesAgo(4), spawnReason: "decide whether a plan with no soft limit shows the band", note: "Should a plan with no soft limit show the band at all?" }),
         other({ id: "s_k2", workspaceId: "w_1", parentId: "s_1", number: 3, name: "Backfill the invoice index", title: "Backfill the invoice index", status: "Failed", agent: "Codex", createdAt: minutesAgo(9), spawnReason: "the migration would not apply — the index already exists", note: "the migration would not apply" }),
-        other({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", number: 4, name: "Token audit", title: "Token audit", status: "Ended", agent: "Cursor", createdAt: minutesAgo(62), spawnReason: "audit the token store" }),
+        other({ id: "s_k3", workspaceId: "w_1", parentId: "s_1", number: 4, name: "Token audit", title: "Token audit", status: "Ended", agent: "CursorAgent", createdAt: minutesAgo(62), spawnReason: "audit the token store" }),
       ];
     }
     /* **The four states proposition C was chosen against.** Seven, forty
@@ -888,12 +1019,15 @@ const server = createServer(async (req, res) => {
     /* `locked` and `needs-setup` are what `Gate.tsx` stands between a
        connected server and the app for, and neither could be reached. */
     "/api/v1/auth/me": { user: { ...USER, mustChangePassword: scene === "locked" }, organization: ORG },
+    /* `publicUrl` is required on `SetupState` and was absent from all
+       three of these — the address this installation tells people to come
+       back to. */
     "/api/v1/setup":
       scene === "needs-setup"
-        ? { needsPassword: false, needsOrganization: true, needsGithub: false, completed: false, organization: null }
+        ? { needsPassword: false, needsOrganization: true, needsGithub: false, publicUrl: `http://localhost:${PORT}`, completed: false, organization: null }
         : scene === "setup-done"
-          ? { needsPassword: false, needsOrganization: false, needsGithub: false, completed: false, organization: ORG }
-          : { needsPassword: false, needsOrganization: false, needsGithub: false, completed: true, organization: ORG },
+          ? { needsPassword: false, needsOrganization: false, needsGithub: false, publicUrl: `http://localhost:${PORT}`, completed: false, organization: ORG }
+          : { needsPassword: false, needsOrganization: false, needsGithub: false, publicUrl: `http://localhost:${PORT}`, completed: true, organization: ORG },
     "/api/v1/sessions": dashboard(),
     "/api/v1/sessions/s_1": session(),
     "/api/v1/sessions/w_1": session(),
@@ -904,12 +1038,23 @@ const server = createServer(async (req, res) => {
     "/api/v1/artifacts": scene === "no-artifacts" || scene === "bare" ? [] : ARTIFACTS,
     "/api/v1/sessions/s_1/conversation": conversation(),
     "/api/v1/sessions/s_1/controls": scene.startsWith("codex") ? [] : CLAUDE_CONTROLS,
+    /* **The limit-hit scene did not hit a limit.** `exhausted()` is
+       `["rejected", "blocked", "reached"].includes(status)` and this said
+       `exhausted`, which is in nobody's list — so the one scene built to
+       photograph a spent subscription drew a healthy one. `scope` is the
+       window as the agent reports it (`five_hour`, `seven_day`), not a
+       word for it, and `observedAt` is required: a percentage with no age
+       is worse than no percentage, which is the whole reason the column is
+       sent. `switches` is a list of `Switch` — what was moved, when, and
+       where it went — and held an `Account`, which is a different object
+       with no `state` the switcher can read. Nothing has switched in this
+       scene, so it is empty. */
     "/api/v1/sessions/s_1/account":
       scene === "limit-hit"
         ? {
-            account: { ...ACCOUNTS[0], limits: [{ scope: "weekly", status: "exhausted", usedPercent: 100, resetsAt: Math.floor(Date.now() / 1000) + 3 * 3600 }] },
-            limits: [{ scope: "weekly", status: "exhausted", usedPercent: 100, resetsAt: Math.floor(Date.now() / 1000) + 3 * 3600, window: "this week" }],
-            switches: [ACCOUNTS[1] ?? ACCOUNTS[0]],
+            account: { ...ACCOUNTS[0], limits: [SPENT] },
+            limits: [SPENT],
+            switches: [],
           }
         : { account: ACCOUNTS[0], limits: [], switches: [] },
     "/api/v1/sessions/s_1/annotations": [],
@@ -929,14 +1074,26 @@ const server = createServer(async (req, res) => {
     /* The run controls, per agent rather than per session. */
     "/api/v1/agents/ClaudeCode/controls": CLAUDE_CONTROLS,
     "/api/v1/agents/Codex/controls": [],
-    /* What this session made. The Overview's "Artifacts & links" reads it. */
-    "/api/v1/sessions/s_1/artifacts": ARTIFACTS.slice(0, 1),
-    /* No fallback configured, said explicitly. */
-    "/api/v1/sessions/s_1/fallback": { enabled: false, order: [] },
-    /* What a tracker is scoped to. */
+    /* **Folders, not artifacts.** This is what `Workbench` polls every
+       three seconds to find pages the agent has written and publish each
+       one it has not seen — `{ name, fingerprint }` — and it answered a
+       list of published `Artifact`s, which have neither field. So
+       `folder.name` was `undefined` on every pass. The Overview's
+       "Artifacts & links" reads `/api/v1/artifacts`, not this; the comment
+       that used to be here named the wrong screen. */
+    "/api/v1/sessions/s_1/artifacts": [
+      { name: "checkout-flow", fingerprint: "f_checkout_1" },
+    ],
+    /* No fallback configured, said explicitly. The list is `accountIds`
+       and was `order`, so `useFallback` read `undefined` and the sheet
+       drew no accounts whatever was configured. */
+    "/api/v1/sessions/s_1/fallback": { enabled: false, accountIds: [] },
+    /* What a tracker is scoped to. `key` is what goes on the wire —
+       `acme/web`, or `ENG` — and this said `id`, which `TaskScope` has
+       never had. */
     "/api/v1/trackers/gh_1/scopes": [
-      { id: "acme/web", label: "acme/web" },
-      { id: "acme/api", label: "acme/api" },
+      { key: "acme/web", label: "acme/web" },
+      { key: "acme/api", label: "acme/api" },
     ],
     /* **Main's endpoint**, added with the machine retirement — the line
        under Compute saying what was removed and where its sessions went.
@@ -966,16 +1123,26 @@ const server = createServer(async (req, res) => {
          `host-needs-app` a colleague's host with no application of its own;
          `no-hosts`       nothing registered, which is the only state where
                           the next step is genuinely *adding* one. */
+    /* **`AuthMode` is `device | token`, and this said `deviceCode`.** So
+       `firstWayIn` answered `token` for every host here and
+       `p.authModes.includes("device")` was false everywhere — the *In a
+       browser* control was drawn disabled on GitHub, and the line
+       explaining that a host has no device flow was printed under one that
+       does. Four more fields `ProviderStatus` requires were absent
+       altogether: `auth` (the way this one is set up *now*, as against the
+       ways it could be), `baseUrl`, `tokenPage` and `appPage` — the three
+       links the connect screen is mostly made of. They are absolute, the
+       way the server composes them from `base_url`. */
     "/api/v1/providers": scene === "no-hosts"
       ? []
       : scene === "fresh-install"
-        ? [{ id: "github", kind: "github", label: "GitHub", gitHost: "github.com", connected: false, configured: true, identity: null, builtin: true, maySetApplication: true, sharedApplication: false, authModes: ["deviceCode", "token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" }]
+        ? [{ id: "github", kind: "github", label: "GitHub", gitHost: "github.com", baseUrl: "https://github.com", tokenPage: "https://github.com/settings/tokens/new?scopes=repo,workflow&description=Firetower", appPage: "https://github.com/settings/applications/new", connected: false, configured: true, identity: null, builtin: true, maySetApplication: true, sharedApplication: false, auth: "device", authModes: ["device", "token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" }]
         : scene === "host-needs-app"
-          ? [{ id: "gitlab_01j", kind: "gitlab", label: "GitLab (internal)", gitHost: "git.acme.internal", connected: false, configured: false, identity: null, builtin: false, maySetApplication: true, sharedApplication: false, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "merge request" }]
+          ? [{ id: "gitlab_01j", kind: "gitlab", label: "GitLab (internal)", gitHost: "git.acme.internal", baseUrl: "https://git.acme.internal", tokenPage: "https://git.acme.internal/-/user_settings/personal_access_tokens?name=Firetower&scopes=api,write_repository", appPage: "https://git.acme.internal/-/user_settings/applications", connected: false, configured: false, identity: null, builtin: false, maySetApplication: true, sharedApplication: false, auth: "token", authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "merge request" }]
           : [
-      { id: "github", kind: "github", label: "GitHub", gitHost: "github.com", connected: true, configured: true, identity: "kevin", builtin: true, maySetApplication: true, sharedApplication: false, authModes: ["deviceCode", "token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
-      { id: "gitlab_01j", kind: "gitlab", label: "GitLab (internal)", gitHost: "git.acme.internal", connected: false, configured: true, identity: null, builtin: false, maySetApplication: true, sharedApplication: true, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "merge request" },
-      { id: "gitea_01k", kind: "gitea", label: "Gitea", gitHost: "code.acme.dev", connected: false, configured: false, identity: null, builtin: false, maySetApplication: true, sharedApplication: false, authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
+      { id: "github", kind: "github", label: "GitHub", gitHost: "github.com", baseUrl: "https://github.com", tokenPage: "https://github.com/settings/tokens/new?scopes=repo,workflow&description=Firetower", appPage: "https://github.com/settings/applications/new", connected: true, configured: true, identity: "kevin", builtin: true, maySetApplication: true, sharedApplication: false, auth: "device", authModes: ["device", "token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
+      { id: "gitlab_01j", kind: "gitlab", label: "GitLab (internal)", gitHost: "git.acme.internal", baseUrl: "https://git.acme.internal", tokenPage: "https://git.acme.internal/-/user_settings/personal_access_tokens?name=Firetower&scopes=api,write_repository", appPage: "https://git.acme.internal/-/user_settings/applications", connected: false, configured: true, identity: null, builtin: false, maySetApplication: true, sharedApplication: true, auth: "token", authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "merge request" },
+      { id: "gitea_01k", kind: "gitea", label: "Gitea", gitHost: "code.acme.dev", baseUrl: "https://code.acme.dev", tokenPage: "https://code.acme.dev/user/settings/applications", appPage: "https://code.acme.dev/user/settings/applications", connected: false, configured: false, identity: null, builtin: false, maySetApplication: true, sharedApplication: false, auth: "token", authModes: ["token"], kinds: ["issue", "pullRequest"], changeNoun: "pull request" },
     ],
     "/api/v1/trackers": scene === "no-trackers" ? [] : TRACKERS,
     "/api/v1/tasks": scene === "no-tasks" ? { more: false, next: null, tasks: [] } : TASKS,
@@ -1079,10 +1246,20 @@ const server = createServer(async (req, res) => {
     return json(res, {
       ...k,
       body: `## When to use this\n\nReach for it when a change is visual and a reviewer cannot tell from the diff whether it is right — a new screen, a layout that moves, anything where "it looks correct" is the acceptance test.\n\n## What it does\n\n- Finds how this project starts its app, and starts it.\n- Drives the routes the change touches and photographs each one, light and dark.\n- Attaches the set to the pull request with a one-line caption each.\n\n## Frontmatter\n\n\`\`\`\nname: ${k.name}\ndescription: ${k.description}\nallowed-tools: Bash, Read, Write\n\`\`\`\n\nFiretower stores the folder verbatim and interprets six fields.\n`,
+      /* `frontmatter` is required on `SkillDetail` and was absent — the
+         parsed head of SKILL.md, which the body below only *prints*.
+         `executable` is required on every `SkillFile` and was on none of
+         them, which is the bit that says a bundle carries something that
+         runs. */
+      frontmatter: {
+        name: k.name,
+        description: k.description,
+        "allowed-tools": ["Bash", "Read", "Write"],
+      },
       files: [
-        { path: "SKILL.md", size: 1840, shared: false },
-        { path: "scripts/shoot.ts", size: 7420, shared: false },
-        { path: "references/playwright.md", size: 52010, shared: true },
+        { path: "SKILL.md", size: 1840, executable: false, shared: false },
+        { path: "scripts/shoot.ts", size: 7420, executable: true, shared: false },
+        { path: "references/playwright.md", size: 52010, executable: false, shared: true },
       ],
     });
   }
@@ -1204,8 +1381,14 @@ const server = createServer(async (req, res) => {
   if (/^\/api\/v1\/providers\/[^/]+\/connection$/.test(path)) {
     return json(res, { connected: scene === "host-connected", identity: scene === "host-connected" ? "kevin" : null });
   }
+  /* **`GitIdentity`, which is `{ name, email, source }`** — what a
+     person's commits are signed with and where it was read from. This
+     answered `{ identity, scopes }`, which is not a shape any client was
+     generated against, so the line that says whose name is on a commit had
+     nothing in it. `source` is `host` (read from the token) or `set` (typed,
+     and nothing overwrites it). */
   if (/^\/api\/v1\/providers\/[^/]+\/identity$/.test(path)) {
-    return json(res, { identity: "kevin", scopes: ["repo", "read:org"] });
+    return json(res, { name: "Kevin", email: "kevin@acme.co", source: "host" });
   }
 
   if (path.endsWith("/readiness")) {
@@ -1300,9 +1483,22 @@ server.on("upgrade", (req, socket) => {
 const skill = (over) => ({
   id: "sk_x", name: "a-skill", description: "", version: 1, tokens: 310, bytes: 61270, files: 3,
   alwaysOn: false, builtin: false, held: false, mayShare: true, mayWrite: true,
-  author: null, risk: [], defaultIn: [], path: "u/kevin", currentVersionId: "sv_1",
+  author: null, risk: [], defaultIn: [], path: "u/kevin",
   createdAt: minutesAgo(9000), updatedAt: minutesAgo(90), ...over,
+  /* **`slug` and `versionId`, both required and both absent** — the second
+     under the invented name `currentVersionId`, which nothing has ever
+     read. They are after the spread because both are derived from what an
+     entry overrode: the slug is the folder's, by `ft_core::slug`'s rule
+     (labels are `[A-Za-z0-9_-]`, so every run of anything else becomes one
+     `_`), and the version id names the version actually being served. */
+  slug: slug(over.name ?? "a-skill"),
+  versionId: `sv_${over.id ?? "sk_x"}_${over.version ?? 1}`,
 });
+
+/** `ft_core::slug`: a name as a label an `ltree` will accept. */
+function slug(name) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "untitled";
+}
 const SKILLS = [
   skill({
     id: "sk_1", name: "deploy-runbook", version: 0, held: true,
@@ -1480,6 +1676,13 @@ const SECRETS = {
 const role = (over) => ({
   id: "r_x", name: "A profile", does: "", instructions: "", path: "u/kevin",
   placement: "here", agent: "ClaudeCode", account: null, machine: null,
+  /* What a lead may do about a child that has run out of allowance, and
+     whether a Manager re-routes one itself. `wait` and `ask` are the
+     column defaults; both are required on `Role` and neither was here, so
+     `toDraft` copied `undefined` into every draft and the editor's two
+     groups of buttons opened with nothing pressed. `onUsageLimit` is
+     `wait | same | engine` and `onChildLimit` is `ask | reroute`. */
+  onUsageLimit: "wait", onChildLimit: "ask",
   isDefault: false, canDelegate: false, delegateScope: [], skillScope: [],
   includeAlwaysOn: true, includeRepoDefaults: true,
   mayShare: true, mayWrite: true, settings: { model: null, effort: null, mode: null, sandbox: null },
@@ -1774,16 +1977,19 @@ function listing(path) {
       "src/ui": [["Chat.tsx", false], ["Composer.tsx", false]],
       docs: [["artifacts.md", false], ["mentions.md", false], ["shot.png", false]],
     };
-    return (tree[path] ?? []).map(([name, directory]) => ({ name, directory, link: false, bytes: directory ? 0 : 2048 }));
+    /* `size`, which is what `FileEntry` has and what the row draws.
+       `bytes` was this fixture's own word for it, so every file in the
+       tree read as sizeless. */
+    return (tree[path] ?? []).map(([name, directory]) => ({ name, directory, link: false, size: directory ? 0 : 2048 }));
   }
   const dirs = { "": "web", web: "src", "web/src": "auth" };
-  if (path in dirs) return [{ name: dirs[path], directory: true, link: false, bytes: 0 }];
+  if (path in dirs) return [{ name: dirs[path], directory: true, link: false, size: 0 }];
   if (path !== "web/src/auth") return [];
   return bigDiff(true).map((f) => ({
     name: f.path.split("/").pop(),
     directory: false,
     link: false,
-    bytes: 1024,
+    size: 1024,
   }));
 }
 

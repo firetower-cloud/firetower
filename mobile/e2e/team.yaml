@@ -7,15 +7,40 @@
 # on the other side has to find the session the row names. Four things, and
 # only a device touches all four.
 #
-# The `team` scene is the point — a manager with three subagents **in its own
-# checkout**, which is the commonest team there is and the one where every row
-# resolved back to the workspace being read. Any other scene leaves `s_1` solo
-# and draws no panel at all.
+# **Two scenes, because there are two kinds of row and they are named by
+# different fields.** `SCENE` picks which, and it defaults to the first:
+#
+#   `team`            a manager with three subagents **in its own checkout**,
+#                     which is the commonest team there is and the one where
+#                     every row resolved back to the workspace being read. A
+#                     row like this reads its `title`, which never carries a
+#                     prefix.
+#   `team-delegated`  a manager with one subagent in its own checkout and two
+#                     children that have workspaces of their own. The server
+#                     names those — `delegate.rs` composes
+#                     `format!("{} / {what}", lead.name)` — so their rows read
+#                     `auth refactor / verifier` off `name`, and under the
+#                     manager's own row that says the manager twice, once per
+#                     member. That is the state #465 fixed and could not
+#                     photograph, before or after, because no fixture produced
+#                     one. `team-delegated-rows` is that photograph.
+#
+# Any other scene leaves `s_1` solo and draws no panel at all.
 #
 #   node desktop/scripts/mock-server.mjs 4488
 #   curl "http://localhost:4488/__reset?scene=team"
 #   maestro test e2e/team.yaml -e ADDRESS=192.168.50.174:4488 -e USER=admin -e PASS=admin
+#
+#   curl "http://localhost:4488/__reset?scene=team-delegated"
+#   maestro test e2e/team.yaml -e ADDRESS=192.168.50.174:4488 -e USER=admin -e PASS=admin \
+#     -e SCENE=team-delegated
+#
+# The scene has to be the one the mock is actually playing: `SCENE` says which
+# sentences to expect, it does not set it. They are two flags on purpose —
+# `/__reset` is an HTTP call and this file cannot make one.
 appId: com.usefiretower.app
+env:
+  SCENE: team
 ---
 - launchApp:
     clearState: true
@@ -50,6 +75,11 @@ appId: com.usefiretower.app
 
 # The quickest path to the workspace with the team in it: the subagent that is
 # asking something is a chip on the home, and the chip opens its workspace.
+#
+# The one that is asking is in the manager's own checkout in **both** scenes,
+# which is what keeps this one tap reaching the same panel: a chip opens a
+# workspace, so a question asked from a child's own workspace would open the
+# child's instead.
 - tapOn:
     id: "waiting-chip"
     index: 0
@@ -62,7 +92,13 @@ appId: com.usefiretower.app
 - assertVisible: "Team"
 # Every row but the one being read is a `Pressable` with a chevron. Before the
 # fix this screenshot has four rows and no chevron on any of them.
-- takeScreenshot: team-rows
+#
+# And in `team-delegated` it is the photograph: two of the three members are
+# named by the server, so what their rows say under a manager called `auth
+# refactor` is the whole of what there is to look at. A `Pressable` collapses
+# its children for accessibility, so no assertion can reach that text — the
+# picture is the only instrument there is for it.
+- takeScreenshot: ${SCENE}-rows
 
 # **Three rows carry `overview-member`, and there are four rows.** That is the
 # assertion, and it is why this is by id and not by the name on the row: a
@@ -74,9 +110,7 @@ appId: com.usefiretower.app
     id: "overview-member"
     index: 2
 
-# A member with no workspace of its own — a subagent in the manager's
-# checkout, which is what every row here is. Third row: `Token audit`, under
-# the manager and the one that is asking something. The desk links it to its
+# The third row, which is the one that has finished. The desk links it to its
 # session and so does this, through the only route the phone has.
 - tapOn:
     id: "overview-member"
@@ -84,12 +118,33 @@ appId: com.usefiretower.app
 # The conversation, which the overview has not got: we have left the panel.
 - assertVisible:
     id: "composer"
+
 # And it is *that* member's. Both halves matter: the header is the name the
 # row carried, and the status is the one the row showed — not the workspace's
 # name and not whichever run speaks for it.
-- assertVisible: "Token audit"
+#
+# Which name that is depends on what kind of member it is, and the two are the
+# point of having two scenes:
+#
+#   in the manager's checkout — the page is the manager's workspace, so it is
+#     called by the member's `title`, the only field that says which agent you
+#     opened. `[id].tsx`'s `sharing`.
+#   its own workspace — the page is that workspace, so it keeps its whole
+#     name, prefix and all. Correct here and nowhere near the roster: off a
+#     list with the lead beside it the prefix is noise, and on a page opened
+#     by itself it is the only thing saying whose work this is.
+- runFlow:
+    when:
+      true: '${SCENE == "team"}'
+    commands:
+      - assertVisible: "Token audit"
+- runFlow:
+    when:
+      true: '${SCENE == "team-delegated"}'
+    commands:
+      - assertVisible: "auth refactor / verifier"
 - assertVisible: "Handed it back"
-- takeScreenshot: member-opened
+- takeScreenshot: ${SCENE}-member-opened
 
 # And the panel from there, which is the other half of the claim: the row that
 # was a link is now the one you are reading, and the one you came from is a
@@ -100,4 +155,4 @@ appId: com.usefiretower.app
 - assertVisible:
     id: "overview-member"
     index: 2
-- takeScreenshot: team-rows-after
+- takeScreenshot: ${SCENE}-rows-after
