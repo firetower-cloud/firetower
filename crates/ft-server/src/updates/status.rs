@@ -656,8 +656,10 @@ mod tests {
         );
         // Which is what makes `update_available` and `upgradable` false: both
         // are `newer`, and `newer` is read off what is offered.
-        assert!(!still_offered(kept, Some("0.54.1"), channel::ManifestOutcome::Unreadable)
-            .is_some_and(|l| version::is_newer(&l, &Version::new(0, 54, 1))));
+        assert!(
+            !still_offered(kept, Some("0.54.1"), channel::ManifestOutcome::Unreadable)
+                .is_some_and(|l| version::is_newer(&l, &Version::new(0, 54, 1)))
+        );
     }
 
     /// **The normal path is untouched, and that is the half worth guarding.**
