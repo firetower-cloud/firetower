@@ -33,8 +33,8 @@ pub use ids::{
 };
 pub use path::{slug, ResourcePath};
 pub use session::{
-    sanitize_branch, slugify, title_from, workspace_name, NewSession, Session, Share, Workspace,
-    WorkspaceSize,
+    sanitize_branch, slugify, title_from, workspace_name, NamedBy, NewSession, Session, Share,
+    Workspace, WorkspaceSize,
 };
 pub use status::{SessionStatus, TransitionError};
 pub use turn::{ItemId, ItemKind, RequestId, TurnEvent, TurnId};
@@ -72,6 +72,24 @@ pub const PREFERRED_ENV: &str = "FIRETOWER_AGENT_SETTINGS";
 /// writing, so it was the one that could pass that on its own and fail the
 /// launch with `command too long`.
 pub const PERSONA_ENV: &str = "FIRETOWER_PERSONA";
+
+/// Set on a session that should name its own workspace on its first turn.
+///
+/// Present — at any value — means this session has no parent, so
+/// [`NAME_GUIDANCE`] goes into its system prompt and the workspace guide beside
+/// it. Absent means a child, and a child is told nothing about naming: it
+/// shares its lead's workspace when it was placed `here`, so a child that
+/// renamed would retitle the row the person is actually watching. The tool
+/// refuses it either way; this is what stops a child burning a turn finding
+/// that out.
+///
+/// The session's environment rather than a field on the launch frame, for the
+/// reason written above [`PREFERRED_ENV`]: the worker already inherits a
+/// session's environment, it is the worker that builds the agent's command
+/// line, and a new frame field is a protocol version every worker in a fleet
+/// has to be upgraded past. A worker older than this simply never finds it and
+/// appends nothing, which is the same session Firetower shipped yesterday.
+pub const NAME_WORKSPACE_ENV: &str = "FIRETOWER_NAME_WORKSPACE";
 
 /// Which agent runs inside a workspace.
 ///
@@ -172,6 +190,12 @@ impl Agent {
     /// `--bare` is deliberately absent. It skips hooks, skills, MCP servers and
     /// `CLAUDE.md` — everything that makes an agent useful in somebody's actual
     /// repository — and refuses to read a subscription login.
+    ///
+    /// `name_yourself` is whether this session should name its own workspace on
+    /// its first turn: true for a session with no parent, false for a child. A
+    /// bool rather than the session, because this is the only thing about
+    /// lineage the command line depends on and the worker that builds it has no
+    /// session record to read — it is told, through [`NAME_WORKSPACE_ENV`].
     pub fn launch_headless(
         &self,
         session_id: &str,
@@ -179,6 +203,7 @@ impl Agent {
         start: Start,
         preferred: &crate::controls::Preferred,
         persona: Option<&str>,
+        name_yourself: bool,
     ) -> Option<Vec<String>> {
         let agent_session = agent_session_uuid(session_id);
         match self {
@@ -239,6 +264,13 @@ impl Agent {
                 // carries it. A plain agent is told how to show you something
                 // and nothing about handing work off.
                 let mut appended = vec![ARTIFACT_GUIDANCE.to_string()];
+                // Only a session with no parent, and only Claude Code reads it
+                // from here — the ACP engines have no append-a-prompt flag and
+                // get the same words out of `AGENTS.md` instead, which is the
+                // same split artifact guidance already lives with.
+                if name_yourself {
+                    appended.push(NAME_GUIDANCE.to_string());
+                }
                 if let Some(persona) = persona.map(str::trim).filter(|p| !p.is_empty()) {
                     appended.push(persona.to_string());
                 }
@@ -361,6 +393,7 @@ impl Agent {
             Start::Fresh,
             &crate::controls::Preferred::default(),
             None,
+            false,
         )
         .is_some()
     }
@@ -1085,6 +1118,52 @@ Nothing written anywhere else is shown to anybody.
 
 The `firetower-artifacts` skill has the rest: what the page is rendered inside,
 what makes one good, and how to use a richer artifact skill alongside it.
+";
+
+/// What a session with no parent is told about naming its own workspace.
+///
+/// **Beside [`ARTIFACT_GUIDANCE`], and gated.** Every session is told where to
+/// put a page somebody can look at; only a session with no parent is told to
+/// name itself, because a child placed `here` shares its lead's workspace and
+/// renaming would retitle the row the person is watching. See
+/// [`NAME_WORKSPACE_ENV`] for how that gate reaches the worker.
+///
+/// **It gates itself as well, in its first sentence, and that is not
+/// belt-and-braces.** The environment gate is per session and reaches the
+/// system prompt, which is the only channel Claude Code reads. Codex, Kimi and
+/// Cursor have no append-a-prompt flag and read this out of `AGENTS.md`
+/// instead — and `AGENTS.md` is one file beside the checkouts, so a child
+/// placed `here` reads its lead's copy and there is no per-session version of
+/// it to withhold. On that one path the text is the only gate there can be.
+/// Without it a child on those engines is instructed, refused by the server,
+/// and has spent a turn on nothing — which is the waste the gating exists to
+/// prevent, not the overwrite R4 exists to prevent.
+///
+/// Short, for the reason the artifact block is short: this is in context on
+/// every turn of a session that will call it exactly once. Two things in it are
+/// doing real work. *Name what the work is, not how the request was phrased* is
+/// the whole feature — an agent that restates the opening sentence has
+/// reproduced the problem in fewer characters. And *carry on silently* is what
+/// keeps a rail label from ever costing somebody a turn: the failure modes here
+/// are an agent that apologises for not renaming, and one that tries again on
+/// turn two.
+pub const NAME_GUIDANCE: &str = "\
+## Naming this workspace
+
+**Only if you have no lead.** If another agent started you, skip this section:
+you are working in its workspace, and renaming would retitle the row the person
+is watching rather than anything of yours.
+
+Call `rename_workspace` as your first action after the person's opening
+message, with a short title for the work — around forty characters.
+
+Name what the work *is*, not how the request was phrased: \"Staging deploy
+failures\", not \"can you look at why the deploy keeps falling over\". This is
+the label in the left rail, which is how somebody finds this conversation
+again, and it can only be done once.
+
+If the call fails or says the workspace is already named, carry on with what
+you were asked to do. Don't mention it, and don't try again.
 ";
 
 /// What a Manager is told about handing work off.

@@ -304,17 +304,107 @@ impl Db {
         Ok(())
     }
 
-    pub async fn rename_session(&self, id: &SessionId, name: &str) -> Result<()> {
-        sqlx::query(
-            "UPDATE workspaces SET name = $1, updated_at = $2
-              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $3)",
+    /// Call the workspace this session is in something else, and record who
+    /// chose it.
+    ///
+    /// **One write path with a setter, rather than two that have to agree.**
+    /// A person renaming through the endpoint and an agent naming itself on
+    /// its first turn are the same statement with a different `by`, and the
+    /// difference between them is one predicate: a person may rename as often
+    /// as they like and is never refused, while the agent writes only into a
+    /// workspace nobody has deliberately named yet.
+    ///
+    /// `Ok(None)` means the name was written. `Ok(Some(who))` means it was
+    /// not, because `who` had already named this place — which only an agent's
+    /// write can ever get back, and which is **not an error**: see the tool in
+    /// `delegate.rs` for why the agent is told this in plain words instead.
+    ///
+    /// The guard is in the `WHERE` clause rather than in a read followed by a
+    /// write, so two calls arriving at once cannot both find the column null.
+    /// The read below only happens once the write has already been refused,
+    /// and is there to name the setter in the answer.
+    pub async fn rename_session(
+        &self,
+        id: &SessionId,
+        name: &str,
+        by: ft_core::NamedBy,
+    ) -> Result<Option<ft_core::NamedBy>> {
+        let wrote = sqlx::query(
+            "UPDATE workspaces
+                SET name = $1, updated_at = $2, name_set_at = $2, name_set_by = $3
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $4)
+                AND ($5 OR name_set_by IS NULL)",
         )
         .bind(name.trim())
         .bind(chrono::Utc::now())
+        .bind(by.as_str())
+        .bind(id.as_str())
+        // A person always wins, so their write carries no condition at all.
+        .bind(by == ft_core::NamedBy::Human)
+        .execute(&self.pool)
+        .await
+        .context("renaming a session")?
+        .rows_affected();
+
+        if wrote > 0 {
+            return Ok(None);
+        }
+
+        // Nothing was written, and there are two reasons it could not have
+        // been. Told apart here rather than guessed at by the caller: a
+        // workspace somebody has already named is the ordinary case this
+        // feature is built around, and a session that has gone is an error.
+        //
+        // Nothing read back means the row is gone, not that the column is
+        // null — a null column is precisely the case the write above does not
+        // refuse.
+        match self.workspace_named_by(id).await? {
+            Some(who) => Ok(Some(who)),
+            None => anyhow::bail!("that workspace is no longer here to rename"),
+        }
+    }
+
+    /// Who deliberately named this session's workspace, if anybody has.
+    ///
+    /// Read rather than carried on [`ft_core::Session`] because nothing a
+    /// person looks at needs it — the rail shows the name, not its
+    /// provenance — and one more column on the session list would be one more
+    /// thing three clients regenerate for nobody's benefit.
+    pub async fn workspace_named_by(&self, id: &SessionId) -> Result<Option<ft_core::NamedBy>> {
+        let row: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT name_set_by FROM workspaces \
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $1)",
+        )
+        .bind(id.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .context("reading who named a workspace")?;
+        Ok(row
+            .flatten()
+            .as_deref()
+            .and_then(ft_core::NamedBy::from_stored))
+    }
+
+    /// Record that the name this workspace was *created* with was chosen by
+    /// somebody, rather than derived from the prompt.
+    ///
+    /// Its own statement rather than a fourteenth argument on
+    /// [`Db::insert_session`], which the comment inside that function already
+    /// explains. The failure is the safe one in the other direction from most
+    /// of them: a stamp that does not land leaves the workspace claimable, so
+    /// the agent renames once over a name somebody typed — which is why the
+    /// caller treats a failure here as worth a line rather than as nothing.
+    pub async fn stamp_created_name(&self, id: &SessionId, by: ft_core::NamedBy) -> Result<()> {
+        sqlx::query(
+            "UPDATE workspaces SET name_set_at = $1, name_set_by = $2
+              WHERE id = (SELECT workspace_id FROM sessions WHERE id = $3)",
+        )
+        .bind(chrono::Utc::now())
+        .bind(by.as_str())
         .bind(id.as_str())
         .execute(&self.pool)
         .await
-        .context("renaming a session")?;
+        .context("recording who named a workspace")?;
         Ok(())
     }
 
@@ -7643,7 +7733,9 @@ mod tests {
         .await
         .unwrap();
 
-        db.rename_session(&id, "second-name").await.unwrap();
+        db.rename_session(&id, "second-name", ft_core::NamedBy::Human)
+            .await
+            .unwrap();
         assert_eq!(db.session(&id).await.unwrap().unwrap().name, "second-name");
 
         let on_workspace: String = sqlx::query_scalar("SELECT name FROM workspaces WHERE id = $1")
@@ -7654,6 +7746,211 @@ mod tests {
         assert_eq!(
             on_workspace, "second-name",
             "the name lives on the workspace"
+        );
+    }
+
+    /// Who named a workspace, read back off the row.
+    ///
+    /// Raw SQL because nothing on [`ft_core::Session`] carries it — see
+    /// [`Db::workspace_named_by`], which is the same read with the string
+    /// parsed.
+    async fn naming(db: &Db, id: &SessionId) -> (Option<String>, bool) {
+        let row = sqlx::query(
+            "SELECT name_set_by, name_set_at IS NOT NULL AS stamped FROM workspaces WHERE id = $1",
+        )
+        .bind(id.as_str())
+        .fetch_one(&db.pool)
+        .await
+        .unwrap();
+        (row.get("name_set_by"), row.get("stamped"))
+    }
+
+    /// A workspace nobody has deliberately named yet says so.
+    ///
+    /// **Null is the load-bearing value here.** It is what every workspace that
+    /// existed before these columns holds, and what a name the desktop derived
+    /// from the first line of a prompt leaves behind — so if a fresh workspace
+    /// came up stamped, the agent would be blocked on every workspace there is
+    /// and the feature would do nothing at all, silently.
+    #[tokio::test]
+    async fn a_new_workspace_has_nobody_down_as_having_named_it() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_test_host("localhost", owner.as_str())
+            .await
+            .unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Something",
+            "something",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            // A name the way a client derives one: the first line of the
+            // prompt, which is not a choice anybody made.
+            Some("can you look at why the deploy keeps falling over on"),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(naming(&db, &id).await, (None, false));
+        assert_eq!(db.workspace_named_by(&id).await.unwrap(), None);
+    }
+
+    /// The agent names a workspace once; a person names it as often as they
+    /// like.
+    ///
+    /// The whole asymmetry in one test, because the two halves are one
+    /// statement and splitting them would let the predicate rot on the side
+    /// that was not asserted. In order: the agent claims an unnamed workspace
+    /// and the stamp says so; a second agent write is refused and the name does
+    /// not move; a person writes over it anyway; and the agent is then refused
+    /// for good.
+    #[tokio::test]
+    async fn an_agent_names_a_workspace_once_and_a_person_whenever_they_want() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_test_host("localhost", owner.as_str())
+            .await
+            .unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Something",
+            "something",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            Some("so when i start a conversation in a new workspace"),
+        )
+        .await
+        .unwrap();
+
+        // The claim.
+        assert_eq!(
+            db.rename_session(&id, "Staging deploy failures", ft_core::NamedBy::Agent)
+                .await
+                .unwrap(),
+            None,
+            "an unnamed workspace is the agent's to name"
+        );
+        assert_eq!(
+            db.session(&id).await.unwrap().unwrap().name,
+            "Staging deploy failures"
+        );
+        assert_eq!(
+            naming(&db, &id).await,
+            (Some("agent".into()), true),
+            "both columns, or `once` is not enforceable"
+        );
+
+        // And once is once.
+        assert_eq!(
+            db.rename_session(&id, "Something else entirely", ft_core::NamedBy::Agent)
+                .await
+                .unwrap(),
+            Some(ft_core::NamedBy::Agent),
+            "a second agent write says who had it rather than failing"
+        );
+        assert_eq!(
+            db.session(&id).await.unwrap().unwrap().name,
+            "Staging deploy failures",
+            "refused means nothing was written"
+        );
+
+        // A person is never refused, including over the agent's own name.
+        assert_eq!(
+            db.rename_session(&id, "Deploys", ft_core::NamedBy::Human)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(db.session(&id).await.unwrap().unwrap().name, "Deploys");
+        assert_eq!(naming(&db, &id).await, (Some("human".into()), true));
+
+        // Twice, to be sure the human path carries no condition of its own.
+        assert_eq!(
+            db.rename_session(&id, "Deploy work", ft_core::NamedBy::Human)
+                .await
+                .unwrap(),
+            None,
+            "a person may rename as often as they like"
+        );
+
+        // And the agent is now shut out permanently, not merely for one turn.
+        assert_eq!(
+            db.rename_session(&id, "Anything", ft_core::NamedBy::Agent)
+                .await
+                .unwrap(),
+            Some(ft_core::NamedBy::Human),
+        );
+        assert_eq!(db.session(&id).await.unwrap().unwrap().name, "Deploy work");
+    }
+
+    /// A name typed into the web's create form is a choice, and is stamped as
+    /// one before the agent has had a turn.
+    ///
+    /// The one case this feature could otherwise cost somebody their own
+    /// input — see `create_session_as`, which calls this.
+    #[tokio::test]
+    async fn a_name_chosen_at_creation_is_closed_to_the_agent() {
+        let (db, owner) = db_with_user().await;
+        let host = db
+            .ensure_test_host("localhost", owner.as_str())
+            .await
+            .unwrap();
+
+        let id = SessionId::new();
+        db.insert_session(
+            &id,
+            &host.id,
+            &owner,
+            None,
+            "Something",
+            "something",
+            None,
+            None,
+            "ClaudeCode",
+            WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &[],
+            Some("Q4 billing migration"),
+        )
+        .await
+        .unwrap();
+        db.stamp_created_name(&id, ft_core::NamedBy::Human)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            db.workspace_named_by(&id).await.unwrap(),
+            Some(ft_core::NamedBy::Human)
+        );
+        assert_eq!(
+            db.rename_session(&id, "Billing", ft_core::NamedBy::Agent)
+                .await
+                .unwrap(),
+            Some(ft_core::NamedBy::Human),
+        );
+        assert_eq!(
+            db.session(&id).await.unwrap().unwrap().name,
+            "Q4 billing migration",
+            "what they typed is what they keep"
         );
     }
 
@@ -7966,7 +8263,9 @@ mod tests {
         // Renaming leaves the number alone: it is what a renamed session can
         // still be traced back to.
         let (id, number) = &made[0];
-        db.rename_session(id, "the flaky test").await.unwrap();
+        db.rename_session(id, "the flaky test", ft_core::NamedBy::Human)
+            .await
+            .unwrap();
 
         let after = db.session(id).await.unwrap().unwrap();
         assert_eq!(after.name, "the flaky test");

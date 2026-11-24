@@ -186,6 +186,12 @@ export function NewWorkspace({
     create.mutate({
       data: {
         name: name.trim(),
+        // A name typed here is a choice, and the agent never writes over one.
+        // The desktop and the phone derive theirs from the prompt and send
+        // nothing, which leaves the workspace for the agent to name on its
+        // first turn — this field is what tells the two apart, and this form
+        // is the only place in any client that sends it.
+        nameSetBy: name.trim() ? "human" : undefined,
         // No prompt, ever — including when this came from a task. The agent
         // starts and waits; what you want doing is said in the conversation,
         // where it can be answered. A task fills the composer instead, unsent,

@@ -8,6 +8,7 @@
 import type { Agent } from './agent';
 import type { DirectoryId } from './directoryId';
 import type { HostId } from './hostId';
+import type { NamedBy } from './namedBy';
 import type { NewCheckout } from './newCheckout';
 import type { Preferred } from './preferred';
 import type { RepoId } from './repoId';
@@ -49,6 +50,7 @@ export interface NewSession {
      * @nullable
      */
   name?: string | null;
+  nameSetBy?: null | NamedBy;
   /**
      * The profile to start as, by id. Omit for a plain agent with no persona.
      *

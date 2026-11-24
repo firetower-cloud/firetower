@@ -1987,6 +1987,24 @@ Docker is installed here and the daemon is not answering, so `docker` commands w
         format!("\n{}", ft_core::ARTIFACT_GUIDANCE)
     }
 
+    /// What the guide says about naming this workspace, when it names itself.
+    ///
+    /// The same words the system prompt carries, here for the same reason the
+    /// artifact block is: Codex, Kimi and Cursor are driven over a protocol
+    /// with no append-a-prompt flag, so this file is the only place they can
+    /// be told anything before their first turn. For Claude Code it is belt
+    /// and braces.
+    ///
+    /// Empty for a workspace that does not name itself — see
+    /// [`agentd::names_itself_path`] for what writes the marker and why it is
+    /// per workspace.
+    fn name_guidance(workspace: &Path) -> String {
+        match crate::agentd::names_itself_path(workspace).exists() {
+            true => format!("\n{}", ft_core::NAME_GUIDANCE),
+            false => String::new(),
+        }
+    }
+
     /// Write down what is checked out and where.
     ///
     /// The agent starts at the workspace rather than inside a repository, so
@@ -2035,6 +2053,7 @@ You are in the directory that holds them, not inside one of them.              P
             );
         }
         text.push_str(&Self::artifact_guidance());
+        text.push_str(&Self::name_guidance(workspace));
         text.push_str(&Self::docker_guidance(&crate::docker::state().await, id));
 
         let at = workspace.join("AGENTS.md");
@@ -2813,6 +2832,25 @@ You are in the directory that holds them, not inside one of them.              P
         // has always been.
         if ready == 0 && !spec.repos.is_empty() {
             anyhow::bail!("none of this session's repositories could be checked out");
+        }
+
+        // Whether this workspace's agent is the one that names it. Dropped
+        // before the guide is written, because the guide reads it — see
+        // `agentd::names_itself_path`. Best effort: a marker that does not
+        // land costs the paragraph in `AGENTS.md`, and for Claude Code the
+        // system prompt carries the same words anyway.
+        if spec
+            .env
+            .iter()
+            .any(|(key, _)| key == ft_core::NAME_WORKSPACE_ENV)
+        {
+            let marker = crate::agentd::names_itself_path(&path);
+            if let Some(dir) = marker.parent() {
+                let _ = tokio::fs::create_dir_all(dir).await;
+            }
+            if let Err(e) = tokio::fs::write(&marker, "").await {
+                tracing::warn!("could not write {}: {e:#}", marker.display());
+            }
         }
 
         // What is checked out and where, written where the agent will find it.
@@ -6397,6 +6435,50 @@ mod tests {
 
         cleanup(&first).await;
         cleanup(&second).await;
+    }
+
+    /// The workspace guide tells the agent to name the place, when it is the
+    /// kind of session that may.
+    ///
+    /// `AGENTS.md` is how the ACP engines receive this at all: Codex, Kimi and
+    /// Cursor are driven over a protocol with no append-a-prompt flag, so for
+    /// them the file is not belt and braces, it is the only channel. And the
+    /// file is per *workspace* while the instruction is per session — see
+    /// `agentd::names_itself_path` — so what gates it is what the control plane
+    /// put in this workspace's environment, which is what is asserted here.
+    #[tokio::test]
+    async fn the_workspace_guide_says_to_name_the_place_when_it_is_asked_to() {
+        let (_origin, remote) = origin().await;
+
+        for told in [true, false] {
+            let home = TempDir::new().unwrap();
+            let worker = std::sync::Arc::new(Worker::open(home.path()).await.unwrap());
+            let id = SessionId::new();
+            let mut frame = spec(&remote, &id, None);
+            if told {
+                if let ToWorker::CreateWorkspace(spec) = &mut frame {
+                    spec.env
+                        .push((ft_core::NAME_WORKSPACE_ENV.into(), "1".into()));
+                }
+            }
+
+            exchange(&worker, vec![hello(), frame]).await;
+
+            let path = worker.store().workspace_path(&id).await.unwrap().unwrap();
+            let guide = std::fs::read_to_string(std::path::Path::new(&path).join("AGENTS.md"))
+                .expect("the guide is written");
+            assert_eq!(
+                guide.contains("rename_workspace"),
+                told,
+                "told={told}, guide was:\n{guide}"
+            );
+            assert!(
+                guide.contains(".firetower/artifacts/"),
+                "and the artifact guidance is there either way"
+            );
+
+            cleanup(&id).await;
+        }
     }
 
     #[tokio::test]
