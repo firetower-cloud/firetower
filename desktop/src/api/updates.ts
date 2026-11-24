@@ -370,8 +370,33 @@ export function rowVerdict(
  *
  * The version is the manifest's, never the newest release — a manifest that
  * could not be read says so rather than putting a zero here.
+ *
+ * **A row names a version only when this installation is on that channel.**
+ * Beta's number under a general-access hero is the whole of the confusion
+ * this closes: it is larger than the one the hero is reporting, no upgrade
+ * from here can reach it, and the control beside it is a channel switch and
+ * not an update — so a reader who does not administer this Firetower is shown
+ * a bigger number with nothing at all to press. The row keeps its name and
+ * what the channel offers, which is what the row is for. The number is what
+ * beta holds, and that is beta's business until somebody is on it.
+ *
+ * **General access names its own either way, which is the rule and not an
+ * exception to it.** It is the floor every installation is offered, so it is
+ * never the number that is out of reach — and somebody on beta is told what
+ * general access holds because that is the version leaving beta waits for,
+ * which the sentence under the rows is entirely about. An unrecognised or
+ * pinned tag is treated as general access, and `on` already says so, so those
+ * follow the same rule without being named here.
+ *
+ * **Never by emptying the field.** `Offer.version` keeps coming back from the
+ * control plane and the switch confirmation still names the version it would
+ * install, from the plan — that is the moment somebody is accepting beta, and
+ * a confirmation that would not say what it is installing is worse than the
+ * confusion being fixed here. This is a row declining to draw a number, not
+ * the number going away.
  */
 export function rowOffers(offer: Offer): string {
+  if (!offer.on && offer.channel !== Channel.general) return offer.offers;
   const holds = offer.version
     ? offer.since
       ? `${offer.version}, promoted ${ago(offer.since)}.`

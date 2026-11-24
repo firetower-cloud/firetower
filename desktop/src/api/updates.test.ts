@@ -482,9 +482,75 @@ describe("what a channel row holds", () => {
   });
 
   it("leaves the date off when the manifest records none — beta has none by design", () => {
-    expect(rowOffers(offer({ channel: "beta", version: "0.56.0", since: null }))).toBe(
+    expect(rowOffers(offer({ channel: "beta", version: "0.56.0", since: null, on: true }))).toBe(
       "Releases a maintainer has promoted. 0.56.0.",
     );
+  });
+});
+
+/**
+ * **A row names a version only when this installation is on that channel.**
+ *
+ * What general access was reading was beta's number — larger than the one the
+ * hero reports, out of reach of any upgrade from here, and next to a channel
+ * switch rather than an update. A reader who does not administer this
+ * Firetower got the bigger number and no control at all.
+ *
+ * General access names its own either way, which is the rule rather than an
+ * exception: it is the floor every installation is offered, so it is never
+ * the number that cannot be had, and somebody on beta is told what general
+ * holds because that is the version leaving beta waits for.
+ */
+describe("whose version a row may name", () => {
+  it("leaves beta's number off for an installation on general access", () => {
+    const [, beta] = bothOffers();
+    expect(rowOffers(beta)).toBe("Every release, as soon as it is cut.");
+    expect(rowOffers(beta)).not.toMatch(/\d+\.\d+\.\d+/);
+  });
+
+  /* The row this installation is on is unchanged — the hero's number and the
+     row's are then the same number, which is the point. */
+  it("still names general access's own number there", () => {
+    const [general] = bothOffers();
+    expect(rowOffers(general)).toBe("Releases a maintainer has promoted. 0.54.1.");
+  });
+
+  it("names both when the installation is on beta", () => {
+    const [general, beta] = bothOffers({
+      general: { on: false, action: null },
+      beta: { on: true, action: null },
+    });
+    expect(rowOffers(beta)).toBe("Every release, as soon as it is cut. 0.56.0.");
+    expect(rowOffers(general)).toBe("Releases a maintainer has promoted. 0.54.1.");
+  });
+
+  /* An unrecognised tag, an exact-version pin and a missing updater are all
+     treated as general access, and `on` already says so — so they get general
+     access's number and not beta's, without the rule naming them. */
+  it("treats a tag that names no channel as general access, beta's number included", () => {
+    const [general, beta] = bothOffers({
+      general: { action: "pin" },
+      beta: { action: "switch" },
+    });
+    expect(rowOffers(general)).toContain("0.54.1");
+    expect(rowOffers(beta)).not.toMatch(/\d+\.\d+\.\d+/);
+  });
+
+  /**
+   * **The field is not emptied — the row declines to draw it.** The API is
+   * additive-only and `servesChannels` reads field *presence*, so nulling
+   * `version` server-side would be a different and worse change. It is also
+   * what the switch confirmation needs: `SwitchPanel` names the version it
+   * would install, because that is the moment somebody is accepting beta and
+   * a confirmation that will not say what it is installing is worse than the
+   * problem being fixed. It takes it from `UpgradePlan.channelChange`, which
+   * nothing here touches; `shoot-channels.mjs` asserts the rendered button
+   * still reads "Switch to beta and upgrade to 0.56.0".
+   */
+  it("keeps the version on the offer for the confirmation to name", () => {
+    const beta = switchOffer(channel({ offers: bothOffers() }));
+    expect(rowOffers(beta!)).not.toMatch(/\d+\.\d+\.\d+/);
+    expect(beta?.version).toBe("0.56.0");
   });
 });
 

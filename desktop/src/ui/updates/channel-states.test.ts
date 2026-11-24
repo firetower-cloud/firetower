@@ -7,7 +7,7 @@
  * set and the screen's reasoning one thing rather than two that agree today.
  */
 import { describe, expect, it } from "vitest";
-import { channelBlock, pinOffer, rowVerdict, switchOffer } from "~/api/updates";
+import { channelBlock, pinOffer, rowOffers, rowVerdict, switchOffer } from "~/api/updates";
 import { CHANNEL_STATES, CHANNEL_STATE_NAMES } from "./channel-states";
 
 describe("every specimen state", () => {
@@ -73,6 +73,37 @@ describe("every specimen state", () => {
       }
     }
     expect(CHANNEL_STATES.manifestUnreadable.offers.every((o) => o.version === null)).toBe(true);
+  });
+
+  /**
+   * **No specimen shows a general-access installation beta's number.**
+   *
+   * The complaint this closes was read off a row: beta's version sat under a
+   * hero reporting general access's, larger than it and out of reach of any
+   * upgrade from here. Swept over every state rather than asserted on one,
+   * because `member` and the manifest-trouble states are each a different
+   * route to the same row.
+   */
+  it.each(CHANNEL_STATE_NAMES)("%s names a version only on the channel it is on", (name) => {
+    const state = CHANNEL_STATES[name];
+    for (const offer of state.offers) {
+      const said = rowOffers(offer);
+      if (offer.on || offer.channel === "general") continue;
+      expect(said, `${name}/${offer.channel} drew a version nobody here is on`).not.toMatch(
+        /\d+\.\d+\.\d+/,
+      );
+      expect(said).toBe(offer.offers);
+    }
+  });
+
+  /* The row the installation *is* on is untouched, so the one number on the
+     section is the one the hero is already reporting. */
+  it("still names the version of the channel in force", () => {
+    expect(rowOffers(CHANNEL_STATES.general.offers[0])).toContain("0.54.1");
+    expect(rowOffers(CHANNEL_STATES.beta.offers[1])).toContain("0.56.0");
+    /* On beta, general access keeps its number too: it is what leaving beta
+       waits for, which is what the sentence under the rows is about. */
+    expect(rowOffers(CHANNEL_STATES.beta.offers[0])).toContain("0.54.1");
   });
 
   /** Beta is irreversible on the row, before it is taken — and general is not. */
