@@ -93,6 +93,7 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "children" => children(state, request).await,
         "update" => update(state, request).await,
         "plan" => plan(state, request).await,
+        "rename_workspace" => rename_workspace(state, request).await,
         "create_profile" => create_profile(state, request).await,
         "update_profile" => update_profile(state, request).await,
         "list_profiles" => list_profiles(state, request).await,
@@ -1552,6 +1553,83 @@ async fn plan(state: &AppState, request: &AgentRequest) -> Result<String> {
          step starts or finishes.",
         plan.len()
     ))
+}
+
+/// The name the workspace wears in the rail, written by the agent in it.
+///
+/// A workspace is labelled with the first line of whoever's prompt started it,
+/// cut to 80 characters, because that is all the client had to go on at the
+/// moment it was created. Open with a paragraph and the rail becomes a column
+/// of sentence fragments. The agent knows what the work actually is by the end
+/// of its first turn; this is how it says so.
+///
+/// **Three refusals, and only one of them is an error.**
+///
+/// A child is an error — it asked for something it cannot have, and the reason
+/// is worth it reading. A child placed `here` shares its lead's workspace, so a
+/// child renaming would retitle the row the person is watching rather than
+/// anything of its own. It should not get this far: the instruction to rename
+/// is only given to a session with no parent. This is the backstop for the
+/// cases where it cannot be withheld — a child reading its lead's shared
+/// `AGENTS.md`, or one that reasons its way to the tool unprompted.
+///
+/// An empty or unparseable name is an error too, for the ordinary reason: the
+/// agent passed something wrong and can pass something right.
+///
+/// **An already-named workspace is not.** It comes back as a plain statement of
+/// fact, because the alternative is worse in a way that is easy to miss: an
+/// agent handed an error retries it, or apologises for it in the conversation,
+/// or explains to the person that it was unable to rename their workspace —
+/// which is three ways of spending somebody's attention on a label. A sentence
+/// saying the place is already named ends the matter in one turn.
+async fn rename_workspace(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = state
+        .db
+        .session(&request.session_id)
+        .await?
+        .context("the session that asked no longer exists")?;
+    if session.parent_id.is_some() {
+        bail!(
+            "only a session with no lead can name a workspace — you are working in your lead's, \
+             and renaming it would retitle the workspace they are watching. Carry on with the \
+             work and say nothing about this."
+        );
+    }
+
+    let asked = text(&request.input, "name").context("`name` is what to call this workspace")?;
+    // The endpoint a person renames through has validated a name since before
+    // this tool existed, so it is called rather than copied: two readings of
+    // what a valid name is would be a bug waiting for the first disagreement.
+    // Both paths genuinely have the same rule — trim, refuse empty — because
+    // length is advice in the tool's description and is not enforced anywhere.
+    let name = crate::api::sessions::valid_name(&asked).map_err(|why| anyhow::anyhow!("{why}"))?;
+
+    // `Agent`, which is the whole guarantee — the write happens only if nobody
+    // has deliberately named this place, decided inside the statement rather
+    // than by reading first. See `Db::rename_session`.
+    match state
+        .db
+        .rename_session(&session.id, &name, ft_core::NamedBy::Agent)
+        .await?
+    {
+        None => Ok(format!(
+            "This workspace is now called \"{name}\". It appears in the rail within a few \
+             seconds; nothing else to do, and nothing to tell the person."
+        )),
+        // Said as a fact with no suggestion of a remedy, deliberately. Any
+        // hint that there might be a way round it is an invitation to spend
+        // another turn looking for one.
+        Some(ft_core::NamedBy::Human) => Ok(
+            "Already named, by the person who started it. Their name stays; carry on with the \
+             work."
+                .into(),
+        ),
+        Some(ft_core::NamedBy::Agent) => Ok(
+            "Already named — this workspace has been named once and that is all it gets. \
+             Nothing was changed; carry on with the work."
+                .into(),
+        ),
+    }
 }
 
 /// A child's progress note to its lead, mid-task.

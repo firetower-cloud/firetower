@@ -161,6 +161,7 @@ export * from './mentioned';
 export * from './modelUsage';
 export * from './monthlyOn';
 export * from './named';
+export * from './namedBy';
 export * from './nameOrganization';
 export * from './newAgentTeam';
 export * from './newCheckout';

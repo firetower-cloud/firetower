@@ -62,6 +62,8 @@ pub const CHILDREN: &str = "children";
 pub const UPDATE: &str = "update";
 /// The plan the agent is keeping, drawn live in the workspace.
 pub const PLAN: &str = "plan";
+/// Name this workspace for the work, once, on the first turn.
+pub const RENAME_WORKSPACE: &str = "rename_workspace";
 /// Save a reusable agent profile, so a person can ask for one in words rather
 /// than filling the form in by hand.
 pub const CREATE_PROFILE: &str = "create_profile";
@@ -270,6 +272,39 @@ feeds the same panel, and this exists for engines that have none. \
 Restate the whole plan each call, like a todo list: 3-8 steps, one \
 `doing` at a time, the rest `pending` or `done`. Update it when a step starts \
 or finishes. It does not pause you and nobody is asked to approve it.";
+
+/// What `rename_workspace` does, as the agent reads it.
+///
+/// **This description is most of the feature.** The guards in the control plane
+/// decide whether a name may be written; nothing but these words decides
+/// whether the name is any good, and the failure they exist to prevent is an
+/// agent that restates the opening sentence in fewer characters. So the
+/// distinction — the work, not the request — is first and is given an example,
+/// which is the only form of that instruction an agent reliably follows.
+///
+/// The other three facts are here because each one is a turn somebody would
+/// otherwise waste: it can be done once, so there is no point holding it back
+/// until the work is understood; it is the label in the rail, so it is read by
+/// a person scanning a list rather than by anything; and a child may not call
+/// it, said with the reason, so a child that reads this in a shared `AGENTS.md`
+/// does not try.
+const RENAME_WORKSPACE_DESCRIPTION: &str = "\
+Name this workspace for the work. Call it ONCE, as your first action after the \
+person's opening message. \
+Name what the work *is*, not how the request was phrased: \"Staging deploy \
+failures\", not \"can you look at why the deploy keeps falling over\". Keep it \
+to about forty characters. \
+This is the label in the left rail — what somebody reads to find this \
+conversation again among twenty others — so it is written for a person \
+scanning a list, not for you. \
+**You get one.** Firetower records that the workspace has been named and a \
+second call writes nothing, so do not wait until you understand the work \
+better; a short title from the opening message is what this is for. A name a \
+person chose is never overwritten. \
+Only a session with no lead may call this: a child started in its lead's \
+workspace shares it, so a child renaming would retitle the row the person is \
+actually watching. \
+If it refuses or fails, carry on with the work and say nothing about it.";
 
 /// The configuration file that tells an agent to start this.
 pub fn mcp_config(exe: &std::path::Path, session_id: &str, workspace: &std::path::Path) -> Value {
@@ -494,6 +529,19 @@ async fn answer(
                                 },
                             },
                             "required": ["steps"],
+                        },
+                    }, {
+                        "name": RENAME_WORKSPACE,
+                        "description": RENAME_WORKSPACE_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "The title, around forty characters. What the work is — \"Tax lines in invoice export\" — rather than how it was asked for.",
+                                },
+                            },
+                            "required": ["name"],
                         },
                     }, {
                         "name": CREATE_PROFILE,
@@ -781,10 +829,10 @@ async fn answer(
                 .and_then(Value::as_str)
                 .unwrap_or(TOOL);
             let text = match name {
-                SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
-                | LIST_PROFILES | GET_PROFILE | CREATE_TEAM | UPDATE_TEAM | LIST_TEAMS
-                | GET_TEAM | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS
-                | GET_SKILL | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
+                SPAWN | CHILDREN | UPDATE | PLAN | RENAME_WORKSPACE | CREATE_PROFILE
+                | UPDATE_PROFILE | LIST_PROFILES | GET_PROFILE | CREATE_TEAM | UPDATE_TEAM
+                | LIST_TEAMS | GET_TEAM | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL
+                | LIST_SKILLS | GET_SKILL | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
                     delegate(session_id, name, &id, &arguments).await
                 }
                 // **The one tool that asks a person before it acts**, and
@@ -837,6 +885,31 @@ async fn ask(
         .and_then(Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| format!("{tool_name}-{}", input.to_string().len()));
+
+    // **Naming the workspace is never put to anybody.**
+    //
+    // Declaring the tool above is what normally keeps it off this path: a
+    // `tools/call` naming it is routed to the control plane rather than turned
+    // into a question. But what reaches here is a question the *engine* raised
+    // about a call it is holding, and in `auto` mode that is a classifier's
+    // judgement — `plan`, `spawn` and `update` are waved through today and
+    // nothing promises `rename_workspace` always will be, on every engine, for
+    // ever.
+    //
+    // A card would defeat the whole point. The agent calls this on its first
+    // turn, before it has done anything the person cares about, and a rename
+    // that stops to ask is a modal interruption about a rail label. So the
+    // answer is decided here instead of being asked: the worst this tool can
+    // do is write a line of text into a name the control plane has already
+    // decided it may write, once.
+    //
+    // Narrowly this one tool, not Firetower's tools in general.
+    // `request_deletion` is also declared and must still reach a person —
+    // asking is what it is *for* — so a blanket rule here would be a hole in
+    // the one place that cannot have one.
+    if tool_name == format!("mcp__{SERVER}__{RENAME_WORKSPACE}") {
+        return settle(json!({ "behavior": "allow" }), &input);
+    }
 
     // Already settled, so nobody is asked twice. This is what makes "always"
     // mean now rather than from the next session onwards.
@@ -1154,6 +1227,7 @@ mod tests {
                 CHILDREN,
                 UPDATE,
                 PLAN,
+                RENAME_WORKSPACE,
                 CREATE_PROFILE,
                 UPDATE_PROFILE,
                 LIST_PROFILES,
@@ -1234,6 +1308,93 @@ mod tests {
         let decision: Value = serde_json::from_str(text).unwrap();
         assert_eq!(decision["behavior"], "deny");
         assert!(decision["message"].as_str().unwrap().contains("Firetower"));
+    }
+
+    /// **Naming the workspace never reaches a person.**
+    ///
+    /// The one requirement of this feature that correct code cannot satisfy on
+    /// its own: a rename that stops to ask about itself defeats the point of
+    /// renaming. Two things have to hold and both are asserted here, because
+    /// each covers a different way the card could appear.
+    ///
+    /// Declaring the tool is the first: a `tools/call` naming it is routed to
+    /// the control plane rather than turned into a question, which is what
+    /// `plan`, `spawn` and `update` already rely on. The session here does not
+    /// exist, so the delegation fails — and *that it failed as a delegation*,
+    /// in words, rather than coming back as a permission decision, is the
+    /// assertion.
+    ///
+    /// The second is the engine asking anyway. In `auto` mode that is a
+    /// classifier's judgement, and nothing promises it waves this through on
+    /// every engine for ever, so a question about this tool is answered here
+    /// instead of being carried to somebody.
+    #[tokio::test]
+    async fn naming_the_workspace_is_never_put_to_a_person() {
+        let called = json!({
+            "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+            "params": { "name": RENAME_WORKSPACE, "arguments": { "name": "Staging deploys" } },
+        });
+        let response = answer(&called, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            serde_json::from_str::<Value>(text)
+                .ok()
+                .and_then(|d| d.get("behavior").cloned())
+                .is_none(),
+            "a declared tool is delegated, not turned into a decision: {text}"
+        );
+        assert!(text.contains("Firetower"), "{text}");
+
+        // And if the engine raises a question about it regardless, it is
+        // answered here rather than carried to whoever is watching — which
+        // this session has nobody to be, so a question would come back denied.
+        let asked = json!({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": TOOL, "arguments": {
+                "tool_name": format!("mcp__{SERVER}__{RENAME_WORKSPACE}"),
+                "input": { "name": "Staging deploys" },
+                "tool_use_id": "toolu_rename" } },
+        });
+        let response = answer(&asked, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let decision: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(decision["behavior"], "allow", "{text}");
+        assert_eq!(
+            decision["updatedInput"],
+            json!({ "name": "Staging deploys" }),
+            "the agent's own arguments come back with the allow"
+        );
+    }
+
+    /// Deleting still asks, which is what the exemption above must not widen
+    /// into.
+    ///
+    /// `request_deletion` is declared beside `rename_workspace` and exists in
+    /// order to put a question to somebody. A rule that waved Firetower's own
+    /// tools through in general would be a hole in the one place that cannot
+    /// have one, so the narrowness is asserted rather than left to the comment.
+    #[tokio::test]
+    async fn deleting_is_still_put_to_a_person() {
+        let request = json!({
+            "jsonrpc": "2.0", "id": 8, "method": "tools/call",
+            "params": { "name": TOOL, "arguments": {
+                "tool_name": format!("mcp__{SERVER}__{REQUEST_DELETION}"),
+                "input": { "items": [] },
+                "tool_use_id": "toolu_delete" } },
+        });
+        let response = answer(&request, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let decision: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            decision["behavior"], "deny",
+            "nobody could be asked, and the safe end of that is still a denial: {text}"
+        );
     }
 
     #[test]

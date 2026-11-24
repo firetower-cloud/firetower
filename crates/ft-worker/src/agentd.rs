@@ -82,6 +82,26 @@ pub fn persona_path(workspace: &Path, session_id: &str) -> PathBuf {
     dir_for(workspace).join(format!("persona-{session_id}.md"))
 }
 
+/// Where it is recorded that this workspace's agent names the place itself.
+///
+/// **Per workspace rather than per session, because the file it gates is.**
+/// `AGENTS.md` is one file beside the checkouts and every agent in the
+/// directory reads it, so what it says about naming is a fact about the
+/// workspace. A child placed `here` reads its lead's copy and there is no
+/// version of this that could say something different to it — which is why the
+/// tool refuses children server-side, and why that refusal is the backstop and
+/// not this.
+///
+/// Written when the workspace is built, from what the control plane said about
+/// lineage, and read again whenever the guide is rewritten — adding a
+/// repository mid-session rewrites it, and the naming paragraph should not
+/// vanish because that happened.
+///
+/// Its existence is the whole value; nothing reads the contents.
+pub fn names_itself_path(workspace: &Path) -> PathBuf {
+    dir_for(workspace).join("names-itself")
+}
+
 /// The per-session log, or the shared one an older session is still using.
 ///
 /// Reading only: what gets written is always the per-session path.

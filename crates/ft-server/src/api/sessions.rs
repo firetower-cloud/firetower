@@ -1078,6 +1078,24 @@ pub(crate) async fn create_session_as(
         state.db.bind_task(&id, key, url).await?;
     }
 
+    // That the name above was *chosen*, when the caller says it was — which
+    // only the web's create form does, because it is the only one with a field
+    // a person types a name into. The desktop and the phone derive theirs from
+    // the prompt and send nothing here, which leaves the stamp null and the
+    // agent free to name the workspace on its first turn.
+    //
+    // Same place and same reason as `bind_task` above, with one difference
+    // worth knowing: the failure is only *nearly* safe. A stamp that does not
+    // land leaves a typed name claimable, so the agent overwrites it once —
+    // the single case this feature can cost somebody their own input. Hence
+    // the `?` rather than a warning.
+    if let (Some(by), true) = (
+        req.name_set_by,
+        req.name.as_deref().is_some_and(|n| !n.trim().is_empty()),
+    ) {
+        state.db.stamp_created_name(&id, by).await?;
+    }
+
     // Whose child this is, for the same reason and at the same moment.
     if let Some(lineage) = &lineage {
         state
@@ -1320,6 +1338,7 @@ pub(crate) async fn create_session_as(
         inherit_settings,
     )
     .await;
+    carry_naming(&mut env, lineage.is_none());
     for vars in &per_repo_env {
         for v in vars {
             env.retain(|(existing, _)| *existing != v.name);
@@ -1789,6 +1808,31 @@ async fn carry_preferences(
     }
 }
 
+/// Tell this session to name its own workspace, if it is the kind that may.
+///
+/// **The one place lineage reaches the command line.** The worker builds the
+/// agent's arguments and has no session record to read, so what it knows about
+/// a session is what is in the session's environment — see
+/// [`ft_core::NAME_WORKSPACE_ENV`], which also says why this is a variable
+/// rather than a field on the launch frame.
+///
+/// Called from all three paths that start an agent, because all three can
+/// start either kind: a new workspace, a second agent in one that exists, and a
+/// relaunch. Nothing is pushed for a child, and `rename_workspace` refuses one
+/// regardless — this is what stops it finding that out the hard way, a turn in.
+///
+/// `name_yourself` reads the same way round as the argument of the same name on
+/// [`ft_core::Agent::launch_headless`], which is the other end of this: true
+/// means *name the workspace* at both ends. Two booleans about one thing
+/// pointing opposite ways across a call boundary is how an inverted gate gets
+/// written later, by somebody who read one of them and assumed the other.
+fn carry_naming(env: &mut Vec<(String, String)>, name_yourself: bool) {
+    env.retain(|(name, _)| name != ft_core::NAME_WORKSPACE_ENV);
+    if name_yourself {
+        env.push((ft_core::NAME_WORKSPACE_ENV.to_string(), "1".to_string()));
+    }
+}
+
 /// The work behind [`relaunch_session`], so a turn can do it without a request.
 ///
 /// Everything is resolved fresh rather than remembered: the credential comes
@@ -1860,6 +1904,7 @@ pub(crate) async fn relaunch(
         true,
     )
     .await;
+    carry_naming(&mut env, session.parent_id.is_none());
     // Re-composed from the stored profile, so a session that resumes after a
     // restart comes back as the profile it was started as. Best effort: a
     // persona that cannot be read is a plain restart, not a refusal to restart.
@@ -2163,6 +2208,7 @@ async fn start_another_agent(
         inherit_settings,
     )
     .await;
+    carry_naming(&mut env, lineage.is_none());
     if let Some(account) = &req.account_id {
         super::accounts::pin(&state, &owner, &id, account, req.agent).await?;
     }
@@ -3073,13 +3119,8 @@ pub(super) async fn rename_session(
 ) -> ApiResult<Json<Session>> {
     let id = SessionId::from_stored(id);
 
-    let name = req.name.trim();
-    if name.is_empty() {
-        return Err(ApiError::new(
-            ErrorCode::InvalidRequest,
-            "a session needs a name — `Agent 3` if you want the one it started with",
-        ));
-    }
+    let name =
+        valid_name(&req.name).map_err(|why| ApiError::new(ErrorCode::InvalidRequest, why))?;
 
     // Checked before renaming, so somebody else's session cannot be renamed by
     // guessing its id.
@@ -3090,7 +3131,14 @@ pub(super) async fn rename_session(
         .await?
         .ok_or_else(|| ApiError::not_found("session"))?;
 
-    state.db.rename_session(&id, name).await?;
+    // **`Human`, which is what makes a person's name permanent.** The agent's
+    // own naming tool reads this stamp and refuses to write over it, however
+    // many turns pass — and the write here is never refused in return, because
+    // a person may rename as often as they like.
+    state
+        .db
+        .rename_session(&id, &name, ft_core::NamedBy::Human)
+        .await?;
 
     state
         .db
@@ -3098,6 +3146,30 @@ pub(super) async fn rename_session(
         .await?
         .map(Json)
         .ok_or_else(|| ApiError::not_found("session"))
+}
+
+/// A workspace name, as anything that writes one has to have it.
+///
+/// Trim, because trailing space in a rail label is invisible and a name of
+/// nothing but space is not a name. Refuse empty, with words the caller passes
+/// straight on. That is the whole of it, and it is what this endpoint has always
+/// done — shared with the agent's `rename_workspace` so two callers writing the
+/// same column cannot come to two readings of what a valid name is.
+///
+/// **No length limit, on either path.** How long a title should be is advice an
+/// agent is given in words — roughly forty characters, in the tool's own
+/// description and in `ft_core::NAME_GUIDANCE` — and nothing counts it. A cut
+/// here would be the one place in the product that silently shortened something
+/// somebody meant, and it would do it to a person's typed name as readily as to
+/// an agent's, because by the time a name reaches this function the two are
+/// indistinguishable. Guidance an agent mostly follows beats a truncation
+/// nobody asked for.
+pub(crate) fn valid_name(raw: &str) -> Result<String, &'static str> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err("a session needs a name — `Agent 3` if you want the one it started with");
+    }
+    Ok(name.to_string())
 }
 
 #[derive(Debug, serde::Deserialize, utoipa::ToSchema)]
@@ -4837,7 +4909,38 @@ mod gh_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{asked_for, nothing_to_do, sanitise, skills_source, within, SkillsSource};
+    use super::{
+        asked_for, nothing_to_do, sanitise, skills_source, valid_name, within, SkillsSource,
+    };
+
+    /// What both writers of a workspace name agree on: trim, and refuse empty.
+    ///
+    /// Asserted on the shared function rather than only through each caller,
+    /// because a test per caller is exactly how two readings get written.
+    #[test]
+    fn a_workspace_name_is_trimmed_and_refused_when_empty() {
+        assert_eq!(
+            valid_name("  Staging deploy failures  ").unwrap(),
+            "Staging deploy failures"
+        );
+        assert!(valid_name("").is_err());
+        assert!(valid_name("   \n ").is_err(), "whitespace is not a name");
+    }
+
+    /// **Nothing is ever cut.**
+    ///
+    /// There was a cap once, briefly, taken from the figure the clients cut a
+    /// derived name to. It was wrong in both directions: it silently shortened
+    /// a name somebody typed into the rename box, and by the time a name
+    /// reaches this function there is nothing left to tell a person's from an
+    /// agent's, so no version of it could have applied to one and not the
+    /// other. Length is advice in the tool's description now, and this is what
+    /// keeps a number from creeping back in to enforce it.
+    #[test]
+    fn a_long_name_is_kept_whole() {
+        let long = "x".repeat(200);
+        assert_eq!(valid_name(&long).unwrap(), long);
+    }
 
     /// The reported bug, as a test.
     ///

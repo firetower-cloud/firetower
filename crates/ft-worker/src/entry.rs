@@ -102,32 +102,44 @@ async fn supervise(session: &str, workspace: PathBuf, agent: &str) -> Result<()>
         // its persona the way that one knows how, and coming up as a plain
         // agent would be the profile quietly going missing.
         let persona = persona_for(&workspace, session);
-        kind.launch_headless(session, &asking, start, &preferred, persona.as_deref())
-            .map(|mut argv| {
-                // Claude Code has no home of its own here, so the directory
-                // holding this session's skills is named on the command line.
-                // Per launch, which is what makes it per *session*: a second
-                // agent in the same workspace gets its own.
-                if kind.skills_home() == Some(ft_core::SkillsHome::AddedDirectory) {
-                    let id = ft_core::SessionId::from_stored(session);
-                    argv.push("--add-dir".into());
-                    argv.push(
-                        crate::skills::added_dir(&workspace, &id)
-                            .to_string_lossy()
-                            .into_owned(),
-                    );
-                }
-                argv
-            })
-            .map(|argv| crate::agentd::Launch {
-                session_id: session.to_string(),
-                workspace: workspace.clone(),
-                argv,
-                // Inherited from tmux, which was handed the session's
-                // environment when it started this. Nothing to add.
-                env: vec![],
-            })
-            .with_context(|| format!("{} cannot be driven this way yet", kind.label()))
+        // Whether this session is told to name its own workspace. Off unless
+        // the control plane said so, which it does for a session with no
+        // parent — see `ft_core::NAME_WORKSPACE_ENV`. Absent is a child, or a
+        // control plane from before this existed, and both want silence.
+        let name_yourself = std::env::var_os(ft_core::NAME_WORKSPACE_ENV).is_some();
+        kind.launch_headless(
+            session,
+            &asking,
+            start,
+            &preferred,
+            persona.as_deref(),
+            name_yourself,
+        )
+        .map(|mut argv| {
+            // Claude Code has no home of its own here, so the directory
+            // holding this session's skills is named on the command line.
+            // Per launch, which is what makes it per *session*: a second
+            // agent in the same workspace gets its own.
+            if kind.skills_home() == Some(ft_core::SkillsHome::AddedDirectory) {
+                let id = ft_core::SessionId::from_stored(session);
+                argv.push("--add-dir".into());
+                argv.push(
+                    crate::skills::added_dir(&workspace, &id)
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
+            argv
+        })
+        .map(|argv| crate::agentd::Launch {
+            session_id: session.to_string(),
+            workspace: workspace.clone(),
+            argv,
+            // Inherited from tmux, which was handed the session's
+            // environment when it started this. Nothing to add.
+            env: vec![],
+        })
+        .with_context(|| format!("{} cannot be driven this way yet", kind.label()))
     };
 
     let ran = crate::agentd::run(launch(start)?)

@@ -3556,6 +3556,9 @@ async fn a_model_the_picker_does_not_offer_is_imported_and_reaches_the_launch() 
             ft_core::Start::Fresh,
             &carried,
             None,
+            // A child, which is the one thing this says about naming: it is
+            // not told to name a workspace it shares with its lead.
+            false,
         )
         .expect("Claude Code is launched with an argv");
     let at = argv
@@ -10773,7 +10776,6 @@ async fn deleting_a_profile_a_team_holds_names_the_teams() {
     );
     state.fleet.stop_supervising(&host.id).await;
 }
-
 // ─── Reading a whole skill ──────────────────────────────────────────────────
 
 /// A skill of this owner's with a bundle of a given shape, live.
@@ -11335,4 +11337,422 @@ async fn a_bundle_of_binaries_offers_no_example_and_a_big_file_reads_in_megabyte
     );
 
     state.fleet.stop_supervising(&host.id).await;
+}
+
+// ── Naming the workspace ────────────────────────────────────────────────
+//
+// Through `delegate::handle` rather than against `Db::rename_session`, for the
+// reason the delegation tests above are: what the agent reaches is the
+// dispatch, and the guards worth proving — which session asked, whether it has
+// a lead, whether anybody has named the place already — are all resolved on
+// that side of the seam. The database tests beside `rename_session` prove the
+// write; these prove what the agent is told.
+
+/// A plain session of this owner's, with no lead and no profile.
+///
+/// What a person starts, which is the only kind of session this tool is for.
+async fn a_workspace_of_their_own(
+    state: &AppState,
+    host: &Host,
+    owner: &str,
+    called: &str,
+) -> ft_core::SessionId {
+    let id = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &id,
+            &host.id,
+            owner,
+            None,
+            "Something",
+            "so when i start a conversation in a new workspace, the",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(false, false),
+            // Derived, the way the desktop derives one. Nobody chose it, so
+            // nothing is stamped and the agent may claim it.
+            Some(called),
+        )
+        .await
+        .unwrap();
+    id
+}
+
+/// What the rail would show for this session.
+async fn shown_in_the_rail(state: &AppState, id: &ft_core::SessionId) -> String {
+    state.db.session(id).await.unwrap().unwrap().name
+}
+
+/// The first call names the workspace; the second is told so, in words.
+///
+/// **The second half is the part that matters.** An error there would be read
+/// by the agent as something to recover from — retry it, apologise for it, or
+/// explain to the person that it could not rename their workspace — and all
+/// three spend somebody's attention on a label. `handle` returning `Ok` is the
+/// assertion, as much as the text is.
+#[tokio::test]
+async fn an_agent_names_its_workspace_once_and_is_told_plainly_the_second_time() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let mine = a_workspace_of_their_own(
+        &state,
+        &host,
+        &owner,
+        "so when i start a conversation in a new workspace, the",
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &mine,
+            "n1",
+            "rename_workspace",
+            serde_json::json!({ "name": "Agent-named workspaces" }),
+        ),
+    )
+    .await
+    .expect("a workspace nobody has named is the agent's to name");
+    assert!(said.contains("Agent-named workspaces"), "{said}");
+    assert_eq!(
+        shown_in_the_rail(&state, &mine).await,
+        "Agent-named workspaces"
+    );
+
+    let again = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &mine,
+            "n2",
+            "rename_workspace",
+            serde_json::json!({ "name": "Second thoughts" }),
+        ),
+    )
+    .await
+    .expect("being already named is not an error");
+    assert!(again.contains("Already named"), "{again}");
+    assert_eq!(
+        shown_in_the_rail(&state, &mine).await,
+        "Agent-named workspaces",
+        "a refusal writes nothing"
+    );
+}
+
+/// A name a person set is never renamed by the agent, however many turns pass.
+#[tokio::test]
+async fn a_name_a_person_chose_is_never_taken_by_the_agent() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let mine = a_workspace_of_their_own(&state, &host, &owner, "Q4 billing migration").await;
+    // Through the same call the rename endpoint makes, which is what stamps
+    // `human` — see `sessions::rename_session`.
+    state
+        .db
+        .rename_session(&mine, "Q4 billing migration", ft_core::NamedBy::Human)
+        .await
+        .unwrap();
+
+    for req in ["n1", "n2", "n3"] {
+        let said = crate::delegate::handle(
+            &state,
+            &asks(
+                &host,
+                &mine,
+                req,
+                "rename_workspace",
+                serde_json::json!({ "name": "Billing" }),
+            ),
+        )
+        .await
+        .expect("still not an error, however many times it is tried");
+        assert!(said.contains("Already named"), "{said}");
+    }
+    assert_eq!(
+        shown_in_the_rail(&state, &mine).await,
+        "Q4 billing migration"
+    );
+}
+
+/// A child cannot rename the workspace it is standing in.
+///
+/// It shares that workspace with its lead when it was placed `here`, so the row
+/// it would retitle is the one the person is actually watching. This is the
+/// backstop rather than the mechanism — a child is not told to rename at all —
+/// so the refusal is asserted along with its lead's label not having moved.
+#[tokio::test]
+async fn a_child_cannot_rename_its_leads_workspace() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "s1",
+            "spawn",
+            serde_json::json!({ "goal": "read the diff", "placement": "here" }),
+        ),
+    )
+    .await
+    .expect("a lead may start a child here");
+    let child = child_of(&state, &lead, "s1").await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &child.id,
+            "n1",
+            "rename_workspace",
+            serde_json::json!({ "name": "Diff review" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("no lead"), "{refused}");
+    assert_eq!(
+        shown_in_the_rail(&state, &lead).await,
+        "lead",
+        "the row the person is watching is untouched"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Empty input is refused, and refusing leaves the workspace claimable.
+///
+/// The second half is what makes the refusal safe to make: nothing is stamped,
+/// so the agent's next call with a real name still lands. A refusal that burned
+/// the one write would be worse than accepting the blank.
+#[tokio::test]
+async fn an_empty_name_is_refused_and_leaves_the_workspace_claimable() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+
+    let blank = a_workspace_of_their_own(&state, &host, &owner, "derived blank").await;
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &blank,
+            "n1",
+            "rename_workspace",
+            serde_json::json!({ "name": "   " }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("`name`"), "{refused}");
+    assert_eq!(
+        shown_in_the_rail(&state, &blank).await,
+        "derived blank",
+        "a refused name leaves the workspace claimable"
+    );
+    assert_eq!(
+        state.db.workspace_named_by(&blank).await.unwrap(),
+        None,
+        "and leaves nothing stamped, so the agent may try again with a real one"
+    );
+}
+
+/// What the worker was told about naming, for the workspace it was asked to
+/// create.
+///
+/// Off the frame rather than out of the database, for the reason
+/// `settings_told_to` is: whether a session is told to name itself is an
+/// environment variable on the frame that starts it and is on no row anywhere.
+fn told_to_name_itself(created: &Created, id: &ft_core::SessionId) -> bool {
+    created
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|spec| &spec.session_id == id)
+        .expect("the worker was asked to create it")
+        .env
+        .iter()
+        .any(|(name, _)| name == ft_core::NAME_WORKSPACE_ENV)
+}
+
+/// A name typed into the create form is closed to the agent; a derived one is
+/// not.
+///
+/// Through `create_session_as` rather than against `stamp_created_name`,
+/// because the wiring is the thing that could be wrong: the stamp works and
+/// the question is whether an optional field on the request reaches it. The
+/// desktop and the phone send no field at all, which is the second case here
+/// and the one that has to leave the workspace claimable — if a derived name
+/// came up stamped, the agent would be blocked on every workspace there is.
+#[tokio::test]
+async fn only_a_name_somebody_typed_is_closed_to_the_agent() {
+    let (state, _principal, host, ready, owner, _created, _frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+
+    let chosen = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "name": "Q4 billing migration",
+            "nameSetBy": "human",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a bare workspace with a name somebody typed");
+    assert_eq!(
+        state.db.workspace_named_by(&chosen.id).await.unwrap(),
+        Some(ft_core::NamedBy::Human),
+    );
+
+    // And what the desktop and the phone send: a name, and nothing about who
+    // chose it, because nobody did.
+    let derived = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "name": "so when i start a conversation in a new workspace",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a bare workspace with a derived name");
+    assert_eq!(
+        state.db.workspace_named_by(&derived.id).await.unwrap(),
+        None,
+        "a derived name is not a choice, and the agent may still claim it"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Only a session with no lead is *told* to name its workspace.
+///
+/// The gate, on the frame the worker actually receives. The tool refuses a
+/// child either way — `a_child_cannot_rename_its_leads_workspace` is that —
+/// and this is what stops a child burning its first turn finding out.
+///
+/// `placement: "new"` for the child, so both sessions arrive as workspaces the
+/// worker was asked to create and the two frames can be compared directly. A
+/// child placed `here` never gets a frame of its own at all, which is the
+/// sharing this whole requirement is about.
+#[tokio::test]
+async fn a_child_is_not_told_to_name_the_workspace() {
+    let (state, _principal, host, ready, owner, created, _frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+
+    let mine = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "so when i start a conversation in a new workspace, the",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a workspace somebody started");
+    assert!(
+        told_to_name_itself(&created, &mine.id),
+        "a session with no lead names the place it is in"
+    );
+
+    let child = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "read the diff",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch {
+            lineage: Some(super::sessions::Lineage {
+                parent: mine.id.clone(),
+                reason: None,
+                req: None,
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("a child in a workspace of its own");
+    assert!(
+        !told_to_name_itself(&created, &child.id),
+        "a child is not told to rename a workspace it may be sharing"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A long name is kept whole, whoever wrote it.**
+///
+/// Length is advice now — roughly forty characters, said in the tool's own
+/// description and in the guidance block — and nothing counts it on either
+/// path. Driven through the endpoint and through the tool rather than against
+/// the validator, because what this pins is the wiring: a cap lived here
+/// briefly and silently shortened a name somebody had typed into the rename
+/// box. Both halves are asserted because "nothing truncates" is a claim about
+/// both doors, and a test of one would have passed while the other cut.
+#[tokio::test]
+async fn a_long_name_is_kept_whole_on_both_paths() {
+    let (state, principal, host, _ready, owner) = fixture().await;
+    let mine = a_workspace_of_their_own(&state, &host, &owner, "derived").await;
+
+    let typed = format!(
+        "{} and then some more of it, well past eighty characters, every one of which they meant",
+        "Q4 billing migration"
+    );
+    assert!(typed.chars().count() > 80, "the test's own premise");
+
+    let Json(renamed) = super::sessions::rename_session(
+        State(state.clone()),
+        Extension(principal),
+        Path(mine.as_str().to_string()),
+        Json(serde_json::from_value(serde_json::json!({ "name": typed.clone() })).unwrap()),
+    )
+    .await
+    .expect("a person may rename their own workspace");
+    assert_eq!(
+        renamed.name, typed,
+        "and what it answers with is what it wrote"
+    );
+    assert_eq!(
+        shown_in_the_rail(&state, &mine).await,
+        typed,
+        "nothing a person typed is dropped"
+    );
+
+    // And the agent, writing the same column through its own door, is held to
+    // the same rule — which is the whole reason one validator serves both.
+    let theirs = a_workspace_of_their_own(&state, &host, &owner, "derived too").await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &theirs,
+            "n1",
+            "rename_workspace",
+            serde_json::json!({ "name": typed.clone() }),
+        ),
+    )
+    .await
+    .expect("a long title is a title, not something to argue about");
+    assert_eq!(
+        shown_in_the_rail(&state, &theirs).await,
+        typed,
+        "nothing counts the characters on this path either"
+    );
 }
