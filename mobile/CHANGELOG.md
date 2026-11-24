@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.19.0...mobile-v0.20.0) (2026-11-24)
+
+
+### Features
+
+* workspaces that name themselves ([1b2f7f2](https://github.com/firetower-cloud/firetower/commit/1b2f7f28f392acb7761b2e9b314451f8977299ab))
+* workspaces that name themselves ([960480f](https://github.com/firetower-cloud/firetower/commit/960480f2b0cc77e1847fbcf31bd20a2e9a5c7c37))
+
 ## [0.19.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.18.0...mobile-v0.19.0) (2026-11-22)
 
 
