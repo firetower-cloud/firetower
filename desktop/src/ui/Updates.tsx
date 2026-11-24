@@ -126,7 +126,23 @@ export function Updates() {
     s.latest?.version !== s.current &&
     !inTheWay;
   const behind = s.hosts.filter((h) => h.mayUpgrade);
-  const level = build.newer ? `${build.newer} is out for this app.` : "Up to date.";
+  /* **Never "Up to date." over a check that did not land.** This is the line
+     both of the heading's quiet branches fall to, and a check that stopped
+     now offers nothing — the server keeps the figure the last good one found
+     so the screen can hold still, but shows it rather than offering it. So
+     the deployment has nothing to *take*, which is not the same fact as the
+     fleet being level, and the brick line under this already says what went
+     wrong. A heading claiming agreement above a line saying the opposite is
+     the sentence somebody acts on.
+
+     This app's own build still speaks first when it has one: that is a
+     different check, it did not fail, and it is the thing on this screen
+     there is actually something to do about. */
+  const level = build.newer
+    ? `${build.newer} is out for this app.`
+    : s.checkError
+      ? "The last check could not say what is out."
+      : "Up to date.";
 
   /* What the heading says is what this person can do something about. "A newer
      version is out" to somebody who cannot install it is a notice with no

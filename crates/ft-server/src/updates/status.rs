@@ -212,13 +212,30 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
             cli_minimum: c.cli_minimum.clone(),
         })
     });
-    let newer = latest_version
-        .as_ref()
-        .is_some_and(|l| version::is_newer(l, &current));
-
     let hosts = state.db.hosts().await?;
 
     let (updater, answered) = updater_view(updates).await;
+    // The updater was asked once, above, and this is the other half of the
+    // same answer. Read before the targets below, because what this
+    // installation's channel holds is what decides whether the figure the
+    // store is holding may be offered at all.
+    let channel = channel::status(state, answered.as_ref()).await;
+
+    // Shown either way, from `latest` above. Whether it may also be *acted
+    // on* is a second question, and `still_offered` is the whole of it.
+    let offered = still_offered(
+        latest_version,
+        channel
+            .offers
+            .iter()
+            .find(|o| o.on)
+            .and_then(|o| o.version.as_deref()),
+        channel.manifest.outcome,
+    );
+    let newer = offered
+        .as_ref()
+        .is_some_and(|l| version::is_newer(l, &current));
+
     let control_plane = ControlPlaneTarget {
         version: current.to_string(),
         upgradable: newer && updater.reachable,
@@ -236,7 +253,10 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
     let mut targets = Vec::new();
     for host in hosts.iter() {
         let online = state.fleet.is_connected(&host.id).await;
-        let behind = match (&host.worker_version, &latest_version) {
+        // Against what is being offered, not against what is merely being
+        // shown: a figure this installation's channel no longer holds would
+        // otherwise mark every worker behind a version nothing is moving to.
+        let behind = match (&host.worker_version, &offered) {
             (Some(theirs), Some(latest)) => version::parse(theirs)
                 .map(|v| version::is_newer(latest, &v))
                 .unwrap_or(true),
@@ -278,10 +298,50 @@ pub async fn status(state: &AppState) -> Result<UpdateStatus> {
         control_plane,
         hosts: targets,
         active_run,
-        // The updater was asked once, above, and this is the other half of
-        // the same answer.
-        channel: channel::status(state, answered.as_ref()).await,
+        channel,
     })
+}
+
+/// Whether the version the store is holding may be *offered*, or only shown.
+///
+/// **[`Store::record_check`] keeps the figure the last good check found when
+/// a later one stops**, so the screen holds still and says why rather than
+/// blanking out. That is right for showing it and wrong for acting on it,
+/// and nothing told the two apart: one column carried both meanings and
+/// [`status`] read it as a target.
+///
+/// What that cost. An installation that checked before the channel manifest
+/// existed stored the newest *release* — and `images.yml` tags every release
+/// `beta`, so what a general-access installation kept was beta's number. Once
+/// the manifest was published but would not read, every check since stopped,
+/// `latest_version` was retained through all of them, and the screen went on
+/// offering an upgrade to it. That upgrade pulls `:stable`, gets the version
+/// general access holds, and the updater refuses on the mismatch. "I cannot
+/// update to the latest release", from several people at once — which is what
+/// one manifest outage looks like from the outside.
+///
+/// So: offered only while this installation's own channel still holds it,
+/// which is the condition the updater enforces, checked where the offer is
+/// made instead of discovered when it refuses. **Deliberately not keyed on
+/// the stored `error`.** A check that found a version but could not fetch its
+/// notes records one too — see [`described`] — and that version is a
+/// perfectly good target, so an error is not evidence the figure is stale.
+///
+/// `holds` is what this installation's channel holds, from the manifest read
+/// on the last check. Absence is the exception the rest of this module
+/// already makes — nothing is published, so the installation follows the
+/// newest release exactly as it did before channels existed. See
+/// [`what_to_offer`].
+fn still_offered(
+    stored: Option<Version>,
+    holds: Option<&str>,
+    outcome: channel::ManifestOutcome,
+) -> Option<Version> {
+    if outcome == channel::ManifestOutcome::Absent {
+        return stored;
+    }
+    let holds = holds.and_then(version::parse)?;
+    stored.filter(|s| *s == holds)
 }
 
 /// What the updater says, and what it said — the status itself comes back
@@ -528,5 +588,109 @@ mod tests {
         let said = nothing_new("the channel manifest could not be fetched".into());
         assert!(said.latest_version.is_none(), "never a zero, never a guess");
         assert!(said.error.is_some());
+    }
+
+    /// **The reported bug, as the sequence that produces it.** Through the
+    /// real store and the real SQL, because the retention that sets it up is
+    /// `record_check`'s `COALESCE` and a hand-written stand-in for that would
+    /// be asserting about the stand-in.
+    ///
+    /// A general-access installation checks before the channel manifest
+    /// exists, so it follows the newest release — which is beta's, every
+    /// release being tagged `beta`. The manifest is published and then will
+    /// not read, so every check since stops. The figure is kept, which is
+    /// what it is kept for; what it must not be is a target, because the
+    /// upgrade it would start pulls `:stable`, gets general access's version
+    /// and is refused by the updater on the mismatch.
+    #[tokio::test]
+    async fn a_version_kept_through_a_stopped_check_is_shown_and_not_offered() {
+        let (db, _owner) = crate::db::Db::open_for_test_owned().await.unwrap();
+        let store = crate::updates::store::Store::new(db.pool().clone());
+
+        // Before the manifest existed: `what_to_offer` says follow the newest
+        // release, and `described` stores it.
+        assert_eq!(
+            what_to_offer(&channel::Read::Absent, channel::Channel::General),
+            Offered::TheNewestRelease
+        );
+        store
+            .record_check(&Checked {
+                checked_at: chrono::Utc::now(),
+                latest_version: Some("0.56.0".into()),
+                published_at: None,
+                notes_url: None,
+                notes: None,
+                cli_minimum: None,
+                error: None,
+            })
+            .await
+            .unwrap();
+
+        // The manifest is published, and will not read. Every check from here
+        // stops, and stores nothing.
+        let stopped = match what_to_offer(
+            &channel::Read::Unreadable("429 Too Many Requests".into()),
+            channel::Channel::General,
+        ) {
+            Offered::Stop(why) => nothing_new(why),
+            other => panic!("a read that failed must stop, not {other:?}"),
+        };
+        store.record_check(&stopped).await.unwrap();
+
+        let last = store.last_check().await.unwrap().unwrap();
+        // Kept, and still shown — the screen holds still and says why rather
+        // than blanking out, which is what the retention is for.
+        assert_eq!(last.latest_version.as_deref(), Some("0.56.0"));
+        assert!(last.error.is_some(), "and says why");
+
+        // And not offered: general access holds 0.54.1, which is not it.
+        let kept = version::parse(last.latest_version.as_deref().unwrap());
+        assert_eq!(
+            still_offered(
+                kept.clone(),
+                Some("0.54.1"),
+                channel::ManifestOutcome::Unreadable
+            ),
+            None,
+            "beta's number, offered to an installation that pulls :stable"
+        );
+        // Which is what makes `update_available` and `upgradable` false: both
+        // are `newer`, and `newer` is read off what is offered.
+        assert!(!still_offered(kept, Some("0.54.1"), channel::ManifestOutcome::Unreadable)
+            .is_some_and(|l| version::is_newer(&l, &Version::new(0, 54, 1))));
+    }
+
+    /// **The normal path is untouched, and that is the half worth guarding.**
+    /// A gate on the stored `error` would have failed here: `described`
+    /// records an error beside a perfectly good version when the feed cannot
+    /// supply its *notes*, which is routine.
+    #[test]
+    fn a_version_this_channel_holds_is_still_offered() {
+        let promoted = version::parse("0.55.0");
+        assert_eq!(
+            still_offered(
+                promoted.clone(),
+                Some("0.55.0"),
+                channel::ManifestOutcome::Found
+            ),
+            promoted,
+            "a healthy installation keeps its upgrade"
+        );
+
+        // Nothing published yet: the bootstrap, and the one case that follows
+        // the newest release — the same exception `what_to_offer` makes.
+        let newest = version::parse("0.56.0");
+        assert_eq!(
+            still_offered(newest.clone(), None, channel::ManifestOutcome::Absent),
+            newest,
+            "absence is the bootstrap, not a stale figure"
+        );
+
+        // A manifest that read but holds nothing for this channel offers
+        // nothing either — there is no version to agree with.
+        assert_eq!(
+            still_offered(newest, None, channel::ManifestOutcome::Incomplete),
+            None
+        );
     }
 }
