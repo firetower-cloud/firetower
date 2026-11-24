@@ -44,8 +44,10 @@ import {
 import type { Chosen } from "~/api/updates";
 import {
   ACTIVE,
+  aheadOfGeneral,
   canStart,
   channelBlock,
+  channelsShown,
   countEnded,
   mismatch,
   needsChoice,
@@ -58,7 +60,7 @@ import {
 import { useBackendKey } from "~/backend";
 import { bridge } from "~/bridge";
 import type { AppChannel } from "~/channel";
-import { installedFrom, setAppChannel, useAppChannel } from "~/channel";
+import { installedFrom, revealChannels, setAppChannel, useAppChannel, useChannelsRevealed } from "~/channel";
 import type { Span } from "~/releases";
 import { span as readSpan } from "~/releases";
 import { look, takeUpdate, useBuild, whyUpdateFailed } from "~/update";
@@ -79,6 +81,8 @@ export function Updates() {
   const check = useCheckUpdates();
   const backUp = useBackUpNow();
   const build = useBuild();
+  const revealed = useChannelsRevealed();
+  const appChannel = useAppChannel();
   const [planning, setPlanning] = useState<Chosen | null>(null);
   const [opened, setOpened] = useState<string | null>(null);
   /* Ticked on the page, so the list you are choosing from stays in front of
@@ -91,13 +95,22 @@ export function Updates() {
   const [switching, setSwitching] = useState<ChannelAct | null>(null);
   const refresh = () => Promise.all([cache.invalidateQueries({ queryKey: getGetUpdatesQueryKey() }), cache.invalidateQueries({ queryKey: getListRunsQueryKey() })]);
 
+  /* What this copy is, for `channelsShown` below. Read before the early
+     returns, because the two of them draw the app's own section and it asks
+     the same question. */
+  const copy = {
+    channel: appChannel,
+    from: installedFrom(build.version),
+    ahead: aheadOfGeneral(build.version, pinsFor(status.data?.channel, Package.desktop)?.general),
+  };
+
   /* The app's own section is drawn before the server is heard from, and still
      drawn when it refuses. This app updates itself from GitHub without asking
      any Firetower anything, so a deployment that is down is not a reason to
      hide the one button on this screen that still works — and the rail sends
      people here for that button. */
-  if (status.isPending) return <Page><Copy status={undefined} /><p className="mt-7 flex items-center gap-2 text-read text-mute"><Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />Asking what is running…</p></Page>;
-  if (status.error) return <Page><Copy status={undefined} /><p className="mt-7 text-read text-brick">{why(status.error)}</p></Page>;
+  if (status.isPending) return <Page><Copy status={undefined} shown={channelsShown(revealed, null, copy)} /><p className="mt-7 flex items-center gap-2 text-read text-mute"><Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} />Asking what is running…</p></Page>;
+  if (status.error) return <Page><Copy status={undefined} shown={channelsShown(revealed, null, copy)} /><p className="mt-7 text-read text-brick">{why(status.error)}</p></Page>;
 
   const s = status.data as UpdateStatus;
   /* **What the server can serve, read from the answer rather than from a
@@ -107,6 +120,13 @@ export function Updates() {
      capability. */
   const channel: ChannelStatus | null = servesChannels(s) ? s.channel : null;
   const inTheWay = channel ? channelBlock(channel) : null;
+  /* **Whether this screen names the channels at all.** Off until somebody
+     asks, at the foot of the page — and on regardless for anybody already on
+     beta, by any of the four routes `channelsShown` names. The preference is
+     local to this copy and grants nothing: the installation's channel is
+     still the tag in `firetower.yml`, still an administrator's, and still
+     only moved by the switch flow below. */
+  const shown = channelsShown(revealed, channel, copy);
   const active = ((runs.data ?? []) as UpdateRun[]).find((r) => ACTIVE.includes(r.state));
   const mayMoveEverything = s.controlPlane.mayUpgrade ?? false;
   if (!primed) {
@@ -225,7 +245,7 @@ export function Updates() {
               {/* **The tag goes in the cell that already says what is
                   running**, a step quieter, because the channel *is* that
                   tag. It costs no colour, which a channel is not allowed to. */}
-              <s>{saysChannel(channel)}</s>
+              <s>{saysChannel(shown ? channel : null)}</s>
             </span>
             <span className="ver">
               {s.controlPlane.version}
@@ -259,7 +279,7 @@ export function Updates() {
           )}
 
           {channel ? (
-            <ChannelSection channel={channel} blocked={!!active} onAct={setSwitching} />
+            <ChannelSection channel={channel} blocked={!!active} shown={shown} onAct={setSwitching} />
           ) : (
             /* **A newer client against an older control plane.** Not a control
                it cannot serve, and not silence either: the mismatch is real
@@ -270,7 +290,7 @@ export function Updates() {
             </div>
           )}
 
-          <Copy status={s} />
+          <Copy status={s} shown={shown} />
 
           {s.hosts.length > 0 && (
             <section className="upd-sec">
@@ -332,7 +352,47 @@ export function Updates() {
           </section>
         </>
       )}
+      <Reveal shown={shown} revealed={revealed} />
     </Page>
+  );
+}
+
+/**
+ * The line that puts the release channels on the page, and takes them off.
+ *
+ * **A footnote, and deliberately not a control.** Beta is for the few people
+ * who want every release as it is cut; for everybody else it was a larger
+ * version number on the one screen whose job is to say what is running and
+ * what is out. So it is one underlined line under a rule, at the foot, below
+ * everything the screen is actually for — the weight of a thing you find
+ * because you went looking, rather than a toggle competing with the buttons
+ * above it.
+ *
+ * **It discloses; it does not permit.** Nothing here moves a channel. The
+ * installation's is the tag in `firetower.yml`, install-wide, an
+ * administrator's, and changed only by the switch flow that rewrites the file
+ * and upgrades behind it. This copy's is the segmented control the line
+ * brings back. Pressing this grants nothing to anybody.
+ *
+ * **Not drawn when the channels are already on the page for another reason.**
+ * Somebody on beta sees the sections whatever the preference says, so a line
+ * offering to hide them would be offering something it cannot do. It appears
+ * again the moment they are off beta and the preference is the only thing
+ * holding them open.
+ */
+function Reveal({ shown, revealed }: { shown: boolean; revealed: boolean }) {
+  if (shown && !revealed) return null;
+  return (
+    <p className="upd-foot">
+      <button
+        type="button"
+        onClick={() => revealChannels(!revealed)}
+        aria-pressed={revealed}
+        className="upd-foot-act"
+      >
+        {revealed ? "Hide pre-release channels" : "Pre-release channels"}
+      </button>
+    </p>
   );
 }
 
@@ -351,7 +411,7 @@ export function Updates() {
  *
  * Nothing in a browser tab: a tab has no build of its own to move.
  */
-function Copy({ status }: { status: UpdateStatus | undefined }) {
+function Copy({ status, shown }: { status: UpdateStatus | undefined; shown: boolean }) {
   const build = useBuild();
   const channel = useAppChannel();
   const [trouble, setTrouble] = useState<string | null>(null);
@@ -416,6 +476,7 @@ function Copy({ status }: { status: UpdateStatus | undefined }) {
       spanPending={spanPending}
       onSpan={() => setSpanOpen(!spanOpen)}
       releasePage={RELEASES}
+      shown={shown}
     />
   );
 }

@@ -7,7 +7,7 @@
  * set and the screen's reasoning one thing rather than two that agree today.
  */
 import { describe, expect, it } from "vitest";
-import { channelBlock, pinOffer, rowOffers, rowVerdict, switchOffer } from "~/api/updates";
+import { channelBlock, channelsShown, pinOffer, rowOffers, rowVerdict, switchOffer } from "~/api/updates";
 import { CHANNEL_STATES, CHANNEL_STATE_NAMES } from "./channel-states";
 
 describe("every specimen state", () => {
@@ -104,6 +104,47 @@ describe("every specimen state", () => {
     /* On beta, general access keeps its number too: it is what leaving beta
        waits for, which is what the sentence under the rows is about. */
     expect(rowOffers(CHANNEL_STATES.beta.offers[0])).toContain("0.54.1");
+  });
+
+  /**
+   * **The decision blocks are not about beta, and must survive it being
+   * hidden.** Each one says an installation's image line is wrong and names
+   * what to change it to; each one is in the way of every upgrade until
+   * somebody acts. A reader with the channels hidden still gets all of them,
+   * because `channelBlock` never reads the preference.
+   */
+  it.each(CHANNEL_STATE_NAMES)("%s decides its block without asking about beta", (name) => {
+    const state = CHANNEL_STATES[name];
+    /* The same answer at both settings — the argument is not passed to it. */
+    expect(channelBlock(state)).toEqual(channelBlock({ ...state }));
+  });
+
+  it("still puts the frozen, unrecognised and pinned blocks in the way", () => {
+    for (const [name, kind] of [
+      ["frozen", "frozen"],
+      ["unrecognised", "unrecognised"],
+      ["pinned", "pinned"],
+      ["noUpdater", "noUpdater"],
+    ] as const) {
+      expect(channelBlock(CHANNEL_STATES[name])?.kind, name).toBe(kind);
+    }
+    /* And the pin each one offers is general access's, never beta's — so the
+       control in the block is the same one with the channels hidden. */
+    expect(pinOffer(CHANNEL_STATES.frozen)?.channel).toBe("general");
+    expect(pinOffer(CHANNEL_STATES.unrecognised)?.channel).toBe("general");
+  });
+
+  /**
+   * **Hidden for every state but the one that is on beta.** A copy on general
+   * access with nothing asked for: the page names no channel, except where
+   * the installation itself is on beta and the page cannot sensibly decline.
+   */
+  it.each(CHANNEL_STATE_NAMES)("%s draws the channels only when it is on one", (name) => {
+    const quiet = { channel: "general" as const, from: null, ahead: false };
+    const state = CHANNEL_STATES[name];
+    expect(channelsShown(false, state, quiet), name).toBe(name === "beta");
+    /* And every one of them once somebody asks. */
+    expect(channelsShown(true, state, quiet), name).toBe(true);
   });
 
   /** Beta is irreversible on the row, before it is taken — and general is not. */

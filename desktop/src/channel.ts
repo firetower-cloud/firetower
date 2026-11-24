@@ -40,6 +40,8 @@ const CHANNELS: AppChannel[] = ["general", "beta"];
 const KEY = "firetower.channel";
 /** Which channel's manifest served the build this copy is running. */
 const FROM = "firetower.channel.installed";
+/** Whether this copy draws the release channels at all. See [`channelsShown`]. */
+const SHOWN = "firetower.channels.shown";
 
 /**
  * Where each channel's manifest lives.
@@ -97,6 +99,63 @@ export function useAppChannel(): AppChannel {
 function watch(onChange: () => void): () => void {
   watching.add(onChange);
   return () => void watching.delete(onChange);
+}
+
+/* ── Whether the channels are on the page at all ───────────────────────── */
+
+/**
+ * Whether this copy draws the release channels.
+ *
+ * **A disclosure control and not a channel change.** Nothing here moves
+ * anything: an installation's channel is still the tag in `firetower.yml` and
+ * still only changes through the switch flow that rewrites the file and
+ * upgrades behind it. This says whether the page *mentions* the other
+ * channel, and it is off until somebody turns it on.
+ *
+ * Why it is a preference on this copy rather than a setting on the server.
+ * Beta is for the handful of people who want every release as it is cut, and
+ * for everybody else it is a second version number on a screen whose whole job
+ * is to say what is running and what is out. Hiding it is a local reading
+ * choice, so it lives where the other local reading choices live — the same
+ * storage as [`appChannel`], no field on the control plane, nobody else on
+ * this Firetower affected by it.
+ *
+ * **Reveal, never permit.** It is only ever consulted to decide what is
+ * drawn. Somebody who is already on beta sees beta whatever this says, which
+ * is `channelsShown` in `api/updates.ts` rather than a rule here: a screen
+ * that denied the existence of the channel it is running is worse than the
+ * second version number it was hiding.
+ */
+export function channelsRevealed(): boolean {
+  try {
+    return window.localStorage.getItem(SHOWN) === "yes";
+  } catch {
+    /* A window with no storage, exactly as above: the page draws the quiet
+       version, which is the one it would draw for somebody who never asked. */
+    return false;
+  }
+}
+
+export function revealChannels(next: boolean) {
+  if (next === channelsRevealed()) return;
+  try {
+    window.localStorage.setItem(SHOWN, next ? "yes" : "no");
+  } catch {
+    /* It applies to this run; it just will not survive a restart. */
+  }
+  for (const tell of watching) tell();
+}
+
+/**
+ * The preference, as something a screen can subscribe to.
+ *
+ * The same `watching` set as the channel above, deliberately: both are this
+ * module's preferences, both are read by the one screen, and a second
+ * notifier would be a second thing to keep in step for no gain. A change to
+ * either re-renders whoever is reading either.
+ */
+export function useChannelsRevealed(): boolean {
+  return useSyncExternalStore(watch, channelsRevealed, () => false);
 }
 
 /**

@@ -21,7 +21,7 @@ import { Building2, Download, RefreshCw } from "lucide-react";
 import { Icon } from "~/components/ui";
 import type { ChannelStatus, UpgradePlan } from "~/api/generated/model";
 import { Act, Channel } from "~/api/generated/model";
-import { channelBlock, pinsFor, saysChannel } from "~/api/updates";
+import { aheadOfGeneral, channelBlock, channelsShown, pinsFor, saysChannel } from "~/api/updates";
 import type { AppChannel } from "~/channel";
 import type { Span } from "~/releases";
 import type { Build } from "~/update";
@@ -148,10 +148,23 @@ const LONG_SPAN: Span = {
 
 type Panel = "none" | "switch" | "pin" | "plan" | "planlong";
 
-type Scene = { channel: ChannelState | null; copy: keyof typeof COPIES; panel: Panel };
+type Scene = {
+  channel: ChannelState | null;
+  copy: keyof typeof COPIES;
+  panel: Panel;
+  /**
+   * Whether the line at the foot has been pressed. **The preference, not the
+   * answer** — what gets drawn is `channelsShown`, which also lets through
+   * anybody already on beta. `undefined` keeps the states above as they were
+   * photographed, with the channels on the page.
+   */
+  revealed?: boolean;
+};
 
 const SCENES: Record<string, Scene> = {
-  /* A — the installation's channel. */
+  /* A — the installation's channel. Drawn with the channels shown, which is
+     what every one of these states is about; `hidden` below is the default
+     page, and `onBeta` is the copy that gets them back regardless. */
   general: { channel: "general", copy: "b1", panel: "none" },
   beta: { channel: "beta", copy: "b1", panel: "none" },
   frozen: { channel: "frozen", copy: "b1", panel: "none" },
@@ -175,6 +188,28 @@ const SCENES: Record<string, Scene> = {
   b3: { channel: "general", copy: "b3", panel: "none" },
   b4: { channel: "general", copy: "b4", panel: "none" },
   downloading: { channel: "general", copy: "downloading", panel: "none" },
+  /* ── The channels, hidden and revealed ────────────────────────────────
+     `hidden` is the page everybody gets: a general-access installation, a
+     copy on general access, nobody having asked for anything. `hiddenMember`
+     is the same for somebody who does not administer it — the reader the
+     change is most for. `revealed` is the line at the foot pressed.
+     `onBetaHidden` is the edge the preference must not win: the installation
+     is on beta, so the sections are drawn whatever the preference says. */
+  hidden: { channel: "general", copy: "b1", panel: "none", revealed: false },
+  hiddenMember: { channel: "member", copy: "b1", panel: "none", revealed: false },
+  revealed: { channel: "general", copy: "b1", panel: "none", revealed: true },
+  /* The installation is on beta and nobody has asked for anything: the
+     sections are drawn regardless, because a screen that would not name the
+     channel it is running is lying about what is installed. */
+  onBetaHidden: { channel: "beta", copy: "b1", panel: "none", revealed: false },
+  /* Same, by way of this copy rather than the installation. */
+  copyOnBetaHidden: { channel: "general", copy: "b2", panel: "none", revealed: false },
+  /* And by way of provenance alone — switched back, still running the build
+     beta gave it. */
+  copyFromBetaHidden: { channel: "general", copy: "b3", panel: "none", revealed: false },
+  /* A decision block with the channels hidden: it has to keep working, and it
+     names `:beta` because that is one of the two tags the line may become. */
+  hiddenFrozen: { channel: "frozen", copy: "b1", panel: "none", revealed: false },
 };
 
 const NAMES = Object.keys(SCENES);
@@ -186,6 +221,20 @@ function Harness() {
   const scene = SCENES[name] ?? SCENES.general;
   const channel: ChannelStatus | null = scene.channel ? CHANNEL_STATES[scene.channel] : null;
   const copy = COPIES[scene.copy];
+  /* **The product's own rule, not the scene's.** The preference comes off the
+     scene rather than out of storage — a value that leaked between scenes
+     would make each picture depend on the one before it — but what is
+     *drawn* goes through `channelsShown`, exactly as `Updates.tsx` does. So
+     a scene asking for the channels to be hidden on an installation that is
+     on beta gets them anyway, which is the whole point of that rule and has
+     to be visible in the picture rather than only in a test. */
+  const shown =
+    scene.revealed === undefined ||
+    channelsShown(scene.revealed, channel, {
+      channel: copy.channel,
+      from: copy.from,
+      ahead: aheadOfGeneral(copy.build.version, pinsFor(channel ?? undefined, "desktop")?.general),
+    });
   const [channelPick, setChannelPick] = useState<AppChannel>(copy.channel);
   const [spanOpen, setSpanOpen] = useState(false);
   const [acted, setActed] = useState<string | null>(null);
@@ -288,7 +337,7 @@ function Harness() {
                 </span>
                 <span className="tx">
                   <b>This Firetower</b>
-                  <s>{saysChannel(channel)}</s>
+                  <s>{saysChannel(shown ? channel : null)}</s>
                 </span>
                 <span className="ver">
                   0.50.0
@@ -317,6 +366,7 @@ function Harness() {
                 <ChannelSection
                   channel={channel}
                   blocked={false}
+                  shown={shown}
                   onAct={(a) => {
                     setActed(`${a.act} ${a.channel}`);
                     show(a.act === Act.pin ? "pin" : "switch");
@@ -348,8 +398,20 @@ function Harness() {
                 spanPending={false}
                 onSpan={() => setSpanOpen(!spanOpen)}
                 releasePage={RELEASES}
+                shown={shown}
               />
             </>
+          )}
+
+          {/* The same condition `Reveal` applies in the product: no line where
+              the channels are already on the page for another reason, because
+              it would be offering to hide something it cannot. */}
+          {scene.panel === "none" && !(shown && !scene.revealed) && (
+            <p className="upd-foot">
+              <button type="button" className="upd-foot-act" aria-pressed={!!scene.revealed}>
+                {scene.revealed ? "Hide pre-release channels" : "Pre-release channels"}
+              </button>
+            </p>
           )}
 
           {acted && <p className="mt-6 text-meta text-mute">harness: {acted}</p>}

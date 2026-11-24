@@ -14,6 +14,8 @@ import type {
   UpgradePlan,
 } from "./generated/model";
 import { Channel, ManifestOutcome } from "./generated/model";
+import type { AppChannel } from "~/channel";
+import { isNewer } from "~/releases";
 
 /**
  * What the Updates screen works out for itself.
@@ -239,6 +241,78 @@ export function diffLines(diff: string): { kind: "add" | "del" | "hunk" | "meta"
    The server publishes a control or the reason there is none, per channel
    row, so nothing here decides what may be done — it decides what a row
    *says*, which is the half the API deliberately leaves to a screen. */
+
+/**
+ * Whether this copy is running something general access has not reached.
+ *
+ * The state leaving beta produces: a copy is never moved backwards, so it
+ * keeps the build it has until general access catches up. Named once and read
+ * twice — `ThisApp` draws a block about it, and `channelsShown` treats it as
+ * one of the ways to be already on beta.
+ */
+export function aheadOfGeneral(
+  version: string | null | undefined,
+  generalPin: string | null | undefined,
+): boolean {
+  return !!version && !!generalPin && isNewer(version, generalPin);
+}
+
+/** What this copy of the app is, as far as the question below is concerned. */
+export type ThisCopy = {
+  /** The channel this copy is set to. */
+  channel: AppChannel;
+  /** Which channel the running build came from, when it is known. */
+  from: AppChannel | null;
+  /** Whether it is running something general access has not reached. */
+  ahead: boolean;
+};
+
+/**
+ * Whether the Updates screen names the release channels at all.
+ *
+ * **Hidden by default, for everybody, administrators included.** Beta is for
+ * the few who want every release as it is cut; for everybody else it was a
+ * larger version number on the one screen whose job is to say what is running
+ * and what is out — and for a reader who does not administer this Firetower,
+ * a larger version number with no control beside it at all. So the page does
+ * not mention it until somebody asks, through the line at the foot.
+ *
+ * **Reveal, never permit.** The preference decides what is *drawn*, and
+ * nothing else. An installation's channel is still the tag in
+ * `firetower.yml`, still install-wide, still an administrator's, and still
+ * only moved by the switch flow that rewrites the file and upgrades behind
+ * it. Turning this on grants nothing and moves nothing.
+ *
+ * **Anybody already on beta sees beta, whatever the preference says.** Four
+ * ways to be already on it, and the screen owes an explanation for all four:
+ *
+ *   * the *installation* is on beta — the thing everybody connected to it is
+ *     running, which the page cannot sensibly decline to name;
+ *   * *this copy* is set to beta — it is taking beta builds right now;
+ *   * this copy *came from* beta, which is what `installedFrom` records
+ *     before an install so the provenance survives the relaunch;
+ *   * this copy is *ahead* of general access, which is the state leaving beta
+ *     produces and the one the screen already has a block for. Reachable with
+ *     no provenance at all — a build installed by hand from the release page
+ *     — and the honest reading of it is the same: this is a pre-release
+ *     build, and a screen pretending otherwise is lying about what is
+ *     installed.
+ *
+ * A screen that denied the existence of the channel it is on would be a worse
+ * bug than the one this fixes.
+ */
+export function channelsShown(
+  revealed: boolean,
+  installation: ChannelStatus | null,
+  copy: ThisCopy,
+): boolean {
+  if (revealed) return true;
+  /* `recognised` is not asked for: the server resolves an unrecognised tag to
+     general access before this is read — see `running_from` — so a channel of
+     beta is a tag that said beta. */
+  if (installation?.channel === Channel.beta) return true;
+  return copy.channel === "beta" || copy.from === "beta" || copy.ahead;
+}
 
 /**
  * Whether this control plane can answer about channels at all.
