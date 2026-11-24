@@ -9,6 +9,7 @@ export * from './consumption/consumption.ts';
 export * from './conversation/conversation.ts';
 export * from './events/events.ts';
 export * from './hosts/hosts.ts';
+export * from './marketplaces/marketplaces.ts';
 export * from './meta/meta.ts';
 export * from './organization/organization.ts';
 export * from './providers/providers.ts';

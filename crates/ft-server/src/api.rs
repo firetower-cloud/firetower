@@ -17,6 +17,7 @@ mod annotations;
 pub(crate) mod artifacts;
 mod auth;
 mod connectors;
+mod marketplaces;
 mod consumption;
 mod conversation;
 mod events;
@@ -834,6 +835,14 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(connectors::probe_url))
         .routes(routes!(connectors::add_from_url))
         .routes(routes!(connectors::connector_callback))
+        .routes(routes!(
+            marketplaces::list_marketplaces,
+            marketplaces::add_marketplace
+        ))
+        .routes(routes!(marketplaces::remove_marketplace))
+        .routes(routes!(marketplaces::refresh_marketplace))
+        .routes(routes!(marketplaces::list_entries))
+        .routes(routes!(marketplaces::install_entry))
         .routes(routes!(skills::list_skills, skills::create_skill))
         .routes(routes!(skills::match_skills))
         .routes(routes!(skills::rename_skill, skills::delete_skill))

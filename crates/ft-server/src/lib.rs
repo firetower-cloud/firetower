@@ -23,6 +23,7 @@ pub mod diagnose;
 pub mod fleet;
 pub mod forward;
 pub mod install;
+pub mod marketplace;
 pub mod notify;
 pub mod oauth;
 pub mod preview;
@@ -351,6 +352,15 @@ async fn seed_builtin_skills(state: AppState) {
     // somebody who turns it off does not find it back on after a restart.
     if let Err(e) = state.skills.offer_builtins_once(&state.accounts).await {
         tracing::warn!("offering built-in skills: {e:#}");
+    }
+
+    // **The source is added; the catalogue is not read here.** Booting must
+    // not depend on reaching GitHub — an installation behind a firewall comes
+    // up with an empty shelf that says why, rather than not coming up.
+    match crate::marketplace::ensure_default(state.skills.pool()).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("added the Firetower marketplace to {n} organisation(s)"),
+        Err(e) => tracing::warn!("adding the default marketplace: {e:#}"),
     }
 }
 

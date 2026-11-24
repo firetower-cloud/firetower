@@ -23,7 +23,20 @@
  * the skills library has always written, because it is the same question.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, FolderDown, Link2, Loader2, Plus, Puzzle, Search, Square, Terminal } from "lucide-react";
+import {
+  Check,
+  FolderDown,
+  Link2,
+  Loader2,
+  Plus,
+  Puzzle,
+  RefreshCw,
+  Search,
+  Square,
+  Store,
+  Terminal,
+  X,
+} from "lucide-react";
 import { Blank, Dropping, Note, Row, Section } from "~/ui/config/bits";
 import { useSkills, why } from "~/data";
 import { setDefault, getListSkillsQueryKey } from "~/api/generated/skills/skills";
@@ -38,7 +51,18 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AddSkill } from "~/ui/AddSkill";
 import { readDrop } from "~/skills";
 import { openExternal } from "~/open";
-import type { Skill } from "~/api/generated/model";
+import {
+  addMarketplace,
+  installEntry,
+  refreshMarketplace,
+  removeMarketplace,
+  useListEntries,
+  useListMarketplaces,
+  getListEntriesQueryKey,
+  getListMarketplacesQueryKey,
+} from "~/api/generated/marketplaces/marketplaces";
+import { IconButton } from "~/components/ui";
+import type { Listed, Market, Skill } from "~/api/generated/model";
 
 /**
  * What is inside a bundle, as a phrase rather than a meta string.
@@ -57,6 +81,9 @@ export function contents(p: Skill): string {
   if (bits.length === 1) return bits[0];
   return `${bits.slice(0, -1).join(", ")} and ${bits[bits.length - 1]}`;
 }
+
+/** How many catalogue rows are drawn before the search has to do the work. */
+const SHELF = 40;
 
 /** A monogram, from the initial of each hyphenated part. */
 function mono(name: string): string {
@@ -97,7 +124,29 @@ export function Plugins() {
   const [trouble, setTrouble] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
-  const refresh = () => cache.invalidateQueries({ queryKey: getListSkillsQueryKey() });
+  const catalogue = useListEntries(undefined, {
+    query: { select: (rows) => rows ?? [] },
+  });
+
+  const refresh = async () => {
+    await cache.invalidateQueries({ queryKey: getListSkillsQueryKey() });
+    await cache.invalidateQueries({ queryKey: getListEntriesQueryKey() });
+  };
+
+  /* Taking a copy, pinned to the commit the catalogue was read at. It lands
+     switched off: installing is not consenting to load it into every session. */
+  const install = async (e: Listed) => {
+    setBusy(e.slug);
+    setTrouble(null);
+    try {
+      await installEntry(e.marketplaceId, e.slug);
+      await refresh();
+    } catch (err) {
+      setTrouble(why(err));
+    } finally {
+      setBusy(null);
+    }
+  };
 
   const toggle = async (p: Skill) => {
     setBusy(p.id);
@@ -124,8 +173,30 @@ export function Plugins() {
       );
   }, [feed.data, query]);
 
-  const yours = all.filter((p) => p.alwaysOn);
-  const shelf = all.filter((p) => !p.alwaysOn);
+  /* **Everything installed is yours**, switched on or not. The shelf below
+     is a catalogue of what has *not* been taken a copy of — which is a fact
+     about a repository rather than about a toggle. The heading used to mean
+     "not switched on", which is why a connector somebody pasted themselves
+     sat under "From the Firetower marketplace". */
+  const yours = all;
+  const offered = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    return (catalogue.data ?? [])
+      .filter((e) => !e.installed)
+      .filter(
+        (e) =>
+          !term ||
+          e.name.toLowerCase().includes(term) ||
+          e.description.toLowerCase().includes(term),
+      );
+  }, [catalogue.data, query]);
+
+  /* **A shelf is for browsing, and nobody browses three hundred.** One real
+     marketplace is 316 plugins; drawing them all costs a second of layout to
+     show a scrollbar. The search above already filters the whole catalogue,
+     so the cap only decides how much of it is on screen at once. */
+  const shelf = offered.slice(0, SHELF);
+  const more = offered.length - shelf.length;
 
   if (adding)
     return (
@@ -236,45 +307,60 @@ export function Plugins() {
         </>
       )}
 
-      {shelf.length > 0 && (
+      {offered.length > 0 && (
         <>
-          <h3 className="mt-7 text-ui text-dim">From the Firetower marketplace</h3>
+          <h3 className="mt-7 text-ui text-dim">From a marketplace</h3>
+          <p className="mt-1 max-w-[74ch] text-meta text-dim">
+            Adding one takes a copy, pinned to the commit the list was read at. What the
+            source does afterwards — change, rename itself, disappear — cannot reach it.
+          </p>
           <div className="pgrid">
-            {shelf.map((p) => (
-              <div key={p.id} className="pcard">
+            {shelf.map((e) => (
+              <div key={`${e.marketplaceId}/${e.slug}`} className="pcard">
                 <span className="top">
-                  <Mark of={p} />
+                  <EntryMark of={e} />
                   <span className="nm">
-                    <b>{p.name}</b>
+                    <b>{e.name}</b>
                   </span>
                 </span>
-                <span className="desc">{p.description}</span>
+                <span className="desc">{e.description}</span>
                 <span className="foot">
-                  <span className="chip3">{contents(p)}</span>
+                  {inside(e) ? <span className="chip3">{inside(e)}</span> : <span />}
                   <button
                     type="button"
                     className="add"
-                    disabled={busy === p.id}
-                    onClick={() => toggle(p)}
+                    disabled={busy === e.slug}
+                    onClick={() => install(e)}
                   >
-                    <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                    Always on
+                    {busy === e.slug ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+                    ) : (
+                      <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+                    )}
+                    Add
                   </button>
                 </span>
               </div>
             ))}
           </div>
+          {more > 0 && (
+            <p className="mt-3 text-meta text-dim">
+              {more} more in the catalogue. Search to narrow it.
+            </p>
+          )}
         </>
       )}
 
-      {all.length === 0 && !feed.loading && (
+      <Sources />
+
+      {all.length === 0 && shelf.length === 0 && !feed.loading && (
         <Blank
           icon={Puzzle}
           title={query ? "Nothing matches that" : "No plugins here yet"}
         >
           {query
-            ? "Clear the search to see the whole library."
-            : "Firetower ships a few. If this is empty the control plane has not seeded them — restart it and look again."}
+            ? "Clear the search to see everything."
+            : "Add a folder, paste an MCP address, or refresh a marketplace below to see what it offers."}
         </Blank>
       )}
     </Section>
@@ -541,5 +627,200 @@ export function Off() {
       <Square className="h-3.5 w-3.5" strokeWidth={1.5} />
       Off
     </span>
+  );
+}
+
+/**
+ * What is inside a catalogue row, before anybody has a copy of it.
+ *
+ * Counted from the repository's own paths rather than from what the listing
+ * claims about itself, so a plugin that says "5 skills" and ships one reads
+ * as one.
+ */
+function inside(e: Listed): string | null {
+  /* **Unknown is not empty.** An entry whose files live in another repository
+     is not opened until somebody adds it, so its counts are zero because
+     nobody looked — and a chip saying "nothing in it yet" would be the one
+     thing we are not entitled to claim. Those rows carry their category
+     instead, which is a fact the listing really does supply. */
+  if (!e.counted) return e.category ?? e.author ?? null;
+  const bits: string[] = [];
+  const say = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  if (e.hasConnector) bits.push("1 connector");
+  if (e.nSkills) bits.push(say(e.nSkills, "skill", "skills"));
+  if (e.nCommands) bits.push(say(e.nCommands, "command", "commands"));
+  if (!bits.length) return "nothing in it yet";
+  if (bits.length === 1) return bits[0];
+  return `${bits.slice(0, -1).join(", ")} and ${bits[bits.length - 1]}`;
+}
+
+/** The same mark, for a row nobody has installed yet. */
+function EntryMark({ of }: { of: Listed }) {
+  if (of.logo)
+    return (
+      <span className="plg" data-brand>
+        <img src={of.logo} alt="" className="h-[18px] w-[18px] rounded-[4px] object-contain" />
+      </span>
+    );
+  return <span className="plg">{mono(of.name)}</span>;
+}
+
+/** How long ago, in the one unit that is worth reading. */
+function when(at?: string | null): string {
+  if (!at) return "never read";
+  const mins = Math.round((Date.now() - new Date(at).getTime()) / 60000);
+  if (mins < 1) return "read just now";
+  if (mins < 60) return `read ${mins}m ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `read ${hours}h ago`;
+  return `read ${Math.round(hours / 24)}d ago`;
+}
+
+/**
+ * Where plugins come from.
+ *
+ * **A source is a listing, never an installer.** Refreshing rewrites what is
+ * on offer and touches nothing anybody has a copy of — which is why adding
+ * somebody else's repository is a smaller act than it sounds, and why ours
+ * is removable like any other.
+ */
+function Sources() {
+  const feed = useListMarketplaces({ query: { select: (rows) => rows ?? [] } });
+  const cache = useQueryClient();
+  const [adding, setAdding] = useState(false);
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [bad, setBad] = useState<string | null>(null);
+
+  const reload = async () => {
+    await cache.invalidateQueries({ queryKey: getListMarketplacesQueryKey() });
+    await cache.invalidateQueries({ queryKey: getListEntriesQueryKey() });
+  };
+
+  const add = async () => {
+    const at = url.trim();
+    if (!at) return;
+    setBusy("new");
+    setBad(null);
+    try {
+      await addMarketplace({ url: at, gitRef: null });
+      setUrl("");
+      setAdding(false);
+      await reload();
+    } catch (e) {
+      setBad(why(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const again = async (m: Market) => {
+    setBusy(m.id);
+    setBad(null);
+    try {
+      await refreshMarketplace(m.id);
+      await reload();
+    } catch (e) {
+      setBad(why(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const drop = async (m: Market) => {
+    setBusy(m.id);
+    try {
+      await removeMarketplace(m.id);
+      await reload();
+    } catch (e) {
+      setBad(why(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="mt-8">
+      <h3 className="text-ui text-dim">Where these come from</h3>
+      <p className="mt-1 max-w-[74ch] text-meta text-dim">
+        A repository of plugins. Firetower reads the list; it never installs anything on
+        its own, and nothing is fetched until you ask.
+      </p>
+
+      {bad && <Note icon={Store}>{bad}</Note>}
+
+      <div className="mt-2">
+        {feed.data?.map((m) => (
+          <div key={m.id} className="r">
+            <span className="plg">
+              <Store className="h-[15px] w-[15px]" strokeWidth={1.5} />
+            </span>
+            <span className="tx">
+              <b>{m.name}</b>
+              <s>
+                {m.error
+                  ? m.error
+                  : `${m.url.replace("https://github.com/", "")} on ${m.gitRef}, ${when(m.fetchedAt)}`}
+              </s>
+            </span>
+            <span className="chip3">
+              {m.entries} {m.entries === 1 ? "plugin" : "plugins"}
+            </span>
+            <button
+              type="button"
+              className="out"
+              disabled={busy === m.id}
+              onClick={() => again(m)}
+            >
+              {busy === m.id ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.5} />
+              ) : (
+                <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />
+              )}
+              Refresh
+            </button>
+            <IconButton
+              of={X}
+              label={`Remove ${m.name}`}
+              className="hov"
+              onClick={() => drop(m)}
+            />
+          </div>
+        ))}
+
+        {adding ? (
+          <div className="mt-2 rounded-xl bg-raise p-3">
+            <input
+              autoFocus
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && add()}
+              placeholder="https://github.com/owner/repo"
+              aria-label="A marketplace repository"
+              className="w-full bg-transparent font-mono text-ui text-bone outline-none placeholder:text-mute"
+            />
+            <p className="mt-2 max-w-[70ch] text-meta text-dim">
+              A GitHub repository holding <span className="font-mono">marketplace.json</span>.
+              Anthropic&rsquo;s own catalogue works here, which is the point: a plugin
+              written for Claude Code runs on every engine Firetower starts.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button type="button" className="btn primary" disabled={busy === "new"} onClick={add}>
+                {busy === "new" && <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} />}
+                Read it
+              </button>
+              <button type="button" className="btn quiet" onClick={() => setAdding(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button type="button" className="out mt-2" onClick={() => setAdding(true)}>
+            <Plus className="h-4 w-4" strokeWidth={1.5} />
+            Add a marketplace
+          </button>
+        )}
+      </div>
+    </section>
   );
 }

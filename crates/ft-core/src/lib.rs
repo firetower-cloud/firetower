@@ -28,7 +28,7 @@ pub mod turn;
 pub use grants::{Level, SubjectKind};
 pub use ids::{
     AgentTeamId, ArtifactId, ArtifactVersionId, DeliveryId, DirectoryId, HostId, OrgId, PositionId,
-    RepoId, RoleId, ScheduleId, ScheduleRunId, SessionId, SkillId, SkillVersionId, TeamId,
+    MarketId, RepoId, RoleId, ScheduleId, ScheduleRunId, SessionId, SkillId, SkillVersionId, TeamId,
     TriggerId, UserId, WorkspaceId,
 };
 pub use path::{slug, ResourcePath};

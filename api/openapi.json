@@ -2678,6 +2678,229 @@
         }
       }
     },
+    "/api/v1/marketplaces": {
+      "get": {
+        "tags": [
+          "marketplaces"
+        ],
+        "operationId": "list_marketplaces",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Market"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "marketplaces"
+        ],
+        "summary": "Add a source and read it at once.",
+        "description": "**The fetch is not deferred.** Somebody who pastes an address is asking\nwhether it works; answering \"added\" and failing quietly in the background\nis answering a question they did not ask.",
+        "operationId": "add_marketplace",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMarket"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Market"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/marketplaces/entries": {
+      "get": {
+        "tags": [
+          "marketplaces"
+        ],
+        "operationId": "list_entries",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Filter by name or description",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Listed"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/marketplaces/{id}": {
+      "delete": {
+        "tags": [
+          "marketplaces"
+        ],
+        "operationId": "remove_marketplace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Marketplace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/marketplaces/{id}/entries/{slug}/install": {
+      "post": {
+        "tags": [
+          "marketplaces"
+        ],
+        "summary": "Take a copy of one entry.",
+        "operationId": "install_entry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Marketplace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Entry",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Skill"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/marketplaces/{id}/refresh": {
+      "post": {
+        "tags": [
+          "marketplaces"
+        ],
+        "operationId": "refresh_marketplace",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Marketplace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Market"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/organization": {
       "patch": {
         "tags": [
@@ -10063,6 +10286,26 @@
           }
         }
       },
+      "AddMarket": {
+        "type": "object",
+        "description": "A repository to read.",
+        "required": [
+          "url"
+        ],
+        "properties": {
+          "gitRef": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which branch or tag. `main` when unsaid."
+          },
+          "url": {
+            "type": "string",
+            "description": "A GitHub repository, as somebody would paste it."
+          }
+        }
+      },
       "Administered": {
         "type": "object",
         "description": "Everything one person can reach, and everything that is theirs.\n\n**Answered for a person, which is the opposite of how access is stored.**\nEvery other read asks \"may this person see this thing\" and lets\n[`filed_where`] answer it per row. This asks the reverse, and nothing else\nneeds it — only offboarding, where deciding about somebody means seeing what\ngoes with them before it goes.\n\nEach field is a list so the shape can grow a kind without breaking a client:\na reader that does not know about a new one ignores it rather than failing.",
@@ -13834,6 +14077,89 @@
           }
         }
       },
+      "Listed": {
+        "type": "object",
+        "description": "One row of a shelf.",
+        "required": [
+          "marketplaceId",
+          "marketplaceName",
+          "slug",
+          "name",
+          "description",
+          "nSkills",
+          "nCommands",
+          "hasConnector",
+          "counted",
+          "installed"
+        ],
+        "properties": {
+          "author": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "category": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "counted": {
+            "type": "boolean",
+            "description": "**Whether those counts mean anything.** An entry whose files live in\nanother repository is not opened at catalogue time — 316 downloads to\ndraw a shelf is not a shelf. So its counts are all zero, which is not\nthe same claim as \"this plugin is empty\", and a row must not make the\nsecond one."
+          },
+          "description": {
+            "type": "string"
+          },
+          "hasConnector": {
+            "type": "boolean"
+          },
+          "homepage": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "installed": {
+            "type": "boolean",
+            "description": "Whether this organisation already took a copy."
+          },
+          "logo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Inline, from bytes stored with the catalogue. A shelf draws without\nreaching anybody's origin."
+          },
+          "marketplaceId": {
+            "type": "string"
+          },
+          "marketplaceName": {
+            "type": "string"
+          },
+          "nCommands": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "nSkills": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "name": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "ManifestOutcome": {
         "type": "string",
         "description": "The same six, as the API names them.",
@@ -13892,6 +14218,60 @@
           "url": {
             "type": "string",
             "description": "Where it is published. Reported so an installation that cannot read it\ncan say what it could not reach."
+          }
+        }
+      },
+      "Market": {
+        "type": "object",
+        "description": "A source, as a screen lists it.",
+        "required": [
+          "id",
+          "url",
+          "name",
+          "gitRef",
+          "builtin",
+          "entries"
+        ],
+        "properties": {
+          "builtin": {
+            "type": "boolean"
+          },
+          "commit": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The commit its catalogue was read at. `None` has never been fetched."
+          },
+          "entries": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the last fetch failed, kept so a stale shelf can say so."
+          },
+          "fetchedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "gitRef": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
           }
         }
       },

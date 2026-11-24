@@ -9,6 +9,7 @@ export * from './consumption/consumption';
 export * from './conversation/conversation';
 export * from './events/events';
 export * from './hosts/hosts';
+export * from './marketplaces/marketplaces';
 export * from './meta/meta';
 export * from './organization/organization';
 export * from './providers/providers';
