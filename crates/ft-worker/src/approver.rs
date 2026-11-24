@@ -91,6 +91,8 @@ pub const CREATE_SKILL: &str = "create_skill";
 pub const UPDATE_SKILL: &str = "update_skill";
 /// List the saved skills, so the agent builds on them rather than beside.
 pub const LIST_SKILLS: &str = "list_skills";
+/// The whole of one skill: its instructions, and what is bundled with it.
+pub const GET_SKILL: &str = "get_skill";
 /// Propose work on a clock, for a person to approve. **It never runs until
 /// they do** — the same rule `create_skill` applies to a bundle that ships a
 /// script.
@@ -218,6 +220,33 @@ the mistake this warns against. Two things it reports that NO tool can write: \
 the subscription and whether the profile is the person's default. Both are \
 named in the answer; when you copy a profile, say which of them did not come \
 with it rather than letting the person assume the copy is identical.";
+
+/// What `get_skill` is for, and — the harder half — what it is not for.
+///
+/// The anti-trigger is `get_profile`'s, pointed at the thing that actually
+/// happens: an agent holding `list_skills` and a question about one skill
+/// reads all ten to find it. The index answers that for a line each, and one
+/// skill's instructions are a page.
+///
+/// The second half is `file`, which only earns its keep if the model knows
+/// the listing leaves contents out **on purpose**. Said as the reason rather
+/// than as a rule, because a model told why does not then ask for every file
+/// one after another — which is the same read it was just talked out of.
+const GET_SKILL_DESCRIPTION: &str = "\
+The whole of one saved skill, by name: what it does, its full SKILL.md \
+instructions, and a list of the files bundled with it. Reach for it when \
+somebody asks what a skill SAYS, when you are copying one, or before \
+`update_skill` when the change depends on what it already says — that tool \
+writes only the fields you pass, so this is where the rest of it comes from. \
+THE FILE LIST GIVES PATHS AND SIZES AND NOT CONTENTS, on purpose: pass \
+`file` with one of those exact paths to read that one file whole. Ask for \
+one when you need it, not for all of them — a single reference file can be \
+larger than the instructions and everything else together, which is the \
+reason this is two calls. NOT for finding out which skills exist or what one \
+is roughly for — that is `list_skills`, which answers for every skill at \
+once and costs a line each. Reading ten skills one at a time to work out \
+which you wanted is the mistake this warns against. A skill held for review \
+has no published version yet and says so rather than reading.";
 
 const UPDATE_DESCRIPTION: &str = "\
 Post a short progress note to the agent that started you — your lead — while \
@@ -643,7 +672,7 @@ async fn answer(
                         },
                     }, {
                         "name": UPDATE_SKILL,
-                        "description": "Change a saved skill, by name — \"make the changelog skill terser\", \"add an example\". Writes a new version; a running session keeps the one it started with. Only the fields you pass change; the bundled files carry forward unless you send a new set. A change that ships a script is held for review.",
+                        "description": "Change a saved skill, by name — \"make the changelog skill terser\", \"add an example\". Writes a new version; a running session keeps the one it started with. Only the fields you pass change; the bundled files carry forward unless you send a new set — read `get_skill` first when the change depends on what it already says. A change that ships a script is held for review.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -669,8 +698,19 @@ async fn answer(
                         },
                     }, {
                         "name": LIST_SKILLS,
-                        "description": "List the skills the person can see — name, description, whether it ships a script, and whether it's held for their review. Read this before creating one, to build on what exists rather than make a near-duplicate.",
+                        "description": "List the skills the person can see — name, description, whether it ships a script, and whether it's held for their review. Read this before creating one, to build on what exists rather than make a near-duplicate. `get_skill` reads one whole.",
                         "inputSchema": { "type": "object", "properties": {} },
+                    }, {
+                        "name": GET_SKILL,
+                        "description": GET_SKILL_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The skill to read, by name, as `list_skills` shows it." },
+                                "file": { "type": "string", "description": "Optional. One bundled file to read whole, by the exact path the file list gives, e.g. \"references/format.md\". Omit it for the instructions and the list." },
+                            },
+                            "required": ["name"],
+                        },
                     }, {
                         "name": PROPOSE_SCHEDULE,
                         "description": "Propose work that runs on a clock — a dependency audit every Monday, a flaky-test hunt overnight. IT IS OFF WHEN YOU CREATE IT AND NEVER RUNS UNTIL THE PERSON TURNS IT ON, so say that when you tell them: it appears on the Schedules screen for them to read and approve. Each run starts its OWN NEW WORKSPACE and follows `prompt` with nobody present, so write `prompt` for somebody who cannot ask you a follow-up question: say what to do and what to leave alone. AGREE THE SHAPE FIRST unless they already said — what it should do, how often, which repository, and that nobody will be there to answer it. Runs cannot be closer together than 15 minutes. Check `list_schedules` first so you refine one rather than duplicate it. YOU CANNOT turn one on, edit one, or delete one, and there is no way to end a workspace a run left behind — that is theirs to do.",
@@ -744,7 +784,7 @@ async fn answer(
                 SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
                 | LIST_PROFILES | GET_PROFILE | CREATE_TEAM | UPDATE_TEAM | LIST_TEAMS
                 | GET_TEAM | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS
-                | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
+                | GET_SKILL | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
                     delegate(session_id, name, &id, &arguments).await
                 }
                 // **The one tool that asks a person before it acts**, and
@@ -1126,6 +1166,7 @@ mod tests {
                 CREATE_SKILL,
                 UPDATE_SKILL,
                 LIST_SKILLS,
+                GET_SKILL,
                 PROPOSE_SCHEDULE,
                 LIST_SCHEDULES,
                 PAUSE_SCHEDULE,
