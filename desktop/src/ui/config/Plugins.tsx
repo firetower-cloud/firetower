@@ -28,6 +28,7 @@ import {
   FolderDown,
   Link2,
   Loader2,
+  MoreHorizontal,
   Plus,
   Puzzle,
   RefreshCw,
@@ -39,7 +40,7 @@ import {
 } from "lucide-react";
 import { Blank, Dropping, Note, Row, Section } from "~/ui/config/bits";
 import { useSkills, why } from "~/data";
-import { setDefault, getListSkillsQueryKey } from "~/api/generated/skills/skills";
+import { deleteSkill, setDefault, getListSkillsQueryKey } from "~/api/generated/skills/skills";
 import {
   connect,
   disconnect,
@@ -61,7 +62,9 @@ import {
   getListEntriesQueryKey,
   getListMarketplacesQueryKey,
 } from "~/api/generated/marketplaces/marketplaces";
-import { IconButton } from "~/components/ui";
+import { IconButton, MenuItem } from "~/components/ui";
+import { Pop } from "~/ui/Pop";
+import { useConfirm } from "~/ui/Confirm";
 import type { Listed, Market, Skill } from "~/api/generated/model";
 
 /**
@@ -123,6 +126,8 @@ export function Plugins() {
   const [busy, setBusy] = useState<string | null>(null);
   const [trouble, setTrouble] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  /** The plugin added a moment ago, whose row connects without being asked. */
+  const [fresh, setFresh] = useState<string | null>(null);
 
   const catalogue = useListEntries(undefined, {
     query: { select: (rows) => rows ?? [] },
@@ -139,8 +144,9 @@ export function Plugins() {
     setBusy(e.slug);
     setTrouble(null);
     try {
-      await installEntry(e.marketplaceId, e.slug);
+      const made = await installEntry(e.marketplaceId, e.slug);
       await refresh();
+      if (made.hasConnector) setFresh(made.id);
     } catch (err) {
       setTrouble(why(err));
     } finally {
@@ -284,24 +290,19 @@ export function Plugins() {
           </p>
           <div className="mt-2">
             {yours.map((p) => (
-              <Row
+              <Installed
                 key={p.id}
-                glyph={<Mark of={p} />}
-                name={p.name}
-                sub={p.description}
-              >
-                <span className="chip3">{contents(p)}</span>
-                {p.hasConnector && <Connected of={p} />}
-                <button
-                  type="button"
-                  className="on"
-                  disabled={busy === p.id}
-                  onClick={() => toggle(p)}
-                >
-                  <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} />
-                  Always on
-                </button>
-              </Row>
+                of={p}
+                busy={busy === p.id}
+                /* Just added, and it needs authorizing: the browser opens by
+                   itself. Adding a connector *is* asking for its tools, and
+                   making somebody find a second button to say so again is
+                   asking the same question twice. */
+                connectNow={fresh === p.id}
+                onToggle={() => toggle(p)}
+                onGone={refresh}
+                onTrouble={setTrouble}
+              />
             ))}
           </div>
         </>
@@ -507,7 +508,130 @@ function PasteAddress({ onClose, onDone }: { onClose: () => void; onDone: () => 
  * - Already connected: a quiet statement, with disconnecting on the same
  *   control rather than hidden behind a menu.
  */
-function Connected({ of }: { of: Skill }) {
+/**
+ * One installed plugin.
+ *
+ * **One button, then one menu.** Whatever is blocking gets the button —
+ * Connect, or nothing — and everything else that can be done to the row lives
+ * behind the ⋯, in the same place on every line. Removing used to be
+ * impossible from here: a plugin could be added and not taken back, which is
+ * the one asymmetry a library must not have.
+ */
+function Installed({
+  of,
+  busy,
+  connectNow,
+  onToggle,
+  onGone,
+  onTrouble,
+}: {
+  of: Skill;
+  busy: boolean;
+  connectNow: boolean;
+  onToggle: () => void;
+  onGone: () => void | Promise<void>;
+  onTrouble: (why: string | null) => void;
+}) {
+  const confirm = useConfirm();
+  const cache = useQueryClient();
+  const [menu, setMenu] = useState<HTMLElement | null>(null);
+  const [going, setGoing] = useState(false);
+  const state = useConnectorState(of.id, { query: { enabled: of.hasConnector } }).data;
+
+  const forget = async () => {
+    setGoing(true);
+    try {
+      await disconnect(of.id);
+      await cache.invalidateQueries({ queryKey: getConnectorStateQueryKey(of.id) });
+    } catch (e) {
+      onTrouble(why(e));
+    } finally {
+      setGoing(false);
+    }
+  };
+
+  const remove = async () => {
+    setGoing(true);
+    try {
+      await deleteSkill(of.id);
+      await onGone();
+    } catch (e) {
+      onTrouble(why(e));
+    } finally {
+      setGoing(false);
+    }
+  };
+
+  return (
+    <Row glyph={<Mark of={of} />} name={of.name} sub={of.description}>
+      <span className="chip3">{contents(of)}</span>
+      {of.hasConnector && <Connected of={of} startNow={connectNow} />}
+      <button type="button" className="on" disabled={busy} onClick={onToggle}>
+        <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} />
+        Always on
+      </button>
+      <div>
+        <IconButton
+          of={MoreHorizontal}
+          onClick={(e) => setMenu(menu ? null : e.currentTarget)}
+          label={`More for ${of.name}`}
+          className="hov"
+        />
+        {/* Into `document.body`: `Section` wraps these rows in an
+            `overflow-hidden` card, and a clipping ancestor clips whatever its
+            descendants' z-index say. `Pop` is that lesson, imported. */}
+        {menu && (
+          <Pop anchor={menu} onClose={() => setMenu(null)}>
+            <div className="w-56 py-1">
+              {state?.connected && (
+                <MenuItem
+                  disabled={going}
+                  onClick={() => {
+                    setMenu(null);
+                    void confirm({
+                      title: `Disconnect ${of.name}?`,
+                      body: "Your credential is forgotten. The plugin stays, and anybody else here keeps theirs. Sessions already running keep the token they were given.",
+                      action: "Disconnect",
+                      tone: "danger",
+                    }).then((ok) => {
+                      if (ok) void forget();
+                    });
+                  }}
+                >
+                  Disconnect
+                </MenuItem>
+              )}
+              <MenuItem
+                tone="danger"
+                disabled={going || of.builtin}
+                onClick={() => {
+                  setMenu(null);
+                  void confirm({
+                    title: `Remove ${of.name}?`,
+                    body: of.hasConnector
+                      ? "The plugin and your credential for it both go. Sessions already running keep what they were given, and it can be added again from the marketplace."
+                      : "It goes from the library. Sessions already running keep what they were given, and it can be added again from the marketplace.",
+                    action: "Remove",
+                    tone: "danger",
+                  }).then((ok) => {
+                    if (ok) void remove();
+                  });
+                }}
+              >
+                {/* Firetower's own are seeded on every boot, so removing one
+                    would put it back at the next restart. Saying so beats a
+                    control that silently undoes itself. */}
+                {of.builtin ? "Ships with Firetower" : "Remove"}
+              </MenuItem>
+            </div>
+          </Pop>
+        )}
+      </div>
+    </Row>
+  );
+}
+
+function Connected({ of, startNow = false }: { of: Skill; startNow?: boolean }) {
   const cache = useQueryClient();
   const [busy, setBusy] = useState(false);
   /* **The browser is somewhere else.** A connector is authorized in a tab
@@ -541,31 +665,49 @@ function Connected({ of }: { of: Skill }) {
     return () => clearTimeout(stop);
   }, [awaiting]);
 
-  const refresh = () =>
-    cache.invalidateQueries({ queryKey: getConnectorStateQueryKey(of.id) });
+  const go = async (asked: boolean) => {
+    setBusy(true);
+    try {
+      const opened = await connect(of.id);
+      /* The person's own browser, as them. Nothing is stored until it comes
+         back to the callback. */
+      await openExternal(opened.authorizeUrl);
+      setAwaiting(true);
+    } catch (e) {
+      /* **Only when it was asked for.** The attempt made on your behalf right
+         after adding is a convenience; a server that refuses it — Figma's
+         registration endpoint answers 403 to everyone — must not throw a
+         modal at somebody who did not press anything. The button stays, and
+         pressing it says why. */
+      if (asked) window.alert(why(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /* Added a moment ago: open the browser without being asked again. Guarded
+     on the state having arrived, because a connector that borrows a
+     credential — or already has one — must not open anything. */
+  const started = useRef(false);
+  useEffect(() => {
+    if (!startNow || started.current || !state) return;
+    if (state.connected || state.blocked) return;
+    started.current = true;
+    void go(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startNow, state]);
 
   if (!state) return null;
 
   if (state.connected) {
+    /* Not a button. Clicking the word "Connected" used to disconnect, which
+       is a destructive act behind an affordance that reads as a status —
+       Disconnect is in the ⋯ now, with a confirmation. */
     return (
-      <button
-        type="button"
-        className="on"
-        title={`Connected to ${state.server}. Disconnecting takes out your credential and leaves everybody else's.`}
-        disabled={busy}
-        onClick={async () => {
-          setBusy(true);
-          try {
-            await disconnect(of.id);
-            await refresh();
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
+      <span className="on" title={`Connected to ${state.server}.`}>
         <Link2 className="h-3.5 w-3.5 text-sage" strokeWidth={1.75} />
         Connected
-      </button>
+      </span>
     );
   }
 
@@ -585,20 +727,7 @@ function Connected({ of }: { of: Skill }) {
       className="on"
       disabled={busy}
       title={awaiting ? "Finish in the browser; this updates itself" : undefined}
-      onClick={async () => {
-        setBusy(true);
-        try {
-          const opened = await connect(of.id);
-          /* The person's own browser, as them. Nothing is stored until it
-             comes back to the callback. */
-          await openExternal(opened.authorizeUrl);
-          setAwaiting(true);
-        } catch (e) {
-          window.alert(why(e));
-        } finally {
-          setBusy(false);
-        }
-      }}
+      onClick={() => go(true)}
     >
       {awaiting ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />

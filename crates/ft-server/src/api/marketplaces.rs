@@ -193,6 +193,31 @@ pub(super) async fn install_entry(
     };
     crate::skills::check(&new).map_err(|e| ApiError::new(ErrorCode::InvalidRequest, e.0))?;
 
+    // **Asked before writing, because the database's answer is unreadable.**
+    // One name per owner is a real constraint and hitting it surfaced
+    // `duplicate key value violates unique constraint
+    // "skills_one_name_per_owner"`, which tells somebody nothing they can act
+    // on. The collision is ordinary: a connector pasted by hand lands as
+    // `notion`, and so does the marketplace's.
+    let taken: Option<String> = sqlx::query_scalar(
+        "SELECT name FROM skills WHERE org_id = $1 AND created_by = $2 AND name = $3",
+    )
+    .bind(me.org_id.as_str())
+    .bind(me.id.as_str())
+    .bind(&name)
+    .fetch_optional(pool)
+    .await
+    .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;
+    if taken.is_some() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            format!(
+                "you already have a plugin called `{name}` — remove or rename it, \
+                 and then add this one"
+            ),
+        ));
+    }
+
     let made = state
         .skills
         .create(me.org_id.as_str(), me.id.as_str(), &me.slug, &new, false)
