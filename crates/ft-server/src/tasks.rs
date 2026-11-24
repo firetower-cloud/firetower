@@ -8,9 +8,13 @@
 //! the screen needs is "show me what is open and let me start one", and that is
 //! a request.
 //!
-//! What it costs differs by source and neither bill is large. A conditional
-//! request to GitHub that comes back `304 Not Modified` does not count against
-//! the rate limit at all, so looking twice is free. Linear has no conditional
+//! What it costs differs by source and neither bill is large. No request here
+//! is conditional today: nothing stores an `ETag` or `Last-Modified` for a task
+//! read, so every look at GitHub is a full request. GitHub documents that a
+//! `304 Not Modified` answer to a conditional request does not count against
+//! the *primary* rate limit; whether it counts toward the secondary limit is
+//! not documented either way. Conditional requests are therefore a possible
+//! saving later, not one this module relies on now. Linear has no conditional
 //! request — it is one POST to a GraphQL endpoint — but its budget is per
 //! person and generous, and the query asks for one page of the fields a row
 //! renders and nothing deeper.
@@ -196,7 +200,9 @@ impl Source for GitHub<'_> {
         //
         // The trade is a lower limit — thirty requests a minute rather than
         // five thousand an hour — which is a limit on clicking rather than on
-        // data, and conditional requests do not spend it at all.
+        // data. No conditional request is sent to this endpoint today, and the
+        // saving a `304` gives is documented for the primary limit only, so
+        // none is counted on here.
         let found: SearchResult = crate::oauth::client()?
             .get(format!("{}/search/issues", self.conn.api_base))
             .bearer_auth(token)
