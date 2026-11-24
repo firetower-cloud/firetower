@@ -11165,6 +11165,30 @@ async fn a_binary_file_is_named_and_a_path_that_is_not_there_is_refused_by_name(
         said.contains("assets/logo.png") && said.contains("6 bytes"),
         "it is named and measured: {said}"
     );
+    // **And the listing's own worked example has to survive being copied.**
+    // This bundle is the shape that caught it: `assets/logo.png` sorts first,
+    // so the hint used to point at the image and answer "not text" — a round
+    // trip spent on the tool's own suggestion.
+    let listed = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "b0",
+            "get_skill",
+            serde_json::json!({ "name": "brand" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        listed.contains("e.g. `file: \"references/voice.md\"`"),
+        "the example names a file that will actually come back as text: {listed}"
+    );
+    assert!(
+        !listed.contains("e.g. `file: \"assets/logo.png\"`"),
+        "and never the first path alphabetically just because it is first: {listed}"
+    );
     assert!(
         said.contains("not text"),
         "and says why there is nothing to show: {said}"
@@ -11248,6 +11272,66 @@ async fn a_file_too_big_for_one_answer_is_cut_and_says_so() {
         said.chars().count() < 20_000,
         "a file bigger than one answer does not become one: {} characters",
         said.chars().count()
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A bundle with nothing text-shaped in it offers no worked example, and a
+/// megabyte file says megabytes.**
+///
+/// The two ends of what the listing has to get right. No example is better
+/// than one written to fail, so the `e.g.` clause goes rather than naming a
+/// font. And the size is the whole of what an agent has to decide whether a
+/// file is worth a call on it: `BIGGEST_FILE` is two megabytes, and reporting
+/// that as `2048 KB` writes the one size this design exists to handle in the
+/// unit that makes it look like any other.
+#[tokio::test]
+async fn a_bundle_of_binaries_offers_no_example_and_a_big_file_reads_in_megabytes() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let heavy = vec![0u8; 1_500_000];
+    a_skill_holding(
+        &state,
+        &owner,
+        "typeface",
+        "# Typeface\n\nUse the family.",
+        &[
+            ("assets/body.woff2", &heavy, false),
+            ("assets/mark.png", &[0x89, b'P', b'N', b'G'], false),
+        ],
+        false,
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "m1",
+            "get_skill",
+            serde_json::json!({ "name": "typeface" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        !said.contains("e.g."),
+        "nothing here would come back as text, so no example is offered: {said}"
+    );
+    assert!(
+        said.contains("1.4 MB"),
+        "the size is in the unit that makes it a decision: {said}"
+    );
+    assert!(
+        !said.contains("KB"),
+        "and not the kilobytes that made two megabytes look ordinary: {said}"
+    );
+    // The listing still does its job — both files named, neither included.
+    assert!(
+        said.contains("assets/body.woff2") && said.contains("assets/mark.png"),
+        "every file is still named: {said}"
     );
 
     state.fleet.stop_supervising(&host.id).await;

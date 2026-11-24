@@ -3796,10 +3796,13 @@ async fn get_skill(state: &AppState, request: &AgentRequest) -> Result<String> {
     } else {
         out.push(format!(
             "Bundled files ({}) — named, not included. Read one by calling `get_skill` again \
-             with `file`, e.g. `file: \"{}\"`; one file per call, because a single reference can \
-             be larger than everything above it.",
+             with `file`{}; one file per call, because a single reference can be larger than \
+             everything above it.",
             bundled.len(),
-            bundled[0].path
+            match worth_an_example(&bundled) {
+                Some(path) => format!(", e.g. `file: \"{path}\"`"),
+                None => String::new(),
+            }
         ));
         for file in bundled {
             out.push(format!(
@@ -3875,11 +3878,80 @@ async fn one_bundled_file(
     ))
 }
 
-/// A size as somebody reads it, in the kilobytes `skills::check` refuses in.
+/// The path to put in the listing's `e.g.`, chosen so that copying it works.
+///
+/// **A worked example that fails costs the call it was meant to save.** This
+/// was `bundled[0]`, which is only the first path *alphabetically* — so a
+/// bundle of `assets/logo.png` and `references/voice.md` pointed the agent at
+/// the image, answered "not text", and spent a round trip on the tool's own
+/// suggestion. A small version of exactly the waste the two-call shape exists
+/// to prevent, and the worse one for being self-inflicted.
+///
+/// **Decided from the listing alone, never by reading bytes.** Opening every
+/// file to pick an example is the cost this tool is built to avoid, so the
+/// guess goes on what a path says about itself: an extension known to be
+/// text, then anything not known to be binary, and a file that does not run
+/// ahead of one that does. Alphabetical order breaks a tie, so the hint stays
+/// the same between two reads of an unchanged bundle.
+///
+/// `None` when the whole bundle looks binary — the caller then offers no
+/// example at all, because no example is better than one written to fail.
+fn worth_an_example<'a>(bundled: &[&'a crate::skills::SkillFile]) -> Option<&'a str> {
+    const TEXT: &[&str] = &[
+        "md", "markdown", "txt", "rst", "json", "yaml", "yml", "toml", "ini", "csv", "tsv", "xml",
+        "html", "css", "sh", "bash", "zsh", "py", "rb", "js", "ts", "sql", "env",
+    ];
+    const BINARY: &[&str] = &[
+        "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "bmp", "tiff", "pdf", "zip", "gz",
+        "bz2", "xz", "tar", "woff", "woff2", "ttf", "otf", "eot", "mp3", "mp4", "mov", "wav",
+        "wasm", "so", "dylib", "dll", "exe", "bin", "o", "a", "class", "jar", "db", "sqlite",
+    ];
+    // From the last segment, so a dot in a directory name is not read as an
+    // extension — `references/v1.2/README` has none.
+    let extension = |f: &crate::skills::SkillFile| {
+        f.path
+            .rsplit('/')
+            .next()
+            .and_then(|name| name.rsplit_once('.'))
+            .map(|(_, e)| e.to_lowercase())
+    };
+    let rank = |f: &crate::skills::SkillFile| match extension(f) {
+        Some(e) if TEXT.contains(&e.as_str()) => 2,
+        Some(e) if BINARY.contains(&e.as_str()) => 0,
+        // No extension, or one neither list knows. A `Makefile` or a
+        // `references/NOTES` is text far more often than it is a font.
+        _ => 1,
+    };
+    bundled
+        .iter()
+        .filter(|f| rank(f) > 0)
+        // `min_by_key` keeps the first of equals, which is what makes the
+        // order alphabetical rather than whichever the comparison landed on.
+        .min_by_key(|f| (-rank(f), u8::from(f.executable)))
+        .map(|f| f.path.as_str())
+}
+
+/// A size as somebody reads it, in the units `skills::check` refuses in —
+/// kilobytes for the instructions, megabytes for a file.
+///
+/// **The megabyte step is not a nicety.** [`BIGGEST_FILE`] is two megabytes,
+/// and this number is the whole of what an agent has to decide whether a file
+/// is worth a call on. Capping the units at KB reported that file as
+/// `2048 KB` — the one size this design exists to handle, written in the unit
+/// that makes it look like any other.
+///
+/// [`BIGGEST_FILE`]: crate::skills::BIGGEST_FILE
 fn in_bytes(size: i64) -> String {
+    const KB: i64 = 1024;
+    const MB: i64 = 1024 * KB;
     match size {
-        n if n < 1024 => format!("{n} bytes"),
-        n => format!("{} KB", n / 1024),
+        n if n < KB => format!("{n} bytes"),
+        n if n < MB => format!("{} KB", n / KB),
+        // One decimal, where the two refusals in `skills::check` round to a
+        // whole number: those name a limit, and this reports a measurement —
+        // "1 MB" for anything from 1.0 to 1.9 is the wrong answer to "is this
+        // worth a call".
+        n => format!("{:.1} MB", n as f64 / MB as f64),
     }
 }
 
