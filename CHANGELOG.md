@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.58.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.57.0...firetower-v0.58.0) (2026-11-24)
+
+
+### Features
+
+* **server:** an agent can read a whole skill, and one file of its bundle ([dd6a89d](https://github.com/firetower-cloud/firetower/commit/dd6a89dedf4113c077e6a87bb678da1dae44029b))
+* workspaces that name themselves ([1b2f7f2](https://github.com/firetower-cloud/firetower/commit/1b2f7f28f392acb7761b2e9b314451f8977299ab))
+* workspaces that name themselves ([960480f](https://github.com/firetower-cloud/firetower/commit/960480f2b0cc77e1847fbcf31bd20a2e9a5c7c37))
+
+
+### Bug Fixes
+
+* **server:** the skill listing's worked example comes back as text, and a size reaches megabytes ([41185e7](https://github.com/firetower-cloud/firetower/commit/41185e76ea2614f8f33f07ad99e1ecb37578d01a))
+
 ## [0.57.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.3...firetower-v0.57.0) (2026-11-22)
 
 
