@@ -105,6 +105,7 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "create_skill" => create_skill(state, request).await,
         "update_skill" => update_skill(state, request).await,
         "list_skills" => list_skills(state, request).await,
+        "get_skill" => get_skill(state, request).await,
         "propose_schedule" => propose_schedule(state, request).await,
         "list_schedules" => list_schedules(state, request).await,
         "pause_schedule" => pause_schedule(state, request).await,
@@ -3652,6 +3653,269 @@ async fn update_skill(state: &AppState, request: &AgentRequest) -> Result<String
     }
 }
 
+/// Everything one skill's current version says, so an agent can read it
+/// rather than ask somebody to paste it in.
+///
+/// **The index and the single file are one tool, and that is the design.** A
+/// bundle may hold two megabytes of reference material — [`BIGGEST_FILE`] is
+/// what a drop is allowed — and a read that returned every file's contents
+/// would spend all of that on a question that was almost always about the
+/// instructions. So the plain call answers with the body and a *listing* of
+/// the rest, path and size and whether it runs, and `file` fetches one of
+/// those whole. The cheap call stays cheap, and nothing large arrives in
+/// somebody's context without being asked for.
+///
+/// **Viewer is the whole bar, and deliberately not what `update_skill`
+/// asks.** That one refuses a skill shared read-only, which is right for a
+/// write. This is a read, and the skills most worth reading are exactly the
+/// ones somebody else wrote: a colleague's, shared into a directory, and the
+/// builtins Firetower ships — none of which the owner may write. Borrowing
+/// the write's gate would have made the tool useless for the library it
+/// exists to read.
+///
+/// Prose, like `get_profile` and `list_skills`, because that is what this
+/// surface returns.
+///
+/// [`BIGGEST_FILE`]: crate::skills::BIGGEST_FILE
+async fn get_skill(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted = text(&request.input, "name").context("name the skill to read")?;
+    // The same resolution and the same wording `update_skill` uses, so a name
+    // that works for one works for the other.
+    let skill = state
+        .skills
+        .by_name(owner, &wanted)
+        .await?
+        .with_context(|| format!("you have no skill called \"{wanted}\""))?;
+
+    /* **A held draft has no published version, and "no such skill" about one
+    the person is looking at in their library is a lie.** `detail` reads the
+    *current* version and a held one is never current, so a skill whose only
+    version is held reaches here with `version == 0` and would otherwise fall
+    out of the read below as a bare not-found. Say what is actually true.
+
+    And say it to whoever is asking, which is the half `update_skill` had
+    wrong first: approving is an action only somebody with Writer has, so a
+    reader of a colleague's draft is not sent off to approve it. */
+    if skill.version == 0 {
+        match (skill.held, skill.may_write) {
+            (true, true) => bail!(
+                "\"{}\" is held, pending your review — there is no published version to read. \
+                 Its contents are on the review card on the Skills screen, which is where you \
+                 approve it; it reads here once you have.",
+                skill.name
+            ),
+            (true, false) => bail!(
+                "\"{}\" is held, pending its owner's review — there is no published version to \
+                 read. Approving it is theirs to do, so the thing to do here is tell them it is \
+                 waiting.",
+                skill.name
+            ),
+            // Neither held nor published: a version was discarded or deleted
+            // out from under the row. Rare, and still not a missing skill.
+            _ => bail!(
+                "\"{}\" has no published version — it is in the library with nothing behind it \
+                 to read.",
+                skill.name
+            ),
+        }
+    }
+
+    let detail = state
+        .skills
+        .detail(owner, skill.id.as_str())
+        .await?
+        .with_context(|| format!("\"{}\" could not be read", skill.name))?;
+
+    if let Some(path) = text(&request.input, "file") {
+        return one_bundled_file(state, &skill, &detail, &path).await;
+    }
+
+    // The frontmatter's description rather than the row's. They agree on
+    // every skill that went through `compose_skill_md`, and where an imported
+    // one disagrees the frontmatter is what the model is actually handed.
+    let description = detail
+        .frontmatter
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or(&skill.description);
+    let mut out = vec![format!("**{}** — {description}", skill.name), String::new()];
+
+    /* **What this read does not let you do, said rather than left to the
+    refusal.** `update_skill` points here for anything that depends on what a
+    skill already says, so an agent arrives holding a change it means to make
+    — and three states turn that change into a refusal it could have known
+    about a call earlier. `get_profile` says the same kind of thing for the
+    same reason. */
+    if skill.builtin {
+        out.push(
+            "- One Firetower ships. Read it and build on it; `update_skill` cannot change it."
+                .into(),
+        );
+    } else if !skill.may_write {
+        out.push(
+            "- Shared with you to read, not to change — `update_skill` will refuse it. Writing \
+             your own with what you learn here is the way round it."
+                .into(),
+        );
+    }
+    if skill.held {
+        out.push(
+            "- A newer version of this is held, pending review, and is not what follows. What is \
+             below is the published version — the one that actually runs."
+                .into(),
+        );
+    }
+    if out.len() > 2 {
+        out.push(String::new());
+    }
+
+    out.push("Instructions:".into());
+    out.push(match detail.body.trim().is_empty() {
+        true => "(none)".into(),
+        false => capped(
+            detail.body.trim(),
+            "; the Skills screen shows the instructions whole",
+        ),
+    });
+    out.push(String::new());
+
+    /* The bundle, **named and measured and not included** — the whole reason
+    this tool is two calls rather than one. `SKILL.md` is left out of the list
+    because its contents are the paragraph above; it is still readable by
+    name, which is what makes the listing a view of the bundle rather than a
+    different set of paths. */
+    let bundled: Vec<&crate::skills::SkillFile> = detail
+        .files
+        .iter()
+        .filter(|f| f.path != "SKILL.md")
+        .collect();
+    if bundled.is_empty() {
+        out.push("Bundled files: none — this skill is its instructions and nothing else.".into());
+    } else {
+        out.push(format!(
+            "Bundled files ({}) — named, not included. Read one by calling `get_skill` again \
+             with `file`, e.g. `file: \"{}\"`; one file per call, because a single reference can \
+             be larger than everything above it.",
+            bundled.len(),
+            bundled[0].path
+        ));
+        for file in bundled {
+            out.push(format!(
+                "- `{}` — {}{}",
+                file.path,
+                in_bytes(file.size),
+                match file.executable {
+                    true => ", executable",
+                    false => "",
+                }
+            ));
+        }
+    }
+    Ok(out.join("\n"))
+}
+
+/// One file of a bundle, whole — the other half of [`get_skill`].
+async fn one_bundled_file(
+    state: &AppState,
+    skill: &crate::skills::Skill,
+    detail: &crate::skills::SkillDetail,
+    wanted: &str,
+) -> Result<String> {
+    // **Refused by naming what is there**, the way every other by-name
+    // refusal on this surface works — see [`one_named`]. No near-match and no
+    // guess: a path that is nearly right is a file the agent invented, and
+    // handing back a different one under the name it asked for is how an
+    // agent comes to report the contents of something it never read.
+    let Some(listed) = detail.files.iter().find(|f| f.path == wanted) else {
+        bail!(
+            "\"{}\" has no file at `{wanted}`. What it holds: {}. Ask for one of those by its \
+             exact path.",
+            skill.name,
+            detail
+                .files
+                .iter()
+                .map(|f| format!("`{}`", f.path))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    };
+    let bytes = state
+        .skills
+        .files_with_contents(skill.version_id.as_str())
+        .await?
+        .into_iter()
+        .find(|f| f.path == wanted)
+        .and_then(|f| ft_proto::decode(&f.contents))
+        .with_context(|| format!("`{wanted}` could not be read out of \"{}\"", skill.name))?;
+
+    // **A file that is not text is named and measured, not dumped.**
+    // `ReviewFile` settled this for the review card — a bundle may hold a
+    // font or an image, and `String::from_utf8_lossy` on one is a screenful
+    // of replacement characters that the agent has no way to recognise as
+    // nothing. The size is the useful fact that survives.
+    let Ok(text) = String::from_utf8(bytes) else {
+        return Ok(format!(
+            "`{wanted}` in \"{}\" — {}, and not text: a font, an image, something compiled. It \
+             can be named and measured and not shown; nothing here can hand you its contents.",
+            skill.name,
+            in_bytes(listed.size)
+        ));
+    };
+    Ok(format!(
+        "`{wanted}` in \"{}\" — {}{}:\n\n{}",
+        skill.name,
+        in_bytes(listed.size),
+        match listed.executable {
+            true => ", executable",
+            false => "",
+        },
+        capped(&text, " from the end of the file")
+    ))
+}
+
+/// A size as somebody reads it, in the kilobytes `skills::check` refuses in.
+fn in_bytes(size: i64) -> String {
+    match size {
+        n if n < 1024 => format!("{n} bytes"),
+        n => format!("{} KB", n / 1024),
+    }
+}
+
+/// Text on its way into an agent's context, capped.
+///
+/// **The figure and the marker are [`hand_back_body`]'s**, which caps a
+/// child's last turn for the same reason: a page that arrives whole is a page
+/// of somebody's context spent without them choosing to spend it. A skill's
+/// body may be [`BIGGEST_BODY`] and a bundled file [`BIGGEST_FILE`], both of
+/// which the library accepts and neither of which belongs in one tool result.
+///
+/// The head only, where the hand-back keeps both ends. A conversation's last
+/// words are worth as much as its first; a document is read from the top, and
+/// a head spliced onto a tail reads as continuous prose that is not.
+///
+/// `rest` is where the whole of it is, and is a different answer for the two
+/// callers — which is why it is an argument rather than a sentence in here.
+/// The Skills screen shows a skill's instructions; it does not show a bundled
+/// file's bytes, because `SkillDetail` does not carry them, so a marker that
+/// sent somebody there for one would be sending them nowhere.
+///
+/// [`BIGGEST_BODY`]: crate::skills::BIGGEST_BODY
+/// [`BIGGEST_FILE`]: crate::skills::BIGGEST_FILE
+fn capped(text: &str, rest: &str) -> String {
+    const ROOM: usize = 6000;
+    let total = text.chars().count();
+    if total <= ROOM {
+        return text.to_string();
+    }
+    format!(
+        "{}\n\n[… {} characters cut{rest} …]",
+        text.chars().take(ROOM).collect::<String>(),
+        total - ROOM
+    )
+}
+
 /// The skills the session's owner can see, so the agent builds on them.
 async fn list_skills(state: &AppState, request: &AgentRequest) -> Result<String> {
     let session = authoring_session(state, request).await?;
@@ -3678,7 +3942,13 @@ async fn list_skills(state: &AppState, request: &AgentRequest) -> Result<String>
             format!("- {}{}{}: {}", s.name, scripts, held, s.description)
         })
         .collect();
-    Ok(format!("The skills you can see:\n{}", lines.join("\n")))
+    // The pointer `list_teams` ends with, for the same reason: this is the
+    // index, and the moment an agent is holding it is the moment it wants one
+    // of them whole.
+    Ok(format!(
+        "The skills you can see:\n{}\n\n`get_skill` reads one whole.",
+        lines.join("\n")
+    ))
 }
 
 /// One child, as a line the lead can read.

@@ -951,6 +951,29 @@ that is nobody's to refuse — `seed_builtins`, since nobody holds Writer on
 `create` writes under the owner's personal root, the one root that needs no
 grant, and naming a directory already asks `file_skill` for Writer on it.
 
+**And what an agent reads is a different gate from what it writes.**
+`get_skill` takes one name and returns that skill's current version: the
+description and the full `SKILL.md` instructions, then the bundled files
+*listed* — path, size, whether it runs — and not their contents. `file:
+"references/format.md"` returns that one file whole. Two calls rather than
+one, because `BIGGEST_FILE` (§4) is two megabytes and a read that returned
+every file would spend all of it answering a question that was almost always
+about the instructions; a 2 MB reference landing uninvited in an agent's
+context is the failure the split exists to prevent. Both halves cap
+what they return the way `hand_back_body` caps a child's last turn, with a
+marker saying how much was cut.
+
+**Viewer, not Writer.** `update_skill` refuses a skill shared read-only and is
+right to — that is a write. The skills most worth *reading* are the ones
+somebody else wrote: a colleague's, shared into a directory, and the builtins
+under `d/firetower`, none of which the owner holds Writer on. A held draft has
+no current version, so `detail` finds nothing and the answer says so by name —
+"held, pending your review" — rather than claiming there is no such skill
+about one the person can see in their library; and it says it to whoever is
+asking, since approving is an action only Writer has. A file that is not UTF-8
+is named and measured and not shown, which is `ReviewFile`'s rule for the same
+bytes on the review card.
+
 **And what an agent publishes is held for review by the parser the badges come
 from.** `held_because` reads the bundle through `skills::risk_of` — §8's four
 categories — rather than looking at file paths and the executable bit, so what

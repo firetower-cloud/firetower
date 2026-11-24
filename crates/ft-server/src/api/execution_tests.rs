@@ -10773,3 +10773,482 @@ async fn deleting_a_profile_a_team_holds_names_the_teams() {
     );
     state.fleet.stop_supervising(&host.id).await;
 }
+
+// ─── Reading a whole skill ──────────────────────────────────────────────────
+
+/// A skill of this owner's with a bundle of a given shape, live.
+///
+/// Apart from [`a_skill`] because these tests are about the *files*: the
+/// listing, the one-file read, and the two kinds of file that cannot simply
+/// be printed. Contents arrive as bytes rather than text so a font can be put
+/// in one.
+async fn a_skill_holding(
+    state: &AppState,
+    owner: &str,
+    name: &str,
+    body: &str,
+    files: &[(&str, &[u8], bool)],
+    hold: bool,
+) -> String {
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(owner).await.unwrap();
+    let description = format!("what {name} is for");
+    let skill_md = format!("---\nname: {name}\ndescription: {description}\n---\n\n{body}\n");
+    let mut bundle = vec![crate::skills::IncomingFile {
+        path: "SKILL.md".into(),
+        contents: ft_proto::encode(skill_md.as_bytes()),
+        executable: false,
+    }];
+    bundle.extend(
+        files
+            .iter()
+            .map(|(path, bytes, executable)| crate::skills::IncomingFile {
+                path: (*path).into(),
+                contents: ft_proto::encode(bytes),
+                executable: *executable,
+            }),
+    );
+    state
+        .skills
+        .create(
+            &org,
+            owner,
+            &slug,
+            &crate::skills::NewSkill {
+                name: name.into(),
+                description: description.clone(),
+                frontmatter: serde_json::json!({ "name": name, "description": description }),
+                body: body.into(),
+                files: bundle,
+                notes: None,
+            },
+            hold,
+        )
+        .await
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
+/// **The feature, as one test: can an agent read a skill without being handed
+/// the whole bundle?**
+///
+/// Not "does the tool print the body". Both halves are asserted, because
+/// either alone passes while the design is broken. The plain call has to
+/// carry the instructions and *name* every bundled file with its size and
+/// whether it runs — and must NOT carry a byte of their contents, which is
+/// the entire reason this is two calls rather than one. Then the second call
+/// has to turn one of those listed paths into that file, whole.
+///
+/// The negative is the load-bearing assertion. A tool that returned
+/// everything would pass every positive here.
+#[tokio::test]
+async fn an_agent_can_read_a_whole_skill_and_then_one_of_its_files() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill_holding(
+        &state,
+        &owner,
+        "changelog",
+        "# Changelog helper\n\nRead the diff, then write the entry.",
+        &[
+            (
+                "references/format.md",
+                b"KEEP A CHANGELOG, with the sections in this order." as &[u8],
+                false,
+            ),
+            ("scripts/build.sh", b"#!/bin/sh\necho building\n", true),
+        ],
+        false,
+    )
+    .await;
+
+    // ── the index ─────────────────────────────────────────────────────────
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "k1",
+            "get_skill",
+            serde_json::json!({ "name": "changelog" }),
+        ),
+    )
+    .await
+    .expect("a skill its owner can see is one they can read");
+
+    for expected in [
+        "changelog",
+        "what changelog is for",
+        // The instructions, whole.
+        "Read the diff, then write the entry.",
+        // Every file named, with its size and the bit that says it runs.
+        "references/format.md",
+        "scripts/build.sh",
+        "bytes",
+        "executable",
+        // And how to get one of them, which is the half that makes the
+        // listing usable rather than merely honest.
+        "`file`",
+    ] {
+        assert!(
+            said.contains(expected),
+            "the read has to carry {expected:?}: {said}"
+        );
+    }
+    // **The point of the design.** No file's contents come with the index.
+    assert!(
+        !said.contains("KEEP A CHANGELOG"),
+        "a bundled file's contents must not arrive uninvited: {said}"
+    );
+    assert!(!said.contains("echo building"), "nor a script's: {said}");
+    // `SKILL.md` is not listed beside them: its contents are the paragraph
+    // above, and listing it would read as a file worth a second call.
+    assert!(
+        !said.contains("`SKILL.md`"),
+        "the instructions are not offered again as a file to fetch: {said}"
+    );
+
+    // ── one file ──────────────────────────────────────────────────────────
+    let one = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "k2",
+            "get_skill",
+            serde_json::json!({ "name": "changelog", "file": "references/format.md" }),
+        ),
+    )
+    .await
+    .expect("a path the listing gave is one the tool reads");
+    assert!(
+        one.contains("KEEP A CHANGELOG, with the sections in this order."),
+        "the file asked for arrives whole: {one}"
+    );
+    assert!(
+        !one.contains("echo building"),
+        "and only the one asked for: {one}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **Viewer is the whole bar, and that is not what `update_skill` asks.**
+///
+/// A skill shared read-only — a colleague's, filed where this owner can
+/// reach it — is refused by the write and must be *read* by this. Getting
+/// this wrong makes the tool useless for exactly the library skills people
+/// most want read, so both tools are driven at one skill and the two answers
+/// are asserted against each other.
+#[tokio::test]
+async fn a_skill_shared_to_read_is_read_here_and_refused_by_the_write() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = a_skill_holding(
+        &state,
+        ana.id.as_str(),
+        "house-style",
+        "# House style\n\nShort sentences. No exclamation marks.",
+        &[],
+        false,
+    )
+    .await;
+    // Shared to read and no further, which is the state the write refuses.
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Skill,
+            &hers,
+            &owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "v1",
+            "get_skill",
+            serde_json::json!({ "name": "house-style" }),
+        ),
+    )
+    .await
+    .expect("Viewer is enough to read a skill");
+    assert!(
+        said.contains("Short sentences. No exclamation marks."),
+        "a skill shared to read is readable whole: {said}"
+    );
+    // And the read says, before the agent finds out by being refused, that
+    // changing it is not on the table.
+    assert!(
+        said.contains("not to change"),
+        "the read says what it does not let you do: {said}"
+    );
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "v2",
+            "update_skill",
+            serde_json::json!({ "name": "house-style", "body": "clobbered" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("read, not to change"),
+        "which the write still refuses: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A held draft is answered as held, not as missing.**
+///
+/// `detail` reads the *current* version and a held one is never current, so
+/// the honest-looking implementation says "no skill called that" about
+/// something the person is looking at in their library. Said for both
+/// readers, because `update_skill` already got this wrong once in the other
+/// direction: approving is an action only Writer has, so a reader of
+/// somebody else's draft is not told to go and approve it.
+#[tokio::test]
+async fn a_held_skill_says_it_is_held_rather_than_missing() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill_holding(
+        &state,
+        &owner,
+        "deployer",
+        "# Deployer\n\nShips it.",
+        &[("scripts/ship.sh", b"#!/bin/sh\n", true)],
+        true,
+    )
+    .await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "h1",
+            "get_skill",
+            serde_json::json!({ "name": "deployer" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("held, pending your review"),
+        "the owner is told what is actually true of it: {refused}"
+    );
+    assert!(
+        refused.contains("no published version"),
+        "and why there is nothing to read: {refused}"
+    );
+    assert!(
+        !refused.contains("you have no skill called"),
+        "never a not-found about a skill they can see in their library: {refused}"
+    );
+
+    // The same draft, read by somebody who may only look at it. Approving is
+    // not theirs to do and the answer must not send them to do it.
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = a_skill_holding(
+        &state,
+        ana.id.as_str(),
+        "her-deployer",
+        "# Deployer\n\nShips it.",
+        &[("scripts/ship.sh", b"#!/bin/sh\n", true)],
+        true,
+    )
+    .await;
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Skill,
+            &hers,
+            &owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+    let told = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "h2",
+            "get_skill",
+            serde_json::json!({ "name": "her-deployer" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        told.contains("its owner's review"),
+        "a reader is told whose review it is waiting on: {told}"
+    );
+    assert!(
+        !told.contains("pending your review"),
+        "and not sent to perform an approval they cannot do: {told}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A file that is not text is named and measured, not dumped**, and a path
+/// that is not in the bundle is refused by naming the ones that are.
+///
+/// The first is `ReviewFile`'s rule for the same bytes on the review card: a
+/// bundle may hold a font, and `from_utf8_lossy` on one is a screenful of
+/// replacement characters an agent has no way to read as nothing. The second
+/// is `one_named`'s rule — no near-match and no guess, because handing back a
+/// different file under the name that was asked for is how an agent comes to
+/// report the contents of something it never read.
+#[tokio::test]
+async fn a_binary_file_is_named_and_a_path_that_is_not_there_is_refused_by_name() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill_holding(
+        &state,
+        &owner,
+        "brand",
+        "# Brand\n\nUse the mark.",
+        &[
+            // Not UTF-8 by construction: a lone continuation byte.
+            (
+                "assets/logo.png",
+                &[0x89, b'P', b'N', b'G', 0x80, 0xff],
+                false,
+            ),
+            ("references/voice.md", b"Plain words." as &[u8], false),
+        ],
+        false,
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "b1",
+            "get_skill",
+            serde_json::json!({ "name": "brand", "file": "assets/logo.png" }),
+        ),
+    )
+    .await
+    .expect("a binary file is an answer, not a failure — it exists and was asked for");
+    assert!(
+        said.contains("assets/logo.png") && said.contains("6 bytes"),
+        "it is named and measured: {said}"
+    );
+    assert!(
+        said.contains("not text"),
+        "and says why there is nothing to show: {said}"
+    );
+    assert!(
+        !said.contains('\u{fffd}'),
+        "never a mojibake dump of bytes that are not text: {said}"
+    );
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "b2",
+            "get_skill",
+            // One character off a real path — the shape a guess would get
+            // wrong silently.
+            serde_json::json!({ "name": "brand", "file": "references/voices.md" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("references/voice.md") && refused.contains("assets/logo.png"),
+        "the refusal names what is actually in the bundle: {refused}"
+    );
+    assert!(
+        !refused.contains("Plain words."),
+        "and does not quietly serve the near-match instead: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A file bigger than one tool result is cut, and says how much was cut.**
+///
+/// The failure this design exists to avoid, in its last form: the listing
+/// keeps a 2 MB reference out of the index, and nothing would keep it out of
+/// the index's second call. `hand_back_body`'s cap and marker, for the same
+/// reason it has them.
+#[tokio::test]
+async fn a_file_too_big_for_one_answer_is_cut_and_says_so() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let huge = "x".repeat(20_000);
+    let mut long = huge.clone().into_bytes();
+    long.extend_from_slice(b"THE-VERY-END");
+    a_skill_holding(
+        &state,
+        &owner,
+        "encyclopedia",
+        "# Encyclopedia\n\nLook it up.",
+        &[("references/all.md", &long, false)],
+        false,
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "c1",
+            "get_skill",
+            serde_json::json!({ "name": "encyclopedia", "file": "references/all.md" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        said.contains("characters cut"),
+        "the cut is marked rather than silent: {said}"
+    );
+    assert!(
+        !said.contains("THE-VERY-END"),
+        "and it is a cut, not a reflow: {said}"
+    );
+    assert!(
+        said.chars().count() < 20_000,
+        "a file bigger than one answer does not become one: {} characters",
+        said.chars().count()
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
