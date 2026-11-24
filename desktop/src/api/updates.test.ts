@@ -9,8 +9,10 @@ import type {
   UpgradePlan,
 } from "./generated/model";
 import {
+  aheadOfGeneral,
   canStart,
   channelBlock,
+  channelsShown,
   countEnded,
   diffLines,
   duration,
@@ -327,6 +329,91 @@ const bothOffers = (over: { general?: Partial<Offer>; beta?: Partial<Offer> } = 
     ...over.beta,
   }),
 ];
+
+/**
+ * **Hidden by default, for everybody — and never hidden from somebody on it.**
+ *
+ * The preference is a disclosure control: it decides what the page draws and
+ * grants nothing. What it must never do is deny the channel this copy or this
+ * installation is actually running, which is four separate ways in.
+ */
+describe("whether the screen names the channels at all", () => {
+  const copy = (over: Partial<Parameters<typeof channelsShown>[2]> = {}) => ({
+    channel: "general" as const,
+    from: null,
+    ahead: false,
+    ...over,
+  });
+
+  /* The default page: a general-access installation, a copy on general
+     access, nobody having asked for anything. Administrators included —
+     there is no second variant for them. */
+  it("is off until somebody asks, for an administrator as much as anybody", () => {
+    for (const mayChange of [true, false]) {
+      expect(channelsShown(false, channel({ offers: bothOffers(), mayChange }), copy())).toBe(false);
+    }
+  });
+
+  it("is on once they ask", () => {
+    expect(channelsShown(true, channel({ offers: bothOffers() }), copy())).toBe(true);
+    expect(channelsShown(true, channel({ offers: bothOffers(), mayChange: false }), copy())).toBe(true);
+  });
+
+  /* **The edge the preference must not win.** Everybody connected to this
+     Firetower is running beta; a page that would not name it is lying about
+     what is installed. */
+  it("is on when the installation is on beta, whatever the preference says", () => {
+    const onBeta = channel({ channel: "beta", tag: "beta", offers: bothOffers() });
+    expect(channelsShown(false, onBeta, copy())).toBe(true);
+  });
+
+  it("is on when this copy is set to beta, whatever the preference says", () => {
+    expect(channelsShown(false, channel({ offers: bothOffers() }), copy({ channel: "beta" }))).toBe(true);
+  });
+
+  /* `installedFrom` writes this before an install, so the provenance survives
+     the relaunch. A copy that came from beta is running a beta build even if
+     the preference has since been set back to general access. */
+  it("is on when this copy came from beta, whatever the preference says", () => {
+    expect(channelsShown(false, channel({ offers: bothOffers() }), copy({ from: "beta" }))).toBe(true);
+  });
+
+  /* Ahead with no provenance at all — a build installed by hand off the
+     release page. The honest reading is the same one `ThisApp` already draws
+     a block for: this is a pre-release build. */
+  it("is on when this copy is ahead of general access, whatever the preference says", () => {
+    expect(channelsShown(false, channel({ offers: bothOffers() }), copy({ ahead: true }))).toBe(true);
+  });
+
+  /* An unrecognised tag is resolved to general access by the server before
+     this is read, so it is treated as general access here too — the same rule
+     the rest of the screen follows. */
+  it("is off for a tag that names no channel, which is treated as general access", () => {
+    for (const tag of ["latest", "edge", "0.55.0"]) {
+      const odd = channel({ tag, recognised: false, offers: bothOffers() });
+      expect(channelsShown(false, odd, copy()), tag).toBe(false);
+    }
+  });
+
+  /* A control plane too old to report a channel at all. Nothing to name, and
+     nothing about this copy saying otherwise. */
+  it("is off when the server cannot say what the installation is on", () => {
+    expect(channelsShown(false, null, copy())).toBe(false);
+    expect(channelsShown(false, null, copy({ from: "beta" }))).toBe(true);
+  });
+});
+
+describe("whether this copy is ahead of general access", () => {
+  it("is what leaving beta produces, and needs both figures to say so", () => {
+    expect(aheadOfGeneral("0.30.0", "0.29.1")).toBe(true);
+    expect(aheadOfGeneral("0.29.1", "0.29.1")).toBe(false);
+    expect(aheadOfGeneral("0.28.1", "0.29.1")).toBe(false);
+    /* A server too old to say leaves it unknown, and unknown is not ahead. */
+    expect(aheadOfGeneral("0.30.0", null)).toBe(false);
+    expect(aheadOfGeneral(null, "0.29.1")).toBe(false);
+    expect(aheadOfGeneral(undefined, undefined)).toBe(false);
+  });
+});
 
 describe("whether this control plane can speak about channels at all", () => {
   it("reads the answer rather than a version", () => {

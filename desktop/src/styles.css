@@ -5454,6 +5454,43 @@ html:not([data-platform="macos"]) {
     color: var(--color-mute);
   }
 
+  /* ── The line that puts the channels on the page ────────────────────
+     A footnote, and deliberately not a control. Beta is for the few who
+     want every release as it is cut; for everybody else it was a second
+     version number on the screen that says what is running. So: one
+     underlined line, `mute` — the tier spent on counts and timestamps —
+     under a rule, at the foot, below everything the screen is for. A
+     styled toggle here would be competing with the buttons above it,
+     which is the whole thing this is not. */
+  .upd-foot {
+    margin-top: 52px;
+    padding-top: 18px;
+    border-top: 1px solid var(--color-line-soft);
+  }
+  /* `dim` rather than `mute`, and the one judgement call in here. `mute` is
+     documented in `globals.css` as below the contrast floor and spent on
+     counts, timestamps and placeholders — none of which anybody has to find.
+     This is a control, and a control nobody can find is not a quiet control,
+     it is a missing one. What makes it hard to find is where it is: the
+     bottom of the page, under a rule, below everything the screen is for. */
+  .upd-foot-act {
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: var(--text-micro);
+    color: var(--color-dim);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--color-dim) 40%, transparent);
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .upd-foot-act:hover,
+  .upd-foot-act:focus-visible {
+    color: var(--color-text);
+    text-decoration-color: currentColor;
+  }
+
   /* ── A changelog span ───────────────────────────────────────────────
      One version, its date, and its section. A row that opens, on the plan
      panel's recessed ground. */

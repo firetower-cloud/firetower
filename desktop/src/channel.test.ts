@@ -138,3 +138,55 @@ describe("where the running build came from", () => {
     expect(installedFrom(null)).toBeNull();
   });
 });
+
+/**
+ * **The preference that decides what the page draws, and nothing else.**
+ *
+ * It does not move a channel and it does not grant one: an installation's
+ * channel is still the tag in `firetower.yml` and still only changes through
+ * the switch flow. Whether somebody already on beta sees beta is
+ * `channelsShown` in `api/updates.ts`, which reads this and three other
+ * things — tested there.
+ */
+describe("whether this copy draws the channels", () => {
+  it("is off until somebody asks", async () => {
+    const { channelsRevealed } = await fresh();
+    expect(channelsRevealed()).toBe(false);
+  });
+
+  it("is on once they do, and off again after", async () => {
+    const { channelsRevealed, revealChannels } = await fresh();
+    revealChannels(true);
+    expect(channelsRevealed()).toBe(true);
+    revealChannels(false);
+    expect(channelsRevealed()).toBe(false);
+  });
+
+  /* The same storage as the channel above, and the same `try`: a window
+     without storage still draws a page, and the quiet one is the right
+     default for somebody who has never asked. */
+  it("is off, rather than throwing, in a window with no storage", async () => {
+    (globalThis as { window?: unknown }).window = {};
+    const { channelsRevealed, revealChannels } = await fresh();
+    expect(channelsRevealed()).toBe(false);
+    expect(() => revealChannels(true)).not.toThrow();
+  });
+
+  /* Two preferences, one storage, and neither may read the other's cell. */
+  it("is not the channel this copy is on", async () => {
+    const { appChannel, channelsRevealed, revealChannels, setAppChannel } = await fresh();
+    revealChannels(true);
+    expect(appChannel()).toBe("general");
+    setAppChannel("beta");
+    revealChannels(false);
+    expect(appChannel()).toBe("beta");
+    expect(channelsRevealed()).toBe(false);
+  });
+
+  it("survives being asked for twice", async () => {
+    const { channelsRevealed, revealChannels } = await fresh();
+    revealChannels(true);
+    revealChannels(true);
+    expect(channelsRevealed()).toBe(true);
+  });
+});

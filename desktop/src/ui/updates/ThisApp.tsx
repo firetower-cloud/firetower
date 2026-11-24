@@ -23,7 +23,7 @@ import { Channel } from "~/api/generated/model";
 import type { AppChannel } from "~/channel";
 import type { Build } from "~/update";
 import type { Span } from "~/releases";
-import { isNewer } from "~/releases";
+import { aheadOfGeneral } from "~/api/updates";
 import { ChangelogSpan } from "./Span";
 
 const CHANNELS = [
@@ -45,6 +45,7 @@ export function ThisApp({
   spanPending,
   onSpan,
   releasePage,
+  shown,
 }: {
   build: Build;
   /** The channel this copy is set to. */
@@ -63,6 +64,13 @@ export function ThisApp({
   spanPending: boolean;
   onSpan: () => void;
   releasePage: string;
+  /**
+   * Whether this copy draws the release channels at all — `channelsShown` in
+   * `api/updates.ts`. With it off, the one control and the note about joining
+   * beta by hand both go, and what is left of this section is a version, a
+   * button and what changed.
+   */
+  shown: boolean;
 }) {
   const taking = build.taking;
   /**
@@ -73,8 +81,7 @@ export function ThisApp({
    * it is running something general access has not reached. A check finding
    * nothing is the correct answer here, and it ends by itself.
    */
-  const ahead =
-    channel === "general" && !!build.version && !!generalPin && isNewer(build.version, generalPin);
+  const ahead = channel === "general" && aheadOfGeneral(build.version, generalPin);
 
   const sub = ahead
     ? "On general access, running a beta build."
@@ -125,6 +132,7 @@ export function ThisApp({
 
       {/* **One control, one sentence.** The weight is the whole argument: the
           installation's channel above is a section, and this is a row. */}
+      {shown && (
       <div className="upd-row">
         <span className="tx">
           <b>Channel for this copy</b>
@@ -143,6 +151,7 @@ export function ThisApp({
           />
         </span>
       </div>
+      )}
 
       {trouble && (
         <p className="mt-2 flex items-start gap-2 rounded-lg bg-raise px-3 py-2 text-micro leading-relaxed text-brick">
@@ -186,19 +195,24 @@ export function ThisApp({
         </>
       )}
 
-      <div className="note2">
-        <span className="g">
-          <Icon of={Download} size={14} />
-        </span>
-        <p>
-          Joining beta on a copy older than this one takes one download from its release page. Every
-          copy carries its update address inside the bundle, so installing by hand once is the only
-          way to a different one. After that it updates on beta by itself.{" "}
-          <a className="linkish" href={releasePage} target="_blank" rel="noreferrer">
-            The release page
-          </a>
-        </p>
-      </div>
+      {/* How somebody on a copy too old to carry the beta address joins it at
+          all. It is the answer to a question that is only asked once the
+          channels are on the page. */}
+      {shown && (
+        <div className="note2">
+          <span className="g">
+            <Icon of={Download} size={14} />
+          </span>
+          <p>
+            Joining beta on a copy older than this one takes one download from its release page. Every
+            copy carries its update address inside the bundle, so installing by hand once is the only
+            way to a different one. After that it updates on beta by itself.{" "}
+            <a className="linkish" href={releasePage} target="_blank" rel="noreferrer">
+              The release page
+            </a>
+          </p>
+        </div>
+      )}
     </section>
   );
 }
