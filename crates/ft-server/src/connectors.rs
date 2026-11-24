@@ -210,7 +210,15 @@ async fn fetch_auth_server(http: &reqwest::Client, issuer: &str) -> Result<AuthS
 fn resource_metadata_of(header: &str) -> Option<String> {
     header.split(',').find_map(|part| {
         let (k, v) = part.split_once('=')?;
-        (k.trim().eq_ignore_ascii_case("resource_metadata"))
+        // **The scheme is glued to the first parameter.** `WWW-Authenticate`
+        // is `Bearer resource_metadata="…"` — a space after the scheme, a
+        // comma only *between* parameters. So the first key arrives as
+        // "Bearer resource_metadata", and matching it whole silently missed
+        // every server that puts this parameter first. Slack does, and we
+        // read it as a server wanting no authorization at all.
+        let k = k.trim();
+        let k = k.rsplit_once(char::is_whitespace).map_or(k, |(_, name)| name);
+        (k.eq_ignore_ascii_case("resource_metadata"))
             .then(|| v.trim().trim_matches('"').to_string())
     })
 }
@@ -632,6 +640,30 @@ mod tests {
             !a.challenge.contains(['+', '/', '=']),
             "base64url has neither of the two characters nor the padding"
         );
+    }
+
+    /// The pointer, when the parameter comes first.
+    ///
+    /// Measured against four servers: Linear, Notion and Sentry send
+    /// `Bearer error="…", resource_metadata="…"`, so the parameter follows a
+    /// comma and parsed. Slack sends it first, with only a space after the
+    /// scheme — and that one case is the difference between discovering an
+    /// OAuth server and recording it as needing no authorization.
+    #[test]
+    fn the_pointer_is_found_even_when_the_scheme_is_glued_to_it() {
+        let slack = r#"Bearer resource_metadata="https://mcp.slack.com/.well-known/oauth-protected-resource""#;
+        assert_eq!(
+            resource_metadata_of(slack).as_deref(),
+            Some("https://mcp.slack.com/.well-known/oauth-protected-resource")
+        );
+        let after_a_comma = r#"Bearer error="invalid_token", resource_metadata="https://x.dev/.well-known/oauth-protected-resource""#;
+        assert_eq!(
+            resource_metadata_of(after_a_comma).as_deref(),
+            Some("https://x.dev/.well-known/oauth-protected-resource")
+        );
+        // A bare challenge names nothing, and the caller falls back.
+        assert_eq!(resource_metadata_of("Bearer"), None);
+        assert_eq!(resource_metadata_of(r#"Bearer error="invalid_token""#), None);
     }
 
     /// **`resource` is the one that has to be there.** Without it the token is
