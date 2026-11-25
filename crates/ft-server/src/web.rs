@@ -215,18 +215,18 @@ impl Bundle {
     /// structurally rather than by a second check: neither hashed tree contains
     /// an `.html` file at all, and `nothing_marks_a_shell_immutable` asserts it
     /// over whatever is embedded.
+    fn hashed(self, name: &str) -> bool {
+        match self {
+            Bundle::Renderer => name.starts_with("assets/"),
+            Bundle::Site => name.starts_with("_next/static/"),
+        }
+    }
+
     /// What a document from this bundle is allowed to load, and from where.
     fn policy(self) -> &'static str {
         match self {
             Bundle::Renderer => POLICY,
             Bundle::Site => SITE_POLICY,
-        }
-    }
-
-    fn hashed(self, name: &str) -> bool {
-        match self {
-            Bundle::Renderer => name.starts_with("assets/"),
-            Bundle::Site => name.starts_with("_next/static/"),
         }
     }
 
