@@ -27,6 +27,37 @@
 import { ExternalLink, KeyRound, RotateCw } from "lucide-react";
 import { openExternal } from "~/open";
 
+/**
+ * Where a password is actually replaced, on the control plane's own interface.
+ *
+ * **This used to be the bare root and the root moved.** Serving the application
+ * at `/` — the change that made it reachable in a browser at all — took that
+ * path off the administration site, so this button opened the very app that had
+ * just said it does not carry this screen, which drew the same gate again. A
+ * closed loop, and in the shell as well as in a browser: there the button hands
+ * the URL to the system browser, which lands on the same page.
+ *
+ * `/login` rather than `/account` or `/setup`, measured rather than assumed:
+ * signed out — which is the likely state in both of the ways this screen is
+ * reached — all three answer with `/login` anyway, because the other two
+ * redirect to it. Signing in there routes on `setupState()`, so a password that
+ * still has to be replaced lands on `/setup`, which `web/components/Setup.tsx`
+ * calls "the only place in the product where a password is replaced under
+ * duress. The desktop and phone apps do not offer it; they send people here."
+ * This is the sending.
+ *
+ * Not `/account`: that is the voluntary change — current, new, again — and it
+ * needs a session this person may not have in that browser. It is a different
+ * screen for a different day.
+ *
+ * The design decision behind all of this is untouched. The app still carries no
+ * password form of its own, for the reason at the top of this file. It has only
+ * stopped pointing at a door that no longer opens.
+ */
+export function passwordPage(origin: string): string {
+  return `${origin}/login`;
+}
+
 export function ReplacePassword({
   url,
   username,
@@ -94,7 +125,7 @@ export function ReplacePassword({
              length of the card — a full-width button reads as the only thing
              to do, and here there are two. */
           <div className="mt-5 flex items-center justify-center gap-2">
-            <button onClick={() => void openExternal(origin)} className="btn primary">
+            <button onClick={() => void openExternal(passwordPage(origin))} className="btn primary">
               Open {host}
               <ExternalLink className="h-3.5 w-3.5" strokeWidth={1.75} />
             </button>
@@ -105,7 +136,7 @@ export function ReplacePassword({
           </div>
         ) : (
           <>
-            <button onClick={() => void openExternal(origin)} className="btn primary go">
+            <button onClick={() => void openExternal(passwordPage(origin))} className="btn primary go">
               Open {host}
             </button>
             <button onClick={onRetry} className="btn plain go !mt-2.5">
