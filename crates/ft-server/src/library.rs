@@ -40,6 +40,8 @@ pub struct Item {
     /// **Not a choice.** A Firetower feature depends on it, so it has no
     /// switch and no profile can leave it out. See `builtin::REQUIRED`.
     pub required: bool,
+    /// What stops working without it, said where somebody is looking at it.
+    pub why_required: Option<String>,
 
     // Servers only.
     pub url: Option<String>,
@@ -168,6 +170,10 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
             });
         let builtin: bool = b.try_get("builtin").unwrap_or(false);
         let required = builtin && crate::skills::builtin::required(&bundle_name);
+        let why_required = required
+            .then(|| crate::skills::builtin::why_required(&bundle_name))
+            .flatten()
+            .map(str::to_owned);
 
         // What this bundle carries, read out of its own files.
         let files: Vec<(String, Vec<u8>)> = match &vid {
@@ -199,6 +205,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 logo: logo.clone(),
                 builtin,
                 required,
+                why_required: why_required.clone(),
                 url: b.try_get("url").ok().flatten(),
                 auth: b.try_get("auth").ok().flatten(),
                 // A server that asks for nothing has nothing to connect;
@@ -246,6 +253,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 logo: logo.clone(),
                 builtin,
                 required,
+                why_required: why_required.clone(),
                 url: None,
                 auth: None,
                 server: None,
@@ -285,9 +293,8 @@ pub async fn switch(pool: &PgPool, person: &str, item: &str, on: bool) -> Result
         .fetch_optional(pool)
         .await?;
         if let Some(n) = name.filter(|n| crate::skills::builtin::required(n)) {
-            anyhow::bail!(
-                "`{n}` is what a Firetower feature is built on, so it cannot be turned off"
-            );
+            let why = crate::skills::builtin::why_required(&n).unwrap_or_default();
+            anyhow::bail!("`{n}` cannot be turned off. {why}");
         }
     }
 

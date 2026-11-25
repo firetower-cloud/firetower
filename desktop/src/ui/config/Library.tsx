@@ -514,10 +514,7 @@ function Thing({
           artifact feature is built on — turning it off would not announce
           itself, it would make agents quietly stop publishing. */}
       {of.required ? (
-        <span
-          className="shrink-0 text-meta text-mute"
-          title={`Firetower's artifact feature is built on ${of.name}, so it is always loaded.`}
-        >
+        <span className="shrink-0 text-meta text-mute" title={of.whyRequired ?? undefined}>
           always on
         </span>
       ) : (

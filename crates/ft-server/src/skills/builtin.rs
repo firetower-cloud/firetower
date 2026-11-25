@@ -20,26 +20,51 @@ use anyhow::{bail, Context, Result};
 /// rename or re-file what is in it.
 pub const DIRECTORY_SLUG: &str = "firetower";
 
-/// The built-ins that are not a choice.
+/// The built-ins that are not a choice, and what breaks without each.
 ///
-/// **A capability can be turned off; a contract cannot.** Most of what ships
-/// here is a capability — `skill-creator` off means agents stop offering to
-/// write skills, and nothing else changes. `firetower-artifacts` is not that.
-/// Firetower has a *feature* that only works if an agent writes to
-/// `.firetower/artifacts/<name>/index.html`: the page appears in the
-/// conversation, opens full screen, can be annotated. Turn the skill off and
-/// the feature does not announce its absence — the agent writes an HTML file
-/// somewhere, says "here you go", and nothing appears. That reads as an agent
-/// being bad at its job rather than as a setting somebody changed.
+/// **A capability can be turned off; a contract cannot.** The test is one
+/// question: *does a Firetower feature stop working, without saying so, if
+/// this is off?* Not "is it useful" and not "is it ours" — most of what ships
+/// here is both and is still a capability.
 ///
-/// It was in the system prompt before it was a skill, and the move was about
-/// cost — roughly 250 tokens every turn against 30 at rest. It was never
-/// about making it optional.
-pub const REQUIRED: &[&str] = &["firetower-artifacts"];
+/// Two pass it, and they fail the same way. Each is the only thing that tells
+/// an agent how to reach a mechanism the product is built on, so with it off
+/// the agent does the obvious wrong thing — writes a file somewhere and says
+/// "here you go" — and nothing appears. That reads as an agent being bad at
+/// its job rather than as a setting somebody changed, which is what makes it
+/// worse than an error.
+///
+/// Both were cheaper to ship as skills than as system prompt: roughly 250
+/// tokens every turn against 30 at rest. The move was about cost. It was
+/// never about making them optional.
+pub const REQUIRED: &[(&str, &str)] = &[
+    (
+        "firetower-artifacts",
+        "Publishing an artifact means writing to a path Firetower watches. \
+         Without this, an agent asked to show you something writes an HTML file \
+         somewhere else and nothing appears in the conversation.",
+    ),
+    (
+        "skill-creator",
+        "Saving a skill means calling the tool that puts it in your library. \
+         Without this, an agent asked to write you one leaves a SKILL.md in a \
+         checkout and it never reaches the Skills screen.",
+    ),
+];
 
 /// Whether this slug is one of those.
 pub fn required(slug: &str) -> bool {
-    REQUIRED.contains(&slug)
+    REQUIRED.iter().any(|(s, _)| *s == slug)
+}
+
+/// Why it cannot be turned off, in words for the person looking at the row.
+pub fn why_required(slug: &str) -> Option<&'static str> {
+    REQUIRED.iter().find(|(s, _)| *s == slug).map(|(_, w)| *w)
+}
+
+/// Every required slug, for a query that needs the names.
+pub fn required_slugs() -> Vec<String> {
+    REQUIRED.iter().map(|(s, _)| s.to_string()).collect()
 }
 
 /// The `ltree` prefix a built-in's path begins with.

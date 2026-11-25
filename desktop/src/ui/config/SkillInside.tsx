@@ -79,7 +79,14 @@ export function SkillInside({ of, onBack }: { of: Item; onBack: () => void }) {
         </div>
 
         <aside className="text-meta">
-          <Fact label="Loaded">{of.on ? "Into a plain agent of yours" : "Only when picked"}</Fact>
+          <Fact label="Loaded">
+            {of.required ? "Always — it cannot be turned off" : of.on ? "Into a plain agent of yours" : "Only when picked"}
+          </Fact>
+          {of.whyRequired && (
+            <Fact label="Why">
+              <span className="font-normal text-dim">{of.whyRequired}</span>
+            </Fact>
+          )}
           {of.from && <Fact label="Arrived with">{of.from}</Fact>}
           <Fact label="File">
             <span className="break-all font-mono text-dim">{path}</span>

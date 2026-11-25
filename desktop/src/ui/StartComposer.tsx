@@ -994,7 +994,11 @@ export function StartComposer({
                   type="button"
                   className="prow"
                   disabled={fixed}
-                  title={fixed ? "Firetower's artifact feature is built on this." : undefined}
+                  title={
+                    fixed
+                      ? "A Firetower feature is built on this, so it is always loaded."
+                      : undefined
+                  }
                   onClick={() =>
                     setMuted((m) => {
                       const next = new Set(m);

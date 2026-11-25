@@ -3771,7 +3771,7 @@ impl Skills {
               WHERE k.path <@ 'd.firetower'::ltree AND k.name = ANY($2)",
         )
         .bind(person)
-        .bind(builtin::REQUIRED)
+        .bind(builtin::required_slugs())
         .fetch_all(&self.pool)
         .await
         .unwrap_or_default();

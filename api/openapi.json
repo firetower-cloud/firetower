@@ -14224,6 +14224,13 @@
               "string",
               "null"
             ]
+          },
+          "whyRequired": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What stops working without it, said where somebody is looking at it."
           }
         }
       },

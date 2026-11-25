@@ -50,4 +50,9 @@ export interface Item {
   skillId: string;
   /** @nullable */
   url?: string | null;
+  /**
+     * What stops working without it, said where somebody is looking at it.
+     * @nullable
+     */
+  whyRequired?: string | null;
 }

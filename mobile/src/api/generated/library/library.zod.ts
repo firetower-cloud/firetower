@@ -32,7 +32,8 @@ export const ListLibraryResponseItem = zod.object({
   "required": zod.boolean().describe('**Not a choice.** A Firetower feature depends on it, so it has no\nswitch and no profile can leave it out. See `builtin::REQUIRED`.'),
   "server": zod.string().nullish(),
   "skillId": zod.string().describe('The bundle it lives in, which the detail screen and removal both need.'),
-  "url": zod.string().nullish()
+  "url": zod.string().nullish(),
+  "whyRequired": zod.string().nullish().describe('What stops working without it, said where somebody is looking at it.')
 }).describe('One thing in the library.')
 export const ListLibraryResponse = zod.array(ListLibraryResponseItem)
 
