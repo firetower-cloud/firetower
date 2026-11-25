@@ -63,7 +63,7 @@ import { SkillInside } from "~/ui/config/SkillInside";
 const SHELF = 40;
 
 type Kind = "all" | "skill" | "mcp";
-type Where = "yours" | "discover";
+type Where = "installed" | "discover";
 
 /** A monogram, from the initial of each hyphenated part. */
 export function mono(name: string): string {
@@ -297,7 +297,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
             </div>
             <span className="h-5 w-px bg-line" />
             <div className="seg2" role="tablist">
-              {(["yours", "discover"] as Where[]).map((w) => (
+              {(["installed", "discover"] as Where[]).map((w) => (
                 <button
                   key={w}
                   type="button"
@@ -305,7 +305,12 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                   aria-selected={where === w}
                   onClick={() => setWhere(w)}
                 >
-                  {w === "yours" ? "Yours" : "Discover"}
+                  {/* **Not "Yours".** Nothing in this list is: two ship with
+                      the product and the rest are installed for the whole
+                      organisation, so a colleague's install turns up here
+                      too. It is what this Firetower has, which is a fact
+                      about the installation and not about a person. */}
+                  {w === "installed" ? "Installed" : "Discover"}
                 </button>
               ))}
             </div>
@@ -335,7 +340,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
           />
         )}
 
-        {where === "yours" ? (
+        {where === "installed" ? (
           <>
             {/* **No switch here any more.** Having something and using it in
                 a particular run are different questions, and only the second
@@ -343,8 +348,9 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                 press away from the prompt, where somebody can see what the
                 agent is about to be handed. */}
             <p className="mt-4 text-meta text-dim">
-              {yours.length}. Everything here is offered when you start an agent — the
-              composer is where you choose what that one gets.
+              {yours.length} on this Firetower — what ships with it, and what anybody here
+              has installed. All of it is offered when you start an agent; the composer is
+              where you choose what that one gets.
             </p>
             <div className="mt-2">
               {yours.map((i) => (
@@ -375,7 +381,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
             {have.length > 0 && (
               <>
                 <div className="mt-4 flex items-baseline gap-3">
-                  <h3 className="text-ui text-dim">Installed</h3>
+                  <h3 className="text-ui text-dim">Already added</h3>
                   <span className="text-meta text-mute">{have.length}</span>
                   {have.length > INSTALLED && (
                     <button
