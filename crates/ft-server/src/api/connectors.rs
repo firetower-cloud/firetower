@@ -378,11 +378,17 @@ async fn client_for(
     let found = connectors::discover(url)
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+    // **Says where the answer is, because there is one.** This sentence was
+    // written before `set_client` existed and still ended "which Firetower
+    // cannot do for you yet" — so somebody pressing Connect on one of the
+    // eleven servers that register nothing was told the product could not
+    // help, with the form that does it on the same screen.
     let at = found.register_url.clone().ok_or_else(|| {
         ApiError::new(
             ErrorCode::InvalidRequest,
-            "that server registers no clients dynamically, so it needs a client id somebody \
-             creates by hand — which Firetower cannot do for you yet"
+            "this server does not hand out clients, so it needs an OAuth application you \
+             create once. Open it and use Set it up — the form has the redirect URL to paste \
+             and a link to the right page."
                 .to_string(),
         )
     })?;
