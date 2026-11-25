@@ -463,3 +463,73 @@ async fn codex_takes_every_entry_as_a_streamable_http_server_with_our_token() {
     assert!(config.contains("model = \"gpt-5-codex\""));
     println!("codex: {} servers, all streamable http with a bearer token", all.len());
 }
+
+/// The same catalogue in the shape ACP takes, for Kimi and Cursor.
+///
+/// Those two are not asked anything here because neither has a subcommand to
+/// ask: `session/new` is the only way a server reaches them, and
+/// `acp_mcp_servers` is what builds it. So this asserts the translation over
+/// every entry rather than over one — a connector that came out of it
+/// mis-shaped would be dropped by the agent with nothing logged, on two of
+/// the four engines, which is exactly the failure this file exists for.
+///
+/// Needs no CLI; it is here rather than in `plugins.rs` because the input is
+/// the catalogue.
+#[tokio::test]
+#[ignore = "needs the firetower-marketplace checkout"]
+async fn the_two_acp_engines_get_every_entry_in_the_shape_their_protocol_takes() {
+    let all = entries();
+    let dir = tempfile::tempdir().unwrap();
+    let id = SessionId::from_stored("s_catalogue");
+    let bundles: Vec<SkillBundle> = all.iter().map(|e| e.bundle.clone()).collect();
+    ft_worker::skills::apply(dir.path(), &id, Agent::KimiCode, &bundles, false)
+        .await
+        .expect("the catalogue is written");
+
+    let servers = ft_worker::plugins::acp_mcp_servers(dir.path(), &id).await;
+    assert_eq!(
+        servers.len(),
+        all.len(),
+        "every entry has to come back, or a connector vanishes silently"
+    );
+    let by: BTreeMap<&str, &Value> = servers
+        .iter()
+        .map(|s| (s["name"].as_str().unwrap_or_default(), s))
+        .collect();
+
+    let mut wrong = Vec::new();
+    for e in &all {
+        let Some(got) = by.get(e.server.as_str()) else {
+            wrong.push(format!("{}: {} is not in session/new", e.slug, e.server));
+            continue;
+        };
+        if got["type"] != "http" || got["url"].as_str() != Some(e.url.as_str()) {
+            wrong.push(format!("{}: wrong type or address", e.slug));
+        }
+        // ACP takes headers as a list of pairs rather than as an object, so a
+        // pass-through here would be silently wrong rather than loudly.
+        if got["headers"][0]["name"] != "Authorization"
+            || got["headers"][0]["value"] != FAKE
+        {
+            wrong.push(format!("{}: the credential did not translate", e.slug));
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "{} of {} entries are wrong for ACP:\n  {}",
+        wrong.len(),
+        all.len(),
+        wrong.join("\n  ")
+    );
+
+    // And an agent that did not claim `http` is told what it cannot have
+    // rather than being sent it.
+    let (sent, refused) = ft_worker::plugins::deliverable_mcp(servers, false);
+    assert!(sent.is_empty(), "every entry here is an HTTP server");
+    assert_eq!(
+        refused.len(),
+        all.len(),
+        "and all of them come back to be named, not dropped"
+    );
+    println!("acp: {} servers translated, and all {} refusable", all.len(), refused.len());
+}
