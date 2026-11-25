@@ -11987,9 +11987,14 @@
         "required": [
           "name",
           "description",
-          "path"
+          "path",
+          "body"
         ],
         "properties": {
+          "body": {
+            "type": "string",
+            "description": "What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte."
+          },
           "description": {
             "type": "string"
           },

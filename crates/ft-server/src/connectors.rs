@@ -696,3 +696,31 @@ mod tests {
         );
     }
 }
+
+/// Which connector's key a credential for this one is stored under.
+///
+/// **The credential belongs to the server, not to the folder that mentioned
+/// it.** Two bundles can declare the same address — Anthropic's own catalogue
+/// has a `slack` plugin and a `business` plugin that both point at
+/// `mcp.slack.com` — and keying the vault on the bundle made that two
+/// authorizations, two registered OAuth clients and two tokens for one
+/// account. Adding the second one showed "Connect" on a server you had just
+/// connected.
+///
+/// So everything that reads or writes a connector credential resolves through
+/// here first: the lowest skill id among the connectors sharing an address.
+/// Deterministic, so it does not move when a row is added, and it needs no
+/// migration — the first bundle anybody connected is usually the lowest.
+pub async fn credential_key(pool: &sqlx::PgPool, skill_id: &str) -> String {
+    let same: Option<String> = sqlx::query_scalar(
+        "SELECT min(o.skill_id) \
+           FROM connectors c JOIN connectors o ON o.url = c.url \
+          WHERE c.skill_id = $1",
+    )
+    .bind(skill_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    same.unwrap_or_else(|| skill_id.to_string())
+}

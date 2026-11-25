@@ -7987,6 +7987,12 @@ pub struct Component {
     pub description: String,
     /// Where it sits in the bundle, so somebody can find it in a repository.
     pub path: String,
+    /// What it actually tells the agent, below the frontmatter.
+    ///
+    /// **Carried, not fetched separately.** A `SKILL.md` is a page of prose;
+    /// a second round trip per component to show the one thing somebody
+    /// opened the screen to read would be a worse trade than the kilobyte.
+    pub body: String,
 }
 
 /// Where an installed bundle came from.
@@ -8081,10 +8087,12 @@ impl Skills {
                 // A lone skill is its own single component, so the same screen
                 // describes both kinds without asking which it is looking at.
                 let (front, _, _) = read_frontmatter(&text_of(f));
+                let (_, body, _) = read_frontmatter(&text_of(f));
                 out.skills.push(Component {
                     name: said(&front, "name"),
                     description: said(&front, "description"),
                     path: p.to_string(),
+                    body,
                 });
             }
         }
@@ -8143,7 +8151,7 @@ fn component_at(path: &str, dir: &str, ends: &str, text: &str) -> Option<Compone
                 .unwrap_or_default()
                 .chars()
                 .take(200)
-                .collect()
+                .collect::<String>()
         } else {
             said
         }
@@ -8152,6 +8160,7 @@ fn component_at(path: &str, dir: &str, ends: &str, text: &str) -> Option<Compone
         name,
         description,
         path: path.to_string(),
+        body,
     })
 }
 

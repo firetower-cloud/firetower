@@ -119,6 +119,29 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
     .map(|rows| rows.into_iter().map(|r| r.get("name")).collect())
     .unwrap_or_default();
 
+    // Which bundle's id a credential for each connector is stored under. Two
+    // bundles naming one address share it, so the second one must not read as
+    // unconnected the moment the first is authorized.
+    let shared: Vec<(String, String)> = sqlx::query(
+        "SELECT c.skill_id, (SELECT min(o.skill_id) FROM connectors o WHERE o.url = c.url) AS key \
+           FROM connectors c",
+    )
+    .fetch_all(pool)
+    .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(|r| (r.get("skill_id"), r.get("key")))
+            .collect()
+    })
+    .unwrap_or_default();
+    let key_of = |id: &str| -> String {
+        shared
+            .iter()
+            .find(|(s, _)| s == id)
+            .map(|(_, k)| k.clone())
+            .unwrap_or_else(|| id.to_string())
+    };
+
     let _ = person_slug;
     let mut out = Vec::new();
     for b in bundles {
@@ -179,7 +202,10 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 // credential it leans on instead.
                 connected: match b.try_get::<Option<String>, _>("auth").ok().flatten().as_deref() {
                     Some("borrow-git") | Some("none") => None,
-                    _ => Some(held.iter().any(|n| n == &id)),
+                    _ => {
+                        let k = key_of(&id);
+                        Some(held.iter().any(|n| n == &k))
+                    }
                 },
                 server: Some(server),
             });

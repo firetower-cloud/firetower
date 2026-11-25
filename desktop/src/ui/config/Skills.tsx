@@ -56,7 +56,7 @@ export function Skills({ open: asked = null }: { open?: string | null }) {
   const all = useSkills();
   /* **Plugins have their own pane and must not appear in both.** One library
      call answers for every bundle — a plugin is a row in the same table — so
-     the split is here rather than in a second endpoint. See `config/Plugins`,
+     the split is here rather than in a second endpoint. See `config/Library`,
      where the other half is drawn with a shelf under it. */
   const feed = useMemo(
     () => ({ ...all, data: all.data.filter((s) => s.kind !== "plugin") }),

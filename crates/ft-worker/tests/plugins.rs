@@ -259,3 +259,50 @@ fn every_engine_has_an_answer_for_where_a_plugin_goes() {
         );
     }
 }
+
+/// A plugin that carries a skill somebody already has.
+///
+/// **It used to replace it, silently, on three engines out of four.** Claude
+/// Code is unaffected because a plugin folder and the skills directory are
+/// different roots; everything that decomposes writes into one directory
+/// keyed on the folder name, so `code-review` from a plugin landed on
+/// `code-review` from the person's own library and nothing said so.
+#[tokio::test]
+async fn a_plugin_does_not_quietly_replace_a_skill_of_the_same_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = SessionId::new();
+
+    let mine = SkillBundle {
+        name: "code-review".into(),
+        kind: ft_proto::BundleKind::Skill,
+        files: vec![file("SKILL.md", "---\nname: code-review\n---\nMINE\n")],
+    };
+    let theirs = SkillBundle {
+        name: "security-review".into(),
+        kind: ft_proto::BundleKind::Plugin,
+        files: vec![
+            file(".claude-plugin/plugin.json", r#"{"name":"security-review"}"#),
+            file(
+                "skills/code-review/SKILL.md",
+                "---\nname: code-review\n---\nTHEIRS\n",
+            ),
+        ],
+    };
+
+    ft_worker::skills::apply(dir.path(), &id, Agent::Codex, &[mine, theirs], false)
+        .await
+        .unwrap();
+
+    let root = ft_worker::skills::root(dir.path(), &id, Agent::Codex).unwrap();
+    let ours = tokio::fs::read_to_string(root.join("code-review/SKILL.md"))
+        .await
+        .expect("the skill somebody wrote is still there");
+    assert!(ours.contains("MINE"), "the plugin overwrote it: {ours}");
+
+    // And the plugin's own copy still arrives, under a name that says where
+    // it came from rather than not arriving at all.
+    let prefixed = tokio::fs::read_to_string(root.join("security-review-code-review/SKILL.md"))
+        .await
+        .expect("the plugin's copy is written beside it");
+    assert!(prefixed.contains("THEIRS"));
+}

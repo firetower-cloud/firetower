@@ -58,6 +58,7 @@ import { deleteSkill, getListSkillsQueryKey } from "~/api/generated/skills/skill
 import { probeUrl, addFromUrl } from "~/api/generated/connectors/connectors";
 import type { Item, Listed, Market } from "~/api/generated/model";
 import { ServerInside } from "~/ui/config/ServerInside";
+import { SkillInside } from "~/ui/config/SkillInside";
 
 /** How many Discover cards are drawn before the search has to do the work. */
 const SHELF = 40;
@@ -157,8 +158,12 @@ export function Library({ open: asked = null }: { open?: string | null }) {
   };
 
   const opened = open ? (lib.data ?? []).find((i) => i.id === open) : undefined;
-  if (opened && opened.kind === "server")
-    return <ServerInside of={opened} onBack={() => setOpen(null)} onGone={refresh} />;
+  if (opened)
+    return opened.kind === "server" ? (
+      <ServerInside of={opened} onBack={() => setOpen(null)} onGone={refresh} />
+    ) : (
+      <SkillInside of={opened} onBack={() => setOpen(null)} />
+    );
 
   if (adding)
     return (

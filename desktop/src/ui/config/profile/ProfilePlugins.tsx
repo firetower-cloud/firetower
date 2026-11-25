@@ -19,7 +19,25 @@ import { IconButton } from "~/components/ui";
 import { useSkills } from "~/data";
 import { useConnectorState } from "~/api/generated/connectors/connectors";
 import type { Skill } from "~/api/generated/model";
-import { contents } from "~/ui/config/Plugins";
+
+/**
+ * What is inside a bundle, as a phrase rather than a meta string.
+ *
+ * Kept for the screens that still think in bundles — a profile's list is one
+ * — while the library itself lists components and has no use for it.
+ */
+export function contents(p: { hasConnector?: boolean; nSkills?: number; nCommands?: number }): string {
+  const bits: string[] = [];
+  const say = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  if (p.hasConnector) bits.push("1 connector");
+  if (p.nSkills) bits.push(say(p.nSkills, "skill", "skills"));
+  if (p.nCommands) bits.push(say(p.nCommands, "command", "commands"));
+  if (!bits.length) return "nothing in it yet";
+  if (bits.length === 1) return bits[0];
+  return `${bits.slice(0, -1).join(", ")} and ${bits[bits.length - 1]}`;
+}
+
+
 
 /** A monogram, from the initial of each hyphenated part. */
 function mono(name: string): string {

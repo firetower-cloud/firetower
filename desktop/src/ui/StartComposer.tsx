@@ -67,6 +67,7 @@ import { base64, chipFor, Chips, Dropping, sift, type Chip } from "~/ui/attach";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { openExternal } from "~/open";
 import { isMac } from "~/platform";
+import { useListLibrary } from "~/api/generated/library/library";
 import { dropSeed, seedWaiting, type Seed } from "~/start";
 import type { Agent, AgentTeam, Control, ControlKind, Role } from "~/api/generated/model";
 
@@ -397,23 +398,39 @@ export function StartComposer({
      the set, so a plugin turned on in the library while this page is open
      still arrives — the alternative is a snapshot that silently goes stale
      between opening the page and sending. */
+  const library = useListLibrary({ query: { select: (r) => r ?? [] } });
   const [muted, setMuted] = useState<Set<string>>(new Set());
-  const selectedSkills = useMemo(
-    () => defaultSkillIds.filter((id) => !muted.has(id)),
-    [defaultSkillIds, muted],
-  );
-  /* A profile replaces the selection rather than narrowing it, and the server
-     is where that happens — so the picker is drawn only when there is no
-     profile to decide instead. */
-  const prefilled = !profileId && !teamId
-    ? allSkills.filter((s) => defaultSkillIds.includes(s.id))
-    : [];
-
   const team = teams.find((t) => t.id === teamId);
   const lead = team?.positions.find((p) => !p.parent);
   // A team is started as its lead, so everything downstream — the engine it
   // pins, the settings it carries — reads the lead's profile.
   const profile = profiles.find((p) => p.id === (lead?.profile ?? profileId));
+
+  /* **Shown whatever is picked, which it was not.** A profile replaces the
+     selection rather than narrowing it, and the chip used to be hidden on
+     exactly that case — so at the one moment the question matters, somebody
+     starting a profile was told nothing about what their agent would have.
+     The answer differs; the question does not. */
+  const prefilled = !profileId && !teamId
+    ? allSkills.filter((s) => defaultSkillIds.includes(s.id))
+    : allSkills.filter((s) => (profile?.skillScope ?? []).includes(s.id));
+  /* What a profile decided, named, so nobody wonders what chose it. */
+  const decidedBy = teamId ? team?.name : profileId ? profile?.name : null;
+  /* The only thing that can actually block a start: tools the agent would be
+     handed and cannot call, because nobody has authorized them. Read from the
+     library, which already answers "have *you* connected it" per person and
+     knows that a borrowed git credential needs no connecting at all. */
+  const unconnected = new Set(
+    (library.data ?? [])
+      .filter((i) => i.kind === "server" && i.connected === false)
+      .map((i) => i.skillId),
+  );
+  const needing = prefilled.filter((s) => unconnected.has(s.id));
+  /* **Counted from what is shown, not from the person's own defaults.** The
+     chip read `8 — Engineer` for a profile holding two, because the number
+     came from one source and the list beside it from another. One source. */
+  const selectedSkills = prefilled.map((s) => s.id).filter((id) => !muted.has(id));
+
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
   // A saved engine is used only while it still exists and is supported — one
   // that was uninstalled falls back rather than leaving a dead selection.
@@ -827,15 +844,30 @@ export function StartComposer({
                 <button
                   onClick={(e) => toggle("prefill", e.currentTarget)}
                   data-set
+                  data-warn={needing.length > 0 || undefined}
                   className="chip"
-                  title="What this session opens with. Untick for this conversation only."
+                  title={
+                    decidedBy
+                      ? `What ${decidedBy} always has. Untick for this conversation only.`
+                      : "What this session opens with. Untick for this conversation only."
+                  }
                 >
                   <span className="grid place-items-center text-mute">
                     <Puzzle className="h-[15px] w-[15px]" strokeWidth={1.8} />
                   </span>
                   <span className="lbl">
-                    {selectedSkills.length} on
+                    {selectedSkills.length}
+                    {decidedBy ? ` — ${decidedBy}` : ""}
                   </span>
+                  {/* **The only thing that can actually stop you.** A server
+                      nobody authorized is a tool the agent is handed and
+                      cannot call, which fails on the first turn rather than
+                      here. Ember, because it is the one loud thing. */}
+                  {needing.length > 0 && (
+                    <span className="need">
+                      {needing.length} to connect
+                    </span>
+                  )}
                 </button>
               )}
               <button
@@ -944,8 +976,9 @@ export function StartComposer({
         <Pop anchor={open.at} onClose={close} width={360}>
           <Menu>
             <p className="px-3 pb-2 pt-1 text-meta text-dim">
-              What this session opens with. Unticking is for this conversation only — your
-              always-on set is unchanged and the next one opens the same way.
+              {decidedBy
+                ? `What ${decidedBy} always has. Unticking is for this conversation only, and the profile is unchanged.`
+                : "What this session opens with. Unticking is for this conversation only — your own set is unchanged and the next one opens the same way."}
             </p>
             {prefilled.map((s) => {
               const on = !muted.has(s.id);

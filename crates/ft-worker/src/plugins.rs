@@ -128,23 +128,51 @@ async fn decompose(
     // and created it, so this adds to a directory that exists.
     if let Some(skills_root) = crate::skills::root(workspace, id, agent) {
         tokio::fs::create_dir_all(&skills_root).await.ok();
+        // **Written already, in this pass.** Everything a plugin unpacks into
+        // lands in the same directory a lone skill already occupies, keyed on
+        // the folder name alone — so a plugin carrying `code-review` replaced
+        // somebody's own `code-review`, on every engine that decomposes, with
+        // nothing logged. A name is only free the first time.
+        let mut taken: Vec<String> = Vec::new();
         for bundle in plugins {
             for (name, files) in skills_inside(bundle) {
                 if !crate::skills::usable(&name) {
                     continue;
                 }
+                let at = skills_root.join(&name);
+                let clash = taken.iter().any(|t| t == &name)
+                    || tokio::fs::try_exists(&at).await.unwrap_or(false);
+                // Prefixed only when it would otherwise destroy something, so
+                // the ordinary case keeps the name its author chose and the
+                // collision is the only thing that reads differently.
+                let folder = if clash {
+                    let prefixed = format!("{}-{}", bundle.name, name);
+                    tracing::info!(
+                        plugin = %bundle.name, skill = %name,
+                        "that name was already taken, so it is written as {prefixed}"
+                    );
+                    prefixed
+                } else {
+                    name.clone()
+                };
+                if !crate::skills::usable(&folder) {
+                    continue;
+                }
                 let inner = SkillBundle {
-                    name: name.clone(),
+                    name: folder.clone(),
                     files,
                     kind: ft_proto::BundleKind::Skill,
                 };
-                let at = skills_root.join(&name);
-                if let Err(e) = crate::skills::write_bundle(&at, &inner).await {
+                if let Err(e) =
+                    crate::skills::write_bundle(&skills_root.join(&folder), &inner).await
+                {
                     tracing::warn!(
-                        plugin = %bundle.name, skill = %name,
+                        plugin = %bundle.name, skill = %folder,
                         "could not take it out of the plugin: {e:#}"
                     );
+                    continue;
                 }
+                taken.push(folder);
             }
         }
     }

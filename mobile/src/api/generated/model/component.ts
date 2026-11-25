@@ -10,6 +10,14 @@
  * One component a plugin carries, as a row of its detail.
  */
 export interface Component {
+  /**
+     * What it actually tells the agent, below the frontmatter.
+     *
+     * **Carried, not fetched separately.** A `SKILL.md` is a page of prose;
+     * a second round trip per component to show the one thing somebody
+     * opened the screen to read would be a worse trade than the kilobyte.
+     */
+  body: string;
   description: string;
   name: string;
   /** Where it sits in the bundle, so somebody can find it in a repository. */

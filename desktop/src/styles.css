@@ -836,6 +836,26 @@
     overflow: hidden;
     text-overflow: ellipsis;
   }
+  /* A start that is going to be short of something. Ember and nowhere else:
+     a server nobody authorized is the one thing on this bar that stops the
+     agent doing what it was asked, and it fails on the first turn rather
+     than here if it is not said now. */
+  .chip[data-warn] {
+    border-color: var(--color-ember);
+  }
+  .chip .need {
+    color: var(--color-ember);
+    font-weight: var(--weight-mid);
+  }
+  .chip .need::before {
+    content: "";
+    display: inline-block;
+    width: 1px;
+    height: 11px;
+    margin-right: 7px;
+    vertical-align: -1px;
+    background: var(--color-line);
+  }
   .chip:hover {
     background: var(--color-raise);
     color: var(--color-text);
@@ -7453,6 +7473,12 @@ html:not([data-platform="macos"]) {
     grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
     gap: 8px 16px;
   }
+  /* Something already taken sits quieter than something on offer rather than
+     being hidden: a Discover search returning nothing for a thing you own
+     reads as "it does not exist". */
+  .pcard[data-had] {
+    opacity: 0.66;
+  }
   .pcard {
     display: flex;
     flex-direction: column;
@@ -7648,7 +7674,4 @@ html:not([data-platform="macos"]) {
     font-weight: var(--weight-mid);
     box-shadow: var(--shadow-raise);
   }
-  /* Something already taken sits quieter than something on offer, rather
-     than being hidden: a Discover search that returns nothing for a thing
-     you own reads as "it does not exist". */
-  .pcard[data-had] { opacity: .66; }
+}

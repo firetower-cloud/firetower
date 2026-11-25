@@ -508,7 +508,10 @@ pub(crate) async fn connector_token(
     skill_id: &str,
     owner: &str,
 ) -> Option<zeroize::Zeroizing<String>> {
-    let key = || crate::vault::Key::of(crate::vault::CONNECTOR, skill_id, owner);
+    // Resolved to the server's own key rather than this bundle's, so two
+    // bundles naming one address share the authorization they both need.
+    let shared = crate::connectors::credential_key(state.skills.pool(), skill_id).await;
+    let key = || crate::vault::Key::of(crate::vault::CONNECTOR, &shared, owner);
     let held = crate::oauth::Grant::parse(
         &state
             .vault

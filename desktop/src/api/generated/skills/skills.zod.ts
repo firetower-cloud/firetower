@@ -315,6 +315,7 @@ export const SkillInsideParams = zod.object({
 
 export const SkillInsideResponse = zod.object({
   "agents": zod.array(zod.object({
+  "body": zod.string().describe('What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte.'),
   "description": zod.string(),
   "name": zod.string(),
   "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
@@ -327,6 +328,7 @@ export const SkillInsideResponse = zod.object({
   "url": zod.string()
 }).describe('Where an installed bundle came from.')]).optional(),
   "commands": zod.array(zod.object({
+  "body": zod.string().describe('What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte.'),
   "description": zod.string(),
   "name": zod.string(),
   "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
@@ -341,6 +343,7 @@ export const SkillInsideResponse = zod.object({
   "manifest": zod.unknown().optional().describe('The manifest, as the author wrote it. Absent for a lone skill.'),
   "server": zod.string().nullish().describe('The MCP server it declares, if any, with the address it will call.'),
   "skills": zod.array(zod.object({
+  "body": zod.string().describe('What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte.'),
   "description": zod.string(),
   "name": zod.string(),
   "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')

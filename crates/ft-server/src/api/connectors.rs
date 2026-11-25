@@ -116,7 +116,11 @@ pub(super) async fn connector_state(
         "oauth" => (
             state
                 .vault
-                .holds(Key::of(crate::vault::CONNECTOR, &id, me.id.as_str()))
+                .holds(Key::of(
+                    crate::vault::CONNECTOR,
+                    &connectors::credential_key(state.skills.pool(), &id).await,
+                    me.id.as_str(),
+                ))
                 .await
                 .unwrap_or(false),
             None,
@@ -257,7 +261,11 @@ async fn finish(state: &AppState, back: Returned) -> Result<String, String> {
     state
         .vault
         .put(
-            Key::of(crate::vault::CONNECTOR, &skill_id, &owner),
+            Key::of(
+                crate::vault::CONNECTOR,
+                &connectors::credential_key(state.skills.pool(), &skill_id).await,
+                &owner,
+            ),
             &grant.to_stored(),
             "connected a plugin's connector",
         )
@@ -284,7 +292,11 @@ pub(super) async fn disconnect(
     state
         .vault
         .forget(
-            Key::of(crate::vault::CONNECTOR, &id, me.id.as_str()),
+            Key::of(
+                crate::vault::CONNECTOR,
+                &connectors::credential_key(state.skills.pool(), &id).await,
+                me.id.as_str(),
+            ),
             "disconnected a plugin's connector",
         )
         .await
