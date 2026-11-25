@@ -2,15 +2,27 @@
 //!
 //! `#[ignore]` because it needs GitHub. Run with
 //! `cargo test -p ft-server --test marketplace_fetch -- --ignored --nocapture`.
+//!
+//! **Set `MARKETPLACE_TOKEN` before you do.** Anonymous GitHub is sixty
+//! requests an hour counted per address, which these tests exhaust in a
+//! working afternoon — and the failure that follows says `403` in a place
+//! that looks like "that branch does not exist".
 
 use ft_server::marketplace::{self, Source};
 
-const OURS: &str = "https://github.com/firetower-cloud/firetower-plugins";
+const OURS: &str = "https://github.com/firetower-cloud/firetower-marketplace";
+
+fn token() -> Option<String> {
+    std::env::var("MARKETPLACE_TOKEN")
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
 
 #[tokio::test]
 #[ignore]
 async fn our_own_repository_reads_as_a_catalogue() {
-    let got = marketplace::fetch(OURS, "main", None)
+    let got = marketplace::fetch(OURS, "main", token().as_deref())
         .await
         .expect("fetching our marketplace");
 
@@ -22,31 +34,48 @@ async fn our_own_repository_reads_as_a_catalogue() {
     let names: Vec<&str> = got.entries.iter().map(|e| e.slug.as_str()).collect();
     assert!(names.contains(&"linear") && names.contains(&"figma"));
 
-    // Every one of ours carries its own mark, and the shelf draws from this
-    // rather than from anybody's origin.
     for e in &got.entries {
-        let (bytes, kind) = e.logo.as_ref().unwrap_or_else(|| panic!("{} has no logo", e.slug));
+        // Every one of ours carries its own mark, and the shelf draws from
+        // this rather than from anybody's origin.
+        let (bytes, kind) = e
+            .logo
+            .as_ref()
+            .unwrap_or_else(|| panic!("{} has no logo", e.slug));
         assert!(bytes.len() > 500, "{} has a stub for a logo", e.slug);
         assert!(kind.starts_with("image/"));
-        assert!(e.has_connector, "{} declares no connector", e.slug);
+        assert!(e.has_connector, "{} declares no server", e.slug);
         assert!(!e.description.is_empty(), "{} says nothing", e.slug);
     }
+}
 
-    // Counted from paths, not from anything the listing claims.
-    let github = got.entries.iter().find(|e| e.slug == "github").unwrap();
-    assert_eq!(github.n_skills, 1, "github ships open-a-pr");
-    let linear = got.entries.iter().find(|e| e.slug == "linear").unwrap();
-    assert_eq!(linear.n_skills, 0, "linear ships the connector bare");
+/// **Six servers and no skills**, which is the honest state of this
+/// repository and worth a test rather than a README line alone.
+///
+/// Three skills were written for it and all three deleted: each said what a
+/// capable model already does unprompted, which is the one thing a skill must
+/// not be. If this assertion starts failing, somebody has added one — and the
+/// question to ask is whether it encodes something a vendor's tool names do
+/// not already say.
+#[tokio::test]
+#[ignore]
+async fn it_publishes_servers_and_not_instructions() {
+    let got = marketplace::fetch(OURS, "main", token().as_deref())
+        .await
+        .unwrap();
+    assert_eq!(got.entries.iter().filter(|e| e.has_connector).count(), 6);
+    assert_eq!(got.entries.iter().map(|e| e.n_skills).sum::<i32>(), 0);
 }
 
 #[tokio::test]
 #[ignore]
 async fn one_entry_comes_back_as_files_with_its_connector() {
-    let got = marketplace::fetch(OURS, "main", None).await.unwrap();
+    let got = marketplace::fetch(OURS, "main", token().as_deref())
+        .await
+        .unwrap();
     let linear = got.entries.iter().find(|e| e.slug == "linear").unwrap();
-    assert!(matches!(&linear.source, Source::Inside { path } if path == "./linear"));
+    assert!(matches!(&linear.source, Source::Inside { path } if path == "./mcp/linear"));
 
-    let files = marketplace::files_of(&linear.source, OURS, &got.commit, None)
+    let files = marketplace::files_of(&linear.source, OURS, &got.commit, token().as_deref())
         .await
         .expect("pulling the subtree");
 
@@ -62,16 +91,25 @@ async fn one_entry_comes_back_as_files_with_its_connector() {
     assert_eq!(borrow, None);
 }
 
-/// The one that needs no flow at all, and says so in its own file.
+/// **A manifest does not get to choose how it is authorized.**
+///
+/// `mcp/github` used to carry a `firetower` key asking to reuse the token
+/// Firetower holds for git. Somebody who connected GitHub so Firetower could
+/// do *git* had not agreed to an agent calling GitHub's whole tool surface,
+/// and a repository they did not write is the last place that decision
+/// belongs. Everything authorizes for itself, whatever the file says.
 #[tokio::test]
 #[ignore]
-async fn github_declares_that_it_borrows_a_credential_we_hold() {
-    let got = marketplace::fetch(OURS, "main", None).await.unwrap();
+async fn a_manifest_cannot_ask_to_borrow_a_credential() {
+    let got = marketplace::fetch(OURS, "main", token().as_deref())
+        .await
+        .unwrap();
     let e = got.entries.iter().find(|x| x.slug == "github").unwrap();
-    let files = marketplace::files_of(&e.source, OURS, &got.commit, None).await.unwrap();
+    let files = marketplace::files_of(&e.source, OURS, &got.commit, token().as_deref())
+        .await
+        .unwrap();
     let (server, _, auth, borrow) = marketplace::connector_of(&files).unwrap();
-    assert_eq!((server.as_str(), auth.as_str(), borrow.as_deref()),
-               ("github", "borrow-git", Some("github")));
+    assert_eq!((server.as_str(), auth.as_str(), borrow), ("github".into(), "oauth", None));
 }
 
 /// The catalogue nobody else can read is the one that proves nothing.
@@ -81,7 +119,7 @@ async fn anthropics_marketplace_reads_too() {
     let got = marketplace::fetch(
         "https://github.com/anthropics/claude-plugins-official",
         "main",
-        None,
+        token().as_deref(),
     )
     .await
     .expect("fetching theirs");

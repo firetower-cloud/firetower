@@ -119,6 +119,18 @@ async fn resolve_commit(
         req = req.bearer_auth(t);
     }
     let r = req.send().await.with_context(|| format!("asking {at}"))?;
+    if r.status() == reqwest::StatusCode::FORBIDDEN
+        || r.status() == reqwest::StatusCode::TOO_MANY_REQUESTS
+    {
+        // **A 403 here is almost never permission.** It is GitHub's anonymous
+        // limit — sixty an hour, counted per address and so shared by everyone
+        // behind one office connection. Saying "no ref `main`" sent somebody
+        // to check a branch that was fine.
+        bail!(
+            "GitHub is rate-limiting this address. Connect a git account, or set \
+             MARKETPLACE_TOKEN on the control plane, or try again in a few minutes"
+        );
+    }
     if !r.status().is_success() {
         bail!(
             "{owner}/{repo} has no ref `{git_ref}` that Firetower can read ({})",
@@ -424,7 +436,7 @@ use sqlx::{PgPool, Row};
 /// **Added by default, and still removable.** A source nobody can take off is
 /// a source nobody consented to, and the moment ours is privileged is the
 /// moment it stops exercising the same path as everybody else's.
-pub const OURS: &str = "https://github.com/firetower-cloud/firetower-plugins";
+pub const OURS: &str = "https://github.com/firetower-cloud/firetower-marketplace";
 pub const OURS_REF: &str = "main";
 
 /// A source, as a screen lists it.

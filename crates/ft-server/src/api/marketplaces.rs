@@ -80,7 +80,7 @@ pub(super) async fn add_marketplace(
     .await
     .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
 
-    read_now(&state, &id, &body.url, &git_ref).await?;
+    read_now(&state, &id, &body.url, &git_ref, me.id.as_str()).await?;
     mine(&state, me.org_id.as_str(), &id).await.map(|m| (StatusCode::CREATED, Json(m)))
 }
 
@@ -100,7 +100,7 @@ pub(super) async fn refresh_marketplace(
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?
         .ok_or_else(|| ApiError::not_found("marketplace"))?;
-    read_now(&state, &id, &url, &git_ref).await?;
+    read_now(&state, &id, &url, &git_ref, me.id.as_str()).await?;
     mine(&state, me.org_id.as_str(), &id).await.map(Json)
 }
 
@@ -152,7 +152,7 @@ pub(super) async fn list_entries(
         if m.fetched_at.is_some() {
             continue;
         }
-        if let Err(e) = read_now(&state, &m.id, &m.url, &m.git_ref).await {
+        if let Err(e) = read_now(&state, &m.id, &m.url, &m.git_ref, me.id.as_str()).await {
             // Recorded on the row, where the screen already shows it. A
             // source that cannot be reached must not take the others' rows
             // down with it.
@@ -189,7 +189,8 @@ pub(super) async fn install_entry(
             .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?
             .ok_or_else(|| ApiError::not_found("plugin"))?;
 
-    let files = marketplace::files_of(&source, &market_url, &commit, None)
+    let token = reading_as(&state, me.id.as_str(), &market_url).await;
+    let files = marketplace::files_of(&source, &market_url, &commit, token.as_deref())
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
 
@@ -284,10 +285,54 @@ pub(super) async fn install_entry(
     Ok((StatusCode::CREATED, Json(skill)))
 }
 
+/// This person's GitHub token, when they have one, for reading a repository.
+///
+/// **Unauthenticated is sixty requests an hour, shared by everybody behind
+/// one address.** Measured the hard way: a laptop running three sessions
+/// exhausted it and every refresh started answering `403 Forbidden`, which
+/// reads as "that repository is gone" rather than "come back in half an
+/// hour". A token raises it to five thousand, and it is the same credential
+/// that makes a private marketplace possible at all.
+///
+/// `None` is not an error — a public repository is readable without one, and
+/// somebody who has not connected a git host can still browse ours.
+async fn reading_as(state: &AppState, owner: &str, url: &str) -> Option<String> {
+    let host = reqwest::Url::parse(url).ok()?.host_str()?.to_string();
+    let conns = state.connections.all().await;
+    if let Some(conn) = conns.iter().find(|c| c.git_host == host) {
+        if let Some(t) = super::git_token(state, conn, owner, "reading a marketplace").await {
+            return Some(t.to_string());
+        }
+    }
+
+    // **The installation's own, when nobody's will do.** Somebody who has not
+    // connected a git account still has to be able to browse a catalogue, and
+    // on a shared office address the anonymous sixty is spent by lunchtime.
+    // `MARKETPLACE_TOKEN` is the escape hatch a self-hosted administrator
+    // reaches for, and it is deliberately narrow: it is read for marketplace
+    // fetches and nothing else.
+    //
+    // It is server-wide, so a token that can see private repositories lets
+    // every organisation here read them. That is a thing an administrator
+    // chooses by setting it; a read-only token with no private scope raises
+    // the limit and grants nothing.
+    std::env::var("MARKETPLACE_TOKEN")
+        .ok()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+}
+
 /// Read a repository now, and record the failure rather than throwing it away.
-async fn read_now(state: &AppState, id: &str, url: &str, git_ref: &str) -> Result<(), ApiError> {
+async fn read_now(
+    state: &AppState,
+    id: &str,
+    url: &str,
+    git_ref: &str,
+    owner: &str,
+) -> Result<(), ApiError> {
     let pool = state.skills.pool();
-    match marketplace::fetch(url, git_ref, None).await {
+    let token = reading_as(state, owner, url).await;
+    match marketplace::fetch(url, git_ref, token.as_deref()).await {
         Ok(got) => marketplace::save(pool, id, &got)
             .await
             .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}"))),
