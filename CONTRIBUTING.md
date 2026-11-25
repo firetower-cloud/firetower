@@ -228,18 +228,24 @@ just db-vacuum    # give the disk back
 
 Left alone for three days of heavy use, this reached 1,117 schemas and 514 MB.
 
-## The interface is a static export
+## The interface is two bundles inside the binary
 
-`next build` writes `web/out`, and the control plane compiles it into the
-binary — that is what makes a deployment one image and one origin. Two things
-follow:
+`vite build` writes `desktop/dist` and `next build` writes `web/out`, and the
+control plane compiles both into the binary — that is what makes a deployment
+one image and one origin. Three things follow:
 
-* `web/out` is committed empty. The crate names it at compile time, so a clone
-  that has never run `pnpm build` still has to compile.
-* A route with a runtime parameter cannot be pre-rendered per value. There is
-  one shell, `sessions/_.html`, served for every session, and the page reads
-  the id from the address bar rather than the router. See
-  `crates/ft-server/src/web.rs`.
+* Neither directory is committed, and neither is a placeholder in it: a build
+  empties the directory before writing it, so anything committed there is
+  deleted the first time somebody builds. `crates/ft-server/build.rs` creates
+  them on the way into every build instead, so a clone that has never run
+  `pnpm build` still compiles.
+* `just build` builds both, in that order, and a binary carrying only one of
+  them serves neither — it answers every path with a sentence naming the half
+  that is missing. That is deliberate; see `crates/ft-server/src/web.rs`.
+* `desktop/dist` takes `/` and its own filenames; `web/out` keeps every other
+  path it exports. The application is a hash router, so its routes live after a
+  `#` and never reach the server — which is why there is no single-page
+  fallback, and why adding one would swallow the API, previews and artifacts.
 
 ## Images, and the worker
 

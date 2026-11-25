@@ -6,12 +6,13 @@ node_modules
 # cache of every package ever downloaded, so it is large, and it is not ours.
 /.pnpm-store
 .next
-# The static export. Built by `just build` and compiled into the binary, so
-# nothing in it belongs in version control. The directory has to exist for
-# ft-server to compile, and its build script creates it — a committed
-# placeholder does not survive, because `next build` deletes this directory
-# before writing it.
+# The two interface bundles. Both are built by `just build` and compiled into
+# the binary, so nothing in either belongs in version control. Each directory
+# has to exist for ft-server to compile, and its build script creates them — a
+# committed placeholder does not survive, because `next build` deletes `out/`
+# before writing it and Vite empties `dist/` the same way.
 /web/out
+/desktop/dist
 .env
 # ...but the template is the documentation of what can go in one.
 !.env.example
