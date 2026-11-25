@@ -6,8 +6,9 @@
  * hide. A rule written at the point a control is drawn is a rule nobody can
  * test and nobody can find again; `filing.ts` learned that from four screens
  * that each worked out `mayMove` for themselves and each got a different
- * answer. Teams and the deployment panes come after People and are expected to
- * read these rather than write second copies.
+ * answer. Teams reads these rather than keeping its own — `teamActionsFor` and
+ * `grantsHeldBy` are at the foot of this file — and the deployment panes are
+ * expected to do the same.
  *
  * ## The two ways to list people are not interchangeable
  *
@@ -335,4 +336,110 @@ export function tagsFor(person: {
   if (person.mustChangePassword) tags.push("Has not signed in");
   if (person.disabled) tags.push("Switched off");
   return tags;
+}
+
+/* ── Teams ────────────────────────────────────────────────────────────────
+   The straightforward case, and genuinely a different one from People.
+
+   **The team list is readable by anybody**, and so is one team's membership —
+   the server says so itself, because granting to a team means choosing one
+   from a list and a member who could not read it could not share with one. So
+   there is no two-endpoint split here and no read to pick: same data, same
+   rows, for everybody, and *only the write controls gate*.
+
+   What gates them is `mayAdminister`, the same function People's row uses, so
+   if the rule ever widens there is one place to widen it. Every one of the
+   five mutations is `org_admin` on the server. */
+
+/** What one team's row offers, and whether its expander writes. */
+export type TeamActions = {
+  /**
+   * `read` draws the membership as it always has; `write` adds a way in and a
+   * way out per row. Not a separate "may edit members" flag, because the
+   * expander is one object and a half-writable one would be the greyed control
+   * this client does not draw.
+   */
+  members: "read" | "write";
+  /** In the order the row's own menu draws them. */
+  menu: ("rename" | "delete")[];
+};
+
+/**
+ * What a team's row offers, to whom.
+ *
+ * **The team that is everybody offers nothing, to anybody.** All three of the
+ * things a row can do to it are refused by the server outright and by name:
+ * *"the team that is everybody cannot be renamed"*, *"the team that is
+ * everybody cannot be removed"*, and *"everybody is already in that team"*.
+ * Those are not a permission a reader lacks — they are facts about what the
+ * team *is*, so nothing is drawn rather than drawn and refused.
+ *
+ * It already had no expander, for its own reason, written down in `Teams.tsx`:
+ * the membership that has to be true is "however many people exist right now",
+ * and a team you could open and count would imply somebody could be left out of
+ * it. This adds nothing to that and takes nothing from it.
+ *
+ * A member gets `read` and an empty menu — not a greyed anything. They see
+ * every team and everyone in it, because that is what the server tells them.
+ */
+export function teamActionsFor({
+  me,
+  team,
+}: {
+  me: Signed;
+  team: { everyone: boolean };
+}): TeamActions {
+  if (!mayAdminister(me) || team.everyone) return { members: "read", menu: [] };
+  return { members: "write", menu: ["rename", "delete"] };
+}
+
+/**
+ * One directory a team can reach, as the confirmation names it.
+ *
+ * **No level.** A grant carries one, and the level is deliberately not part of
+ * the answer: the decision in front of somebody is *remove this team or not*,
+ * and which directories go is what changes it. Saying *Editor on d/platform*
+ * would also need the level vocabulary, which `Directories.tsx` owns and this
+ * ticket does not touch — a second copy of *writer means Editor* is how two
+ * screens come to disagree about a word.
+ */
+export type HeldGrant = { name: string; slug: string };
+
+/**
+ * Which directories a team holds a grant on — **the consequence of deleting
+ * it, worked out before it is agreed to**.
+ *
+ * `delete_team` revokes every grant the team held, by cascade, and that is the
+ * whole reason a team is worth having: taking a group's access away is one
+ * delete rather than a hunt through every directory somebody thought to share.
+ * It is also what makes the delete worth stating first — access handed to
+ * several people disappears at once, and nothing about the row says how much.
+ *
+ * **There is no team-shaped read for this.** The server answers grants per
+ * directory, so the caller asks for the directory list and the grants on each
+ * — once, when somebody asks to delete, not on render. This is the part that
+ * turns those answers into the sentence, which is why it is a rule here rather
+ * than a `filter` beside a dialog.
+ *
+ * **It is not the whole of what goes, and the copy must not claim it is.** A
+ * team can also be named in a per-resource exception from the sharing sheet,
+ * and `delete_team` forgets those too; they are keyed by path and cannot be
+ * enumerated from the team. So the directories are named and the rest is
+ * described rather than counted.
+ */
+export function grantsHeldBy(
+  teamId: string,
+  over: {
+    directory: { name: string; slug: string };
+    grants: { subjectKind: string; subjectId: string }[];
+  }[],
+): HeldGrant[] {
+  return over
+    .filter(({ grants }) => grants.some((g) => g.subjectKind === "team" && g.subjectId === teamId))
+    .map(({ directory }) => ({ name: directory.name, slug: directory.slug }));
+}
+
+/** `4 people`, `1 person`, and the one that is neither. */
+export function howMany(n: number): string {
+  return `${n} ${n === 1 ? "person" : "people"}`;
 }

@@ -20,6 +20,8 @@ import {
   actionsFor,
   administrators,
   changeFor,
+  grantsHeldBy,
+  howMany,
   locksTheRoom,
   mayAdminister,
   mayInvite,
@@ -27,6 +29,7 @@ import {
   readsFor,
   saidRole,
   tagsFor,
+  teamActionsFor,
   type Account,
 } from "./organisation";
 
@@ -349,5 +352,116 @@ describe("what a role is called", () => {
   it("does not invent a label for a role it does not know", () => {
     expect(saidRole("auditor")).toBe("—");
     expect(saidRole(null)).toBe("—");
+  });
+});
+
+/* ── Teams ─────────────────────────────────────────────────────────────── */
+
+/**
+ * **Simpler than People, and genuinely a different shape.**
+ *
+ * The team list and one team's membership are readable by anybody, so there is
+ * no read to pick by role and no two-endpoint split: same data, same rows, for
+ * everybody. Only the write controls gate, and they gate at the control.
+ */
+describe("what a team's row offers", () => {
+  const team = { everyone: false };
+  const everybody = { everyone: true };
+
+  it("gives an administrator the menu and a membership that writes", () => {
+    expect(teamActionsFor({ me: admin, team })).toEqual({
+      members: "write",
+      menu: ["rename", "delete"],
+    });
+  });
+
+  /**
+   * **Not a thinner version of the administrator's row — the same row.** A
+   * member sees every team and everybody in each, because that is what the
+   * server tells them; what they do not get is a control, and a control
+   * somebody does not have is not drawn rather than greyed.
+   */
+  it("gives a member the same rows and no controls at all", () => {
+    expect(teamActionsFor({ me: member, team })).toEqual({ members: "read", menu: [] });
+  });
+
+  it("offers nothing while the role is still in flight", () => {
+    expect(teamActionsFor({ me: undefined, team })).toEqual({ members: "read", menu: [] });
+  });
+
+  /**
+   * **The team that is everybody offers nothing, to anybody.** All three are
+   * refused on the server by name — *"the team that is everybody cannot be
+   * renamed"*, *"…cannot be removed"*, *"everybody is already in that team"* —
+   * so they are facts about what the team is rather than a permission a reader
+   * lacks, and nothing is drawn rather than drawn and refused.
+   */
+  it("offers nothing on the team that is everybody, even to an administrator", () => {
+    expect(teamActionsFor({ me: admin, team: everybody })).toEqual({
+      members: "read",
+      menu: [],
+    });
+  });
+});
+
+/**
+ * What deleting a team would withdraw.
+ *
+ * `delete_team` revokes every grant the team held, by cascade — the whole
+ * reason a team is worth having, and the reason removing one is worth stating
+ * first. There is no team-shaped read for it, so the caller brings the
+ * directory list and the grants on each and this turns them into the answer.
+ */
+describe("whether removing a team would withdraw access", () => {
+  const platform = { name: "Platform", slug: "platform" };
+  const shared = { name: "Shared", slug: "shared" };
+  const byTeam = (id: string) => ({ subjectKind: "team", subjectId: id });
+  const byPerson = (id: string) => ({ subjectKind: "person", subjectId: id });
+
+  it("is nothing when the team holds no grants", () => {
+    expect(
+      grantsHeldBy("t_1", [{ directory: platform, grants: [byPerson("u_1"), byTeam("t_2")] }]),
+    ).toEqual([]);
+  });
+
+  it("is nothing when there are no directories at all", () => {
+    expect(grantsHeldBy("t_1", [])).toEqual([]);
+  });
+
+  it("names every directory the team can reach", () => {
+    expect(
+      grantsHeldBy("t_1", [
+        { directory: platform, grants: [byTeam("t_1")] },
+        { directory: shared, grants: [byPerson("u_1"), byTeam("t_1")] },
+      ]),
+    ).toEqual([
+      { name: "Platform", slug: "platform" },
+      { name: "Shared", slug: "shared" },
+    ]);
+  });
+
+  /**
+   * **A person and a team can share an id space, so the kind is checked too.**
+   * Matching on `subjectId` alone would name a directory because somebody
+   * whose id happened to collide was granted on it — which would be a sentence
+   * about the wrong thing, in the one dialog that exists to be believed.
+   */
+  it("does not mistake a person's grant for the team's", () => {
+    expect(grantsHeldBy("t_1", [{ directory: platform, grants: [byPerson("t_1")] }])).toEqual([]);
+  });
+
+  /** One row per directory, however the grants are shaped. */
+  it("names a directory once", () => {
+    expect(
+      grantsHeldBy("t_1", [{ directory: platform, grants: [byTeam("t_1"), byTeam("t_1")] }]),
+    ).toEqual([{ name: "Platform", slug: "platform" }]);
+  });
+});
+
+describe("saying how many people", () => {
+  it("counts in the words somebody reads", () => {
+    expect(howMany(0)).toBe("0 people");
+    expect(howMany(1)).toBe("1 person");
+    expect(howMany(4)).toBe("4 people");
   });
 });

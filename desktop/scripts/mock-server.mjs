@@ -617,6 +617,9 @@ const server = createServer(async (req, res) => {
     checkouts = START();
     PEOPLE = PEOPLE_START();
     COLLEAGUES = COLLEAGUES_START();
+    TEAMS = TEAMS_START();
+    TEAM_MEMBERS = TEAM_MEMBERS_START();
+    GRANTS = GRANTS_START();
     pinned = null;
     repoDefaults = {};
     return json(res, { detail: `back to three, playing ${scene}` });
@@ -660,6 +663,93 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && (path === "/api/v1/setup/organization" || path === "/api/v1/setup/complete")) {
     if (path.endsWith("organization")) scene = "setup-done";
     return json(res, { detail: "done" });
+  }
+
+  /* ── Teams, written to ────────────────────────────────────────────────
+     Enough of `api/access.rs` to drive the demo without a Postgres, **with
+     its refusals**, because they are most of what the pane is for: the team
+     that is everybody cannot be renamed, removed or added to, and two teams
+     cannot share a name. A mock that says yes to all four would photograph a
+     screen nobody can check. Every one of the five is `org_admin` there, so
+     a member is refused before the route is reached. */
+  const team_write = /^\/api\/v1\/teams\/([^/]+)(\/members\/([^/]+))?$/.exec(path);
+  if (team_write && req.method !== "GET") {
+    if (scene === "member") {
+      return json(res, { code: "Forbidden", message: "only an administrator can do that" }, 403);
+    }
+    const team = TEAMS.find((t) => t.id === team_write[1]);
+    if (!team) return json(res, { code: "NotFound", message: "no team here" }, 404);
+    const person = team_write[3];
+
+    if (req.method === "PATCH") {
+      const body = await new Promise((done) => {
+        let raw = "";
+        req.on("data", (c) => (raw += c));
+        req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+      });
+      const wanted = (body.name ?? "").trim();
+      if (team.everyone) {
+        return json(res, { code: "InvalidRequest", message: "no team here to rename — the team that is everybody cannot be renamed" }, 400);
+      }
+      if (TEAMS.some((t) => t.id !== team.id && t.name === wanted)) {
+        return json(res, { code: "InvalidRequest", message: `there is already a team called ${wanted}` }, 400);
+      }
+      team.name = wanted;
+      res.writeHead(204, { "access-control-allow-origin": "*" });
+      return res.end();
+    }
+
+    if (req.method === "DELETE" && !person) {
+      if (team.everyone) {
+        return json(res, { code: "InvalidRequest", message: "no team here to remove — the team that is everybody cannot be removed" }, 400);
+      }
+      TEAMS.splice(TEAMS.indexOf(team), 1);
+      delete TEAM_MEMBERS[team.id];
+      /* The grants go by cascade, which is the whole reason a team is worth
+         having — and the whole reason the confirmation says so first. */
+      for (const id of Object.keys(GRANTS)) {
+        GRANTS[id] = GRANTS[id].filter((g) => !(g.subjectKind === "team" && g.subjectId === team.id));
+      }
+      res.writeHead(204, { "access-control-allow-origin": "*" });
+      return res.end();
+    }
+
+    if (person && (req.method === "PUT" || req.method === "DELETE")) {
+      if (team.everyone && req.method === "PUT") {
+        return json(res, { code: "InvalidRequest", message: "everybody is already in that team" }, 400);
+      }
+      const held = (TEAM_MEMBERS[team.id] ??= []);
+      if (req.method === "PUT") {
+        if (!held.some((m) => m.id === person)) {
+          const who = COLLEAGUES.find((c) => c.id === person);
+          if (who) held.push(who);
+        }
+      } else {
+        TEAM_MEMBERS[team.id] = held.filter((m) => m.id !== person);
+      }
+      team.members = TEAM_MEMBERS[team.id].length;
+      res.writeHead(204, { "access-control-allow-origin": "*" });
+      return res.end();
+    }
+  }
+
+  if (req.method === "POST" && path === "/api/v1/teams") {
+    if (scene === "member") {
+      return json(res, { code: "Forbidden", message: "only an administrator can do that" }, 403);
+    }
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    const wanted = (body.name ?? "").trim();
+    if (TEAMS.some((t) => t.name === wanted)) {
+      return json(res, { code: "InvalidRequest", message: `there is already a team called ${wanted}` }, 400);
+    }
+    const made = { id: `t_${Date.now() % 100000}`, name: wanted, everyone: false, members: 0 };
+    TEAMS.push(made);
+    TEAM_MEMBERS[made.id] = [];
+    return json(res, made);
   }
 
   const members_of = /^\/api\/v1\/teams\/([^/]+)\/members$/.exec(path);
@@ -1565,19 +1655,26 @@ const COLLEAGUES_START = () =>
 let PEOPLE = PEOPLE_START();
 let COLLEAGUES = COLLEAGUES_START();
 
-const TEAMS = [
+/* **`t_1` holds a grant and `t_3` holds none**, which is the pair the delete
+   confirmation has two different sentences for — see `GRANTS` below. A fixture
+   where every team was the same shape would photograph one of the two. */
+const TEAMS_START = () => [
   { id: "t_0", name: "Everyone", everyone: true, members: 6 },
   { id: "t_1", name: "Platform", everyone: false, members: 4 },
   { id: "t_2", name: "Design", everyone: false, members: 2 },
   { id: "t_3", name: "Support", everyone: false, members: 3 },
 ];
+let TEAMS = TEAMS_START();
 
-const TEAM_MEMBERS = {
-  t_0: COLLEAGUES,
+/** Rebuilt by `POST /__reset`, like the checkouts and the people — Teams is
+ *  written to now, so a run that makes one would otherwise leave it behind. */
+const TEAM_MEMBERS_START = () => ({
+  t_0: [...COLLEAGUES],
   t_1: COLLEAGUES.slice(0, 4),
   t_2: COLLEAGUES.slice(2, 4),
   t_3: COLLEAGUES.slice(3),
-};
+});
+let TEAM_MEMBERS = TEAM_MEMBERS_START();
 
 const DIRECTORIES = [
   { id: "d_1", name: "Platform", slug: "platform", level: "admin", workspaces: 12, skills: 4, secrets: 3, hosts: 1, agentAccounts: 2 },
@@ -1585,7 +1682,7 @@ const DIRECTORIES = [
   { id: "d_3", name: "Firetower", slug: "firetower", level: "viewer", workspaces: 31, skills: 7, secrets: 6, hosts: 1, agentAccounts: 3 },
 ];
 
-const GRANTS = {
+const GRANTS_START = () => ({
   d_1: [
     { subjectKind: "person", subjectId: "u_1", subjectName: "kevin", level: "admin" },
     { subjectKind: "team", subjectId: "t_1", subjectName: "Platform", level: "writer" },
@@ -1593,7 +1690,8 @@ const GRANTS = {
   ],
   d_2: [{ subjectKind: "team", subjectId: "t_2", subjectName: "Design", level: "writer" }],
   d_3: [{ subjectKind: "team", subjectId: "t_0", subjectName: "Everyone", level: "viewer" }],
-};
+});
+let GRANTS = GRANTS_START();
 
 /* The vault, with one of each: a key of this person's own, one a directory
    holds for everybody, and the access log the reveal line points at. */
