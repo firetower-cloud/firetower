@@ -10,7 +10,7 @@ const OURS: &str = "https://github.com/firetower-cloud/firetower-plugins";
 #[tokio::test]
 #[ignore]
 async fn our_own_repository_reads_as_a_catalogue() {
-    let got = marketplace::fetch(OURS, "agent/plguins", None)
+    let got = marketplace::fetch(OURS, "main", None)
         .await
         .expect("fetching our marketplace");
 
@@ -42,7 +42,7 @@ async fn our_own_repository_reads_as_a_catalogue() {
 #[tokio::test]
 #[ignore]
 async fn one_entry_comes_back_as_files_with_its_connector() {
-    let got = marketplace::fetch(OURS, "agent/plguins", None).await.unwrap();
+    let got = marketplace::fetch(OURS, "main", None).await.unwrap();
     let linear = got.entries.iter().find(|e| e.slug == "linear").unwrap();
     assert!(matches!(&linear.source, Source::Inside { path } if path == "./linear"));
 
@@ -66,7 +66,7 @@ async fn one_entry_comes_back_as_files_with_its_connector() {
 #[tokio::test]
 #[ignore]
 async fn github_declares_that_it_borrows_a_credential_we_hold() {
-    let got = marketplace::fetch(OURS, "agent/plguins", None).await.unwrap();
+    let got = marketplace::fetch(OURS, "main", None).await.unwrap();
     let e = got.entries.iter().find(|x| x.slug == "github").unwrap();
     let files = marketplace::files_of(&e.source, OURS, &got.commit, None).await.unwrap();
     let (server, _, auth, borrow) = marketplace::connector_of(&files).unwrap();

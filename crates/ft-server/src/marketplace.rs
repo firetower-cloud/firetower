@@ -431,7 +431,7 @@ use sqlx::{PgPool, Row};
 /// a source nobody consented to, and the moment ours is privileged is the
 /// moment it stops exercising the same path as everybody else's.
 pub const OURS: &str = "https://github.com/firetower-cloud/firetower-plugins";
-pub const OURS_REF: &str = "agent/plguins";
+pub const OURS_REF: &str = "main";
 
 /// A source, as a screen lists it.
 #[derive(Debug, Serialize, ToSchema)]
