@@ -7501,10 +7501,26 @@ html:not([data-platform="macos"]) {
   .pcard .nm {
     min-width: 0;
     flex: 1;
-    height: 34px;
+    /* **A minimum, not a height.** It was fixed at 34px, which is right for
+       one line and clips the second — the author line drew on top of the
+       name. A card with an author is simply taller. */
+    min-height: 34px;
     display: flex;
     flex-direction: column;
     justify-content: center;
+  }
+  /* `<s>` is this file's sub-line, as it is on every row — the element is
+     borrowed for its brevity and never for its meaning, so the rule that
+     takes the line off it has to follow it everywhere it is used. */
+  .pcard .nm s {
+    display: block;
+    text-decoration: none;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+    margin-top: 1px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .pcard .nm b {
     display: block;
