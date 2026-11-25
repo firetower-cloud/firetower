@@ -14,7 +14,7 @@
  * Whether you have it — yours, discover — switches. They compose, because
  * "what instructions could I add" is a question somebody really has.
  */
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Link2,
@@ -111,7 +111,32 @@ export function Library({ open: asked = null }: { open?: string | null }) {
   const seed = useRef<ReturnType<typeof readDrop> | null>(null);
   const [open, setOpen] = useOpened(asked);
 
-  const lib = useListLibrary({ query: { select: (r) => r ?? [] } });
+  /* **The browser is somewhere else.** Authorizing happens in a tab outside
+     this app and nothing in that tab can tell us it finished, so the list
+     watches for the answer instead of waiting to be told. Two triggers,
+     because either alone leaves a case: polling catches somebody who
+     finishes in the background, and refetching on focus catches the ordinary
+     path of approving and switching straight back. The poll stops as soon as
+     something connects and gives up after five minutes rather than asking
+     for ever.
+
+     The page this one replaced did exactly this, per row. Listing components
+     took the row's own state away and nothing replaced it, so a server
+     stayed on "Connect" until the page was reopened. */
+  const [awaiting, setAwaiting] = useState(false);
+  const lib = useListLibrary({
+    query: {
+      select: (r) => r ?? [],
+      refetchOnWindowFocus: true,
+      refetchInterval: awaiting ? 2000 : false,
+    },
+  });
+  const connectedCount = (lib.data ?? []).filter((i) => i.connected === true).length;
+  useEffect(() => {
+    if (!awaiting) return;
+    const stop = setTimeout(() => setAwaiting(false), 5 * 60 * 1000);
+    return () => clearTimeout(stop);
+  }, [awaiting, connectedCount]);
   const catalogue = useListEntries(undefined, { query: { select: (r) => r ?? [] } });
 
   const refresh = async () => {
@@ -160,6 +185,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     try {
       const opened = await connect(skillId);
       await openExternal(opened.authorizeUrl);
+      setAwaiting(true);
     } catch {
       /* The row keeps its Connect button, and pressing it says why. */
     }
@@ -303,6 +329,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                   of={i}
                   busy={busy === i.id}
                   onOpen={() => setOpen(i.id)}
+                  onConnecting={() => setAwaiting(true)}
                   onBusy={setBusy}
                   onChanged={refresh}
                   onTrouble={setTrouble}
@@ -387,6 +414,7 @@ function Thing({
   of,
   busy,
   onOpen,
+  onConnecting,
   onBusy,
   onChanged,
   onTrouble,
@@ -394,6 +422,8 @@ function Thing({
   of: Item;
   busy: boolean;
   onOpen: () => void;
+  /** An authorization is outstanding, so the list should start watching. */
+  onConnecting: () => void;
   onBusy: (id: string | null) => void;
   onChanged: () => Promise<void>;
   onTrouble: (why: string | null) => void;
@@ -420,6 +450,7 @@ function Thing({
     try {
       const opened = await connect(of.skillId);
       await openExternal(opened.authorizeUrl);
+      onConnecting();
     } catch (e) {
       onTrouble(why(e));
     } finally {

@@ -33,8 +33,9 @@ export function ServerInside({
   onGone: () => Promise<void>;
 }) {
   const inside = useSkillInside(of.skillId).data;
+  const [awaiting, setAwaiting] = useState(false);
   const state = useConnectorState(of.skillId, {
-    query: { refetchOnWindowFocus: true },
+    query: { refetchOnWindowFocus: true, refetchInterval: awaiting ? 2000 : false },
   }).data;
   const connected = !!state?.connected;
   const tools = useConnectorTools(of.skillId, { query: { enabled: connected } }).data;
@@ -43,7 +44,9 @@ export function ServerInside({
 
   /* Connecting happens elsewhere, so the page watches rather than waits. */
   useEffect(() => {
-    if (connected) setBad(null);
+    if (!connected) return;
+    setBad(null);
+    setAwaiting(false);
   }, [connected]);
 
   const join = async () => {
@@ -52,6 +55,7 @@ export function ServerInside({
     try {
       const opened = await connect(of.skillId);
       await openExternal(opened.authorizeUrl);
+      setAwaiting(true);
     } catch (e) {
       setBad(why(e));
     } finally {
@@ -76,7 +80,12 @@ export function ServerInside({
           <h2 className="text-display text-bone">{of.name}</h2>
           <p className="mt-1 max-w-[70ch] text-ui text-dim">{of.description}</p>
         </div>
-        {of.connected === false && (
+        {/* **Live, not the snapshot the list arrived with.** This read
+            `of.connected`, which is whatever the library said when the page
+            before it was fetched — so a server connected a moment ago still
+            offered a Connect button here. `useConnectorState` asks for
+            itself and refetches when the window comes forward. */}
+        {of.connected !== null && !connected && (
           <button type="button" className="btn primary shrink-0" disabled={busy} onClick={join}>
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} />
@@ -180,11 +189,11 @@ export function ServerInside({
             </Fact>
           )}
           <Fact label="You">
-            {of.connected === true
-              ? "Connected"
-              : of.connected === false
-                ? "Not connected"
-                : "Nothing to connect"}
+            {of.connected === null
+              ? "Nothing to connect"
+              : connected
+                ? "Connected"
+                : "Not connected"}
           </Fact>
         </aside>
       </div>
