@@ -8191,3 +8191,74 @@ fn said(front: &serde_json::Value, key: &str) -> String {
         .unwrap_or_default()
         .to_string()
 }
+
+/// What a folder of bytes carries, without it having been stored.
+///
+/// **The same reading, for a bundle nobody has installed.** `inside` answers
+/// for a version in the library; this answers for files just pulled out of a
+/// repository, so a catalogue row can show its skills — and the prose inside
+/// them — *before* somebody takes a copy. Reading instructions after you have
+/// agreed to run them is the wrong order.
+pub fn read_bundle(files: &[(String, Vec<u8>)]) -> Inside {
+    let mut out = Inside {
+        manifest: None,
+        skills: Vec::new(),
+        commands: Vec::new(),
+        agents: Vec::new(),
+        server: None,
+        url: None,
+        auth: None,
+        has_hooks: false,
+        came: None,
+        files: files
+            .iter()
+            .map(|(path, bytes)| SkillFile {
+                path: path.clone(),
+                size: bytes.len() as i64,
+                executable: false,
+                shared: false,
+            })
+            .collect(),
+    };
+
+    for (path, bytes) in files {
+        let p = path.as_str();
+        let text = String::from_utf8_lossy(bytes).to_string();
+        if p == ".claude-plugin/plugin.json" || p == ".codex-plugin/plugin.json" {
+            if out.manifest.is_none() {
+                out.manifest = serde_json::from_str(&text).ok();
+            }
+        } else if p == "hooks.json" || p.ends_with("/hooks.json") {
+            out.has_hooks = true;
+        } else if p == ".mcp.json" {
+            if let Some((server, url, auth, _)) =
+                crate::marketplace::connector_of(std::slice::from_ref(&(
+                    path.clone(),
+                    bytes.clone(),
+                )))
+            {
+                out.server = Some(server);
+                out.url = Some(url);
+                out.auth = Some(auth);
+            }
+        } else if let Some(c) = component_at(p, "skills/", "SKILL.md", &text) {
+            out.skills.push(c);
+        } else if let Some(c) = component_at(p, "commands/", ".md", &text) {
+            out.commands.push(c);
+        } else if let Some(c) = component_at(p, "agents/", ".md", &text) {
+            out.agents.push(c);
+        } else if p == "SKILL.md" {
+            let (front, body, _) = read_frontmatter(&text);
+            out.skills.push(Component {
+                name: said(&front, "name"),
+                description: said(&front, "description"),
+                path: p.to_string(),
+                body,
+            });
+        }
+    }
+    out.skills.sort_by(|a, b| a.name.cmp(&b.name));
+    out.commands.sort_by(|a, b| a.name.cmp(&b.name));
+    out.agents.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}

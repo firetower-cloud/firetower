@@ -58,6 +58,7 @@ import { probeUrl, addFromUrl } from "~/api/generated/connectors/connectors";
 import type { Item, Listed, Market, Skill } from "~/api/generated/model";
 import { ServerInside } from "~/ui/config/ServerInside";
 import { SkillInside } from "~/ui/config/SkillInside";
+import { OfferInside } from "~/ui/config/OfferInside";
 
 /** How many Discover cards are drawn before the search has to do the work. */
 const SHELF = 40;
@@ -103,6 +104,12 @@ export function Library({ open: asked = null }: { open?: string | null }) {
   const [where, setWhere] = useState<Where>("discover");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  /* **Rows added in this sitting stay where they were.** Pressing a button
+     and having the thing you pressed jump to another part of the page is how
+     somebody loses their place and presses again — so the move to "Already
+     added" waits until the list is next looked at fresh. */
+  const [stayPut, setStayPut] = useState<Set<string>>(new Set());
+
   const [trouble, setTrouble] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [pasting, setPasting] = useState(false);
@@ -179,8 +186,8 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     return by;
   }, [lib.data]);
 
-  const have = offered.filter((e) => e.installed);
-  const rest = offered.filter((e) => !e.installed);
+  const have = offered.filter((e) => e.installed && !stayPut.has(e.slug));
+  const rest = offered.filter((e) => !e.installed || stayPut.has(e.slug));
   const [all, setAll] = useState(false);
   const INSTALLED = 4;
   const shown = rest.slice(0, SHELF);
@@ -210,19 +217,49 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     }
   };
 
-  const install = async (e: Listed) => {
+  /**
+   * One press, whatever it takes.
+   *
+   * **Add and Connect were two steps for one intention.** Nobody wants a
+   * copy of Notion; they want an agent that can read Notion — so a row that
+   * brings a server installs it *and* opens the browser, and the label says
+   * which of those is the point. Only a skills-only entry is an Add, because
+   * there is nothing after it.
+   */
+  const take = async (e: Listed) => {
     setBusy(e.slug);
     setTrouble(null);
+    setStayPut((k) => new Set(k).add(e.slug));
     try {
-      const made = await installEntry(e.marketplaceId, e.slug);
+      /* An entry already installed is connected straight away; one that is
+         not is installed first. Either way the id is the library's. */
+      const id = e.installed
+        ? (lib.data ?? []).find((i) => i.name === e.name && i.kind === "server")?.skillId
+        : (await installEntry(e.marketplaceId, e.slug)).id;
       await refresh();
-      if (made.hasConnector) await offerToConnect(made);
+      if (id && e.hasConnector) await offerToConnect({ id, hasConnector: true });
     } catch (err) {
       setTrouble(why(err));
     } finally {
       setBusy(null);
     }
   };
+
+  /* An entry nobody has installed opens too, on a preview pulled at the
+     pinned commit — the handle is the catalogue's rather than the library's,
+     which is what tells the two apart. */
+  const peeked = open?.startsWith("offer:")
+    ? (catalogue.data ?? []).find((e) => `offer:${e.marketplaceId}/${e.slug}` === open)
+    : undefined;
+  if (peeked)
+    return (
+      <OfferInside
+        of={peeked}
+        busy={busy === peeked.slug}
+        onBack={() => setOpen(null)}
+        onAdd={() => void take(peeked).then(() => setOpen(null))}
+      />
+    );
 
   const opened = open ? (lib.data ?? []).find((i) => i.id === open) : undefined;
   if (opened)
@@ -289,7 +326,10 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                   type="button"
                   role="tab"
                   aria-selected={kind === k}
-                  onClick={() => setKind(k)}
+                  onClick={() => {
+                    setKind(k);
+                    setStayPut(new Set());
+                  }}
                 >
                   {k === "all" ? "All" : k === "skill" ? "Skills" : "MCP"}
                 </button>
@@ -303,7 +343,10 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                   type="button"
                   role="tab"
                   aria-selected={where === w}
-                  onClick={() => setWhere(w)}
+                  onClick={() => {
+                    setWhere(w);
+                    setStayPut(new Set());
+                  }}
                 >
                   {/* **Not "Yours".** Nothing in this list is: two ship with
                       the product and the rest are installed for the whole
@@ -400,9 +443,10 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                       of={e}
                       item={mine.get(e.name)}
                       busy={busy === e.slug}
+                      waiting={awaiting && stayPut.has(e.slug)}
                       onOpen={(id) => setOpen(id)}
                       onConnect={offerToConnect}
-                      onAdd={install}
+                      onAdd={take}
                     />
                   ))}
                 </div>
@@ -421,9 +465,10 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                   of={e}
                   item={mine.get(e.name)}
                   busy={busy === e.slug}
+                  waiting={awaiting && stayPut.has(e.slug)}
                   onOpen={(id) => setOpen(id)}
                   onConnect={offerToConnect}
-                  onAdd={install}
+                  onAdd={take}
                 />
               ))}
             </div>
@@ -897,6 +942,7 @@ function Offer({
   of,
   item,
   busy,
+  waiting,
   onOpen,
   onConnect,
   onAdd,
@@ -908,52 +954,70 @@ function Offer({
   onOpen: (id: string) => void;
   onConnect: (made: { id: string; hasConnector?: boolean }) => Promise<void>;
   onAdd: (e: Listed) => Promise<void>;
+  /** An authorization this row started is outstanding. */
+  waiting?: boolean;
 }) {
-  const open = item ? () => onOpen(item.id) : undefined;
+  const open = () => onOpen(item ? item.id : `offer:${of.marketplaceId}/${of.slug}`);
   return (
     <div className="offer">
       <span className="g">
         <Mark logo={of.logo} name={of.name} />
       </span>
-      {/* Only an installed row opens: there is nothing behind an entry
-          nobody has downloaded that the row is not already showing. */}
-      {open ? (
-        <button type="button" className="tx text-left" onClick={open}>
-          <b>{of.name}</b>
-          <s>{of.description}</s>
-          <u>{[brings(of), of.author && `by ${of.author}`].filter(Boolean).join(", ")}</u>
-        </button>
-      ) : (
-        <span className="tx">
-          <b>{of.name}</b>
-          <s>{of.description}</s>
-          <u>{[brings(of), of.author && `by ${of.author}`].filter(Boolean).join(", ")}</u>
-        </span>
-      )}
+      {/* **Every row opens.** One already installed shows what it became;
+          one nobody has downloaded shows a preview pulled from its
+          repository — which is the only way to read a stranger's
+          instructions before agreeing to run them. */}
+      <button type="button" className="tx text-left" onClick={open}>
+        <b>{of.name}</b>
+        <s>{of.description}</s>
+        <u>{[brings(of), of.author && `by ${of.author}`].filter(Boolean).join(", ")}</u>
+      </button>
 
-      {!of.installed ? (
-        <button type="button" className="add" disabled={busy} onClick={() => onAdd(of)}>
-          {busy ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
-          ) : (
-            <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-          )}
-          Add
-        </button>
+      {/* **One button, named for the point of it.** "Add" then "Connect"
+          was two presses for one intention: nobody wants a copy of Notion,
+          they want an agent that can read Notion. So a row carrying a server
+          says Connect and does both, and only a skills-only row says Add,
+          because nothing follows it.
+
+          And it reports in place. The row used to jump to "Already added"
+          the instant it was pressed, so if the browser did not open there
+          was nothing left on screen to explain why. */}
+      {busy ? (
+        <span className="flex shrink-0 items-center gap-1.5 text-meta text-dim">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+          {of.hasConnector ? "Connecting…" : "Adding…"}
+        </span>
       ) : item?.needsClientId && item.connected !== true ? (
         <button type="button" className="add" onClick={open}>
           Set it up
         </button>
-      ) : item?.connected === false ? (
-        <button type="button" className="add" onClick={() => void onConnect(item)}>
-          <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Connect
-        </button>
-      ) : (
+      ) : waiting ? (
+        <span
+          className="flex shrink-0 items-center gap-1.5 text-meta text-dim"
+          title="Finish in the browser; this updates itself."
+        >
+          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+          Waiting…
+        </span>
+      ) : item?.connected === true || (of.installed && !of.hasConnector) ? (
         <span className="flex shrink-0 items-center gap-1.5 text-meta text-sage">
           <Check className="h-3.5 w-3.5" strokeWidth={2} />
-          Added
+          {of.hasConnector ? "Connected" : "Added"}
         </span>
+      ) : (
+        <button type="button" className="add" onClick={() => void onAdd(of)}>
+          {of.hasConnector ? (
+            <>
+              <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Connect
+            </>
+          ) : (
+            <>
+              <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Add
+            </>
+          )}
+        </button>
       )}
     </div>
   );

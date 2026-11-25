@@ -108,6 +108,57 @@ export const InstallEntryResponse = zod.object({
   "versionId": zod.string().describe('Identifies one version of a skill. Append-only: a session pins one.')
 }).describe('One row of the library.\n\n`name` and `description` are copied down from the current version rather\nthan joined per row: this list is three hundred long and those two fields\nare what every one of them draws.')
 
+/**
+ * **Read before you agree, not after.** An entry's card says how many skills
+ * it brings; it cannot say what they tell an agent to do, and nothing else
+ * could until this existed — so the only way to read a stranger's
+ * instructions was to install them first. The files are pulled at the
+ * pinned commit and thrown away; nothing is stored.
+ * @summary What one catalogue entry carries, before anybody installs it.
+ */
+export const PreviewEntryParams = zod.object({
+  "id": zod.string().describe('Marketplace'),
+  "slug": zod.string().describe('Entry')
+})
+
+export const PreviewEntryResponse = zod.object({
+  "agents": zod.array(zod.object({
+  "body": zod.string().describe('What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte.'),
+  "description": zod.string(),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
+}).describe('One component a plugin carries, as a row of its detail.')),
+  "auth": zod.string().nullish(),
+  "came": zod.union([zod.null(),zod.object({
+  "commit": zod.string(),
+  "marketplace": zod.string(),
+  "slug": zod.string(),
+  "url": zod.string()
+}).describe('Where an installed bundle came from.')]).optional(),
+  "commands": zod.array(zod.object({
+  "body": zod.string().describe('What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte.'),
+  "description": zod.string(),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
+}).describe('One component a plugin carries, as a row of its detail.')),
+  "files": zod.array(zod.object({
+  "executable": zod.boolean(),
+  "path": zod.string(),
+  "shared": zod.boolean().describe('Whether these bytes were already here under the same hash.'),
+  "size": zod.int()
+}).describe('One file of a bundle, without its bytes.')),
+  "hasHooks": zod.boolean().describe('Whether it ships hooks, which run commands and deserve saying out loud.'),
+  "manifest": zod.unknown().optional().describe('The manifest, as the author wrote it. Absent for a lone skill.'),
+  "server": zod.string().nullish().describe('The MCP server it declares, if any, with the address it will call.'),
+  "skills": zod.array(zod.object({
+  "body": zod.string().describe('What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte.'),
+  "description": zod.string(),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
+}).describe('One component a plugin carries, as a row of its detail.')),
+  "url": zod.string().nullish()
+}).describe('What is actually in a plugin.\n\n**The thing a marketplace owes you.** Installing from a repository means\ntaking somebody else\'s instructions and somebody else\'s MCP server into\nyour agent\'s context. Being unable to read either, before or after, is\nasking for trust that has not been earned — so this opens the bundle and\nsays what is in it in the words its own author wrote.')
+
 export const RefreshMarketplaceParams = zod.object({
   "id": zod.string().describe('Marketplace')
 })

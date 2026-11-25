@@ -28,6 +28,7 @@ import type {
 import type {
   AddMarket,
   ApiError,
+  Inside,
   ListEntriesParams,
   Listed,
   Market,
@@ -505,7 +506,139 @@ export const useInstallEntry = <TError = ApiError,
       > => {
       return useMutation(getInstallEntryMutationOptions(options), queryClient);
     }
-    export const getRefreshMarketplaceUrl = (id: string,) => {
+    export const getPreviewEntryUrl = (id: string,
+    slug: string,) => {
+
+
+
+
+  return `/api/v1/marketplaces/${id}/entries/${slug}/preview`
+}
+
+/**
+ * **Read before you agree, not after.** An entry's card says how many skills
+ * it brings; it cannot say what they tell an agent to do, and nothing else
+ * could until this existed — so the only way to read a stranger's
+ * instructions was to install them first. The files are pulled at the
+ * pinned commit and thrown away; nothing is stored.
+ * @summary What one catalogue entry carries, before anybody installs it.
+ */
+export const previewEntry = async (id: string,
+    slug: string, options?: Parameters<typeof http>[1]): Promise<Inside> => {
+
+  return http<Inside>(getPreviewEntryUrl(id,slug),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getPreviewEntryQueryKey = (id: string,
+    slug: string,) => {
+    return [
+    `/api/v1/marketplaces/${id}/entries/${slug}/preview`
+    ] as const;
+    }
+
+
+export const getPreviewEntryQueryOptions = <TData = Awaited<ReturnType<typeof previewEntry>>, TError = ApiError>(id: string,
+    slug: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewEntry>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getPreviewEntryQueryKey(id,slug);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof previewEntry>>> = ({ signal }) => previewEntry(id,slug, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined && slug !== null && slug !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof previewEntry>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type PreviewEntryQueryResult = NonNullable<Awaited<ReturnType<typeof previewEntry>>>
+export type PreviewEntryQueryError = ApiError
+
+
+export function usePreviewEntry<TData = Awaited<ReturnType<typeof previewEntry>>, TError = ApiError>(
+ id: string,
+    slug: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewEntry>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof previewEntry>>,
+          TError,
+          Awaited<ReturnType<typeof previewEntry>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function usePreviewEntry<TData = Awaited<ReturnType<typeof previewEntry>>, TError = ApiError>(
+ id: string,
+    slug: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewEntry>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof previewEntry>>,
+          TError,
+          Awaited<ReturnType<typeof previewEntry>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function usePreviewEntry<TData = Awaited<ReturnType<typeof previewEntry>>, TError = ApiError>(
+ id: string,
+    slug: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewEntry>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary What one catalogue entry carries, before anybody installs it.
+ */
+
+export function usePreviewEntry<TData = Awaited<ReturnType<typeof previewEntry>>, TError = ApiError>(
+ id: string,
+    slug: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof previewEntry>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getPreviewEntryQueryOptions(id,slug,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary What one catalogue entry carries, before anybody installs it.
+ */
+export const useSetPreviewEntryQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    slug: string,updater: Awaited<ReturnType<typeof previewEntry>> | undefined | ((old: Awaited<ReturnType<typeof previewEntry>> | undefined) => Awaited<ReturnType<typeof previewEntry>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof previewEntry>>>({ exact: $exactMatch, queryKey: getPreviewEntryQueryKey(id,slug) }, updater);
+  };
+}
+
+/**
+ * @summary What one catalogue entry carries, before anybody installs it.
+ */
+export const useGetPreviewEntryQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,
+    slug: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof previewEntry>>>(getPreviewEntryQueryKey(id,slug));
+}
+
+
+export const getRefreshMarketplaceUrl = (id: string,) => {
 
 
 

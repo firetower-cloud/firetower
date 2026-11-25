@@ -837,6 +837,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(marketplaces::refresh_marketplace))
         .routes(routes!(marketplaces::list_entries))
         .routes(routes!(marketplaces::install_entry))
+        .routes(routes!(marketplaces::preview_entry))
         .routes(routes!(library::list_library))
         .routes(routes!(library::switch_item))
         .routes(routes!(library::connector_tools))

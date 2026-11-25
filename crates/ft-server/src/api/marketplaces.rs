@@ -355,3 +355,41 @@ async fn mine(state: &AppState, org: &str, id: &str) -> Result<Market, ApiError>
         .find(|m| m.id == id)
         .ok_or_else(|| ApiError::not_found("marketplace"))
 }
+
+/// What one catalogue entry carries, before anybody installs it.
+///
+/// **Read before you agree, not after.** An entry's card says how many skills
+/// it brings; it cannot say what they tell an agent to do, and nothing else
+/// could until this existed — so the only way to read a stranger's
+/// instructions was to install them first. The files are pulled at the
+/// pinned commit and thrown away; nothing is stored.
+#[utoipa::path(
+    get, path = "/api/v1/marketplaces/{id}/entries/{slug}/preview", tag = "marketplaces",
+    params(
+        ("id" = String, Path, description = "Marketplace"),
+        ("slug" = String, Path, description = "Entry"),
+    ),
+    responses(
+        (status = 200, body = crate::skills::Inside),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub(super) async fn preview_entry(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path((id, slug)): Path<(String, String)>,
+) -> ApiResult<Json<crate::skills::Inside>> {
+    let me = whoever(&principal)?;
+    let (source, market_url, commit, _, _) =
+        marketplace::address_of(state.skills.pool(), me.org_id.as_str(), &id, &slug)
+            .await
+            .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?
+            .ok_or_else(|| ApiError::not_found("plugin"))?;
+
+    let token = reading_as(&state, me.id.as_str(), &market_url).await;
+    let files = marketplace::files_of(&source, &market_url, &commit, token.as_deref())
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+
+    Ok(Json(crate::skills::read_bundle(&files)))
+}

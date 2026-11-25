@@ -2994,6 +2994,58 @@
         }
       }
     },
+    "/api/v1/marketplaces/{id}/entries/{slug}/preview": {
+      "get": {
+        "tags": [
+          "marketplaces"
+        ],
+        "summary": "What one catalogue entry carries, before anybody installs it.",
+        "description": "**Read before you agree, not after.** An entry's card says how many skills\nit brings; it cannot say what they tell an agent to do, and nothing else\ncould until this existed — so the only way to read a stranger's\ninstructions was to install them first. The files are pulled at the\npinned commit and thrown away; nothing is stored.",
+        "operationId": "preview_entry",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Marketplace",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "slug",
+            "in": "path",
+            "description": "Entry",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inside"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/marketplaces/{id}/refresh": {
       "post": {
         "tags": [
