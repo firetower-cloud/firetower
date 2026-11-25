@@ -56,7 +56,7 @@ import {
 import { connect, disconnect, getConnectorStateQueryKey } from "~/api/generated/connectors/connectors";
 import { deleteSkill, getListSkillsQueryKey } from "~/api/generated/skills/skills";
 import { probeUrl, addFromUrl } from "~/api/generated/connectors/connectors";
-import type { Item, Listed, Market } from "~/api/generated/model";
+import type { Item, Listed, Market, Skill } from "~/api/generated/model";
 import { ServerInside } from "~/ui/config/ServerInside";
 import { SkillInside } from "~/ui/config/SkillInside";
 
@@ -147,12 +147,31 @@ export function Library({ open: asked = null }: { open?: string | null }) {
   const shown = offered.slice(0, SHELF);
   const more = offered.length - shown.length;
 
+  /**
+   * Adding a server is already asking for its tools.
+   *
+   * **So the browser opens by itself.** Making somebody find a second button
+   * to say what they just said is asking the same question twice. An attempt
+   * made on your behalf that the other end refuses stays quiet — some servers
+   * register no clients, and a modal nobody pressed anything for is worse
+   * than a Connect button that is still there.
+   */
+  const offerToConnect = async (skillId: string) => {
+    try {
+      const opened = await connect(skillId);
+      await openExternal(opened.authorizeUrl);
+    } catch {
+      /* The row keeps its Connect button, and pressing it says why. */
+    }
+  };
+
   const install = async (e: Listed) => {
     setBusy(e.slug);
     setTrouble(null);
     try {
-      await installEntry(e.marketplaceId, e.slug);
+      const made = await installEntry(e.marketplaceId, e.slug);
       await refresh();
+      if (made.hasConnector) await offerToConnect(made.id);
     } catch (err) {
       setTrouble(why(err));
     } finally {
@@ -700,7 +719,14 @@ function Sources() {
  * server what it is and how it wants to be authorized, writes the manifest
  * itself, and lands it in the library. Nobody is asked to author a wrapper.
  */
-function PasteAddress({ onClose, onDone }: { onClose: () => void; onDone: () => void }) {
+function PasteAddress({
+  onClose,
+  onDone,
+}: {
+  onClose: () => void;
+  /** The thing that was made, so the caller can offer to connect it. */
+  onDone: (made?: Skill) => void | Promise<void>;
+}) {
   const [url, setUrl] = useState("");
   const [found, setFound] = useState<Awaited<ReturnType<typeof probeUrl>> | null>(null);
   const [name, setName] = useState("");
@@ -780,8 +806,8 @@ function PasteAddress({ onClose, onDone }: { onClose: () => void; onDone: () => 
                 setBusy(true);
                 setBad(null);
                 try {
-                  await addFromUrl({ url: url.trim(), name });
-                  onDone();
+                  const made = await addFromUrl({ url: url.trim(), name });
+                  await onDone(made);
                 } catch (e) {
                   setBad(why(e));
                 } finally {
