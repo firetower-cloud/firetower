@@ -477,6 +477,24 @@
       background var(--dur-native) var(--ease-swift),
       color var(--dur-native) var(--ease-swift);
   }
+  /* A denser row for a list somebody reads at a glance rather than works
+     through. Four of these used to stand as tall as the composer they hang
+     off, which made a short list look like a settings screen. */
+  .prow.tight {
+    min-height: 30px;
+    gap: 8px;
+    padding: 3px 9px;
+  }
+  .prow.tight .plg {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    font-size: 9px;
+  }
+  .prow.tight .plg img {
+    width: 14px;
+    height: 14px;
+  }
   .prow:hover,
   .mrow:hover {
     background: color-mix(in srgb, var(--color-raise) 70%, transparent);

@@ -27,6 +27,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
+  ArrowUpRight,
   Check,
   ChevronDown,
   CircleAlert,
@@ -1014,7 +1015,7 @@ export function StartComposer({
                 const on = fixed || !muted.has(s.id);
                 const short = unconnected.has(s.id);
                 return (
-                  <div key={s.id} className="prow">
+                  <div key={s.id} className="prow tight">
                     <Mark logo={s.logo} name={s.name} />
                     <span className="lbl flex-1 truncate">{s.name}</span>
                     {/* The one thing that stops it working gets the only
@@ -1032,12 +1033,11 @@ export function StartComposer({
                         <TriangleAlert className="h-4 w-4" strokeWidth={1.75} />
                       </span>
                     ) : fixed ? (
-                      <span
-                        className="shrink-0 text-meta text-mute"
-                        title="A Firetower feature is built on this, so it is always loaded."
-                      >
-                        always
-                      </span>
+                      /* **Nothing, not "always".** A word repeated down the
+                         column said the same thing about every row that has
+                         no switch, which is already what no switch means.
+                         The reason lives on the row's own page. */
+                      <span className="w-7 shrink-0" />
                     ) : (
                       <button
                         type="button"
@@ -1060,6 +1060,20 @@ export function StartComposer({
                   </div>
                 );
               })}
+            <button
+              type="button"
+              className="prow tight mt-1 border-t border-line pt-2 text-dim"
+              onClick={() => {
+                close();
+                navigate("/configuration/plugins");
+              }}
+            >
+              <span className="grid h-5 w-5 shrink-0 place-items-center">
+                <Puzzle className="h-4 w-4" strokeWidth={1.6} />
+              </span>
+              <span className="lbl flex-1">Manage skills &amp; MCP</span>
+              <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.6} />
+            </button>
           </div>
         </Pop>
       )}
