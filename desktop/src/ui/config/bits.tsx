@@ -12,7 +12,7 @@
  * second frame inside the sheet's own, and what makes a list read as a list is
  * the repeat — every border added is one more thing competing with it.
  */
-import { CircleSlash2, ExternalLink, FolderDown, Info, Loader2, Lock, RefreshCw, Shapes, TriangleAlert } from "lucide-react";
+import { CircleSlash2, FolderDown, Info, Loader2, Lock, RefreshCw, Shapes, TriangleAlert } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "~/components/ui";
 import type { Trouble as TroubleKind } from "~/data";
@@ -191,9 +191,10 @@ export function Section({
   return (
     <div className="pg">
       {/* **Above the head, and outside everything `trouble` swaps.** Settings
-          has no rail icon to leave a pane by, so the one way between its five
-          panes is in here — and a pane that cannot be read is the pane you
-          most need to leave. It draws nothing outside Settings. */}
+          has no rail icon to leave a pane by, so the one way between the panes
+          it owns is in here — and a pane that cannot be read is the pane you
+          most need to leave. It draws nothing outside Settings, which is now
+          everywhere but Vault and This Firetower. */}
       <SettingsIndex />
       <div className="pg-head">
         <div>
@@ -585,41 +586,20 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 
 /**
- * The way out to the administration site, for the things this app does not do.
+ * **`ManageOnTheWeb` was here, and it has gone outright.**
  *
- * **The base address and nothing after it.** Linking at a page would make the
- * desktop depend on the web's route structure, and that is a contract nobody
- * agreed to keep — the admin site is free to move its own screens around.
+ * It opened the administration site's root, from the head of People and Teams,
+ * and it existed for one reason: those two screens could not do the thing
+ * somebody had come to them to do. That stopped being true when People and
+ * Teams became the only place accounts and teams exist — see
+ * `config/People.tsx` — so the control went with the reason for it, rather
+ * than being left behind pointing at a second application nobody should be
+ * sent to.
  *
- * `backend.url` is already a resolved origin: `probe.ts` tries the schemes,
- * keeps whichever answered, and only that is stored. So there is no guessing to
- * do here. It is still parsed before it is offered, because a URL written by an
- * older build, or edited by hand in `localStorage`, should not produce a button
- * that goes nowhere.
- *
- * Only to an administrator. Sending a member to a screen that will refuse them
- * is the same mistake as drawing a control the server will not honour.
+ * Deleted rather than emptied: a component that returns `null` everywhere is
+ * a thing the next reader has to work out, and `reuse.test.ts` is the record
+ * of what unused code costs here.
  */
-export function ManageOnTheWeb({ url, may }: { url: string; may: boolean }) {
-  if (!may) return null;
-  let origin: string;
-  try {
-    origin = new URL(url).origin;
-  } catch {
-    return null;
-  }
-  return (
-    <a
-      href={origin}
-      target="_blank"
-      rel="noreferrer"
-      className="out"
-    >
-      Manage on the web
-      <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
-    </a>
-  );
-}
 
 /**
  * `**like this**` → bold.

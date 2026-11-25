@@ -3,12 +3,12 @@ import { SETTINGS, SETTINGS_HOME, SETTINGS_PANES } from "~/ui/config/panes";
 import { DESTINATIONS, destinationAt } from "./destinations";
 
 describe("the rail's own shape", () => {
-  /* Seven, and nothing under them. Settings and Updates used to be two doors
+  /* Eight, and nothing under them. Settings and Updates used to be two doors
      below a rule, keyless because they were doors rather than destinations;
      they are rows in the profile menu now and nothing else. */
-  test("seven destinations, each on its own number", () => {
-    expect(DESTINATIONS).toHaveLength(7);
-    expect(DESTINATIONS.map((d) => d.key)).toEqual(["1", "2", "3", "4", "5", "6", "7"]);
+  test("eight destinations, each on its own number", () => {
+    expect(DESTINATIONS).toHaveLength(8);
+    expect(DESTINATIONS.map((d) => d.key)).toEqual(["1", "2", "3", "4", "5", "6", "7", "8"]);
   });
 
   /**
@@ -33,7 +33,28 @@ describe("the rail's own shape", () => {
       ["schedules", "5"],
       ["repos", "6"],
       ["machines", "7"],
+      ["organisation", "8"],
     ]);
+  });
+
+  /**
+   * **Organisation was appended, and that is the whole point of it.**
+   *
+   * Schedules was inserted at `⌘5` and moved two destinations down with it —
+   * a cost `destinations.ts` records as paid once, deliberately. Paying it
+   * again two releases later is what makes a numbered rail something people
+   * stop learning, so this pins the seven that were already here to the
+   * numbers they already had, independently of the list above.
+   */
+  test("appending the eighth renumbered none of the seven", () => {
+    const keys = Object.fromEntries(DESTINATIONS.map((d) => [d.id, d.key]));
+    expect(keys.home).toBe("1");
+    expect(keys.tasks).toBe("2");
+    expect(keys.artifacts).toBe("3");
+    expect(keys.customize).toBe("4");
+    expect(keys.schedules).toBe("5");
+    expect(keys.repos).toBe("6");
+    expect(keys.machines).toBe("7");
   });
 
   /* What the keyless doors used to prove, from the other side: a place in the
@@ -55,24 +76,54 @@ describe("the rail's own shape", () => {
  * reachable only by typing its address, which nobody will.
  */
 describe("Settings' own index", () => {
+  /**
+   * **Three fewer than it held.** People, Teams and Directories are
+   * Organisation's panes now, so they are expected to be *absent* here and
+   * present in `PANE_HOME` — which the loop below is the other half of. The
+   * cross-check is unchanged and is the thing that matters: every pane belongs
+   * to exactly one of the two tables, and a pane in neither is reachable only
+   * by typing its address.
+   */
   test("holds exactly the panes no destination owns", () => {
-    expect(SETTINGS_PANES).toEqual(["people", "teams", "directories", "vault", "server"]);
+    expect(SETTINGS_PANES).toEqual(["vault", "server"]);
     for (const at of SETTINGS_PANES) expect(destinationAt(`/configuration/${at}`)).toBeNull();
   });
 
-  /* The grouping is the part that survived the move out of the rail panel
-     unchanged, so it is the part worth pinning. */
-  test("keeps the three groups the rail panel drew", () => {
-    expect(SETTINGS.map((g) => g.group)).toEqual(["Who can reach what", "Secrets", "This deployment"]);
+  /* "Who can reach what" went with its three panes rather than being left
+     behind as an empty heading. What is left is what is genuinely nobody's
+     work surface: the secrets this installation holds, and the installation. */
+  test("keeps the two groups whose panes stayed", () => {
+    expect(SETTINGS.map((g) => g.group)).toEqual(["Secrets", "This deployment"]);
   });
 
-  test("opens on its first pane, which is where ⌘, lands", () => {
-    expect(SETTINGS_HOME).toBe("/configuration/people");
+  /**
+   * **`⌘,` is Vault, and it is named rather than counted.**
+   *
+   * `SETTINGS_HOME` was the *first pane in this list*, which meant that moving
+   * People out changed what `⌘,`, the profile menu's Settings row and the
+   * palette's Settings command all mean — three entry points, at once, by
+   * array order rather than by anybody's decision. `panes.ts` names the pane
+   * now, so reordering the index moves rows in an index and nothing else.
+   *
+   * Vault because it is the one of the two somebody goes to: a secret is
+   * added, replaced and taken away, where *This Firetower* is read once. And
+   * **not People** — People has a rail icon and `⌘8` now, and a `⌘,` that also
+   * landed there would draw Settings and Organisation as two doors onto one
+   * room, which is the defect that took the Settings door out of the rail.
+   */
+  test("opens on Vault, which is where ⌘, lands", () => {
+    expect(SETTINGS_HOME).toBe("/configuration/vault");
+  });
+
+  /* And it has to be a pane this index actually draws, or ⌘, lands somewhere
+     with no way back out of it. */
+  test("and ⌘, lands on a pane the index lists", () => {
+    expect(SETTINGS_PANES).toContain(SETTINGS_HOME.split("/").pop());
   });
 });
 
 describe("which destination a path is in", () => {
-  test("the six, from their own addresses", () => {
+  test("the first three, from their own addresses", () => {
     expect(destinationAt("/")).toBe("home");
     expect(destinationAt("/tasks")).toBe("tasks");
     expect(destinationAt("/artifacts")).toBe("artifacts");
@@ -96,7 +147,7 @@ describe("which destination a path is in", () => {
   });
 
   /* The twelve configuration panes used to be one screen behind one rail
-     entry. Seven of them now belong to the destination they are about. */
+     entry. Ten of them now belong to the destination they are about. */
   test("every configuration pane a destination owns", () => {
     expect(destinationAt("/configuration/skills")).toBe("customize");
     expect(destinationAt("/configuration/roles")).toBe("customize");
@@ -107,15 +158,25 @@ describe("which destination a path is in", () => {
     expect(destinationAt("/configuration/trackers")).toBe("tasks");
   });
 
-  /* **And Settings' five own none of the six.** These answered "settings"
-     while Settings was the seventh icon in the rail. Lighting a work surface
+  /**
+   * **The three that moved, and the rail lights for all three.**
+   *
+   * They answered `null` while they were Settings' — which was right then, and
+   * is the thing that changed. A member pressing `⌘8` has to land on a
+   * destination that is lit, on a pane that is populated; a rail that marks
+   * nothing while People is on screen would say the pane belongs to nobody.
+   */
+  test("People, Teams and Directories are the Organisation destination", () => {
+    expect(destinationAt("/configuration/people")).toBe("organisation");
+    expect(destinationAt("/configuration/teams")).toBe("organisation");
+    expect(destinationAt("/configuration/directories")).toBe("organisation");
+  });
+
+  /* **And Settings' two own neither of the eight.** Lighting a work surface
      for a screen that is reached from the profile menu would say you are
      somewhere you are not, so the rail marks nothing and Settings' own index
      says where you are. */
   test("Settings' own panes light no destination", () => {
-    expect(destinationAt("/configuration/people")).toBeNull();
-    expect(destinationAt("/configuration/teams")).toBeNull();
-    expect(destinationAt("/configuration/directories")).toBeNull();
     expect(destinationAt("/configuration/vault")).toBeNull();
     expect(destinationAt("/configuration/server")).toBeNull();
   });

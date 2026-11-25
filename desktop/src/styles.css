@@ -2014,15 +2014,15 @@ html:not([data-platform="macos"]) {
   }
 
   /* ── Settings' own index ──────────────────────────────────────────
-     Settings has no rail icon, so the five panes it owns are navigated from
-     inside the page. Plain text with an underline — `.itab`'s rule, for the
-     same job: the index of a page should not compete with the page.
+     Settings has no rail icon, so the panes it owns are navigated from inside
+     the page. Plain text with an underline — `.itab`'s rule, for the same job:
+     the index of a page should not compete with the page.
 
      Two lines, because the grouping is load-bearing. The group name sits over
-     its own cluster rather than beside it, so "Who can reach what" reads as a
-     heading for the three under it; a flat strip of five would have to drop
-     the names, and the names are the part that says why Teams is next to
-     Directories. `SettingsIndex.tsx` has the rest of the argument. */
+     its own cluster rather than beside it, so "This deployment" reads as a
+     heading for what is under it; a flat strip would have to drop the names,
+     and the names are the part that says what a group is *for*.
+     `SettingsIndex.tsx` has the rest of the argument. */
   .snav {
     display: flex;
     align-items: flex-start;

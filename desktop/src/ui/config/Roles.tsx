@@ -786,8 +786,12 @@ function RoleRow({
  *
  * The same facts the editor holds, as text — no fields, no Save, and nothing
  * greyed out. The line at the foot is the *where-this-lives note*: a boundary
- * read as a boundary rather than as a refusal, which is the same move People
- * and Teams make for the administration site.
+ * read as a boundary rather than as a refusal.
+ *
+ * People and Teams used to be named here as making the same move. They no
+ * longer do: People is read–write now and neither of them points at a second
+ * application any more, so the comparison would send a reader to a paragraph
+ * that has gone.
  */
 function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
   const teams = useAgentTeams();

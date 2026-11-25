@@ -142,10 +142,19 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
 
         {/* Where the rest of it is. Everything an administrator does to an
             account happens somewhere else, and a screen that does not say so
-            is a screen people hunt around in. */}
+            is a screen people hunt around in.
+
+            **It used to say the administration site, and it does not any
+            more.** Inviting somebody, changing a role and switching an account
+            off are all in the app now, in the Organisation destination — so
+            this is a pointer across the window rather than out of it, and
+            naming `⌘8` is what makes it one. *Settings → People* would have
+            been doubly wrong: People is not in Settings any more, and `⌘,`
+            goes to Vault. */}
         <WhereTo className="mt-[22px]" icon={<UsersRound className="h-4 w-4" strokeWidth={1.75} />}>
-          Everything else about an account — inviting somebody, changing a role, disabling or deleting —
-          belongs to the administration site and is never drawn here. See <b>Settings &rarr; People</b>.
+          Everything else about an account — inviting somebody, changing a role, switching one off or
+          removing it — is about <b>other people</b> and is never drawn here. An administrator does it
+          in <b>Organisation &rarr; People</b>.
         </WhereTo>
       </div>
     </div>

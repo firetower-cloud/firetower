@@ -23,6 +23,7 @@ import {
   Clock,
   FileClock,
   FolderGit2,
+  FolderOpen,
   GitBranch,
   Inbox,
   Monitor,
@@ -123,7 +124,8 @@ function Contents({ at, stale, onCollapse }: { at: DestinationId; stale: boolean
         {at === "customize" && <Customize />}
         {at === "repos" && <Repositories />}
         {at === "machines" && <Machines />}
-        {/* **Settings' five panes and Updates' two rows used to be here.** They
+        {at === "organisation" && <Organisation path={path} />}
+        {/* **Settings' panes and Updates' two rows used to be here.** They
             were the panels of the two doors below the rail's rule, and both
             doors have gone — the profile menu is the only Settings and the only
             Updates now. Settings' index moved into the page it indexes
@@ -516,6 +518,38 @@ function Customize() {
           ))}
         </>
       )}
+    </>
+  );
+}
+
+/**
+ * Organisation's three panes.
+ *
+ * **An index and nothing under it**, which is the one place this panel differs
+ * from Customize's: there is no *your people* run of rows beneath, because the
+ * list of people is the pane and repeating its first eight here would be the
+ * same list twice on one screen.
+ *
+ * **And no counts, which the drawing had.** The sketch puts `14`, `5` and `6`
+ * beside the three rows, and the number beside People cannot be got without
+ * the administrators-only user list — so drawing it would make a member's rail
+ * panel fire the one request a member is forbidden, on every destination hover,
+ * to render a number. That is the ⌘8 trap in miniature, and it is the reason
+ * the counts are not here. `Configuration.tsx` already refuses counts in an
+ * index for the cheaper version of the same reason: a number beside every row
+ * fetches every list to render it.
+ */
+function Organisation({ path }: { path: string }) {
+  return (
+    <>
+      <Row label="People" icon={UserRound} on={pane(path) === "people"} to="/configuration/people" />
+      <Row label="Teams" icon={UsersRound} on={pane(path) === "teams"} to="/configuration/teams" />
+      <Row
+        label="Directories"
+        icon={FolderOpen}
+        on={pane(path) === "directories"}
+        to="/configuration/directories"
+      />
     </>
   );
 }

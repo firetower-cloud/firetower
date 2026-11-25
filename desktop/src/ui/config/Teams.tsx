@@ -1,13 +1,22 @@
 /**
- * The teams a grant can be held by, and who is in each. Read, and only read.
+ * The teams a grant can be held by, and who is in each. Read, for now.
  *
  * **A team is people-shaped.** It outlives every resource it was ever granted
- * on, and saying who is in one is a statement about the organisation rather
- * than about any piece of work — so it is made and changed on the
- * administration site, beside the accounts it names.
+ * on, so saying who is in one is a statement about the organisation rather than
+ * about any piece of work — which is why it sits in the Organisation
+ * destination beside People, and not beside the thing being shared.
  *
- * Granting a team access to a directory is the opposite: that is resource-
- * shaped, it belongs beside the thing being shared, and it stays here.
+ * Granting a team access to a directory is the opposite: that is
+ * resource-shaped, it belongs beside the thing being shared, and it is
+ * Directories' and the sharing sheet's.
+ *
+ * **The *Manage on the web* link and the paragraph naming the administration
+ * site have both gone**, with the control itself — they existed only because
+ * this screen could not do the thing being asked of it, and sending somebody to
+ * a second application is no longer an answer to anything. Making this pane
+ * write is its own change and is not this one: what is left here is the read it
+ * always was, in its new home, saying nothing untrue about where a team comes
+ * from.
  *
  * `Everyone` has no membership rows, because the membership that has to be true
  * is "however many people exist right now" — so it is drawn without an
@@ -18,15 +27,12 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, UsersRound } from "lucide-react";
 import { Avatar, Icon } from "~/components/ui";
 import { useListTeamMembers, useListTeams } from "~/api/generated/access/access";
-import { useMe } from "~/api/generated/auth/auth";
 import type { Team } from "~/api/generated/model";
-import type { Backend } from "~/fleet";
-import { Group, ManageOnTheWeb, Rows, Section, WhereTo } from "~/ui/config/bits";
+import { Group, Rows, Section, WhereTo } from "~/ui/config/bits";
 import { trouble, why } from "~/data";
 
-export function Teams({ backend }: { backend: Backend }) {
+export function Teams() {
   const q = useListTeams();
-  const me = useMe();
   const blank = !q.isPending && !q.error && (q.data ?? []).length === 0;
 
   return (
@@ -36,14 +42,12 @@ export function Teams({ backend }: { backend: Backend }) {
       settling={q.isPending}
       trouble={trouble(q.error)}
       error={q.error ? why(q.error) : null}
-      action={<ManageOnTheWeb url={backend.url} may={me.data?.user?.role === "admin"} />}
     >
       <Group>
         <Rows
           feed={{ data: q.data ?? [], loading: q.isPending, error: q.error ? why(q.error) : null }}
           icon={UsersRound}
           empty="No teams yet"
-          note="A team is made on the administration site, beside the accounts it names."
         >
           {(q.data ?? []).map((t) => (
             <One key={t.id} team={t as Team} />
@@ -51,14 +55,15 @@ export function Teams({ backend }: { backend: Backend }) {
         </Rows>
       </Group>
 
-      {/* Never beside a blank: granting a team access to a directory is
-          about operating teams this reader does not have, and the blank's own
-          sentence already names where one is made. */}
+      {/* The distinction, which is the thing a reader of this list actually
+          needs and the one part of the old paragraph that was never about
+          going somewhere else. Never beside a blank: it is about operating
+          teams this reader does not have yet. */}
       {!blank && (
         <WhereTo>
-          Who is in a team is decided on the administration site, beside the accounts it names — a
-          team <b>outlives every resource it was ever granted on</b>. Granting one access to a
-          directory is the opposite, and stays here.
+          A team <b>outlives every resource it was ever granted on</b>, so who is in one is a
+          statement about the organisation. Granting a team access to a directory is the opposite —
+          it belongs beside the thing being shared — and the two are kept apart on purpose.
         </WhereTo>
       )}
     </Section>

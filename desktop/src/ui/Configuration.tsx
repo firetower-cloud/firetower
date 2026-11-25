@@ -3,8 +3,8 @@
  *
  * **One page became too many things.** It was five sections on one scroll —
  * fine at five, and this is nine now. What makes it survivable is that each
- * pane has an index: seven of them belong to a rail destination and are
- * indexed by that destination's panel, and Settings' five are indexed inside
+ * pane has an index: ten of them belong to a rail destination and are indexed
+ * by that destination's panel, and the two Settings has left are indexed inside
  * the page by `config/SettingsIndex.tsx`, because Settings has no rail icon —
  * it is a row in the profile menu. Neither index is a second *column*: two
  * rails side by side was a busy screen where one of them was always
@@ -81,9 +81,9 @@ function Pane({ at, open, backend, onForgot }: { at: string; open: string | null
     case "agent-teams":
       return <AgentTeams open={open} />;
     case "people":
-      return <People backend={backend} />;
+      return <People />;
     case "teams":
-      return <Teams backend={backend} />;
+      return <Teams />;
     case "directories":
       return <Directories />;
     case "vault":
