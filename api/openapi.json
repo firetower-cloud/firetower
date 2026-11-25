@@ -1474,6 +1474,37 @@
         }
       }
     },
+    "/api/v1/connectors/{id}/tools": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "operationId": "connector_tools",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Tools"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/consumption": {
       "get": {
         "tags": [
@@ -2666,6 +2697,63 @@
             }
           },
           "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library": {
+      "get": {
+        "tags": [
+          "library"
+        ],
+        "operationId": "list_library",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Item"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/library/switch": {
+      "post": {
+        "tags": [
+          "library"
+        ],
+        "summary": "Turn one component on or off, for this person.",
+        "operationId": "switch_item",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LibrarySwitch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
             "description": "",
             "content": {
               "application/json": {
@@ -14049,6 +14137,86 @@
           }
         }
       },
+      "Item": {
+        "type": "object",
+        "description": "One thing in the library.",
+        "required": [
+          "id",
+          "skillId",
+          "kind",
+          "name",
+          "description",
+          "on",
+          "builtin"
+        ],
+        "properties": {
+          "auth": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "builtin": {
+            "type": "boolean",
+            "description": "Firetower's own, which nobody can remove because the next boot puts it back."
+          },
+          "connected": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Whether **you** hold a credential for it. `None` for a skill."
+          },
+          "description": {
+            "type": "string"
+          },
+          "from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The bundle's name, when the bundle holds more than this one thing.\n`None` when the component *is* the bundle, because \"from notion\" under\na row called notion is noise."
+          },
+          "id": {
+            "type": "string",
+            "description": "`<skill id>:<path>`. Opaque, and the handle every write takes."
+          },
+          "kind": {
+            "type": "string",
+            "description": "`skill` or `server`."
+          },
+          "logo": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The bundle's own mark, shared by everything inside it."
+          },
+          "name": {
+            "type": "string"
+          },
+          "on": {
+            "type": "boolean",
+            "description": "Whether a plain agent of yours opens with it."
+          },
+          "server": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "skillId": {
+            "type": "string",
+            "description": "The bundle it lives in, which the detail screen and removal both need."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
       "ItemId": {
         "type": "string",
         "description": "One thing in the transcript — a message, a thought, a tool call."
@@ -14201,6 +14369,22 @@
           "writer",
           "admin"
         ]
+      },
+      "LibrarySwitch": {
+        "type": "object",
+        "required": [
+          "id",
+          "on"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "**In the body, not the path.** A component's handle is\n`<skill id>:skills/<name>/SKILL.md` — it carries slashes, and a path\nparameter holding one is a different route. The switch silently did\nnothing until this moved."
+          },
+          "on": {
+            "type": "boolean"
+          }
+        }
       },
       "Limit": {
         "type": "object",
@@ -19552,6 +19736,37 @@
         "properties": {
           "password": {
             "type": "string"
+          }
+        }
+      },
+      "Tools": {
+        "type": "object",
+        "description": "What one server says it can do.",
+        "required": [
+          "names"
+        ],
+        "properties": {
+          "fetchedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When somebody last asked. `None` has never been asked."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tool names, in the order the server listed them."
+          },
+          "why": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why there is nothing, when there is nothing."
           }
         }
       },

@@ -17,6 +17,7 @@ mod annotations;
 pub(crate) mod artifacts;
 mod auth;
 mod connectors;
+mod library;
 mod marketplaces;
 mod consumption;
 mod conversation;
@@ -502,7 +503,7 @@ pub(crate) async fn with_connectors(
 /// plugin loads with its skills and without its tools, and the interface is
 /// where somebody is asked to connect. Refusing a whole session because one
 /// connector is unauthorized would make it cost every other plugin in the set.
-async fn connector_token(
+pub(crate) async fn connector_token(
     state: &AppState,
     skill_id: &str,
     owner: &str,
@@ -843,6 +844,9 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(marketplaces::refresh_marketplace))
         .routes(routes!(marketplaces::list_entries))
         .routes(routes!(marketplaces::install_entry))
+        .routes(routes!(library::list_library))
+        .routes(routes!(library::switch_item))
+        .routes(routes!(library::connector_tools))
         .routes(routes!(skills::list_skills, skills::create_skill))
         .routes(routes!(skills::match_skills))
         .routes(routes!(skills::rename_skill, skills::delete_skill))

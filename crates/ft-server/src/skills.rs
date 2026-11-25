@@ -3433,12 +3433,25 @@ impl Skills {
     /// this function's resolution order rather than here.
     pub async fn bundles_for_session(&self, session: &str) -> Result<Vec<ft_proto::SkillBundle>> {
         let rows = sqlx::query(
+            // **The components this person switched off are left out here**,
+            // rather than at pin time, because a pin is over a version and a
+            // switch is over a path. The skill folder simply does not arrive,
+            // which is what every engine already handles: a plugin with two
+            // skills and one of them muted is a plugin with one skill.
             "SELECT p.skill_id, k.name, k.kind, f.path, f.executable, b.bytes \
                FROM skill_pins p \
                JOIN skills k ON k.id = p.skill_id \
                JOIN skill_files f ON f.version_id = p.version_id \
                JOIN blobs b ON b.hash = f.hash \
+               JOIN sessions s ON s.id = p.session_id \
               WHERE p.session_id = $1 \
+                AND NOT EXISTS ( \
+                      SELECT 1 FROM component_off o \
+                       WHERE o.skill_id = p.skill_id AND o.person_id = s.user_id \
+                         AND (f.path = o.path \
+                              OR (o.path LIKE 'skills/%/SKILL.md' \
+                                  AND f.path LIKE replace(o.path, 'SKILL.md', '') || '%')) \
+                    ) \
               ORDER BY k.name, p.skill_id, f.path",
         )
         .bind(session)
@@ -3540,11 +3553,17 @@ impl Skills {
     /// is what `deliverable` already guarantees is unique within one session.
     pub async fn connectors_for_session(&self, session: &str) -> Result<Vec<SessionConnector>> {
         let rows = sqlx::query(
+            // A server switched off is a server the agent is not handed, the
+            // same way a muted skill is one it never reads.
             "SELECT k.id AS skill_id, k.name AS plugin, c.server, c.url, c.auth, c.borrow \
                FROM skill_pins p \
                JOIN skills k ON k.id = p.skill_id \
                JOIN connectors c ON c.skill_id = k.id \
+               JOIN sessions s ON s.id = p.session_id \
               WHERE p.session_id = $1 \
+                AND NOT EXISTS (SELECT 1 FROM component_off o \
+                                 WHERE o.skill_id = k.id AND o.person_id = s.user_id \
+                                   AND o.path = '.mcp.json') \
               ORDER BY k.name",
         )
         .bind(session)

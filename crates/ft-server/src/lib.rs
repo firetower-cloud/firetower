@@ -23,6 +23,7 @@ pub mod diagnose;
 pub mod fleet;
 pub mod forward;
 pub mod install;
+pub mod library;
 pub mod marketplace;
 pub mod notify;
 pub mod oauth;

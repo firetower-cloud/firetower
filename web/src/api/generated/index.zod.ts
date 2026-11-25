@@ -9,6 +9,7 @@ export * from './consumption/consumption.zod';
 export * from './conversation/conversation.zod';
 export * from './events/events.zod';
 export * from './hosts/hosts.zod';
+export * from './library/library.zod';
 export * from './marketplaces/marketplaces.zod';
 export * from './meta/meta.zod';
 export * from './organization/organization.zod';

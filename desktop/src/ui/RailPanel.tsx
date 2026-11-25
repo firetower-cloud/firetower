@@ -498,12 +498,18 @@ function Customize() {
   const lone = skills.data.filter((s) => s.kind !== "plugin");
   return (
     <>
-      <Row label="Skills" icon={Puzzle} on={pane(path) === "skills"} to="/configuration/skills" />
-      {/* A plugin is a bundle that may hold several components — skills, a
-          connector, commands — so it is its own destination rather than a
-          filter on Skills: the two lists answer different questions, and one
-          of them has a shelf in it. */}
-      <Row label="Plugins" icon={Blocks} on={pane(path) === "plugins"} to="/configuration/plugins" />
+      {/* **One entry, both words.** Somebody scanning for "Skills" and
+          somebody scanning for "MCP" are looking for the same page, and two
+          rows into one list meant a highlight that was wrong as soon as you
+          changed the filter. The skill editor still answers at
+          `/configuration/skills`; it is reached from a row rather than from
+          here, because nobody opens a rail looking for an editor. */}
+      <Row
+        label="Skills & MCP"
+        icon={Puzzle}
+        on={pane(path) === "plugins" || pane(path) === "skills"}
+        to="/configuration/plugins"
+      />
       <Row label="Agent profiles" icon={UsersRound} on={pane(path) === "roles"} to="/configuration/roles" />
       {/* Directly after Agent profiles: a profile is what an agent is, and a
           team is where it sits and who is under it. */}

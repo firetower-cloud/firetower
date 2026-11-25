@@ -7617,3 +7617,38 @@ html:not([data-platform="macos"]) {
     color: var(--color-text);
   }
 }
+
+  /* Two segmented controls on one line — what it is, and whether you have
+     it. The pair reads as one bar because they share a track height and a
+     divider, and they compose: "Skills" plus "Discover" is a question
+     somebody really has. */
+  .seg2 {
+    display: inline-flex;
+    gap: 2px;
+    flex: none;
+    padding: 3px;
+    border-radius: 99px;
+    background: var(--color-sunk);
+  }
+  .seg2 button {
+    font: inherit;
+    font-size: var(--text-meta);
+    padding: 4px 13px;
+    border: 0;
+    border-radius: 99px;
+    background: transparent;
+    color: var(--color-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .seg2 button:hover { color: var(--color-bone); }
+  .seg2 button[aria-selected="true"] {
+    background: var(--color-panel);
+    color: var(--color-bone);
+    font-weight: var(--weight-mid);
+    box-shadow: var(--shadow-raise);
+  }
+  /* Something already taken sits quieter than something on offer, rather
+     than being hidden: a Discover search that returns nothing for a thing
+     you own reads as "it does not exist". */
+  .pcard[data-had] { opacity: .66; }
