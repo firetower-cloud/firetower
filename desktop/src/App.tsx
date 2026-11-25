@@ -13,6 +13,7 @@ import { bridge } from "~/bridge";
 import { StartProvider } from "~/start";
 import { Connect } from "~/ui/Connect";
 import { servers, onServers, tokensKnown } from "~/servers";
+import { ownFiretower } from "~/probe";
 import { Boundary } from "~/ui/Boundary";
 import { Gate } from "~/ui/Gate";
 import { navigate, usePathname } from "~/shims/next-navigation";
@@ -21,6 +22,16 @@ import { startCourier } from "~/telemetry";
 import { useConfirm } from "~/ui/Confirm";
 
 const StylePage = import.meta.env.DEV ? lazy(() => import("~/ui/StylePage").then((m) => ({ default: m.StylePage }))) : () => null;
+
+/**
+ * Which Firetower this client is for, asked once.
+ *
+ * Module scope because the answer cannot change while the page is open — it is
+ * the origin the document was loaded from, the presence of a native shell, and
+ * how this bundle was built. Recomputing it per render would read the same
+ * three things and get the same answer.
+ */
+const own = ownFiretower();
 
 const WHICH = "firetower.current";
 /** What this used to be called, when it could also hold `"all"`. */
@@ -230,7 +241,21 @@ function Window() {
             <StylePage />
           </Suspense>
         ) : connecting || none ? (
+          /* **`at` only on the first run, and only in a browser.** A page
+             served by a control plane knows which Firetower it is for — it was
+             loaded from it — so the first question has an answer and `Connect`
+             skips it, exactly the way it already skips it for a server whose
+             token died. What is left is the sign-in, unchanged.
+
+             Not when `connecting`: that is somebody pressing "connect to
+             another Firetower" in the switcher, and they are there precisely
+             to type an address. Answering it for them would break the one
+             thing this ticket is told to leave intact.
+
+             Not in the shell, and not in a dev build. `ownFiretower` is where
+             that is decided and why. */
           <Connect
+            at={own.ask || connecting ? undefined : own.url}
             onDone={(serverId) => {
               setWhich(serverId);
               navigate("/");
