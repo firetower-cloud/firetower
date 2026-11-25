@@ -232,7 +232,7 @@ Left alone for three days of heavy use, this reached 1,117 schemas and 514 MB.
 
 `vite build` writes `desktop/dist` and `next build` writes `web/out`, and the
 control plane compiles both into the binary — that is what makes a deployment
-one image and one origin. Four things follow:
+one image and one origin. Five things follow:
 
 * Neither directory is committed, and neither is a placeholder in it: a build
   empties the directory before writing it, so anything committed there is
@@ -253,6 +253,12 @@ one image and one origin. Four things follow:
 * The application is a hash router, so its routes live after a `#` and never
   reach the server — which is why there is no single-page fallback, and why
   adding one would swallow the API, previews and artifacts.
+* Both carry a content policy, a frame refusal and `nosniff`, set in `web.rs`
+  and nowhere else — the reverse proxy in `deploy/Caddyfile` sets none. The
+  policy is derived from the one the desktop shell ships and is **a
+  production-only failure class**: a directive that is too narrow is a feature
+  that quietly does not work, for everybody except the person who wrote it.
+  Tighten it only against a browser, never against the string.
 
 ## Images, and the worker
 

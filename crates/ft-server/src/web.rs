@@ -54,6 +54,109 @@ struct Renderer;
 #[folder = "$CARGO_MANIFEST_DIR/../../web/out"]
 struct Site;
 
+/// What a page served from here may load, and from where.
+///
+/// **Derived from the policy the desktop shell already ships**
+/// (`desktop/src-tauri/tauri.conf.json`, `app.security.csp`, which
+/// `desktop/src/shell-csp.test.ts` asserts) rather than invented, because that
+/// string is the one proven against this application in a shipped build. Two
+/// things are dropped from it: `ipc:` and `http://ipc.localhost`, which are
+/// Tauri's own transport and address nothing over HTTP.
+///
+/// **This is a production-only failure class, and it has bitten this project
+/// before.** `shell-csp.test.ts` exists because of it: Tauri injects its policy
+/// only into documents it serves itself, so `pnpm dev` carries none, and
+/// `img-src` was once too narrow — a release drew a placeholder for every
+/// artifact tile while development drew the picture. Nothing errors. A
+/// directive that is too narrow is simply a feature that does not work for
+/// everybody except the person who wrote it. So every allowance below is
+/// either carried across from that string or measured against the bundles as
+/// built, and both bundles were driven in a browser against a non-dev server
+/// with the violation reporter wired up before this was committed.
+///
+/// What each is load-bearing for:
+///
+/// - `img-src … http: https:` — the incident above. A thumbnail is an `<img>`
+///   against whichever control plane the artifact lives on.
+/// - `img-src … data: blob:` — a screenshot pasted into the composer, and a
+///   picture read through the API with a bearer token.
+/// - `connect-src … http: https: ws: wss:` — the API and the event stream.
+///   Same-origin now that the control plane serves the page, but
+///   multi-installation switching is still in the product and still reaches
+///   another Firetower.
+/// - `frame-src 'self' http: https:` — `PreviewTab` and `ArtifactTab` both
+///   embed an `<iframe>`, and a preview and an artifact are each a whole
+///   hostname of their own. Narrowing this would empty both tabs. Neither is
+///   reachable on a fresh install with no worker, so neither was driven here;
+///   carrying the shipped string across verbatim is what keeps that surface's
+///   constraints exactly as they are today.
+/// - `style-src 'unsafe-inline'` — React writes `style` attributes and xterm
+///   injects a stylesheet. Not optional for either bundle.
+///
+/// `fonts.googleapis.com` and `fonts.gstatic.com` are carried across and appear
+/// to be referenced by nothing: both applications ship their own woff2 and a
+/// grep of the built bundles and of both sources finds neither host. They are
+/// kept anyway, deliberately. Removing an allowance is the direction that fails
+/// invisibly in a release, which is the whole subject of this comment, and the
+/// saving is two font hosts. They are the first thing to drop for somebody who
+/// can watch a real deployment afterwards.
+///
+/// **`eval` stays blocked, and that was measured rather than assumed.** Driving
+/// both bundles turned up one violation and only one, on every page of both:
+/// `script-src blocked eval`, from a zero-argument `Function()` inside a lazy
+/// `get value` getter in each bundle's vendor chunk — a feature probe. Nothing
+/// is thrown, every page renders with live data, signing in works, and a `POST`
+/// issued from a page under this policy comes back 200. It is also not a
+/// regression for the renderer: the shell ships `default-src 'self'` with no
+/// `script-src` either, which blocks `eval` in exactly the same way, so the
+/// renderer has run against this in every release. `'unsafe-eval'` would buy
+/// nothing and is in neither policy.
+///
+/// No `script-src` here, so scripts fall back to `default-src 'self'` — the
+/// same arrangement the shell ships, and the same thing
+/// `shell-csp.test.ts`'s "does not let anything execute from off the machine"
+/// is about. [`SITE_POLICY`] is where that is not true.
+const POLICY: &str = "default-src 'self'; \
+style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+font-src 'self' https://fonts.gstatic.com; \
+img-src 'self' data: blob: http: https:; \
+connect-src 'self' http: https: ws: wss:; \
+frame-src 'self' http: https:; \
+frame-ancestors 'none'; \
+base-uri 'self'; \
+object-src 'none'";
+
+/// [`POLICY`] with one directive in front of it, for the administration site.
+///
+/// **Its export cannot run without inline script.** Every one of the twelve
+/// exported pages carries two inline `<script>` blocks — `self.__next_f.push(…)`,
+/// the server-component payload the page hydrates from — and no usable nonce:
+/// the only `nonce` in the HTML is an escaped string inside that payload, and a
+/// static export written at build time could not carry a per-request one
+/// anyway. Under `default-src 'self'` alone the browser refuses both, and the
+/// administration site renders an empty page. In production. Only.
+///
+/// Hashing them instead was considered and is not worth it: the payload differs
+/// per page and changes on every build, so it would be twelve hashes to
+/// regenerate whenever anybody edits a screen, and a stale one fails exactly
+/// the same silent way.
+///
+/// So this is scoped to the bundle that needs it rather than granted to both.
+/// The renderer has no inline script at all — its shell is three `src=`
+/// references — and it is the surface growing the controls that invite a
+/// person and change a role, so it is the one that keeps the strict rule. This
+/// directive goes away with the administration site.
+const SITE_POLICY: &str = "script-src 'self' 'unsafe-inline'; \
+default-src 'self'; \
+style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; \
+font-src 'self' https://fonts.gstatic.com; \
+img-src 'self' data: blob: http: https:; \
+connect-src 'self' http: https: ws: wss:; \
+frame-src 'self' http: https:; \
+frame-ancestors 'none'; \
+base-uri 'self'; \
+object-src 'none'";
+
 /// Which bundle a file came from, and therefore which rules apply to it.
 ///
 /// The caching rule below is the reason this exists as a type rather than as a
@@ -112,6 +215,14 @@ impl Bundle {
     /// structurally rather than by a second check: neither hashed tree contains
     /// an `.html` file at all, and `nothing_marks_a_shell_immutable` asserts it
     /// over whatever is embedded.
+    /// What a document from this bundle is allowed to load, and from where.
+    fn policy(self) -> &'static str {
+        match self {
+            Bundle::Renderer => POLICY,
+            Bundle::Site => SITE_POLICY,
+        }
+    }
+
     fn hashed(self, name: &str) -> bool {
         match self {
             Bundle::Renderer => name.starts_with("assets/"),
@@ -139,6 +250,7 @@ impl Bundle {
                 .first_or_octet_stream()
                 .to_string(),
             immutable: self.hashed(name),
+            policy: self.policy(),
             body,
         }
     }
@@ -152,23 +264,29 @@ pub async fn serve(request: Request) -> Response {
     // answering it with a page of HTML turns a clear 404 into a parse error in
     // whatever asked.
     if path.starts_with("/api/") {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(crate::api::ApiError::new(
-                crate::api::ErrorCode::NotFound,
-                "no such endpoint",
-            )),
-        )
-            .into_response();
+        return hardened(
+            (
+                StatusCode::NOT_FOUND,
+                Json(crate::api::ApiError::new(
+                    crate::api::ErrorCode::NotFound,
+                    "no such endpoint",
+                )),
+            )
+                .into_response(),
+            POLICY,
+        );
     }
 
     if let Some(sentence) = unbuilt(Bundle::Renderer.built(), Bundle::Site.built()) {
-        return (
-            StatusCode::NOT_FOUND,
-            [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-            sentence,
-        )
-            .into_response();
+        return hardened(
+            (
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
+                sentence,
+            )
+                .into_response(),
+            POLICY,
+        );
     }
 
     match resolve(request.uri()) {
@@ -177,14 +295,19 @@ pub async fn serve(request: Request) -> Response {
         // like Firetower. 200 would be a lie to anything crawling it. It is the
         // administration site's — the renderer ships no such page, because a
         // hash router cannot be asked for a path it does not have.
+        // Its policy is the site's, because the page is: it hydrates from the
+        // same two inline scripts every other exported page does.
         None => match Site::get("404.html") {
-            Some(page) => (
-                StatusCode::NOT_FOUND,
-                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
-                page.data.into_owned(),
-            )
-                .into_response(),
-            None => StatusCode::NOT_FOUND.into_response(),
+            Some(page) => hardened(
+                (
+                    StatusCode::NOT_FOUND,
+                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    page.data.into_owned(),
+                )
+                    .into_response(),
+                SITE_POLICY,
+            ),
+            None => hardened(StatusCode::NOT_FOUND.into_response(), POLICY),
         },
     }
 }
@@ -231,6 +354,53 @@ struct Asset {
     /// Hashed filenames never change contents; everything else must be
     /// re-checked or an upgrade is invisible until someone clears their cache.
     immutable: bool,
+    /// Which bundle's content policy this file is served under.
+    policy: &'static str,
+}
+
+/// The headers every response from this module carries, whatever it is.
+///
+/// Stamped in one place, on the way out, rather than at each of the four points
+/// that build a response here — the same argument as checking `..` once above
+/// both bundles. A header set that has to be remembered per branch is one that
+/// will be missing from the branch added next, and "which responses carry a
+/// frame rule" is not a question anybody should have to answer by reading.
+///
+/// **Framing is the one that is genuinely new.** A Tauri window cannot be put
+/// in somebody else's page; a web page can, and the page now being served is
+/// the one growing the controls that invite a person and change their role. A
+/// clickjacked administrator is the concrete risk, so the frame rule is said
+/// twice: `frame-ancestors` for browsers that read the policy, and
+/// `X-Frame-Options` for the older ones that only read the header. Neither
+/// touches artifacts or previews — those are answered by `preview_first` and
+/// `artifact::serve`, before anything reaches this module, and they are
+/// embedded *by* the application rather than embedding it.
+///
+/// **`nosniff` matters here specifically.** `load` falls back to
+/// `application/octet-stream` for a name whose type it cannot guess, and a
+/// browser left to sniff may conclude something else entirely — which turns an
+/// unrecognised file in a bundle into whatever the sniffer decides it is.
+///
+/// `Referrer-Policy: same-origin` because an address here can carry a session
+/// or workspace id in its path, and nothing in either bundle needs a referrer
+/// to arrive at another origin. Not `no-referrer`: same-origin requests keep
+/// theirs, which costs nothing and leaves ordinary navigation legible in a log.
+fn hardened(mut response: Response, policy: &'static str) -> Response {
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(policy),
+    );
+    headers.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("same-origin"),
+    );
+    response
 }
 
 impl IntoResponse for Asset {
@@ -241,7 +411,8 @@ impl IntoResponse for Asset {
             "no-cache"
         };
 
-        Response::builder()
+        let policy = self.policy;
+        let response = Response::builder()
             .header(
                 header::CONTENT_TYPE,
                 HeaderValue::from_str(&self.content_type)
@@ -249,7 +420,9 @@ impl IntoResponse for Asset {
             )
             .header(header::CACHE_CONTROL, HeaderValue::from_static(cache))
             .body(Body::from(self.body))
-            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+
+        hardened(response, policy)
     }
 }
 
@@ -667,6 +840,180 @@ mod tests {
             site_candidates("organization/")[2],
             "organization/index.html"
         );
+    }
+
+    /// The sources a directive names, or nothing if it has no directive.
+    ///
+    /// Written the way `desktop/src/shell-csp.test.ts` writes it, because this
+    /// is the same job on the other side of the same policy: the shipped shell
+    /// asserts the string it injects, and this asserts the string the control
+    /// plane sends.
+    fn sources(policy: &str, directive: &str) -> Vec<String> {
+        policy
+            .split(';')
+            .map(str::trim)
+            .find(|d| *d == directive || d.starts_with(&format!("{directive} ")))
+            .map(|d| d.split_whitespace().skip(1).map(String::from).collect())
+            .unwrap_or_default()
+    }
+
+    /// Whether a directive would let a page load an address.
+    ///
+    /// Only the shapes these policies are written in — a bare scheme, a
+    /// keyword, an exact origin — for the reason the shell's copy of this
+    /// gives: a general CSP evaluator is a second implementation to be wrong in
+    /// its own way. Anything else answers false and the test that cares fails
+    /// loudly, which is the right way round.
+    fn allows(policy: &str, directive: &str, address: &str) -> bool {
+        let scheme = address.split(':').next().unwrap_or_default();
+        let origin = address
+            .split_once("://")
+            .map(|(s, rest)| format!("{s}://{}", rest.split('/').next().unwrap_or_default()));
+        sources(policy, directive).iter().any(|src| {
+            src == "*" || src == &format!("{scheme}:") || Some(src.as_str()) == origin.as_deref()
+        })
+    }
+
+    /// **What both bundles are known to ask for, against the policy they are
+    /// actually served under.**
+    ///
+    /// The point of this test is the sentence at the top of
+    /// `desktop/src/shell-csp.test.ts`: a policy reaches only what a shipped
+    /// build serves, so every mistake in one is invisible to the person making
+    /// it and arrives as a feature that quietly does not work. That already
+    /// happened here once — `img-src` was `'self' data: blob:` and a release
+    /// drew a placeholder for every artifact tile while development drew the
+    /// picture.
+    ///
+    /// So these are addresses the applications really fetch, not a reading of
+    /// the directives. Somebody tightening this finds out here rather than from
+    /// somebody whose tiles are blank.
+    #[test]
+    fn the_policy_permits_what_both_bundles_ask_for() {
+        for policy in [POLICY, SITE_POLICY] {
+            // The incident, both ways: a thumbnail is an `<img>` against
+            // whichever control plane the artifact lives on, and most
+            // Firetowers are http on a port nobody can predict.
+            let poster = "/__firetower/poster/a_01jc-3f2a9c81d0e4b7a6.png?v=v_01jc";
+            assert!(allows(
+                policy,
+                "img-src",
+                &format!("https://firetower.example.com{poster}")
+            ));
+            assert!(allows(
+                policy,
+                "img-src",
+                &format!("http://10.0.0.4:3000{poster}")
+            ));
+            // A screenshot pasted into the composer, and a picture read
+            // through the API with a bearer token.
+            assert!(allows(
+                policy,
+                "img-src",
+                "data:image/png;base64,iVBORw0KGgo="
+            ));
+            assert!(allows(
+                policy,
+                "img-src",
+                "blob:http://localhost:4400/8f2c-1d"
+            ));
+
+            // The API and the event stream.
+            assert!(allows(
+                policy,
+                "connect-src",
+                "https://firetower.example.com/api/v1/bootstrap"
+            ));
+            assert!(allows(
+                policy,
+                "connect-src",
+                "wss://firetower.example.com/api/v1/events"
+            ));
+            assert!(allows(
+                policy,
+                "connect-src",
+                "ws://localhost:4400/api/v1/events"
+            ));
+
+            // `PreviewTab` and `ArtifactTab` each embed an iframe, and a
+            // preview and an artifact are each a hostname of their own.
+            assert!(allows(
+                policy,
+                "frame-src",
+                "https://s-1-8080-ab12.firetower.example.com/"
+            ));
+            assert!(allows(policy, "frame-src", "http://127.0.0.1:4400/a_01jc"));
+
+            // React writes `style` attributes and xterm injects a stylesheet.
+            assert!(
+                sources(policy, "style-src")
+                    .iter()
+                    .any(|s| s == "'unsafe-inline'"),
+                "both bundles write inline styles"
+            );
+
+            // The frame rule, which is the new thing here. Said in the policy
+            // and again in a header beside it, for browsers that read only one.
+            assert_eq!(sources(policy, "frame-ancestors"), ["'none'"]);
+            assert_eq!(sources(policy, "object-src"), ["'none'"]);
+            assert_eq!(sources(policy, "base-uri"), ["'self'"]);
+
+            // Tauri's own transport, which addresses nothing over HTTP.
+            assert!(!policy.contains("ipc:"), "{policy}");
+            assert!(!policy.contains("ipc.localhost"), "{policy}");
+            // Never, in either: the shell ships without it and so does this.
+            assert!(!policy.contains("'unsafe-eval'"), "{policy}");
+        }
+    }
+
+    /// The one difference between the two, and why it is one.
+    ///
+    /// The administration site's export carries two inline `<script>` blocks on
+    /// every page — the payload it hydrates from — with no usable nonce, so
+    /// `'unsafe-inline'` is what stands between a release and a blank page. The
+    /// renderer has no inline script at all and therefore keeps the strict
+    /// rule, which matters because it is the surface the administration
+    /// controls are moving on to.
+    #[test]
+    fn only_the_administration_site_may_run_inline_script() {
+        assert_eq!(sources(POLICY, "script-src"), Vec::<String>::new());
+        assert_eq!(sources(POLICY, "default-src"), ["'self'"]);
+        assert_eq!(
+            sources(SITE_POLICY, "script-src"),
+            ["'self'", "'unsafe-inline'"]
+        );
+
+        // Stated as "the strict one plus one directive" rather than written out
+        // twice and hoped about: a directive added to one and forgotten in the
+        // other is a production-only difference between two halves of one
+        // address.
+        assert_eq!(
+            SITE_POLICY,
+            format!("script-src 'self' 'unsafe-inline'; {POLICY}"),
+            "the site's policy is the strict one with exactly one addition"
+        );
+    }
+
+    /// Every response this module can produce carries the headers, including
+    /// the ones that are not a file at all.
+    #[test]
+    fn nothing_leaves_here_unhardened() {
+        let bare = hardened(StatusCode::NOT_FOUND.into_response(), POLICY);
+        let headers = bare.headers();
+        assert_eq!(headers[header::CONTENT_SECURITY_POLICY], POLICY);
+        assert_eq!(headers[header::X_FRAME_OPTIONS], "DENY");
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+        assert_eq!(headers[header::REFERRER_POLICY], "same-origin");
+
+        // And a file carries its own bundle's policy rather than a default.
+        let site = Bundle::Site
+            .describe("organization.html", b"<!doctype html>".to_vec())
+            .into_response();
+        assert_eq!(site.headers()[header::CONTENT_SECURITY_POLICY], SITE_POLICY);
+        let app = Bundle::Renderer
+            .describe("index.html", b"<!doctype html>".to_vec())
+            .into_response();
+        assert_eq!(app.headers()[header::CONTENT_SECURITY_POLICY], POLICY);
     }
 
     /// The sentence names the half that is missing, because "run `just build`"
