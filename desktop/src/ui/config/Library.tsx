@@ -201,7 +201,6 @@ export function Library({ open: asked = null }: { open?: string | null }) {
       )}
       <Section
         title="Skills &amp; MCP"
-        note="What an agent can do past the model — the servers it can call tools on, and the instructions for using them well. Everything here reaches whichever engine a session runs on."
         action={
           <div className="flex items-center gap-2">
             <button type="button" className="out" onClick={() => setPasting((p) => !p)}>
@@ -454,9 +453,7 @@ function Thing({
             )}
             Connect
           </button>
-        ) : (
-          <span className="shrink-0 text-meta text-mute">uses your git credential</span>
-        ))}
+        ) : null)}
 
       <button
         type="button"

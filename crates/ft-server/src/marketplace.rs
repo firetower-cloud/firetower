@@ -404,18 +404,12 @@ pub fn connector_of(files: &[(String, Vec<u8>)]) -> Option<(String, String, Stri
     let (name, server) = servers.iter().next()?;
     let url = server.get("url").and_then(Value::as_str)?.to_string();
 
-    // Our own key, which every other client ignores. It says this server
-    // takes a credential Firetower already holds, so there is no flow to run.
-    let ours = server.get("firetower");
-    let auth = ours
-        .and_then(|f| f.get("auth"))
-        .and_then(Value::as_str)
-        .unwrap_or("oauth")
-        .to_string();
-    let borrow = ours
-        .and_then(|f| f.get("borrow"))
-        .and_then(Value::as_str)
-        .map(str::to_owned);
+    // **A bundle does not get to choose how it is authorized.** There used to
+    // be a `firetower` key here saying "reuse the git credential", and a
+    // manifest from a repository nobody at this company wrote is the last
+    // place that decision belongs. Everything authorizes for itself.
+    let auth = "oauth".to_string();
+    let borrow: Option<String> = None;
     Some((name.clone(), url, auth, borrow))
 }
 

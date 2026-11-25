@@ -196,12 +196,10 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 builtin,
                 url: b.try_get("url").ok().flatten(),
                 auth: b.try_get("auth").ok().flatten(),
-                // **`borrow-git` has nothing to connect.** It reuses a token
-                // Firetower already holds, so reporting it as unconnected
-                // offers a button that would do nothing; the row says which
-                // credential it leans on instead.
+                // A server that asks for nothing has nothing to connect;
+                // everything else authorizes for itself, per person.
                 connected: match b.try_get::<Option<String>, _>("auth").ok().flatten().as_deref() {
-                    Some("borrow-git") | Some("none") => None,
+                    Some("none") => None,
                     _ => {
                         let k = key_of(&id);
                         Some(held.iter().any(|n| n == &k))

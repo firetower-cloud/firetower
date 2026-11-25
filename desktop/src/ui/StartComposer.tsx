@@ -418,8 +418,7 @@ export function StartComposer({
   const decidedBy = teamId ? team?.name : profileId ? profile?.name : null;
   /* The only thing that can actually block a start: tools the agent would be
      handed and cannot call, because nobody has authorized them. Read from the
-     library, which already answers "have *you* connected it" per person and
-     knows that a borrowed git credential needs no connecting at all. */
+     library, which already answers "have *you* connected it" per person. */
   const unconnected = new Set(
     (library.data ?? [])
       .filter((i) => i.kind === "server" && i.connected === false)

@@ -1,6 +1,0 @@
-{
-  "name": "security-review",
-  "description": "Find the vulnerability in a pending change, then prove the fix stops it.",
-  "version": "1.0.0",
-  "author": { "name": "Firetower" }
-}

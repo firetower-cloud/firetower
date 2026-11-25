@@ -412,12 +412,12 @@ pub(crate) async fn git_token(
 /// the authorization it was written with, and the connector travels through a
 /// directory or a profile while the token never does.
 ///
-/// `borrow-git` is the path that needs no new authorization code. Measured:
-/// GitHub's MCP server names `github.com/login/oauth` as its authorization
-/// server and takes a bearer in the header — and that is the application
-/// Firetower already registered and already holds a per-person token from. So
-/// the first connector works on a credential this installation has had all
-/// along.
+/// **A credential granted for git is not a credential for an MCP server.**
+/// There used to be a third path here that handed the token Firetower holds
+/// for a git host to a server that named the same authorization server — true
+/// of GitHub's — and it was convenient and wrong: somebody who connected
+/// GitHub so Firetower could do git had not agreed to an agent calling
+/// GitHub's whole tool surface. Every connector authorizes for itself now.
 ///
 /// **A connector with no credential is not an error.** The plugin loads
 /// without it, its skills work, and the interface is where somebody is asked
@@ -439,24 +439,12 @@ pub(crate) async fn with_connectors(
     if connectors.is_empty() {
         return bundles;
     }
-    let hosts = state.connections.all().await;
 
     for c in connectors {
         let Some(bundle) = bundles.iter_mut().find(|b| b.name == c.plugin) else {
             continue;
         };
         let token = match c.auth.as_str() {
-            "borrow-git" => match c.borrow.as_deref().and_then(|kind| {
-                hosts
-                    .iter()
-                    .find(|h| h.kind.id == kind && h.configured())
-                    .cloned()
-            }) {
-                Some(conn) => {
-                    git_token(state, &conn, owner, "a plugin's connector asked for it").await
-                }
-                None => None,
-            },
             // Brokered: this person's own grant, renewed on the way out if it
             // has gone stale. An access token has an hour on it and a session
             // may be starting long after the browser closed, so the renewal

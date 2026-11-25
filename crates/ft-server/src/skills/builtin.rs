@@ -92,92 +92,15 @@ pub const ALL: &[Builtin] = &[
             include_str!("../../skills/skill-creator/SKILL.md"),
         )],
     ),
-    // ── Plugins ──────────────────────────────────────────────────────
+    // **Two skills, no plugins, no connectors.** What ships inside the
+    // binary is what Firetower itself knows how to do — publishing an
+    // artifact, and writing a skill — and nothing else.
     //
-    // Two, and each is carrying a different half of the claim. One holds
-    // several skills, so that turning on *one row* has to deliver all of them
-    // on whichever engine the session runs. The other holds a connector, so
-    // that an agent ends up with tools it could not otherwise call — and does
-    // it on a credential this installation already has, which is what makes
-    // it demonstrable the day it is built rather than after an OAuth broker.
-    Builtin {
-        slug: "security-review",
-        kind: Kind::Plugin,
-        files: &[
-            (
-                ".claude-plugin/plugin.json",
-                include_str!("../../plugins/security-review/.claude-plugin/plugin.json"),
-            ),
-            (
-                "skills/review-the-diff/SKILL.md",
-                include_str!("../../plugins/security-review/skills/review-the-diff/SKILL.md"),
-            ),
-            (
-                "skills/patch-verifier/SKILL.md",
-                include_str!("../../plugins/security-review/skills/patch-verifier/SKILL.md"),
-            ),
-        ],
-        connector: None,
-    },
-    Builtin {
-        slug: "release-notes",
-        kind: Kind::Plugin,
-        files: &[
-            (
-                ".claude-plugin/plugin.json",
-                include_str!("../../plugins/release-notes/.claude-plugin/plugin.json"),
-            ),
-            (
-                "skills/conventional-commits/SKILL.md",
-                include_str!("../../plugins/release-notes/skills/conventional-commits/SKILL.md"),
-            ),
-            (
-                "commands/changelog.md",
-                include_str!("../../plugins/release-notes/commands/changelog.md"),
-            ),
-        ],
-        connector: None,
-    },
-    // The one that goes through the broker. Linear advertises dynamic client
-    // registration, so connecting it needs no administrator and no
-    // application — which is the claim the broker exists to make true, and
-    // this is where somebody can press it.
-    Builtin {
-        slug: "linear",
-        kind: Kind::Plugin,
-        files: &[(
-            ".claude-plugin/plugin.json",
-            include_str!("../../plugins/linear/.claude-plugin/plugin.json"),
-        )],
-        connector: Some(Connector {
-            server: "linear",
-            url: "https://mcp.linear.app/mcp",
-            auth: "oauth",
-            borrow: None,
-            scopes: None,
-        }),
-    },
-    Builtin {
-        slug: "github",
-        kind: Kind::Plugin,
-        files: &[
-            (
-                ".claude-plugin/plugin.json",
-                include_str!("../../plugins/github/.claude-plugin/plugin.json"),
-            ),
-            (
-                "skills/open-a-pr/SKILL.md",
-                include_str!("../../plugins/github/skills/open-a-pr/SKILL.md"),
-            ),
-        ],
-        connector: Some(Connector {
-            server: "github",
-            url: "https://api.githubcopilot.com/mcp/",
-            auth: "borrow-git",
-            borrow: Some("github"),
-            scopes: Some("repo read:org read:user"),
-        }),
-    },
+    // `security-review`, `release-notes`, `linear` and `github` were all here
+    // and all came out. A plugin that arrives pre-installed is one nobody
+    // chose, and the one holding a credential granted for git made the
+    // argument for the rest. They live in `firetower-cloud/firetower-plugins`
+    // now, reached the way anybody else's are.
 ];
 
 impl Builtin {

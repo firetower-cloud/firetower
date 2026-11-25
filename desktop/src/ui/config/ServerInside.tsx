@@ -159,11 +159,7 @@ export function ServerInside({
 
         <aside className="text-meta">
           <Fact label="Sign-in">
-            {of.auth === "borrow-git"
-              ? "Uses your git credential"
-              : of.auth === "none"
-                ? "Not required"
-                : "Required, per person"}
+            {of.auth === "none" ? "Not required" : "Required, per person"}
           </Fact>
           <Fact label="Authorizing">
             {of.auth === "oauth" ? "OAuth, registered automatically" : of.auth ?? "—"}
