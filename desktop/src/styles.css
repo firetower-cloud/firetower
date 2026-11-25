@@ -294,6 +294,26 @@
 }
 
 @layer base {
+  /* **`hidden` has to win, and by default it does not.**
+     The UA sheet says `[hidden] { display: none }`, and any class that sets
+     `display` outranks it — which means `hidden={!spills}` on a button that
+     is `display: inline-flex` hides nothing, and `hidden={!term}` on a panel
+     that is `display: flex` leaves it on screen taking its height. Both are
+     in this app today: Home's "See all" and Workbench's terminal. It is the
+     same defect twice and it will be the same defect a third time, because
+     the markup reads as correct. One line, in the layer everything else
+     builds on.
+
+     Here rather than in `globals.css`: that sheet is byte-shared with the
+     web client, and a global `[hidden] !important` there would change how
+     the web application and Spend draw, which is not what this rule was
+     written to do. It landed in the desk's copy of the shared sheet, which
+     is the one place `STYLE.md` says nothing may be edited, and `just
+     check-style` had been red ever since. */
+  [hidden] {
+    display: none !important;
+  }
+
   /* The window is the app. Nothing scrolls but the panes inside it. */
   html,
   body,
