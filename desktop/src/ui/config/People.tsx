@@ -84,6 +84,7 @@ import { Offboard } from "~/ui/config/Offboard";
 import {
   actionsFor,
   changeFor,
+  feedState,
   locksTheRoom,
   mayInvite,
   readsFor,
@@ -135,8 +136,18 @@ export function People() {
      that was made rather than by the one that was not. While `me` is still in
      flight neither has started, and the page is settling. */
   const feed = reads.users ? users : reads.colleagues ? colleagues : null;
-  const settling = me.isPending || !feed || feed.isPending;
-  const error = feed?.error ?? null;
+  /* **`me` failing is the one way both reads stay off with nothing in
+     flight**, and it used to settle forever: `feed` is null, so `!feed` held
+     `settling` true, while `error` read off a feed that was never created and
+     stayed null. ⌘8 drew a spinner that could not resolve and offered no way
+     out — on the destination this whole surface exists to make reachable.
+
+     So a role that could not be read is an error like any other, and it is
+     `me`'s own that is shown, because that is the request that failed. */
+  const { settling, error } = feedState(
+    { pending: me.isPending, error: me.error },
+    feed ? { pending: feed.isPending, error: feed.error } : null,
+  );
 
   /* Nothing there, and nothing wrong. In practice unreachable — both reads
      include the person asking, so the list always has at least you in it,
@@ -157,7 +168,9 @@ export function People() {
       settling={settling}
       trouble={trouble(error)}
       error={error ? why(error) : null}
-      onRetry={() => void (reads.users ? users.refetch() : colleagues.refetch())}
+      /* Retry whichever request actually failed — neither list exists to
+         refetch when it was the role that could not be read. */
+      onRetry={() => void (reads.users ? users.refetch() : reads.colleagues ? colleagues.refetch() : me.refetch())}
       /* The screen's one primary action, top right. Not drawn at all for
          somebody the server will not take an account from — a greyed *Add a
          person* is how an interface says you are being withheld from. */

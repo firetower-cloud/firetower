@@ -61,7 +61,14 @@ import { PickPeople } from "~/ui/PickPeople";
 import { RowMenu, type RowMenuItem } from "~/ui/RowMenu";
 import { usePrompt } from "~/ui/Confirm";
 import { Group, Rows, Section, WhereTo } from "~/ui/config/bits";
-import { grantsHeldBy, howMany, mayAdminister, teamActionsFor, type Signed } from "~/ui/config/organisation";
+import {
+  consequenceState,
+  grantsHeldBy,
+  howMany,
+  mayAdminister,
+  teamActionsFor,
+  type Signed,
+} from "~/ui/config/organisation";
 
 export function Teams() {
   const cache = useQueryClient();
@@ -466,6 +473,21 @@ function DeleteTeam({
   const [said, setSaid] = useState<string | null>(null);
 
   const reading = directories.loading || answers.some((a) => a.isPending);
+  /* **A read that failed is not an answer of "none".** `answers[i].data` is
+     undefined whether a directory holds no grants or could not be asked, and
+     `grantsHeldBy` cannot tell those apart — so a 403 on one directory used to
+     render *nobody loses access* over an irreversible delete, and the people
+     who did lose it found out afterwards.
+
+     Not fatal, deliberately: an administrator who is only a Viewer somewhere
+     gets that 403 every time, and a team they want gone would otherwise be
+     undeletable forever. So the dialog says what it does not know and lets
+     them decide knowing it — which is what *the consequence stated before
+     confirming* has to mean when the consequence cannot be read. */
+  const consequence = consequenceState(
+    reading,
+    !!directories.error || answers.some((a) => a.isError),
+  );
   const held = grantsHeldBy(
     team.id,
     directories.data.map((d, i) => ({
@@ -494,8 +516,13 @@ function DeleteTeam({
         <div>
           <h2>Remove {team.name}?</h2>
           <div className="say">
-            {reading ? (
+            {consequence === "reading" ? (
               <p>Reading what it can reach…</p>
+            ) : consequence === "unread" ? (
+              <p>
+                <b>What this team reaches could not be read.</b> Removing it may withdraw access
+                this cannot list. {howMany(team.members)} stop being in it either way.
+              </p>
             ) : held.length === 0 ? (
               <p>
                 It holds no grants, so <b>nobody loses access</b>. {howMany(team.members)} stop being

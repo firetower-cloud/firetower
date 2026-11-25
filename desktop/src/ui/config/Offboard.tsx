@@ -95,6 +95,17 @@ export function Offboard({ person, onClose }: { person: User; onClose: () => voi
     }
   };
 
+  /* **The one decision has to actually be made.** The sheet draws a picker for
+     every directory nobody else administers, says *Nobody else can change who
+     these let in*, and then let *Remove* through whether or not one was
+     chosen — so the question it exists to ask was optional.
+
+     The server does not ask it either: `offboard_user` iterates whatever
+     successors arrive, so an empty map deletes the account and leaves the
+     directory with nobody able to change who it lets in. That is precisely
+     the outcome this sheet is for, reached by pressing the button it drew. */
+  const unhanded = alone.filter((a) => !successors[a.directoryId]);
+
   const revoked =
     (reach.data?.teams ?? []).length > 0 ||
     (reach.data?.directories ?? []).some((d) => d.through.some((r) => r.how === "direct")) ||
@@ -243,11 +254,21 @@ export function Offboard({ person, onClose }: { person: User; onClose: () => voi
 
         <div className="sh-foot">
           {trouble && <span className="where !text-brick">{trouble}</span>}
+          {/* Why the button will not go. A disabled control with nothing
+              beside it is the interface refusing without saying so, and the
+              thing missing here is a decision rather than a permission. */}
+          {!trouble && unhanded.length > 0 && (
+            <span className="where">
+              {unhanded.length === 1
+                ? `Choose who administers ${unhanded[0].name} first.`
+                : `Choose who administers ${unhanded.length} directories first.`}
+            </span>
+          )}
           <button onClick={onClose} className="btn quiet ml-auto">
             Cancel
           </button>
           <button
-            disabled={run.isPending || !reach.data}
+            disabled={run.isPending || !reach.data || unhanded.length > 0}
             onClick={() => void go()}
             className="btn harm disabled:opacity-50"
           >

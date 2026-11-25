@@ -443,3 +443,43 @@ export function grantsHeldBy(
 export function howMany(n: number): string {
   return `${n} ${n === 1 ? "person" : "people"}`;
 }
+
+/**
+ * What the People pane is doing, given the role read and whichever list it
+ * chose from it.
+ *
+ * **A role that could not be read is the case this exists for.** Both reads are
+ * off until `me` resolves, so a failed `me` leaves no feed at all — and the
+ * pane read its error off that absent feed and found none, so it settled
+ * forever: a spinner behind ⌘8 that could not resolve and offered no way out,
+ * on the destination the whole surface exists to make reachable. `me`'s own
+ * error is the one to show, because `me` is the request that failed.
+ */
+export function feedState(
+  me: { pending: boolean; error: unknown },
+  feed: { pending: boolean; error: unknown } | null,
+): { settling: boolean; error: unknown } {
+  return {
+    settling: me.pending || (!feed && !me.error) || !!feed?.pending,
+    error: feed?.error ?? me.error ?? null,
+  };
+}
+
+/**
+ * What a team's delete confirmation can honestly say about the consequence.
+ *
+ * **A read that failed is not an answer of "none".** A grant list that could
+ * not be fetched arrives as `undefined`, exactly like a directory that holds
+ * no grants, so the dialog said *nobody loses access* over an irreversible
+ * delete and the people who did lose it found out afterwards.
+ *
+ * `unread` rather than refusing outright: an administrator who is only a
+ * Viewer somewhere gets that refusal every time, and a team they want gone
+ * would be undeletable forever. Saying what is not known is what *the
+ * consequence stated before confirming* has to mean when it cannot be read.
+ */
+export function consequenceState(loading: boolean, failed: boolean): "reading" | "unread" | "known" {
+  if (loading) return "reading";
+  if (failed) return "unread";
+  return "known";
+}

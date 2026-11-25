@@ -31,6 +31,8 @@ import {
   tagsFor,
   teamActionsFor,
   type Account,
+  consequenceState,
+  feedState,
 } from "./organisation";
 
 const admin = { id: "u_kevin", role: "admin" } as const;
@@ -463,5 +465,59 @@ describe("saying how many people", () => {
     expect(howMany(0)).toBe("0 people");
     expect(howMany(1)).toBe("1 person");
     expect(howMany(4)).toBe("4 people");
+  });
+});
+
+
+describe("what the People pane is doing", () => {
+  const ok = { pending: false, error: null };
+
+  it("settles while the role is still being read", () => {
+    expect(feedState({ pending: true, error: null }, null).settling).toBe(true);
+  });
+
+  /**
+   * **The one that settled forever.** A failed `me` leaves no feed at all —
+   * both reads are off until the role arrives — so the pane read its error off
+   * a feed that was never created, found none, and kept drawing a spinner
+   * behind ⌘8 with no way out.
+   */
+  it("stops settling and shows the role's own error when the role could not be read", () => {
+    const state = feedState({ pending: false, error: new Error("no me") }, null);
+    expect(state.settling).toBe(false);
+    expect(state.error).toBeInstanceOf(Error);
+  });
+
+  it("shows the list's error once a list is the thing that failed", () => {
+    const boom = new Error("list");
+    expect(feedState(ok, { pending: false, error: boom }).error).toBe(boom);
+  });
+
+  it("is neither settling nor in error when both came back", () => {
+    expect(feedState(ok, ok)).toEqual({ settling: false, error: null });
+  });
+});
+
+describe("what a delete confirmation can honestly say", () => {
+  it("is reading while it is reading", () => {
+    expect(consequenceState(true, false)).toBe("reading");
+  });
+
+  /**
+   * **A read that failed is not an answer of "none".** An unfetched grant list
+   * is `undefined`, exactly like a directory that holds none — so the dialog
+   * said *nobody loses access* over an irreversible delete.
+   */
+  it("will not claim nobody loses access when it could not read", () => {
+    expect(consequenceState(false, true)).toBe("unread");
+  });
+
+  it("states the consequence when it actually has one", () => {
+    expect(consequenceState(false, false)).toBe("known");
+  });
+
+  /** Reading wins: a failure that has not finished arriving is not yet one. */
+  it("is reading rather than unread while both are true", () => {
+    expect(consequenceState(true, true)).toBe("reading");
   });
 });

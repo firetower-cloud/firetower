@@ -100,6 +100,21 @@ describe("somebody who holds something", () => {
     expect(html).toContain("Make someone an administrator");
   });
 
+  /**
+   * **The question it exists to ask was optional.** The sheet drew a picker
+   * for every directory nobody else administers and said *Nobody else can
+   * change who these let in* — then enabled *Remove* whether or not one was
+   * chosen. The server does not ask either: `offboard_user` iterates whatever
+   * successors arrive, so an empty map deleted the account and left the
+   * directory with nobody able to change who it lets in. That is the outcome
+   * this sheet is for, reached by pressing the button it drew.
+   */
+  it("will not remove while a directory nobody else administers has no successor", () => {
+    const html = draw(theirs);
+    expect(html).toContain("disabled=\"\"");
+    expect(html).toContain("Choose who administers Platform first.");
+  });
+
   it("does not ask when somebody else administers it too", () => {
     const html = draw({
       ...theirs,

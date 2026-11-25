@@ -1187,7 +1187,10 @@ const server = createServer(async (req, res) => {
       return json(res, { code: "InvalidRequest", message: `${mail} is already somebody's here` }, 400);
     }
     const made = {
-      id: `u_${PEOPLE.length + 1}`, orgId: "o_1", username: name, slug: name,
+      // Not `PEOPLE.length + 1`: offboarding splices the array, so the next
+      // add reuses an id that TEAM_MEMBERS and GRANTS still point at. Same
+      // shape the team ids already use.
+      id: `u_${Date.now() % 100000}`, orgId: "o_1", username: name, slug: name,
       email: mail, role: body.role ?? "member", mustChangePassword: true, disabled: false,
     };
     PEOPLE.push(made);
