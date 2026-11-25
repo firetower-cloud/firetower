@@ -20,6 +20,28 @@ use anyhow::{bail, Context, Result};
 /// rename or re-file what is in it.
 pub const DIRECTORY_SLUG: &str = "firetower";
 
+/// The built-ins that are not a choice.
+///
+/// **A capability can be turned off; a contract cannot.** Most of what ships
+/// here is a capability — `skill-creator` off means agents stop offering to
+/// write skills, and nothing else changes. `firetower-artifacts` is not that.
+/// Firetower has a *feature* that only works if an agent writes to
+/// `.firetower/artifacts/<name>/index.html`: the page appears in the
+/// conversation, opens full screen, can be annotated. Turn the skill off and
+/// the feature does not announce its absence — the agent writes an HTML file
+/// somewhere, says "here you go", and nothing appears. That reads as an agent
+/// being bad at its job rather than as a setting somebody changed.
+///
+/// It was in the system prompt before it was a skill, and the move was about
+/// cost — roughly 250 tokens every turn against 30 at rest. It was never
+/// about making it optional.
+pub const REQUIRED: &[&str] = &["firetower-artifacts"];
+
+/// Whether this slug is one of those.
+pub fn required(slug: &str) -> bool {
+    REQUIRED.contains(&slug)
+}
+
 /// The `ltree` prefix a built-in's path begins with.
 pub const PATH_PREFIX: &str = "d.firetower.";
 

@@ -508,22 +508,36 @@ function Thing({
           </button>
         ) : null)}
 
-      <button
-        type="button"
-        role="switch"
-        aria-checked={of.on}
-        aria-label={`${of.name} on by default`}
-        title={
-          of.on
-            ? "A plain agent of yours opens with this. Anybody can untick it before they send."
-            : "Not loaded unless somebody picks it when starting."
-        }
-        className="tog shrink-0"
-        disabled={busy}
-        onClick={flip}
-      >
-        <i />
-      </button>
+      {/* **No switch where there is no choice.** A drawn control that the
+          server refuses is worse than no control: it says a decision is
+          yours and then takes it back. `firetower-artifacts` is what the
+          artifact feature is built on — turning it off would not announce
+          itself, it would make agents quietly stop publishing. */}
+      {of.required ? (
+        <span
+          className="shrink-0 text-meta text-mute"
+          title={`Firetower's artifact feature is built on ${of.name}, so it is always loaded.`}
+        >
+          always on
+        </span>
+      ) : (
+        <button
+          type="button"
+          role="switch"
+          aria-checked={of.on}
+          aria-label={`${of.name} on by default`}
+          title={
+            of.on
+              ? "A plain agent of yours opens with this. Anybody can untick it before they send."
+              : "Not loaded unless somebody picks it when starting."
+          }
+          className="tog shrink-0"
+          disabled={busy}
+          onClick={flip}
+        >
+          <i />
+        </button>
+      )}
 
       <div>
         <IconButton

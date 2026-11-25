@@ -39,6 +39,11 @@ export interface Item {
   name: string;
   /** Whether a plain agent of yours opens with it. */
   on: boolean;
+  /**
+     * **Not a choice.** A Firetower feature depends on it, so it has no
+     * switch and no profile can leave it out. See `builtin::REQUIRED`.
+     */
+  required: boolean;
   /** @nullable */
   server?: string | null;
   /** The bundle it lives in, which the detail screen and removal both need. */

@@ -14152,7 +14152,8 @@
           "name",
           "description",
           "on",
-          "builtin"
+          "builtin",
+          "required"
         ],
         "properties": {
           "auth": {
@@ -14203,6 +14204,10 @@
           "on": {
             "type": "boolean",
             "description": "Whether a plain agent of yours opens with it."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "**Not a choice.** A Firetower feature depends on it, so it has no\nswitch and no profile can leave it out. See `builtin::REQUIRED`."
           },
           "server": {
             "type": [

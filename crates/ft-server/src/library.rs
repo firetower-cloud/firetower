@@ -37,6 +37,9 @@ pub struct Item {
     pub logo: Option<String>,
     /// Firetower's own, which nobody can remove because the next boot puts it back.
     pub builtin: bool,
+    /// **Not a choice.** A Firetower feature depends on it, so it has no
+    /// switch and no profile can leave it out. See `builtin::REQUIRED`.
+    pub required: bool,
 
     // Servers only.
     pub url: Option<String>,
@@ -164,6 +167,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 format!("data:{kind};base64,{}", ft_proto::encode(&bytes))
             });
         let builtin: bool = b.try_get("builtin").unwrap_or(false);
+        let required = builtin && crate::skills::builtin::required(&bundle_name);
 
         // What this bundle carries, read out of its own files.
         let files: Vec<(String, Vec<u8>)> = match &vid {
@@ -194,6 +198,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 on: bundle_on && !muted(&id, SERVER_PATH),
                 logo: logo.clone(),
                 builtin,
+                required,
                 url: b.try_get("url").ok().flatten(),
                 auth: b.try_get("auth").ok().flatten(),
                 // A server that asks for nothing has nothing to connect;
@@ -237,9 +242,10 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 name,
                 description: said(&front, "description"),
                 from: None,
-                on: bundle_on && !muted(&id, path),
+                on: required || (bundle_on && !muted(&id, path)),
                 logo: logo.clone(),
                 builtin,
+                required,
                 url: None,
                 auth: None,
                 server: None,
@@ -268,6 +274,22 @@ pub async fn switch(pool: &PgPool, person: &str, item: &str, on: bool) -> Result
     let (skill_id, path) = item
         .split_once(':')
         .context("that is not a library item")?;
+
+    // Refused rather than drawn and ignored. The screen does not offer a
+    // switch for these; an API call that tries anyway gets the reason.
+    if !on {
+        let name: Option<String> = sqlx::query_scalar(
+            "SELECT name FROM skills WHERE id = $1 AND path <@ 'd.firetower'::ltree",
+        )
+        .bind(skill_id)
+        .fetch_optional(pool)
+        .await?;
+        if let Some(n) = name.filter(|n| crate::skills::builtin::required(n)) {
+            anyhow::bail!(
+                "`{n}` is what a Firetower feature is built on, so it cannot be turned off"
+            );
+        }
+    }
 
     let mut tx = pool.begin().await?;
     if on {

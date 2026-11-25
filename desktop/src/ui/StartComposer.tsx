@@ -419,6 +419,9 @@ export function StartComposer({
   /* The only thing that can actually block a start: tools the agent would be
      handed and cannot call, because nobody has authorized them. Read from the
      library, which already answers "have *you* connected it" per person. */
+  const required = new Set(
+    (library.data ?? []).filter((i) => i.required).map((i) => i.skillId),
+  );
   const unconnected = new Set(
     (library.data ?? [])
       .filter((i) => i.kind === "server" && i.connected === false)
@@ -428,7 +431,7 @@ export function StartComposer({
   /* **Counted from what is shown, not from the person's own defaults.** The
      chip read `8 — Engineer` for a profile holding two, because the number
      came from one source and the list beside it from another. One source. */
-  const selectedSkills = prefilled.map((s) => s.id).filter((id) => !muted.has(id));
+  const selectedSkills = prefilled.map((s) => s.id).filter((id) => required.has(id) || !muted.has(id));
 
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
   // A saved engine is used only while it still exists and is supported — one
@@ -980,12 +983,18 @@ export function StartComposer({
                 : "What this session opens with. Unticking is for this conversation only — your own set is unchanged and the next one opens the same way."}
             </p>
             {prefilled.map((s) => {
-              const on = !muted.has(s.id);
+              /* Required built-ins are drawn and not untickable: unticking
+                 one for a conversation would take the artifact feature away
+                 from it, with nothing to say so. */
+              const fixed = required.has(s.id);
+              const on = fixed || !muted.has(s.id);
               return (
                 <button
                   key={s.id}
                   type="button"
                   className="prow"
+                  disabled={fixed}
+                  title={fixed ? "Firetower's artifact feature is built on this." : undefined}
                   onClick={() =>
                     setMuted((m) => {
                       const next = new Set(m);

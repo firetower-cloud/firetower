@@ -29,6 +29,7 @@ export const ListLibraryResponseItem = zod.object({
   "logo": zod.string().nullish().describe('The bundle\'s own mark, shared by everything inside it.'),
   "name": zod.string(),
   "on": zod.boolean().describe('Whether a plain agent of yours opens with it.'),
+  "required": zod.boolean().describe('**Not a choice.** A Firetower feature depends on it, so it has no\nswitch and no profile can leave it out. See `builtin::REQUIRED`.'),
   "server": zod.string().nullish(),
   "skillId": zod.string().describe('The bundle it lives in, which the detail screen and removal both need.'),
   "url": zod.string().nullish()

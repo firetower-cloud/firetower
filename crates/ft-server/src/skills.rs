@@ -3760,7 +3760,27 @@ impl Skills {
         person: &str,
         skills: &[String],
     ) -> Result<()> {
-        let skills = &self.deliverable(person, skills).await?;
+        // **Added whatever was asked for.** A required built-in is what a
+        // Firetower feature is built on, and a profile is a closed set — so
+        // a profile that simply does not mention it would take the feature
+        // away from everybody who starts that profile, silently. There is no
+        // list this is allowed to be absent from.
+        let mut asked: Vec<String> = skills.to_vec();
+        let required: Vec<String> = sqlx::query_scalar(
+            "SELECT k.id FROM skills k JOIN users u ON u.id = $1 AND u.org_id = k.org_id \
+              WHERE k.path <@ 'd.firetower'::ltree AND k.name = ANY($2)",
+        )
+        .bind(person)
+        .bind(builtin::REQUIRED)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+        for id in required {
+            if !asked.contains(&id) {
+                asked.push(id);
+            }
+        }
+        let skills = &self.deliverable(person, &asked).await?;
         let mut tx = self.pool.begin().await?;
         sqlx::query("DELETE FROM skill_pins WHERE session_id = $1 AND NOT (skill_id = ANY($2))")
             .bind(session)
