@@ -168,8 +168,23 @@ export function Library({ open: asked = null }: { open?: string | null }) {
         .filter((e) => matches(`${e.name} ${e.description}`)),
     [catalogue.data, kind, query],
   );
-  const shown = offered.slice(0, SHELF);
-  const more = offered.length - shown.length;
+  /* **A card knows what it became.** An entry and the thing it installed to
+     are the same object seen twice, and the catalogue row alone cannot say
+     whether you have authorized it — so the two are matched by name, which
+     is what the installer used. Without this a card said "Added" and stopped
+     there, with the one thing left to do a tab away. */
+  const mine = useMemo(() => {
+    const by = new Map<string, Item>();
+    for (const i of lib.data ?? []) if (!by.has(i.name)) by.set(i.name, i);
+    return by;
+  }, [lib.data]);
+
+  const have = offered.filter((e) => e.installed);
+  const rest = offered.filter((e) => !e.installed);
+  const [all, setAll] = useState(false);
+  const INSTALLED = 4;
+  const shown = rest.slice(0, SHELF);
+  const more = rest.length - shown.length;
 
   /**
    * Adding a server is already asking for its tools.
@@ -353,45 +368,57 @@ export function Library({ open: asked = null }: { open?: string | null }) {
           </>
         ) : (
           <>
-            <p className="mt-4 text-meta text-dim">
-              {offered.length} from your sources. Something you already have says so rather
-              than hiding — adding one takes a copy pinned to the commit the list was read at.
-            </p>
-            <div className="pgrid mt-2">
-              {shown.map((e) => (
-                <div key={`${e.marketplaceId}/${e.slug}`} className="pcard" data-had={e.installed || undefined}>
-                  <span className="top">
-                    <Mark logo={e.logo} name={e.name} />
-                    <span className="nm">
-                      <b>{e.name}</b>
-                      {e.author && <s>by {e.author}</s>}
-                    </span>
-                  </span>
-                  <span className="desc">{e.description}</span>
-                  <span className="foot">
-                    <span className="chip3">{brings(e) ?? "—"}</span>
-                    {e.installed ? (
-                      <span className="flex items-center gap-1.5 text-meta text-sage">
-                        <Check className="h-3.5 w-3.5" strokeWidth={2} />
-                        Added
-                      </span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="add"
-                        disabled={busy === e.slug}
-                        onClick={() => install(e)}
-                      >
-                        {busy === e.slug ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
-                        ) : (
-                          <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-                        )}
-                        Add
-                      </button>
-                    )}
-                  </span>
+            {/* **What you have, first and small.** Browsing a catalogue with
+                no sense of what is already yours is how somebody installs the
+                same thing twice — and the one thing a just-added server still
+                needs is a press, which belonged here rather than a tab away. */}
+            {have.length > 0 && (
+              <>
+                <div className="mt-4 flex items-baseline gap-3">
+                  <h3 className="text-ui text-dim">Installed</h3>
+                  <span className="text-meta text-mute">{have.length}</span>
+                  {have.length > INSTALLED && (
+                    <button
+                      type="button"
+                      className="ml-auto text-meta text-dim hover:text-bone"
+                      onClick={() => setAll((v) => !v)}
+                    >
+                      {all ? "Show fewer" : `Show all ${have.length}`}
+                    </button>
+                  )}
                 </div>
+                <div className="offers mt-2">
+                  {(all ? have : have.slice(0, INSTALLED)).map((e) => (
+                    <Offer
+                      key={`${e.marketplaceId}/${e.slug}`}
+                      of={e}
+                      item={mine.get(e.name)}
+                      busy={busy === e.slug}
+                      onOpen={(id) => setOpen(id)}
+                      onConnect={offerToConnect}
+                      onAdd={install}
+                    />
+                  ))}
+                </div>
+                <div className="mt-6 border-t border-line" />
+              </>
+            )}
+
+            <p className="mt-4 text-meta text-dim">
+              {rest.length} more from your sources. Adding one takes a copy pinned to the
+              commit the list was read at.
+            </p>
+            <div className="offers mt-2">
+              {shown.map((e) => (
+                <Offer
+                  key={`${e.marketplaceId}/${e.slug}`}
+                  of={e}
+                  item={mine.get(e.name)}
+                  busy={busy === e.slug}
+                  onOpen={(id) => setOpen(id)}
+                  onConnect={offerToConnect}
+                  onAdd={install}
+                />
               ))}
             </div>
             {more > 0 && (
@@ -845,3 +872,83 @@ function PasteAddress({
 }
 
 export { listLibrary };
+
+/**
+ * One catalogue row.
+ *
+ * **A row, not a card.** Six cards filled a screen that now holds twelve
+ * rows: the padding, the border and the separate footer line were spending
+ * height on nothing, and a catalogue is a thing you scan rather than read.
+ * Two columns of hairline-separated rows is what every catalogue worth
+ * copying does, and it is the shape the eye already knows.
+ *
+ * **It carries its own state.** An entry and the thing it installed to are
+ * one object seen twice, matched by the name the installer used — so a row
+ * that has been added can offer the press it is still waiting for, instead
+ * of saying "Added" and sending somebody to another tab to finish.
+ */
+function Offer({
+  of,
+  item,
+  busy,
+  onOpen,
+  onConnect,
+  onAdd,
+}: {
+  of: Listed;
+  /** What it became, once it is installed. */
+  item?: Item;
+  busy: boolean;
+  onOpen: (id: string) => void;
+  onConnect: (made: { id: string; hasConnector?: boolean }) => Promise<void>;
+  onAdd: (e: Listed) => Promise<void>;
+}) {
+  const open = item ? () => onOpen(item.id) : undefined;
+  return (
+    <div className="offer">
+      <span className="g">
+        <Mark logo={of.logo} name={of.name} />
+      </span>
+      {/* Only an installed row opens: there is nothing behind an entry
+          nobody has downloaded that the row is not already showing. */}
+      {open ? (
+        <button type="button" className="tx text-left" onClick={open}>
+          <b>{of.name}</b>
+          <s>{of.description}</s>
+          <u>{[brings(of), of.author && `by ${of.author}`].filter(Boolean).join(", ")}</u>
+        </button>
+      ) : (
+        <span className="tx">
+          <b>{of.name}</b>
+          <s>{of.description}</s>
+          <u>{[brings(of), of.author && `by ${of.author}`].filter(Boolean).join(", ")}</u>
+        </span>
+      )}
+
+      {!of.installed ? (
+        <button type="button" className="add" disabled={busy} onClick={() => onAdd(of)}>
+          {busy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+          ) : (
+            <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+          )}
+          Add
+        </button>
+      ) : item?.needsClientId && item.connected !== true ? (
+        <button type="button" className="add" onClick={open}>
+          Set it up
+        </button>
+      ) : item?.connected === false ? (
+        <button type="button" className="add" onClick={() => void onConnect(item)}>
+          <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+          Connect
+        </button>
+      ) : (
+        <span className="flex shrink-0 items-center gap-1.5 text-meta text-sage">
+          <Check className="h-3.5 w-3.5" strokeWidth={2} />
+          Added
+        </span>
+      )}
+    </div>
+  );
+}
