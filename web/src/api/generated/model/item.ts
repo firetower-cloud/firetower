@@ -37,6 +37,13 @@ export interface Item {
      */
   logo?: string | null;
   name: string;
+  /**
+     * **This server registers no clients**, so Connect cannot work until
+     * somebody creates an application by hand and pastes its id — which
+     * Firetower has nowhere to put yet. GitHub, Slack and Google are all
+     * here. Drawing a button that fails on the press is worse than saying so.
+     */
+  needsClientId: boolean;
   /** Whether a plain agent of yours opens with it. */
   on: boolean;
   /**

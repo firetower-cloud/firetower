@@ -724,3 +724,39 @@ pub async fn credential_key(pool: &sqlx::PgPool, skill_id: &str) -> String {
     .flatten();
     same.unwrap_or_else(|| skill_id.to_string())
 }
+
+
+/// Write down what discovery found, before anybody presses Connect.
+///
+/// **A row here with no `client_id` is the useful case.** It means the server
+/// was asked and said it registers no clients — GitHub, Slack, Google — so
+/// the screen can say "this one needs a client id made by hand" instead of
+/// drawing a Connect button that fails the moment it is pressed. Firetower
+/// swallowed that failure for a while, which made adding GitHub look like
+/// nothing had happened at all.
+///
+/// Best effort: a server that cannot be reached leaves no row, and the row is
+/// then written the first time somebody connects, as before.
+pub async fn remember(pool: &sqlx::PgPool, skill_id: &str, url: &str) {
+    let Ok(found) = discover(url).await else {
+        return;
+    };
+    let _ = sqlx::query(
+        "INSERT INTO connector_clients \
+           (skill_id, resource, authorize_url, token_url, register_url, scopes) \
+         VALUES ($1,$2,$3,$4,$5,$6) \
+         ON CONFLICT (skill_id) DO UPDATE SET \
+           resource = excluded.resource, authorize_url = excluded.authorize_url, \
+           token_url = excluded.token_url, register_url = excluded.register_url, \
+           scopes = excluded.scopes \
+         WHERE connector_clients.client_id IS NULL",
+    )
+    .bind(skill_id)
+    .bind(&found.resource)
+    .bind(&found.authorize_url)
+    .bind(&found.token_url)
+    .bind(&found.register_url)
+    .bind(&found.scopes)
+    .execute(pool)
+    .await;
+}

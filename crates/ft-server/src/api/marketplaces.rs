@@ -256,6 +256,9 @@ pub(super) async fn install_entry(
             .set_connector(made.as_str(), &server, &url, &auth)
             .await
             .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;
+        // Ask the server how it wants authorizing now, so the row can say so
+        // rather than finding out when somebody presses a button.
+        crate::connectors::remember(pool, made.as_str(), &url).await;
         if let Some(kind) = borrow {
             sqlx::query("UPDATE connectors SET borrow = $2 WHERE skill_id = $1")
                 .bind(made.as_str())

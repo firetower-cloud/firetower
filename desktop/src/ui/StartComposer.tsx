@@ -33,12 +33,13 @@ import {
   ExternalLink,
   FolderGit2,
   GitBranch,
+  Network,
   Paperclip,
   Plus,
   Puzzle,
   Server,
   ServerOff,
-  Network,
+  TriangleAlert,
   UserRound,
   X,
 } from "lucide-react";
@@ -68,6 +69,7 @@ import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { openExternal } from "~/open";
 import { isMac } from "~/platform";
 import { useListLibrary } from "~/api/generated/library/library";
+import { Mark } from "~/ui/config/Library";
 import { dropSeed, seedWaiting, type Seed } from "~/start";
 import type { Agent, AgentTeam, Control, ControlKind, Role } from "~/api/generated/model";
 
@@ -400,6 +402,7 @@ export function StartComposer({
      between opening the page and sending. */
   const library = useListLibrary({ query: { select: (r) => r ?? [] } });
   const [muted, setMuted] = useState<Set<string>>(new Set());
+  const [look, setLook] = useState("");
   const team = teams.find((t) => t.id === teamId);
   const lead = team?.positions.find((p) => !p.parent);
   // A team is started as its lead, so everything downstream — the engine it
@@ -411,8 +414,13 @@ export function StartComposer({
      exactly that case — so at the one moment the question matters, somebody
      starting a profile was told nothing about what their agent would have.
      The answer differs; the question does not. */
+  /* **Everything you have, not a saved subset.** There used to be a switch
+     in the library writing `skill_defaults`, and this read that — so with the
+     switch gone nothing wrote it and a thing installed a minute ago never
+     reached the composer at all. Having something *is* the decision; which
+     run uses it is the question asked here. */
   const prefilled = !profileId && !teamId
-    ? allSkills.filter((s) => defaultSkillIds.includes(s.id))
+    ? allSkills.filter((s) => (library.data ?? []).some((i) => i.skillId === s.id))
     : allSkills.filter((s) => (profile?.skillScope ?? []).includes(s.id));
   /* What a profile decided, named, so nobody wonders what chose it. */
   const decidedBy = teamId ? team?.name : profileId ? profile?.name : null;
@@ -431,7 +439,9 @@ export function StartComposer({
   /* **Counted from what is shown, not from the person's own defaults.** The
      chip read `8 — Engineer` for a profile holding two, because the number
      came from one source and the list beside it from another. One source. */
-  const selectedSkills = prefilled.map((s) => s.id).filter((id) => required.has(id) || !muted.has(id));
+  const selectedSkills = prefilled
+    .map((s) => s.id)
+    .filter((id) => required.has(id) || (!muted.has(id) && !unconnected.has(id)));
 
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
   // A saved engine is used only while it still exists and is supported — one
@@ -975,47 +985,73 @@ export function StartComposer({
       )}
 
       {open?.which === "prefill" && (
-        <Pop anchor={open.at} onClose={close} width={360}>
-          <Menu>
-            <p className="px-3 pb-2 pt-1 text-meta text-dim">
-              {decidedBy
-                ? `What ${decidedBy} always has. Unticking is for this conversation only, and the profile is unchanged.`
-                : "What this session opens with. Unticking is for this conversation only — your own set is unchanged and the next one opens the same way."}
-            </p>
-            {prefilled.map((s) => {
-              /* Required built-ins are drawn and not untickable: unticking
-                 one for a conversation would take the artifact feature away
-                 from it, with nothing to say so. */
-              const fixed = required.has(s.id);
-              const on = fixed || !muted.has(s.id);
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  className="prow"
-                  disabled={fixed}
-                  title={
-                    fixed
-                      ? "A Firetower feature is built on this, so it is always loaded."
-                      : undefined
-                  }
-                  onClick={() =>
-                    setMuted((m) => {
-                      const next = new Set(m);
-                      if (on) next.add(s.id);
-                      else next.delete(s.id);
-                      return next;
-                    })
-                  }
-                >
-                  <span className="grid h-4 w-4 place-items-center text-mute">
-                    {on ? <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2.25} /> : null}
-                  </span>
-                  <span className="lbl">{s.name}</span>
-                </button>
-              );
-            })}
-          </Menu>
+        <Pop anchor={open.at} onClose={close} width={320}>
+          {/* **No paragraph.** A list of switches explains itself, and the
+              sentence that used to sit above it said three things nobody had
+              asked: what the list was, that unticking is temporary, and what
+              it is not. The one thing worth saying — that a profile chose
+              this — is already on the chip that opened it. */}
+          <div className="py-1">
+            {prefilled.length > 6 && (
+              <input
+                autoFocus
+                value={look}
+                onChange={(e) => setLook(e.target.value)}
+                placeholder="Search"
+                aria-label="Search what this agent gets"
+                className="mb-1 w-full bg-transparent px-3 py-1.5 text-ui text-bone outline-none placeholder:text-mute"
+              />
+            )}
+            {prefilled
+              .filter((s) => !look.trim() || s.name.toLowerCase().includes(look.trim().toLowerCase()))
+              .map((s) => {
+                const fixed = required.has(s.id);
+                const on = fixed || !muted.has(s.id);
+                const short = unconnected.has(s.id);
+                return (
+                  <div key={s.id} className="prow">
+                    <Mark logo={s.logo} name={s.name} />
+                    <span className="lbl flex-1 truncate">{s.name}</span>
+                    {/* The one thing that stops it working gets the only
+                        colour, and takes the switch's place: a server nobody
+                        authorized has nothing to turn on. */}
+                    {short ? (
+                      <span
+                        className="grid h-4 w-4 shrink-0 place-items-center text-ember"
+                        title={`${s.name} is not connected, so its tools will not answer.`}
+                      >
+                        <TriangleAlert className="h-4 w-4" strokeWidth={1.75} />
+                      </span>
+                    ) : fixed ? (
+                      <span
+                        className="shrink-0 text-meta text-mute"
+                        title="A Firetower feature is built on this, so it is always loaded."
+                      >
+                        always
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={on}
+                        aria-label={s.name}
+                        className="tog shrink-0"
+                        onClick={() =>
+                          setMuted((m) => {
+                            const next = new Set(m);
+                            if (on) next.add(s.id);
+                            else next.delete(s.id);
+                            return next;
+                          })
+                        }
+                      >
+                        <i />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
         </Pop>
       )}
 

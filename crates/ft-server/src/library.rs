@@ -49,6 +49,11 @@ pub struct Item {
     pub server: Option<String>,
     /// Whether **you** hold a credential for it. `None` for a skill.
     pub connected: Option<bool>,
+    /// **This server registers no clients**, so Connect cannot work until
+    /// somebody creates an application by hand and pastes its id — which
+    /// Firetower has nowhere to put yet. GitHub, Slack and Google are all
+    /// here. Drawing a button that fails on the press is worse than saying so.
+    pub needs_client_id: bool,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -139,6 +144,15 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
             .collect()
     })
     .unwrap_or_default();
+    // Servers that were asked and said they register no clients.
+    let by_hand: Vec<String> = sqlx::query_scalar(
+        "SELECT skill_id FROM connector_clients \
+          WHERE client_id IS NULL AND register_url IS NULL",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
     let key_of = |id: &str| -> String {
         shared
             .iter()
@@ -218,6 +232,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                     }
                 },
                 server: Some(server),
+                needs_client_id: by_hand.iter().any(|s| s == &id),
             });
         }
 
@@ -258,6 +273,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 auth: None,
                 server: None,
                 connected: None,
+                needs_client_id: false,
             });
         }
 

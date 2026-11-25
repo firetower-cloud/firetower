@@ -14153,7 +14153,8 @@
           "description",
           "on",
           "builtin",
-          "required"
+          "required",
+          "needsClientId"
         ],
         "properties": {
           "auth": {
@@ -14200,6 +14201,10 @@
           },
           "name": {
             "type": "string"
+          },
+          "needsClientId": {
+            "type": "boolean",
+            "description": "**This server registers no clients**, so Connect cannot work until\nsomebody creates an application by hand and pastes its id — which\nFiretower has nowhere to put yet. GitHub, Slack and Google are all\nhere. Drawing a button that fails on the press is worse than saying so."
           },
           "on": {
             "type": "boolean",

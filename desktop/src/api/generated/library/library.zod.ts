@@ -28,6 +28,7 @@ export const ListLibraryResponseItem = zod.object({
   "kind": zod.string().describe('`skill` or `server`.'),
   "logo": zod.string().nullish().describe('The bundle\'s own mark, shared by everything inside it.'),
   "name": zod.string(),
+  "needsClientId": zod.boolean().describe('**This server registers no clients**, so Connect cannot work until\nsomebody creates an application by hand and pastes its id — which\nFiretower has nowhere to put yet. GitHub, Slack and Google are all\nhere. Drawing a button that fails on the press is worse than saying so.'),
   "on": zod.boolean().describe('Whether a plain agent of yours opens with it.'),
   "required": zod.boolean().describe('**Not a choice.** A Firetower feature depends on it, so it has no\nswitch and no profile can leave it out. See `builtin::REQUIRED`.'),
   "server": zod.string().nullish(),

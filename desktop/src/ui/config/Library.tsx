@@ -39,7 +39,6 @@ import { openExternal } from "~/open";
 import { useOpened } from "~/ui/opened";
 import {
   listLibrary,
-  switchItem,
   useListLibrary,
   getListLibraryQueryKey,
 } from "~/api/generated/library/library";
@@ -181,13 +180,18 @@ export function Library({ open: asked = null }: { open?: string | null }) {
    * register no clients, and a modal nobody pressed anything for is worse
    * than a Connect button that is still there.
    */
-  const offerToConnect = async (skillId: string) => {
+  const offerToConnect = async (made: { id: string; hasConnector?: boolean }) => {
     try {
-      const opened = await connect(skillId);
+      const opened = await connect(made.id);
       await openExternal(opened.authorizeUrl);
       setAwaiting(true);
-    } catch {
-      /* The row keeps its Connect button, and pressing it says why. */
+    } catch (e) {
+      /* **Said, not swallowed.** This was silent on the theory that a modal
+         nobody asked for is worse than none — true of a modal, and the reason
+         it was wrong: adding GitHub opened nothing and explained nothing, so
+         it read as a button that does not work. A line on the page is not a
+         modal. */
+      setTrouble(why(e));
     }
   };
 
@@ -197,7 +201,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     try {
       const made = await installEntry(e.marketplaceId, e.slug);
       await refresh();
-      if (made.hasConnector) await offerToConnect(made.id);
+      if (made.hasConnector) await offerToConnect(made);
     } catch (err) {
       setTrouble(why(err));
     } finally {
@@ -318,19 +322,22 @@ export function Library({ open: asked = null }: { open?: string | null }) {
 
         {where === "yours" ? (
           <>
+            {/* **No switch here any more.** Having something and using it in
+                a particular run are different questions, and only the second
+                one has an answer that changes often. The composer asks it, a
+                press away from the prompt, where somebody can see what the
+                agent is about to be handed. */}
             <p className="mt-4 text-meta text-dim">
-              {yours.length} — the ticked ones load into a plain agent of yours. A profile
-              decides for itself.
+              {yours.length}. Everything here is offered when you start an agent — the
+              composer is where you choose what that one gets.
             </p>
             <div className="mt-2">
               {yours.map((i) => (
                 <Thing
                   key={i.id}
                   of={i}
-                  busy={busy === i.id}
                   onOpen={() => setOpen(i.id)}
                   onConnecting={() => setAwaiting(true)}
-                  onBusy={setBusy}
                   onChanged={refresh}
                   onTrouble={setTrouble}
                 />
@@ -412,19 +419,15 @@ export function Library({ open: asked = null }: { open?: string | null }) {
  */
 function Thing({
   of,
-  busy,
   onOpen,
   onConnecting,
-  onBusy,
   onChanged,
   onTrouble,
 }: {
   of: Item;
-  busy: boolean;
   onOpen: () => void;
   /** An authorization is outstanding, so the list should start watching. */
   onConnecting: () => void;
-  onBusy: (id: string | null) => void;
   onChanged: () => Promise<void>;
   onTrouble: (why: string | null) => void;
 }) {
@@ -432,18 +435,6 @@ function Thing({
   const cache = useQueryClient();
   const [menu, setMenu] = useState<HTMLElement | null>(null);
   const [going, setGoing] = useState(false);
-
-  const flip = async () => {
-    onBusy(of.id);
-    try {
-      await switchItem({ id: of.id, on: !of.on });
-      await onChanged();
-    } catch (e) {
-      onTrouble(why(e));
-    } finally {
-      onBusy(null);
-    }
-  };
 
   const join = async () => {
     setGoing(true);
@@ -493,7 +484,18 @@ function Thing({
       )}
 
       {of.kind === "server" &&
-        (of.connected === true ? (
+        (of.needsClientId && of.connected !== true ? (
+          /* **Not a Connect button.** This server registers no clients, so
+             pressing it would fail every time — and Firetower has nowhere to
+             put a hand-made client id yet. Saying so beats a control that
+             does nothing, which is what adding GitHub used to look like. */
+          <span
+            className="shrink-0 text-meta text-mute"
+            title={`${of.name} registers no OAuth clients, so it needs an application created by hand. Firetower cannot hold one yet.`}
+          >
+            needs a client id
+          </span>
+        ) : of.connected === true ? (
           <span className="shrink-0 text-sage" title={`Connected to ${of.server}.`}>
             <Link2 className="h-4 w-4" strokeWidth={1.75} />
           </span>
@@ -507,34 +509,6 @@ function Thing({
             Connect
           </button>
         ) : null)}
-
-      {/* **No switch where there is no choice.** A drawn control that the
-          server refuses is worse than no control: it says a decision is
-          yours and then takes it back. `firetower-artifacts` is what the
-          artifact feature is built on — turning it off would not announce
-          itself, it would make agents quietly stop publishing. */}
-      {of.required ? (
-        <span className="shrink-0 text-meta text-mute" title={of.whyRequired ?? undefined}>
-          always on
-        </span>
-      ) : (
-        <button
-          type="button"
-          role="switch"
-          aria-checked={of.on}
-          aria-label={`${of.name} on by default`}
-          title={
-            of.on
-              ? "A plain agent of yours opens with this. Anybody can untick it before they send."
-              : "Not loaded unless somebody picks it when starting."
-          }
-          className="tog shrink-0"
-          disabled={busy}
-          onClick={flip}
-        >
-          <i />
-        </button>
-      )}
 
       <div>
         <IconButton

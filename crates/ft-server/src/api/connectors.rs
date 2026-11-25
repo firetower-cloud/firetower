@@ -716,6 +716,10 @@ pub(super) async fn add_from_url(
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
 
+    // What the probe already learned, kept so the row can say whether this
+    // one can be connected at all before anybody presses anything.
+    connectors::remember(state.skills.pool(), id.as_str(), &url).await;
+
     let made = state
         .skills
         .one(me.id.as_str(), id.as_str(), crate::access::Level::Viewer)
