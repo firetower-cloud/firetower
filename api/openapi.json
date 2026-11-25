@@ -1423,6 +1423,52 @@
         }
       }
     },
+    "/api/v1/connectors/{id}/client": {
+      "put": {
+        "tags": [
+          "connectors"
+        ],
+        "summary": "Give a connector an application to authorize with.",
+        "description": "**The wall this is on the other side of.** A server that registers no\nclients could be added and never used: Connect had nothing to send, the\nrow said so, and that was the end of it. GitHub, Slack and Google are all\nhere — between them most of what anybody actually wants to connect — so\n\"we cannot do that yet\" was most of the product missing.\n\nDiscovery is run first rather than trusted from the row, because the\naddresses this needs — authorize, token — are the server's to change, and\npasting a client id is the moment somebody is waiting for an answer.",
+        "operationId": "set_client",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The connector",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HandMade"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/connectors/{id}/connect": {
       "post": {
         "tags": [
@@ -12110,6 +12156,7 @@
         "type": "object",
         "description": "Whether **you** are connected, and how this one is authorized at all.",
         "required": [
+          "redirectUri",
           "auth",
           "server",
           "url",
@@ -12130,6 +12177,10 @@
           "connected": {
             "type": "boolean",
             "description": "Whether this person holds a credential for it."
+          },
+          "redirectUri": {
+            "type": "string",
+            "description": "Where the browser comes back to, for somebody registering an\napplication by hand. **Said rather than guessed**: it is built from\n`api_url`, and the difference between that and the address a person\ntypes in the app is the mistake that loses an authorization at the\nlast step with nothing to say why."
           },
           "server": {
             "type": "string",
@@ -13700,6 +13751,25 @@
           }
         }
       },
+      "HandMade": {
+        "type": "object",
+        "description": "The OAuth application somebody created by hand for a server that registers\nnone of its own.",
+        "required": [
+          "clientId"
+        ],
+        "properties": {
+          "clientId": {
+            "type": "string"
+          },
+          "clientSecret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent for a public client — one that authorizes with PKCE alone, which\nis what a desktop or native application registers as. Present for a\nconfidential one, and then it is this installation's rather than\nanybody's."
+          }
+        }
+      },
       "HeldSecret": {
         "type": "object",
         "description": "A credential Firetower holds. Its name, and nothing else.",
@@ -14173,6 +14243,13 @@
               "null"
             ],
             "description": "Whether **you** hold a credential for it. `None` for a skill."
+          },
+          "console": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where somebody goes to create that application, when we know. Each\nvendor's console is in a different place and none of them is\nguessable from the server's address."
           },
           "description": {
             "type": "string"

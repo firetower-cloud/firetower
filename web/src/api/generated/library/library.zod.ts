@@ -22,6 +22,7 @@ export const ListLibraryResponseItem = zod.object({
   "auth": zod.string().nullish(),
   "builtin": zod.boolean().describe('Firetower\'s own, which nobody can remove because the next boot puts it back.'),
   "connected": zod.boolean().nullish().describe('Whether **you** hold a credential for it. `None` for a skill.'),
+  "console": zod.string().nullish().describe('Where somebody goes to create that application, when we know. Each\nvendor\'s console is in a different place and none of them is\nguessable from the server\'s address.'),
   "description": zod.string(),
   "from": zod.string().nullish().describe('The bundle\'s name, when the bundle holds more than this one thing.\n`None` when the component *is* the bundle, because "from notion" under\na row called notion is noise.'),
   "id": zod.string().describe('`<skill id>:<path>`. Opaque, and the handle every write takes.'),

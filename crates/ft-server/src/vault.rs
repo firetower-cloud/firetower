@@ -46,6 +46,15 @@ pub const TRACKER: &str = "tracker";
 /// same plugin's row gets their own answer.
 pub const CONNECTOR: &str = "connector";
 
+/// The OAuth *application* behind a connector, rather than a person's grant.
+///
+/// **Owned by the installation, not by anybody.** Most MCP servers register a
+/// client for us on the spot; GitHub, Slack and Google do not, and want one
+/// created by hand in their own console. That client's secret belongs to this
+/// Firetower and is used for everybody who connects, which is exactly why it
+/// cannot sit under an owner.
+pub const CONNECTOR_CLIENT: &str = "connector-client";
+
 /// Which secret, and whose.
 ///
 /// The owner is part of the key rather than part of the name, because a token

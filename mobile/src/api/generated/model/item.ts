@@ -19,6 +19,13 @@ export interface Item {
      * @nullable
      */
   connected?: boolean | null;
+  /**
+     * Where somebody goes to create that application, when we know. Each
+     * vendor's console is in a different place and none of them is
+     * guessable from the server's address.
+     * @nullable
+     */
+  console?: string | null;
   description: string;
   /**
      * The bundle's name, when the bundle holds more than this one thing.

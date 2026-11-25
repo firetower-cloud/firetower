@@ -54,6 +54,10 @@ pub struct Item {
     /// Firetower has nowhere to put yet. GitHub, Slack and Google are all
     /// here. Drawing a button that fails on the press is worse than saying so.
     pub needs_client_id: bool,
+    /// Where somebody goes to create that application, when we know. Each
+    /// vendor's console is in a different place and none of them is
+    /// guessable from the server's address.
+    pub console: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -233,6 +237,15 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 },
                 server: Some(server),
                 needs_client_id: by_hand.iter().any(|s| s == &id),
+                console: b
+                    .try_get::<Option<String>, _>("url")
+                    .ok()
+                    .flatten()
+                    .as_deref()
+                    .and_then(|u| reqwest::Url::parse(u).ok())
+                    .and_then(|u| u.host_str().map(str::to_owned))
+                    .and_then(|h| crate::api::console_for(&h))
+                    .map(str::to_owned),
             });
         }
 
@@ -274,6 +287,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 server: None,
                 connected: None,
                 needs_client_id: false,
+                console: None,
             });
         }
 

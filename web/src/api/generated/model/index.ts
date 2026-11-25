@@ -133,6 +133,7 @@ export * from './getTaskParams';
 export * from './gitIdentity';
 export * from './grant';
 export * from './group';
+export * from './handMade';
 export * from './heldSecret';
 export * from './host';
 export * from './hostId';

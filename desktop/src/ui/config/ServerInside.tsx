@@ -13,10 +13,10 @@
  * came from, because an install here is a pinned copy and not a subscription.
  */
 import { useEffect } from "react";
-import { ArrowLeft, Link2, Loader2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, ExternalLink, Link2, Loader2, TriangleAlert } from "lucide-react";
 import { useConnectorTools } from "~/api/generated/library/library";
 import { useSkillInside } from "~/api/generated/skills/skills";
-import { connect, useConnectorState } from "~/api/generated/connectors/connectors";
+import { connect, setClient, useConnectorState } from "~/api/generated/connectors/connectors";
 import { openExternal } from "~/open";
 import { why } from "~/data";
 import type { Item } from "~/api/generated/model";
@@ -41,6 +41,9 @@ export function ServerInside({
   const tools = useConnectorTools(of.skillId, { query: { enabled: connected } }).data;
   const [busy, setBusy] = useState(false);
   const [bad, setBad] = useState<string | null>(null);
+  const [supplying, setSupplying] = useState(false);
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
 
   /* Connecting happens elsewhere, so the page watches rather than waits. */
   useEffect(() => {
@@ -85,7 +88,15 @@ export function ServerInside({
             before it was fetched — so a server connected a moment ago still
             offered a Connect button here. `useConnectorState` asks for
             itself and refetches when the window comes forward. */}
-        {of.connected !== null && !connected && (
+        {of.needsClientId && !connected ? (
+          <button
+            type="button"
+            className="btn primary shrink-0"
+            onClick={() => setSupplying((v) => !v)}
+          >
+            Set it up
+          </button>
+        ) : of.connected !== null && !connected ? (
           <button type="button" className="btn primary shrink-0" disabled={busy} onClick={join}>
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} />
@@ -94,8 +105,94 @@ export function ServerInside({
             )}
             Connect
           </button>
-        )}
+        ) : null}
       </header>
+
+      {/* **The other side of the wall.** A server that registers no clients
+          could be added and never used: Connect had nothing to send, the row
+          said so, and that was the end of it. GitHub, Slack and Google are
+          all here — between them most of what anybody wants to connect — so
+          "not supported yet" was most of the product missing.
+
+          One application for this whole Firetower, not one per person: the
+          people who connect afterwards each authorize their own account
+          through it. */}
+      {supplying && (
+        <section className="mt-5 rounded-xl bg-raise p-4">
+          <h3 className="text-ui text-bone">An application for {of.name}</h3>
+          <p className="mt-1 max-w-[74ch] text-meta text-dim">
+            {of.name} does not register clients itself, so somebody creates one in its
+            console and pastes it here — once, for everybody on this Firetower. Each
+            person still authorizes their own account.
+          </p>
+          <p className="mt-3 text-meta text-dim">
+            Its redirect address has to be exactly this:
+          </p>
+          <p className="mt-1 select-all break-all rounded-lg bg-sunk px-3 py-2 font-mono text-meta text-bone">
+            {state?.redirectUri ?? "…"}
+          </p>
+          {of.console && (
+            <button
+              type="button"
+              className="out mt-3"
+              onClick={() => void openExternal(of.console!)}
+            >
+              <ExternalLink className="h-4 w-4" strokeWidth={1.5} />
+              Open {of.name}&rsquo;s console
+            </button>
+          )}
+          <div className="mt-4 flex flex-col gap-2">
+            <input
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder="Client ID"
+              aria-label="Client ID"
+              className="rounded-lg bg-panel px-3 py-2 font-mono text-ui text-bone outline-none placeholder:text-mute"
+            />
+            <input
+              value={clientSecret}
+              onChange={(e) => setClientSecret(e.target.value)}
+              type="password"
+              placeholder="Client secret — leave empty if it has none"
+              aria-label="Client secret"
+              className="rounded-lg bg-panel px-3 py-2 font-mono text-ui text-bone outline-none placeholder:text-mute"
+            />
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              className="btn primary"
+              disabled={busy || !clientId.trim()}
+              onClick={async () => {
+                setBusy(true);
+                setBad(null);
+                try {
+                  await setClient(of.skillId, {
+                    clientId: clientId.trim(),
+                    clientSecret: clientSecret.trim() || null,
+                  });
+                  setSupplying(false);
+                  setClientSecret("");
+                  await onGone();
+                  /* Straight into authorizing: supplying the application was
+                     only ever the thing standing in front of connecting. */
+                  await join();
+                } catch (e) {
+                  setBad(why(e));
+                } finally {
+                  setBusy(false);
+                }
+              }}
+            >
+              {busy && <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} />}
+              Save and connect
+            </button>
+            <button type="button" className="btn quiet" onClick={() => setSupplying(false)}>
+              Cancel
+            </button>
+          </div>
+        </section>
+      )}
 
       {bad && <p className="mt-3 text-meta text-brick">{bad}</p>}
 
@@ -171,7 +268,11 @@ export function ServerInside({
             {of.auth === "none" ? "Not required" : "Required, per person"}
           </Fact>
           <Fact label="Authorizing">
-            {of.auth === "oauth" ? "OAuth, registered automatically" : of.auth ?? "—"}
+            {of.needsClientId
+              ? "OAuth, with an application you supply"
+              : of.auth === "oauth"
+                ? "OAuth, registered automatically"
+                : (of.auth ?? "—")}
           </Fact>
           <Fact label="Called as">
             <span className="font-mono">{of.server ?? of.name}</span>

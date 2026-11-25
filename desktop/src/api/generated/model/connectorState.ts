@@ -24,6 +24,14 @@ export interface ConnectorState {
   blocked?: string | null;
   /** Whether this person holds a credential for it. */
   connected: boolean;
+  /**
+     * Where the browser comes back to, for somebody registering an
+     * application by hand. **Said rather than guessed**: it is built from
+     * `api_url`, and the difference between that and the address a person
+     * types in the app is the mistake that loses an authorization at the
+     * last step with nothing to say why.
+     */
+  redirectUri: string;
   /** What the agent calls this server. */
   server: string;
   url: string;

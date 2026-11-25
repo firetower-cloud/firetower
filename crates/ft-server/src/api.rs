@@ -17,6 +17,7 @@ mod annotations;
 pub(crate) mod artifacts;
 mod auth;
 mod connectors;
+pub use connectors::console_for;
 mod library;
 mod marketplaces;
 mod consumption;
@@ -827,6 +828,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(connectors::probe_url))
         .routes(routes!(connectors::add_from_url))
         .routes(routes!(connectors::connector_callback))
+        .routes(routes!(connectors::set_client))
         .routes(routes!(
             marketplaces::list_marketplaces,
             marketplaces::add_marketplace

@@ -41,6 +41,12 @@ fn redirect_uri(state: &AppState) -> String {
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectorState {
+    /// Where the browser comes back to, for somebody registering an
+    /// application by hand. **Said rather than guessed**: it is built from
+    /// `api_url`, and the difference between that and the address a person
+    /// types in the app is the mistake that loses an authorization at the
+    /// last step with nothing to say why.
+    pub redirect_uri: String,
     /// `none`, `borrow-git` or `oauth`. What the row on the screen says about
     /// what pressing Connect will do.
     pub auth: String,
@@ -129,6 +135,7 @@ pub(super) async fn connector_state(
     };
 
     Ok(Json(ConnectorState {
+        redirect_uri: redirect_uri(&state),
         auth: row.auth,
         server: row.server,
         url: row.url,
@@ -247,10 +254,26 @@ async fn finish(state: &AppState, back: Returned) -> Result<String, String> {
         .await
         .map_err(|e| e.message.clone())?;
 
+    // **The secret, when this application has one.** A client somebody
+    // registered by hand is usually confidential — GitHub's OAuth apps have
+    // no public mode at all — and a token request without it is refused with
+    // `invalid_client`, which reads as a bad code rather than a missing
+    // secret.
+    let shared = connectors::credential_key(state.skills.pool(), &skill_id).await;
+    let secret = state
+        .vault
+        .get(
+            crate::vault::Key::of(crate::vault::CONNECTOR_CLIENT, &shared, ""),
+            "authorizing a connector",
+        )
+        .await
+        .ok()
+        .flatten();
+
     let grant = connectors::exchange(
         &found,
         &client_id,
-        None,
+        secret.as_ref().map(|s| s.as_str()),
         &code,
         &redirect_uri(state),
         &verifier,
@@ -796,4 +819,128 @@ mod tests {
             ]
         );
     }
+}
+
+/// The OAuth application somebody created by hand for a server that registers
+/// none of its own.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct HandMade {
+    pub client_id: String,
+    /// Absent for a public client — one that authorizes with PKCE alone, which
+    /// is what a desktop or native application registers as. Present for a
+    /// confidential one, and then it is this installation's rather than
+    /// anybody's.
+    #[serde(default)]
+    pub client_secret: Option<String>,
+}
+
+/// Give a connector an application to authorize with.
+///
+/// **The wall this is on the other side of.** A server that registers no
+/// clients could be added and never used: Connect had nothing to send, the
+/// row said so, and that was the end of it. GitHub, Slack and Google are all
+/// here — between them most of what anybody actually wants to connect — so
+/// "we cannot do that yet" was most of the product missing.
+///
+/// Discovery is run first rather than trusted from the row, because the
+/// addresses this needs — authorize, token — are the server's to change, and
+/// pasting a client id is the moment somebody is waiting for an answer.
+#[utoipa::path(
+    put, path = "/api/v1/connectors/{id}/client", tag = "connectors",
+    params(("id" = String, Path, description = "The connector")),
+    request_body = HandMade,
+    responses((status = 204), (status = 400, body = ApiError)),
+)]
+pub(super) async fn set_client(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+    Json(body): Json<HandMade>,
+) -> ApiResult<StatusCode> {
+    let me = whoever(&principal)?;
+    let client_id = body.client_id.trim().to_string();
+    if client_id.is_empty() {
+        return Err(ApiError::new(
+            ErrorCode::InvalidRequest,
+            "that application needs a client id".to_string(),
+        ));
+    }
+
+    let found = state
+        .skills
+        .connector_of(&id)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?
+        .ok_or_else(|| ApiError::not_found("connector"))?;
+
+    let d = connectors::discover(&found.url)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+
+    let secret = body
+        .client_secret
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    // Shared by every connector naming the same address, the same way the
+    // person's own grant is: two bundles pointing at Slack are one
+    // application, not two.
+    let key_for = connectors::credential_key(state.skills.pool(), &id).await;
+    if let Some(secret) = &secret {
+        state
+            .vault
+            .put(
+                crate::vault::Key::of(crate::vault::CONNECTOR_CLIENT, &key_for, ""),
+                secret,
+                "an OAuth application for a connector",
+            )
+            .await
+            .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;
+    }
+
+    sqlx::query(
+        "INSERT INTO connector_clients \
+           (skill_id, resource, authorize_url, token_url, register_url, client_id, \
+            has_secret, scopes) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8) \
+         ON CONFLICT (skill_id) DO UPDATE SET \
+           resource = excluded.resource, authorize_url = excluded.authorize_url, \
+           token_url = excluded.token_url, register_url = excluded.register_url, \
+           client_id = excluded.client_id, has_secret = excluded.has_secret, \
+           scopes = excluded.scopes",
+    )
+    .bind(&key_for)
+    .bind(&d.resource)
+    .bind(&d.authorize_url)
+    .bind(&d.token_url)
+    .bind(&d.register_url)
+    .bind(&client_id)
+    .bind(secret.is_some())
+    .bind(&d.scopes)
+    .execute(state.skills.pool())
+    .await
+    .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;
+
+    tracing::info!(
+        connector = %found.server, by = %me.username,
+        "an OAuth application was supplied by hand"
+    );
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// Where somebody goes to make one, and what it has to say.
+///
+/// Each of these consoles asks a different question for the same thing, and
+/// getting the redirect wrong is the failure that wastes an afternoon — so
+/// the screen shows the exact value rather than describing it.
+pub fn console_for(host: &str) -> Option<&'static str> {
+    Some(match host {
+        h if h.contains("github") => "https://github.com/settings/applications/new",
+        h if h.contains("slack") => "https://api.slack.com/apps",
+        h if h.contains("google") => "https://console.cloud.google.com/auth/clients",
+        h if h.contains("asana") => "https://app.asana.com/0/my-apps",
+        h if h.contains("atlassian") => "https://developer.atlassian.com/console/myapps/",
+        _ => return None,
+    })
 }

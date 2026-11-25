@@ -133,6 +133,7 @@ export * from './getTaskParams.ts';
 export * from './gitIdentity.ts';
 export * from './grant.ts';
 export * from './group.ts';
+export * from './handMade.ts';
 export * from './heldSecret.ts';
 export * from './host.ts';
 export * from './hostId.ts';

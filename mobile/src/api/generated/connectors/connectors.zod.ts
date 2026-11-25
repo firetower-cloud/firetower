@@ -75,6 +75,29 @@ export const DisconnectParams = zod.object({
 
 export const DisconnectResponse = zod.void()
 
+/**
+ * **The wall this is on the other side of.** A server that registers no
+ * clients could be added and never used: Connect had nothing to send, the
+ * row said so, and that was the end of it. GitHub, Slack and Google are all
+ * here — between them most of what anybody actually wants to connect — so
+ * "we cannot do that yet" was most of the product missing.
+ *
+ * Discovery is run first rather than trusted from the row, because the
+ * addresses this needs — authorize, token — are the server's to change, and
+ * pasting a client id is the moment somebody is waiting for an answer.
+ * @summary Give a connector an application to authorize with.
+ */
+export const SetClientParams = zod.object({
+  "id": zod.string().describe('The connector')
+})
+
+export const SetClientBody = zod.object({
+  "clientId": zod.string(),
+  "clientSecret": zod.string().nullish().describe('Absent for a public client — one that authorizes with PKCE alone, which\nis what a desktop or native application registers as. Present for a\nconfidential one, and then it is this installation\'s rather than\nanybody\'s.')
+}).describe('The OAuth application somebody created by hand for a server that registers\nnone of its own.')
+
+export const SetClientResponse = zod.void()
+
 export const ConnectParams = zod.object({
   "id": zod.string().describe('The plugin the connector belongs to')
 })

@@ -30,6 +30,7 @@ import type {
   ApiError,
   ConnectorState,
   FromUrl,
+  HandMade,
   Opened,
   Probed,
   Skill
@@ -507,6 +508,103 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
         TContext
       > => {
       return useMutation(getDisconnectMutationOptions(options), queryClient);
+    }
+    export const getSetClientUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/connectors/${id}/client`
+}
+
+/**
+ * **The wall this is on the other side of.** A server that registers no
+ * clients could be added and never used: Connect had nothing to send, the
+ * row said so, and that was the end of it. GitHub, Slack and Google are all
+ * here — between them most of what anybody actually wants to connect — so
+ * "we cannot do that yet" was most of the product missing.
+ *
+ * Discovery is run first rather than trusted from the row, because the
+ * addresses this needs — authorize, token — are the server's to change, and
+ * pasting a client id is the moment somebody is waiting for an answer.
+ * @summary Give a connector an application to authorize with.
+ */
+export const setClient = async (id: string,
+    handMade: HandMade, options?: Parameters<typeof http>[1]): Promise<void> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return http<void>(getSetClientUrl(id),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(handMade)
+  }
+);}
+
+
+
+
+
+export const getSetClientMutationKey = () => ['setClient'] as const;
+
+export const getSetClientMutationOptions = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClient>>, TError,SetClientMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+): UseMutationOptions<Awaited<ReturnType<typeof setClient>>, TError,SetClientMutationVariables, TContext> => {
+
+const mutationKey = getSetClientMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setClient>>, SetClientMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  setClient(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetClientMutationResult = NonNullable<Awaited<ReturnType<typeof setClient>>>
+    export type SetClientMutationBody = HandMade
+    export type SetClientMutationError = ApiError
+    export type SetClientMutationVariables = {id: string;data: HandMade}
+
+    /**
+ * @summary Give a connector an application to authorize with.
+ */
+export const useSetClient = <TError = ApiError,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setClient>>, TError,SetClientMutationVariables, TContext>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof setClient>>,
+        TError,
+        SetClientMutationVariables,
+        TContext
+      > => {
+      return useMutation(getSetClientMutationOptions(options), queryClient);
     }
     export const getConnectUrl = (id: string,) => {
 
