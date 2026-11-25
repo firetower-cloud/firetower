@@ -135,6 +135,31 @@ pub(super) async fn list_entries(
     Query(search): Query<Search>,
 ) -> ApiResult<Json<Vec<Listed>>> {
     let me = whoever(&principal)?;
+
+    // **A source nobody has read yet is read now.** Booting must not depend on
+    // reaching GitHub, so the default marketplace is added at start-up and not
+    // fetched — which left a new installation with a Discover tab that was
+    // empty until somebody found a Refresh button and guessed that it was the
+    // thing standing between them and a catalogue. Asking for the list *is*
+    // that guess, made for them.
+    //
+    // Only for a source that has never answered, so this costs one fetch in
+    // the lifetime of each; a stale one is refreshed on purpose, by a person.
+    for m in marketplace::list(state.skills.pool(), me.org_id.as_str())
+        .await
+        .unwrap_or_default()
+    {
+        if m.fetched_at.is_some() {
+            continue;
+        }
+        if let Err(e) = read_now(&state, &m.id, &m.url, &m.git_ref).await {
+            // Recorded on the row, where the screen already shows it. A
+            // source that cannot be reached must not take the others' rows
+            // down with it.
+            tracing::info!(source = %m.url, "first read failed: {}", e.message);
+        }
+    }
+
     let got = marketplace::entries(state.skills.pool(), me.org_id.as_str(), search.q.as_deref())
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
