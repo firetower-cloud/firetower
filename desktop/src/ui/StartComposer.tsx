@@ -443,6 +443,8 @@ export function StartComposer({
   /* **Counted from what is shown, not from the person's own defaults.** The
      chip read `8 — Engineer` for a profile holding two, because the number
      came from one source and the list beside it from another. One source. */
+  /* What somebody may actually turn off. A required built-in is not one. */
+  const choosable = prefilled.filter((s) => !required.has(s.id));
   const selectedSkills = prefilled
     .map((s) => s.id)
     .filter((id) => required.has(id) || (!muted.has(id) && !unconnected.has(id)));
@@ -860,7 +862,6 @@ export function StartComposer({
                 <button
                   onClick={(e) => toggle("prefill", e.currentTarget)}
                   data-set
-                  data-warn={needing.length > 0 || undefined}
                   className="chip"
                   title={
                     decidedBy
@@ -879,12 +880,21 @@ export function StartComposer({
                       nobody authorized is a tool the agent is handed and
                       cannot call, which fails on the first turn rather than
                       here. Ember, because it is the one loud thing. */}
-                  {/* **"not ready", not "to connect".** A server that
-                      registers no clients cannot be connected at all, so the
-                      second reading is a promise the product cannot keep —
-                      the row inside says which of the two it is. */}
+                  {/* **A mark and a count, not a sentence.** Every phrasing
+                      tried here promised something: "to connect" is a button
+                      that does not exist for a server registering no clients,
+                      and "not ready" is three words on a bar where everything
+                      else is one. The triangle is the whole message and the
+                      row inside says which of the two problems it is.
+
+                      Quiet, too. Ember is for the thing that is going wrong
+                      now; this is a thing that will not work when it is
+                      reached, which is worth saying and not worth shouting. */}
                   {needing.length > 0 && (
-                    <span className="need">{needing.length} not ready</span>
+                    <span className="need" title={`${needing.length} will not answer yet`}>
+                      <TriangleAlert className="h-[13px] w-[13px]" strokeWidth={1.75} />
+                      {needing.length}
+                    </span>
                   )}
                 </button>
               )}
@@ -975,7 +985,7 @@ export function StartComposer({
 
       {/* ---------- the pill menus ---------- */}
       {open?.which === "profile" && (
-        <Pop anchor={open.at} onClose={close} width={320}>
+        <Pop anchor={open.at} onClose={close} width={248}>
           <ProfileMenu
             profiles={profiles}
             teams={teams}
@@ -991,14 +1001,14 @@ export function StartComposer({
       )}
 
       {open?.which === "prefill" && (
-        <Pop anchor={open.at} onClose={close} width={320}>
+        <Pop anchor={open.at} onClose={close} width={248}>
           {/* **No paragraph.** A list of switches explains itself, and the
               sentence that used to sit above it said three things nobody had
               asked: what the list was, that unticking is temporary, and what
               it is not. The one thing worth saying — that a profile chose
               this — is already on the chip that opened it. */}
           <div className="py-1">
-            {(
+            {choosable.length > 5 && (
               <input
                 autoFocus
                 value={look}
@@ -1008,11 +1018,20 @@ export function StartComposer({
                 className="mb-1 w-full border-b border-line bg-transparent px-3 pb-2 pt-1 text-ui text-bone outline-none placeholder:text-mute"
               />
             )}
-            {prefilled
+            {/* **The always-on ones are not here.** They were drawn with no
+                switch and nothing to the right of them, which is a row that
+                costs height to say "you cannot change this". The chip still
+                counts them, because it answers what the agent will have
+                rather than what you may alter. */}
+            {choosable.length === 0 && (
+              <p className="px-3 py-2 text-meta text-dim">
+                Nothing to change — everything you have loads every time.
+              </p>
+            )}
+            {choosable
               .filter((s) => !look.trim() || s.name.toLowerCase().includes(look.trim().toLowerCase()))
               .map((s) => {
-                const fixed = required.has(s.id);
-                const on = fixed || !muted.has(s.id);
+                const on = !muted.has(s.id);
                 const short = unconnected.has(s.id);
                 return (
                   <div key={s.id} className="prow tight">
@@ -1032,12 +1051,6 @@ export function StartComposer({
                       >
                         <TriangleAlert className="h-4 w-4" strokeWidth={1.75} />
                       </span>
-                    ) : fixed ? (
-                      /* **Nothing, not "always".** A word repeated down the
-                         column said the same thing about every row that has
-                         no switch, which is already what no switch means.
-                         The reason lives on the row's own page. */
-                      <span className="w-7 shrink-0" />
                     ) : (
                       <button
                         type="button"
