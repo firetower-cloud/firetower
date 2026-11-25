@@ -318,6 +318,14 @@ pub fn deliverable_mcp(servers: Vec<Value>, http_ok: bool) -> (Vec<Value>, Vec<V
 /// — so the block is delimited, the old one is cut out, and the new one goes
 /// on the end. A `[table]` header is always legal after any valid TOML, which
 /// is what makes appending safe where appending a bare key would not be.
+///
+/// **The server's name is quoted, because a dot in it is not a dot.** The name
+/// comes out of somebody's `.mcp.json` unexamined — `usable` guards the plugin
+/// folder, not the keys inside it — and `[mcp_servers.cal.com]` is TOML for a
+/// server called `com` nested under `cal`. Codex then refuses the *whole* file:
+/// measured against 0.156.1, `invalid transport in mcp_servers.cal` and no
+/// servers, no model setting, nothing. One third-party catalogue entry would
+/// take the session down with it, so every name goes in as a quoted key.
 async fn write_codex_mcp(workspace: &Path, id: &SessionId, plugins: &[SkillBundle]) -> Result<()> {
     const OPEN: &str = "# >>> firetower plugins — written per session, do not edit";
     const CLOSE: &str = "# <<< firetower plugins";
@@ -345,9 +353,10 @@ async fn write_codex_mcp(workspace: &Path, id: &SessionId, plugins: &[SkillBundl
         let Some(url) = server.get("url").and_then(Value::as_str) else {
             continue;
         };
-        block.push_str(&format!("\n[mcp_servers.{name}]\nurl = {}\n", quoted(url)));
+        let key = quoted(&name);
+        block.push_str(&format!("\n[mcp_servers.{key}]\nurl = {}\n", quoted(url)));
         if let Some(headers) = server.get("headers").and_then(Value::as_object) {
-            block.push_str(&format!("\n[mcp_servers.{name}.http_headers]\n"));
+            block.push_str(&format!("\n[mcp_servers.{key}.http_headers]\n"));
             for (k, v) in headers {
                 block.push_str(&format!(
                     "{} = {}\n",

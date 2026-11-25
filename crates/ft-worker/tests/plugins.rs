@@ -139,7 +139,7 @@ async fn codex_gets_the_skills_out_of_the_plugin_and_the_connector_in_its_config
             .join("config.toml"),
     )
     .expect("codex gets a config.toml");
-    assert!(config.contains("[mcp_servers.github]"), "{config}");
+    assert!(config.contains(r#"[mcp_servers."github"]"#), "{config}");
     assert!(
         config.contains("https://api.githubcopilot.com/mcp/"),
         "{config}"
@@ -170,9 +170,60 @@ async fn codex_config_is_rewritten_in_place_and_keeps_what_was_already_there() {
     let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
     assert!(config.contains("model = \"gpt-5\""), "{config}");
     assert_eq!(
-        config.matches("[mcp_servers.github]").count(),
+        config.matches(r#"[mcp_servers."github"]"#).count(),
         1,
         "a second apply must replace the block, not append another: {config}"
+    );
+}
+
+/// A server whose name holds a dot goes in as a quoted key, because the bare
+/// form is a different server.
+///
+/// `[mcp_servers.cal.com]` is TOML for a server called `com` nested under
+/// `cal`, and Codex 0.156.1 does not shrug that off — it refuses the entire
+/// file with `invalid transport in mcp_servers.cal`, so the session gets no
+/// servers, no model setting and no explanation. The name comes out of
+/// somebody else's `.mcp.json`, which nothing sanitises, so one entry in one
+/// third-party catalogue is enough to do it.
+#[tokio::test]
+async fn a_server_name_with_a_dot_in_it_does_not_become_two_tables() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = SessionId::from_stored("s_test");
+    let dotted = SkillBundle {
+        name: "scheduling".into(),
+        kind: BundleKind::Plugin,
+        files: vec![
+            file(
+                ".claude-plugin/plugin.json",
+                r#"{"name":"scheduling","description":"d","version":"1.0.0"}"#,
+            ),
+            file(
+                ".mcp.json",
+                r#"{"mcpServers":{"cal.com":{"type":"http","url":"https://mcp.cal.com/mcp","headers":{"Authorization":"Bearer t"}}}}"#,
+            ),
+        ],
+    };
+    ft_worker::skills::apply(dir.path(), &id, Agent::Codex, &[dotted], false)
+        .await
+        .unwrap();
+
+    let config = std::fs::read_to_string(
+        ft_worker::agentd::dir_for(dir.path())
+            .join(format!("agent-home-{}", id.as_str()))
+            .join("config.toml"),
+    )
+    .unwrap();
+    assert!(
+        config.contains(r#"[mcp_servers."cal.com"]"#),
+        "the name is one key, quoted: {config}"
+    );
+    assert!(
+        !config.contains("[mcp_servers.cal.com]"),
+        "the bare form is the bug: {config}"
+    );
+    assert!(
+        config.contains(r#"[mcp_servers."cal.com".http_headers]"#),
+        "and its headers hang off the same key: {config}"
     );
 }
 

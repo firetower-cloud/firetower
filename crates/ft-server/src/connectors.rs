@@ -181,14 +181,26 @@ pub async fn discover(url: &str) -> Result<Discovered> {
     })
 }
 
-/// Both spellings of the authorization-server document, in the order a reader
+/// Both spellings of the authorization-server document, at both of the
+/// addresses an issuer with a path can publish it, in the order a reader
 /// should try them.
+///
+/// **The spec's address is not the obvious one.** RFC 8414 §3.1 inserts the
+/// well-known segment between the host and the issuer's path, so the issuer
+/// `https://access.stripe.com/mcp` publishes at
+/// `https://access.stripe.com/.well-known/oauth-authorization-server/mcp`;
+/// OpenID Connect Discovery appends instead. Stripe answers only the first
+/// form, and appending alone read it as a server with no metadata — a
+/// connector that is perfectly reachable, reported as dead. For an issuer
+/// without a path the two forms are the same string, which `dedup` drops.
 async fn fetch_auth_server(http: &reqwest::Client, issuer: &str) -> Result<AuthServer> {
     let base = issuer.trim_end_matches('/');
-    let candidates = [
-        format!("{base}/.well-known/oauth-authorization-server"),
-        format!("{base}/.well-known/openid-configuration"),
-    ];
+    let mut candidates = Vec::with_capacity(4);
+    for leaf in ["oauth-authorization-server", "openid-configuration"] {
+        candidates.push(inserted(base, leaf));
+        candidates.push(format!("{base}/.well-known/{leaf}"));
+    }
+    candidates.dedup();
     let mut last = None;
     for at in &candidates {
         match http.get(at).send().await {
@@ -201,6 +213,18 @@ async fn fetch_auth_server(http: &reqwest::Client, issuer: &str) -> Result<AuthS
         }
     }
     Err(last.unwrap_or_else(|| anyhow::anyhow!("no metadata at {issuer}")))
+}
+
+/// RFC 8414's address for a document belonging to `issuer`: the well-known
+/// segment goes after the origin and the issuer's own path follows it.
+fn inserted(issuer: &str, leaf: &str) -> String {
+    match issuer.split_once("://") {
+        Some((scheme, rest)) => match rest.split_once('/') {
+            Some((host, path)) => format!("{scheme}://{host}/.well-known/{leaf}/{path}"),
+            None => format!("{scheme}://{rest}/.well-known/{leaf}"),
+        },
+        None => format!("{issuer}/.well-known/{leaf}"),
+    }
 }
 
 /// `resource_metadata="…"` out of a `WWW-Authenticate` header.
@@ -600,6 +624,30 @@ mod tests {
         assert_eq!(
             resource_metadata_of(linear).as_deref(),
             Some("https://mcp.linear.app/.well-known/oauth-protected-resource/mcp")
+        );
+    }
+
+    /// RFC 8414 does the same for the authorization server's own document,
+    /// and the difference only shows on an issuer that has a path.
+    ///
+    /// Stripe's issuer is `https://access.stripe.com/mcp` and it answers the
+    /// inserted address alone. Appending was all we tried, so a live
+    /// one-click server read as one publishing no metadata at all.
+    #[test]
+    fn the_well_known_segment_goes_after_the_origin_for_an_issuer_with_a_path() {
+        assert_eq!(
+            inserted("https://access.stripe.com/mcp", "oauth-authorization-server"),
+            "https://access.stripe.com/.well-known/oauth-authorization-server/mcp"
+        );
+        // No path, so there is nothing to insert ahead of and the two forms
+        // agree — which is why appending alone passed for everybody else.
+        assert_eq!(
+            inserted("https://auth.exa.ai", "oauth-authorization-server"),
+            "https://auth.exa.ai/.well-known/oauth-authorization-server"
+        );
+        assert_eq!(
+            inserted("https://fly.io/mcp/oauth", "openid-configuration"),
+            "https://fly.io/.well-known/openid-configuration/mcp/oauth"
         );
     }
 
