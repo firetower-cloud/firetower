@@ -121,14 +121,26 @@ impl Bundle {
 
     fn load(self, name: &str) -> Option<Asset> {
         let file = self.get(name)?;
+        Some(self.describe(name, file.data.into_owned()))
+    }
 
-        Some(Asset {
+    /// The headers a file of this name gets, whatever its bytes turn out to be.
+    ///
+    /// Split out of [`load`](Self::load) so that every step from a filename to
+    /// a `Cache-Control` can be read back with no bundle on disk. That is not a
+    /// tidiness: `backend-ci` is the only job that runs `cargo test
+    /// --workspace` and it builds neither front end, so a test that has to find
+    /// a real hashed file to assert anything asserts nothing there — which is
+    /// the one place it would ever catch somebody. See
+    /// `the_cache_rule_holds_with_no_bundle_on_disk`.
+    fn describe(self, name: &str, body: Vec<u8>) -> Asset {
+        Asset {
             content_type: mime_guess::from_path(name)
                 .first_or_octet_stream()
                 .to_string(),
             immutable: self.hashed(name),
-            body: file.data.into_owned(),
-        })
+            body,
+        }
     }
 }
 
@@ -291,15 +303,33 @@ fn resolve(uri: &Uri) -> Option<Asset> {
         return Some(asset);
     }
 
-    let candidates = [
+    site_candidates(path)
+        .iter()
+        .find_map(|candidate| Bundle::Site.load(candidate))
+}
+
+/// The names the administration site is asked for, in order, for one path.
+///
+/// Three lines with a name on them rather than three lines inside [`resolve`],
+/// because the collision guard in the tests below has to ask the same question
+/// the router asks, and for a while it asked a narrower one: `Site::get(name)`
+/// for each of the renderer's raw names. Those are two different notions of
+/// "the site carries this", and the gap between them is exactly one file.
+///
+/// An extensionless name in `desktop/public/` — `login`, `account`, `setup` —
+/// is copied to the root of the renderer's bundle, wins that path ahead of the
+/// site, and was invisible to the guard, because `Site::get("account")` is
+/// `None` while the site answers `/account` out of `account.html`. The route
+/// would quietly start serving a renderer asset and the test nominated as what
+/// makes the one-directional precedence safe would have nothing to say. One
+/// definition, asked twice, is the whole fix; `resolve` behaves exactly as it
+/// did.
+fn site_candidates(path: &str) -> [String; 3] {
+    [
         path.to_string(),
         format!("{path}.html"),
         format!("{}/index.html", path.trim_end_matches('/')),
-    ];
-
-    candidates
-        .iter()
-        .find_map(|candidate| Bundle::Site.load(candidate))
+    ]
 }
 
 #[cfg(test)]
@@ -420,7 +450,22 @@ mod tests {
         );
     }
 
+    /// Whether the administration site would answer this path — the question
+    /// `resolve` asks, which is not the question `Site::get` answers.
+    fn site_answers(path: &str) -> bool {
+        site_candidates(path)
+            .iter()
+            .any(|candidate| Site::get(candidate).is_some())
+    }
+
     /// What makes the precedence in `resolve` safe to state in one direction.
+    ///
+    /// Asked through `site_candidates`, because the router is. Asking
+    /// `Site::get` alone let an extensionless file in `desktop/public/` take a
+    /// route the site serves as `<name>.html`: dropping a file called `account`
+    /// in there hijacked `/account` and the whole suite stayed green, including
+    /// this test and including `an_administration_route_resolves_to_its_page`,
+    /// which only enumerates four routes and does not enumerate that one.
     #[test]
     fn the_bundles_claim_one_name_in_common() {
         if !Bundle::Renderer.built() || !Bundle::Site.built() {
@@ -428,14 +473,14 @@ mod tests {
         }
         let shared: Vec<_> = Bundle::Renderer
             .names()
-            .filter(|name| Site::get(name).is_some())
+            .filter(|name| site_answers(name))
             .collect();
         assert_eq!(
             shared,
             ["index.html"],
             "only the root is contested, and the application wins it on purpose; \
-             anything else here is a path served from whichever bundle happens to \
-             be asked first"
+             anything else here is an administration route quietly served out of \
+             the renderer's bundle"
         );
     }
 
@@ -479,6 +524,148 @@ mod tests {
         assert!(
             resolve_path("/nonsense").is_none(),
             "neither bundle carries it, and nothing falls back to a shell"
+        );
+    }
+
+    /// **The cache rule, as a rule.** This is the one that has to work on the
+    /// branch.
+    ///
+    /// Every test above that reads a name out of an embed returns early on
+    /// `backend-ci`, which runs `cargo test --workspace` and builds neither
+    /// front end — so they are the developer-machine check and nothing more.
+    /// Measured, not assumed: with both bundles absent, re-applying the
+    /// `_next/static/` regression to the renderer's rule passed 12 of 12. The
+    /// guard written to stop the specification's silent trap returning was
+    /// blind in the only place it would ever catch anybody.
+    ///
+    /// So the decision is tested where it actually lives. It is a pure
+    /// predicate over a filename; these filenames are invented, and the shapes
+    /// they are invented in are the shapes each bundler really writes.
+    #[test]
+    fn the_cache_rule_holds_with_no_bundle_on_disk() {
+        use Bundle::{Renderer, Site};
+
+        #[rustfmt::skip]
+        let cases = [
+            // Vite's content-hashed output, which is the whole of what the
+            // renderer may pin.
+            (Renderer, "assets/index-ZZ5k_kTa.js",            true),
+            (Renderer, "assets/index-CUoiwNfh.css",           true),
+            (Renderer, "assets/xterm-DudyGoOt.js",            true),
+            (Renderer, "assets/archivo-BEIDiHaE.woff2",       true),
+            // Its shell, and `public/` copied through under its own names.
+            // Neither carries a hash, so pinning either strands a browser on a
+            // version it can never be told about.
+            (Renderer, "index.html",                          false),
+            (Renderer, "voice-worklet.js",                    false),
+            // The other tree's prefix means nothing in this one. This is the
+            // entry that fails first if the two rules are ever collapsed back
+            // into one.
+            (Renderer, "_next/static/chunks/main-abc123.js",  false),
+
+            // Next writes hashed filenames under exactly one directory.
+            (Site, "_next/static/chunks/29iev1wdi1r0p.js",    true),
+            (Site, "_next/static/css/4f2a9c1b.css",           true),
+            (Site, "_next/static/media/archivo.d41d8cd9.woff2", true),
+            // Its sibling under the build id is named by route, not by hash:
+            // the directory moves every build and the file inside keeps its
+            // name, so a pin there outlives the bytes it was taken from.
+            (Site, "_next/WRo8u728hRf0gc5ixbXTK/index.txt",   false),
+            // Shells, at the root and nested. A pinned one hides an upgrade.
+            (Site, "index.html",                              false),
+            (Site, "404.html",                                false),
+            (Site, "organization.html",                       false),
+            (Site, "organization/people.html",                false),
+            (Site, "fonts/archivo.woff2",                     false),
+            (Site, "favicon.ico",                             false),
+            // And Vite's prefix means nothing here either.
+            (Site, "assets/index-ZZ5k_kTa.js",                false),
+
+            // The prefix is a prefix, not a substring. `starts_with` quietly
+            // widened to `contains` would pin a file somebody put inside a
+            // directory that merely shares the name.
+            (Renderer, "public/assets/index-ZZ5k_kTa.js",     false),
+            (Site, "docs/_next/static/chunks/main.js",        false),
+
+            // "Anything with a dot in it" is the rule the specification tells
+            // us not to write, and these are what it would have got wrong.
+            (Renderer, "index.html",                          false),
+            (Site, "organization/usage.txt",                  false),
+
+            // Nothing is not something.
+            (Renderer, "",                                    false),
+            (Site, "",                                        false),
+        ];
+
+        for (bundle, name, immutable) in cases {
+            assert_eq!(
+                bundle.hashed(name),
+                immutable,
+                "{bundle:?} got {name:?} wrong: it should{} be pinned",
+                if immutable { "" } else { " not" }
+            );
+        }
+    }
+
+    /// And that the decision reaches a header, which is the half of the chain
+    /// the predicate above cannot see.
+    ///
+    /// Through `describe`, so this needs no bundle either — `immutable: false`
+    /// written straight into `load` would be the same defect arriving one line
+    /// further down, and on `backend-ci` nothing else would notice.
+    #[test]
+    fn a_name_reaches_its_cache_header_with_no_bundle_on_disk() {
+        let cache = |bundle: Bundle, name: &str| {
+            let asset = bundle.describe(name, Vec::new());
+            let response = asset.into_response();
+            response
+                .headers()
+                .get(header::CACHE_CONTROL)
+                .expect("every asset says how long it keeps")
+                .to_str()
+                .unwrap()
+                .to_string()
+        };
+
+        assert_eq!(
+            cache(Bundle::Renderer, "assets/index-ZZ5k_kTa.js"),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(
+            cache(Bundle::Site, "_next/static/chunks/29iev1wdi1r0p.js"),
+            "public, max-age=31536000, immutable"
+        );
+        assert_eq!(cache(Bundle::Renderer, "index.html"), "no-cache");
+        assert_eq!(cache(Bundle::Site, "organization.html"), "no-cache");
+
+        // The type comes off the name as well, which is what makes the shell a
+        // page rather than a download.
+        assert!(Bundle::Renderer
+            .describe("index.html", Vec::new())
+            .content_type
+            .starts_with("text/html"));
+    }
+
+    /// The site's candidates, without a bundle — the shapes `resolve` asks for
+    /// and `site_answers` has to agree with.
+    #[test]
+    fn the_site_is_asked_for_three_names() {
+        assert_eq!(
+            site_candidates("account"),
+            ["account", "account.html", "account/index.html"]
+        );
+        assert_eq!(
+            site_candidates("organization/people"),
+            [
+                "organization/people",
+                "organization/people.html",
+                "organization/people/index.html"
+            ]
+        );
+        // A trailing slash must not produce `organization//index.html`.
+        assert_eq!(
+            site_candidates("organization/")[2],
+            "organization/index.html"
         );
     }
 

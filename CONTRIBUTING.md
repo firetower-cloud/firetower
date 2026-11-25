@@ -232,7 +232,7 @@ Left alone for three days of heavy use, this reached 1,117 schemas and 514 MB.
 
 `vite build` writes `desktop/dist` and `next build` writes `web/out`, and the
 control plane compiles both into the binary — that is what makes a deployment
-one image and one origin. Three things follow:
+one image and one origin. Four things follow:
 
 * Neither directory is committed, and neither is a placeholder in it: a build
   empties the directory before writing it, so anything committed there is
@@ -242,10 +242,17 @@ one image and one origin. Three things follow:
 * `just build` builds both, in that order, and a binary carrying only one of
   them serves neither — it answers every path with a sentence naming the half
   that is missing. That is deliberate; see `crates/ft-server/src/web.rs`.
-* `desktop/dist` takes `/` and its own filenames; `web/out` keeps every other
-  path it exports. The application is a hash router, so its routes live after a
-  `#` and never reach the server — which is why there is no single-page
-  fallback, and why adding one would swallow the API, previews and artifacts.
+* `desktop/dist` takes `/` and its own filenames; `web/out` keeps its other
+  paths. **Which is why adding a file to `desktop/public/` is not free**: it is
+  copied to the root of that bundle under its own name and wins that path, so
+  an extensionless `login` or `account` would take a route the site serves as
+  `login.html`. `the_bundles_claim_one_name_in_common` refuses any overlap
+  except `index.html`, which the renderer wins on purpose — so `/` and
+  `/index.html` are both the application, and the site's own index is reachable
+  at `/index`.
+* The application is a hash router, so its routes live after a `#` and never
+  reach the server — which is why there is no single-page fallback, and why
+  adding one would swallow the API, previews and artifacts.
 
 ## Images, and the worker
 
