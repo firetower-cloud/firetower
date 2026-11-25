@@ -153,7 +153,13 @@ export function ReplacePassword({
               signing out and forgetting this Firetower are both legitimate answers to being stuck.
             </>
           ) : (
-            "Signing in there is also how you reach the rest of your organisation's settings."
+            /* **It used to send you to the web for the organisation**, and
+               People, Teams and Directories are in this app now — so the
+               sentence named a place that is no longer where any of it
+               happens. What is still true, and is what somebody stuck on this
+               screen wants to know, is that nothing of theirs is waiting on
+               the password being replaced. */
+            "Everything of yours stays exactly where it is while you do."
           )}
         </p>
 

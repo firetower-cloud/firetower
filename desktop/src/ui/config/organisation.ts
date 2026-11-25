@@ -134,6 +134,19 @@ export function administrators(users: Account[]): Account[] {
  * same second — is a normal outcome, and the pane shows that sentence in the
  * same place. Belt and braces, and the braces are the server's.
  *
+ * **The sentence is in the second person, because it is only ever about you.**
+ * This returns non-null only when the single active administrator is the person
+ * it is being asked about — and to be offered any of these controls at all you
+ * must be an administrator who can sign in, so you are in that count yourself.
+ * One active administrator who is somebody else is therefore arithmetically
+ * impossible here. It read *"They are the only administrator"* and drew that on
+ * the row that also says **you**, which is the one row it can ever appear on.
+ *
+ * The server says it by name — *"kevin is the only administrator"* — and that
+ * is right there, because the server is answering about somebody rather than to
+ * them. Where the two sentences differ is whose voice they are in, not what
+ * they say, and a stale list is exactly when the server's is the one that shows.
+ *
  * `null` means nothing is in the way. A string is the reason, written the way
  * it is read out loud.
  */
@@ -149,7 +162,8 @@ export function locksTheRoom(
   const losing = change.role !== undefined || change.disabled === true;
   if (!losing) return null;
   if (!left.some((u) => u.id === id)) return null;
-  return left.length > 1 ? null : "They are the only administrator, so there would be nobody left to add people or change a role.";
+  if (left.length > 1) return null;
+  return "You are the only administrator, so there would be nobody left to add people or change a role.";
 }
 
 /** What a row offers, and what the role beside the name is. */

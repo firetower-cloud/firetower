@@ -160,12 +160,34 @@ describe("the last administrator", () => {
     { id: "u_tom", role: "member" },
   ];
 
-  it("refuses demoting the only one, in a sentence", () => {
-    expect(locksTheRoom(alone, "u_kevin", { role: "member" })).toMatch(/only administrator/);
+  /**
+   * **The whole sentence, including the pronoun.**
+   *
+   * `/only administrator/` was what this matched, which left the pronoun
+   * unpinned — and it was *"**They** are the only administrator"*, drawn on
+   * the row that also says **you**. It can only ever be that row: this returns
+   * non-null when the single active administrator is the person asked about,
+   * and anybody offered these controls is an active administrator themselves,
+   * so one active administrator who is somebody else cannot arise. Matching
+   * the exact string is the point — a loose pattern is how the wrong person
+   * got named in the first place.
+   */
+  it("refuses demoting the only one, in a sentence about you", () => {
+    expect(locksTheRoom(alone, "u_kevin", { role: "member" })).toBe(
+      "You are the only administrator, so there would be nobody left to add people or change a role.",
+    );
   });
 
-  it("refuses switching the only one off", () => {
-    expect(locksTheRoom(alone, "u_kevin", { disabled: true })).toMatch(/only administrator/);
+  it("refuses switching the only one off, in the same sentence", () => {
+    expect(locksTheRoom(alone, "u_kevin", { disabled: true })).toBe(
+      "You are the only administrator, so there would be nobody left to add people or change a role.",
+    );
+  });
+
+  /* The third person is the server's, where it is right — it is answering
+     *about* somebody rather than *to* them, and it says which one by name. */
+  it("never says it in the third person", () => {
+    expect(locksTheRoom(alone, "u_kevin", { role: "member" })).not.toMatch(/\bThey\b|\bthey\b/);
   });
 
   /* A switched-off administrator is not one, so the one who can still sign in
@@ -175,7 +197,7 @@ describe("the last administrator", () => {
       { id: "u_kevin", role: "admin" },
       { id: "u_ana", role: "admin", disabled: true },
     ];
-    expect(locksTheRoom(one, "u_kevin", { role: "member" })).toMatch(/only administrator/);
+    expect(locksTheRoom(one, "u_kevin", { role: "member" })).toMatch(/^You are the only administrator/);
   });
 
   /** Nothing is in the way of adding one, or of putting one back. */
@@ -226,9 +248,9 @@ describe("what each change asks for", () => {
    */
   it("is the same object the last-administrator rule is asked about", () => {
     const alone: Account[] = [{ id: "u_kevin", role: "admin" }];
-    expect(locksTheRoom(alone, "u_kevin", changeFor("member"))).toMatch(/only administrator/);
+    expect(locksTheRoom(alone, "u_kevin", changeFor("member"))).toMatch(/^You are the only administrator/);
     expect(locksTheRoom(alone, "u_kevin", changeFor("admin"))).toBeNull();
-    expect(locksTheRoom(alone, "u_kevin", changeFor("switch-off"))).toMatch(/only administrator/);
+    expect(locksTheRoom(alone, "u_kevin", changeFor("switch-off"))).toMatch(/^You are the only administrator/);
     expect(locksTheRoom(alone, "u_kevin", changeFor("switch-on"))).toBeNull();
   });
 });

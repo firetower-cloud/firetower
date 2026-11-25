@@ -15,6 +15,27 @@
  * password is a field rather than a sentence: masked, revealable, and copyable
  * without being selected by hand.
  *
+ * ### There are two routes to the clipboard, and the second one is the real one
+ *
+ * **`navigator.clipboard` is undefined on a non-secure origin**, and a
+ * self-hoster reaching a bare address over plain http is an ordinary
+ * deployment for this product — so the modern API is simply not there for a
+ * large share of installations. `write()` falls through to a selection and
+ * `document.execCommand("copy")`, which was driven on a real non-secure origin
+ * rather than reasoned about: the clipboard genuinely receives the password,
+ * `execCommand` reports it, and the button says *Copied* truthfully. With both
+ * routes dead the button does **not** flash *Copied* and the line underneath
+ * says so, which is the behaviour that matters — a silent success here loses
+ * an account.
+ *
+ * **The mask is not selectable, and that is the part that was wrong.** Both
+ * spans carried `select-all`, so dragging across the field while it was masked
+ * put sixteen bullet characters on the clipboard with nothing to say they were
+ * not a password — and the failure sentence told you to do exactly that. A
+ * hand-selection can now only ever pick up the real thing, and a copy that
+ * fails **reveals the password on its way to saying so**, because advice to
+ * select something by hand is worth nothing against a row of dots.
+ *
  * The message underneath is what somebody actually needs — a note to paste to a
  * colleague. **The password is hidden in the note on screen and whole on the
  * clipboard**, so reading over somebody's shoulder gets nothing while the paste
@@ -172,10 +193,18 @@ export function HandOver({ handed, onClose }: { handed: Handed; onClose: () => v
      API is simply `undefined` — and says so when neither works. */
   const put = (what: "password" | "note", text: string, confirm: string) => {
     void write(text).then((ok) => {
-      setSaid(ok ? confirm : "That didn’t copy. Select it and copy by hand.");
-      if (!ok) return;
-      setTook(what);
-      window.setTimeout(() => setTook((now) => (now === what ? null : now)), 1600);
+      if (ok) {
+        setSaid(confirm);
+        setTook(what);
+        window.setTimeout(() => setTook((now) => (now === what ? null : now)), 1600);
+        return;
+      }
+      /* Nothing reached the clipboard by either route, so the only way this
+         password leaves the screen is somebody reading it — and it is still
+         masked. Revealing it is the whole of the advice; the sentence alone
+         would send them to select a row of dots. */
+      setShown(true);
+      setSaid("That didn’t copy. It is shown now — select it and copy by hand.");
     });
   };
 
@@ -192,7 +221,18 @@ export function HandOver({ handed, onClose }: { handed: Handed; onClose: () => v
             <span>Temporary password</span>
             <div className="flex items-stretch gap-2">
               <span className="box mono min-w-0 flex-1">
-                <span className="truncate select-all">{shown ? handed.password : hidden}</span>
+                {/* **`select-all` on the password and `select-none` on the
+                    mask.** The two used to share one span, so a drag across a
+                    masked field quietly yielded sixteen bullets — the shape of
+                    a password, on the clipboard, for an account whose real one
+                    is never shown again. */}
+                {shown ? (
+                  <span className="truncate select-all">{handed.password}</span>
+                ) : (
+                  <span className="truncate select-none" aria-hidden>
+                    {hidden}
+                  </span>
+                )}
               </span>
               {/* The two controls act on the same thing, so they sit together
                   and apart from it. */}

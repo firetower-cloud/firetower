@@ -18,11 +18,16 @@
  * have been the second copy, with its own `MenuItem` drifting a half-pixel
  * from the first one. That is the shape `reuse.test.ts` was written about.
  *
- * **The button lives in `.hov`**, so it arrives on hover *and on focus* —
- * `.r:hover .hov` and the focus ring between them, or the keyboard is told
- * less than the mouse. A row with nothing to offer draws no button at all,
- * rather than an empty menu or a greyed one: a control somebody does not have
- * is not drawn.
+ * **The button lives in `.hov`**, so it arrives on hover *and on focus* — or
+ * the keyboard is told less than the mouse. That second half was a claim this
+ * comment made and the stylesheet did not keep: `.r .hov` set `opacity: 0` and
+ * only `:hover` cleared it, so tab landed on an invisible button that still
+ * opened on Enter. Survivable where `.hov` held one control beside a visible
+ * primary, and not here — **three of People's four write controls are behind
+ * this one button** — so the rule is in `styles.css` now and says why.
+ *
+ * A row with nothing to offer draws no button at all, rather than an empty
+ * menu or a greyed one: a control somebody does not have is not drawn.
  */
 import { useState } from "react";
 import { MoreHorizontal, type LucideIcon } from "lucide-react";
@@ -86,9 +91,17 @@ export function RowMenu({
                     setOpen(null);
                     item.onPick();
                   }}
-                  className="mi disabled:opacity-40"
+                  /* **Top-aligned once there is a second line.** `.mi`
+                     centres its children, which is right for a one-line entry
+                     and drops the glyph ten pixels down the paragraph of a
+                     two-line one — beside the note rather than beside the word
+                     it belongs to. `RoleMenu` in `config/People.tsx` has the
+                     same correction for the same reason. */
+                  className={`mi disabled:opacity-40 ${item.note ? "items-start" : ""}`}
                 >
-                  <span className="ic">{item.icon && <Icon of={item.icon} size={14} />}</span>
+                  <span className={`ic ${item.note ? "mt-0.5" : ""}`}>
+                    {item.icon && <Icon of={item.icon} size={14} />}
+                  </span>
                   <span className="tx">
                     <b>{item.label}</b>
                     {item.note && <s>{item.note}</s>}

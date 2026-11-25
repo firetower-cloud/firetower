@@ -2131,7 +2131,25 @@ html:not([data-platform="macos"]) {
   .r:hover {
     background: var(--color-raise);
   }
-  .r:hover .hov {
+  /* **And on focus, or the keyboard is told less than the mouse.**
+     `bits.tsx` has said *"the actions, which arrive on hover **and on focus**"*
+     since the row was written, and the rule was never here: tab landed on a
+     control at `opacity: 0`, which still opens on Enter but is invisible to
+     whoever is pressing it. That was survivable while `.hov` carried a single
+     *forget the key* beside a visible primary; People put **three of its four
+     write controls** behind one `.hov` button, so a keyboard user had no
+     drawn way to reset a password, switch an account off or remove somebody.
+     Opacity rather than `display` is what made it silent — the button is in
+     the tab order either way.
+
+     Two selectors because focus arrives two ways. `:focus-visible` on the
+     control is the common one; `:focus-within` on the row catches the case
+     where `.hov` is a *wrapper* and the focus is on a button inside it, which
+     is what the vault's rows are. */
+  .r:hover .hov,
+  .r:focus-within .hov,
+  .r .hov:focus-visible,
+  .r .hov:focus-within {
     opacity: 1;
   }
   .r .hov {

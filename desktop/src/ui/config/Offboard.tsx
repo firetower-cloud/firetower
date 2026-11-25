@@ -131,8 +131,17 @@ export function Offboard({ person, onClose }: { person: User; onClose: () => voi
           {reach.data && (
             <div className="flex flex-col gap-6">
               <section>
+                {/* **Zero is a sentence, not a count.** *"0 things are
+                    destroyed"* above *"Nothing of theirs"* made the heading
+                    read as an arithmetic result where the two lines under it
+                    were already saying the thing in words — and this sheet's
+                    own sub-head had the zero right all along. */}
                 <h3 className="text-ui text-bone">
-                  {owns.length === 1 ? "1 thing is destroyed" : `${owns.length} things are destroyed`}
+                  {owns.length === 0
+                    ? "Nothing of theirs is destroyed"
+                    : owns.length === 1
+                      ? "1 thing is destroyed"
+                      : `${owns.length} things are destroyed`}
                 </h3>
                 <p className="mt-1 text-meta text-mute">Theirs, so nobody else can be given it.</p>
                 {owns.length === 0 ? (
