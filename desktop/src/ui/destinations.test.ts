@@ -98,7 +98,7 @@ describe("which destination a path is in", () => {
   /* The twelve configuration panes used to be one screen behind one rail
      entry. Seven of them now belong to the destination they are about. */
   test("every configuration pane a destination owns", () => {
-    expect(destinationAt("/configuration/skills")).toBe("customize");
+    expect(destinationAt("/configuration/plugins")).toBe("customize");
     expect(destinationAt("/configuration/roles")).toBe("customize");
     expect(destinationAt("/configuration/agents")).toBe("customize");
     expect(destinationAt("/configuration/repositories")).toBe("repos");

@@ -502,12 +502,11 @@ function Customize() {
           somebody scanning for "MCP" are looking for the same page, and two
           rows into one list meant a highlight that was wrong as soon as you
           changed the filter. The skill editor still answers at
-          `/configuration/skills`; it is reached from a row rather than from
-          here, because nobody opens a rail looking for an editor. */}
+          the library; there is no second pane and no editor to reach. */}
       <Row
         label="Skills & MCP"
         icon={Puzzle}
-        on={pane(path) === "plugins" || pane(path) === "skills"}
+        on={pane(path) === "plugins"}
         to="/configuration/plugins"
       />
       <Row label="Agent profiles" icon={UsersRound} on={pane(path) === "roles"} to="/configuration/roles" />
@@ -515,22 +514,11 @@ function Customize() {
           team is where it sits and who is under it. */}
       <Row label="Agent teams" icon={Network} on={pane(path) === "agent-teams"} to="/configuration/agent-teams" />
       <Row label="Agents" icon={Blocks} on={pane(path) === "agents"} to="/configuration/agents" />
-      {lone.length > 0 && (
-        <>
-          <Label>Your skills</Label>
-          {/* **Not monospace, and no monogram tile.** A skill's name is read
-              as a word, never character by character — which is the test the
-              handoff now gives for the mono voice. The six tiles that used to
-              sit here decoded to nothing (`it` for incident-timeline); a 17px
-              spacer keeps the column aligned with the rows above. */}
-          {lone.slice(0, 8).map((s) => (
-            <button key={s.id} onClick={() => navigate(`/configuration/skills/${s.id}`)} className="prow">
-              <span className="w-[17px] shrink-0" />
-              <span className="lbl">{s.name}</span>
-            </button>
-          ))}
-        </>
-      )}
+      {/* **No shortcut list here any more.** It navigated to
+          `/configuration/skills/<id>`, a pane that no longer exists, and it
+          listed only lone skills — half the library, chosen by a storage
+          detail nobody outside this file knows about. The library itself is
+          one press away and lists everything. */}
     </>
   );
 }

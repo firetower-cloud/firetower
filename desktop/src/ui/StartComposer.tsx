@@ -430,6 +430,9 @@ export function StartComposer({
   const required = new Set(
     (library.data ?? []).filter((i) => i.required).map((i) => i.skillId),
   );
+  const needsHand = new Set(
+    (library.data ?? []).filter((i) => i.needsClientId).map((i) => i.skillId),
+  );
   const unconnected = new Set(
     (library.data ?? [])
       .filter((i) => i.kind === "server" && i.connected === false)
@@ -875,10 +878,12 @@ export function StartComposer({
                       nobody authorized is a tool the agent is handed and
                       cannot call, which fails on the first turn rather than
                       here. Ember, because it is the one loud thing. */}
+                  {/* **"not ready", not "to connect".** A server that
+                      registers no clients cannot be connected at all, so the
+                      second reading is a promise the product cannot keep —
+                      the row inside says which of the two it is. */}
                   {needing.length > 0 && (
-                    <span className="need">
-                      {needing.length} to connect
-                    </span>
+                    <span className="need">{needing.length} not ready</span>
                   )}
                 </button>
               )}
@@ -992,14 +997,14 @@ export function StartComposer({
               it is not. The one thing worth saying — that a profile chose
               this — is already on the chip that opened it. */}
           <div className="py-1">
-            {prefilled.length > 6 && (
+            {(
               <input
                 autoFocus
                 value={look}
                 onChange={(e) => setLook(e.target.value)}
                 placeholder="Search"
                 aria-label="Search what this agent gets"
-                className="mb-1 w-full bg-transparent px-3 py-1.5 text-ui text-bone outline-none placeholder:text-mute"
+                className="mb-1 w-full border-b border-line bg-transparent px-3 pb-2 pt-1 text-ui text-bone outline-none placeholder:text-mute"
               />
             )}
             {prefilled
@@ -1018,7 +1023,11 @@ export function StartComposer({
                     {short ? (
                       <span
                         className="grid h-4 w-4 shrink-0 place-items-center text-ember"
-                        title={`${s.name} is not connected, so its tools will not answer.`}
+                        title={
+                          needsHand.has(s.id)
+                            ? `${s.name} registers no OAuth clients, so it needs an application created by hand. Firetower cannot hold one yet.`
+                            : `${s.name} is not connected, so its tools will not answer. Connect it from Skills & MCP.`
+                        }
                       >
                         <TriangleAlert className="h-4 w-4" strokeWidth={1.75} />
                       </span>

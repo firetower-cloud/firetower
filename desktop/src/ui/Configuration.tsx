@@ -33,7 +33,6 @@ import { Repos } from "~/ui/config/Repos";
 import { GitHosts } from "~/ui/config/GitHosts";
 import { Trackers } from "~/ui/config/Trackers";
 import { Agents } from "~/ui/config/Agents";
-import { Skills } from "~/ui/config/Skills";
 import { Library } from "~/ui/config/Library";
 import { Roles } from "~/ui/config/Roles";
 import { AgentTeams } from "~/ui/config/AgentTeams";
@@ -60,7 +59,7 @@ export function Configuration({ backend, onForgot }: { backend: Backend; onForgo
   );
 }
 
-/* `open` is the id after the pane's own segment — `/configuration/skills/sk_1`.
+/* `open` is the id after the pane's own segment — `/configuration/plugins/sk_1`.
    The panes keep their own "which is open" state because most of the time it
    is opened by clicking a row; this is how an address gets a word in. */
 function Pane({ at, open, backend, onForgot }: { at: string; open: string | null; backend: Backend; onForgot: () => void }) {
@@ -75,8 +74,6 @@ function Pane({ at, open, backend, onForgot }: { at: string; open: string | null
       return <Machines live open={open} />;
     case "agents":
       return <Agents live />;
-    case "skills":
-      return <Skills open={open} />;
     case "plugins":
       return <Library open={open} />;
     case "roles":
