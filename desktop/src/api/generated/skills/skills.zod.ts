@@ -306,6 +306,48 @@ export const DiscardSkillParams = zod.object({
 
 export const DiscardSkillResponse = zod.void()
 
+/**
+ * @summary What is in a bundle, in its author's own words.
+ */
+export const SkillInsideParams = zod.object({
+  "id": zod.string().describe('The plugin or skill')
+})
+
+export const SkillInsideResponse = zod.object({
+  "agents": zod.array(zod.object({
+  "description": zod.string(),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
+}).describe('One component a plugin carries, as a row of its detail.')),
+  "auth": zod.string().nullish(),
+  "came": zod.union([zod.null(),zod.object({
+  "commit": zod.string(),
+  "marketplace": zod.string(),
+  "slug": zod.string(),
+  "url": zod.string()
+}).describe('Where an installed bundle came from.')]).optional(),
+  "commands": zod.array(zod.object({
+  "description": zod.string(),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
+}).describe('One component a plugin carries, as a row of its detail.')),
+  "files": zod.array(zod.object({
+  "executable": zod.boolean(),
+  "path": zod.string(),
+  "shared": zod.boolean().describe('Whether these bytes were already here under the same hash.'),
+  "size": zod.int()
+}).describe('One file of a bundle, without its bytes.')),
+  "hasHooks": zod.boolean().describe('Whether it ships hooks, which run commands and deserve saying out loud.'),
+  "manifest": zod.unknown().optional().describe('The manifest, as the author wrote it. Absent for a lone skill.'),
+  "server": zod.string().nullish().describe('The MCP server it declares, if any, with the address it will call.'),
+  "skills": zod.array(zod.object({
+  "description": zod.string(),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
+}).describe('One component a plugin carries, as a row of its detail.')),
+  "url": zod.string().nullish()
+}).describe('What is actually in a plugin.\n\n**The thing a marketplace owes you.** Installing from a repository means\ntaking somebody else\'s instructions and somebody else\'s MCP server into\nyour agent\'s context. Being unable to read either, before or after, is\nasking for trust that has not been earned — so this opens the bundle and\nsays what is in it in the words its own author wrote.')
+
 export const ReviewSkillParams = zod.object({
   "id": zod.string().describe('The skill')
 })

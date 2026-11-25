@@ -8214,6 +8214,48 @@
         }
       }
     },
+    "/api/v1/skills/{id}/inside": {
+      "get": {
+        "tags": [
+          "skills"
+        ],
+        "summary": "What is in a bundle, in its author's own words.",
+        "operationId": "skill_inside",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "The plugin or skill",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Inside"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/skills/{id}/review": {
       "get": {
         "tags": [
@@ -11105,6 +11147,30 @@
           }
         }
       },
+      "Came": {
+        "type": "object",
+        "description": "Where an installed bundle came from.",
+        "required": [
+          "marketplace",
+          "url",
+          "slug",
+          "commit"
+        ],
+        "properties": {
+          "commit": {
+            "type": "string"
+          },
+          "marketplace": {
+            "type": "string"
+          },
+          "slug": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "CandidateAnswer": {
         "type": "object",
         "description": "What somebody decided about one candidate.",
@@ -11824,6 +11890,27 @@
               "type": "string"
             },
             "description": "Which files to include. Empty means everything that changed."
+          }
+        }
+      },
+      "Component": {
+        "type": "object",
+        "description": "One component a plugin carries, as a row of its detail.",
+        "required": [
+          "name",
+          "description",
+          "path"
+        ],
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "description": "Where it sits in the bundle, so somebody can find it in a repository."
           }
         }
       },
@@ -13853,6 +13940,79 @@
           "path": {
             "type": "string",
             "description": "Relative, inside the bundle. Never absolute and never climbing out."
+          }
+        }
+      },
+      "Inside": {
+        "type": "object",
+        "description": "What is actually in a plugin.\n\n**The thing a marketplace owes you.** Installing from a repository means\ntaking somebody else's instructions and somebody else's MCP server into\nyour agent's context. Being unable to read either, before or after, is\nasking for trust that has not been earned — so this opens the bundle and\nsays what is in it in the words its own author wrote.",
+        "required": [
+          "skills",
+          "commands",
+          "agents",
+          "hasHooks",
+          "files"
+        ],
+        "properties": {
+          "agents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Component"
+            }
+          },
+          "auth": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "came": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Came"
+              }
+            ]
+          },
+          "commands": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Component"
+            }
+          },
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkillFile"
+            }
+          },
+          "hasHooks": {
+            "type": "boolean",
+            "description": "Whether it ships hooks, which run commands and deserve saying out loud."
+          },
+          "manifest": {
+            "description": "The manifest, as the author wrote it. Absent for a lone skill."
+          },
+          "server": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The MCP server it declares, if any, with the address it will call."
+          },
+          "skills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Component"
+            }
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },

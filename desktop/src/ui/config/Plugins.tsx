@@ -51,6 +51,8 @@ import { addFromUrl, probeUrl } from "~/api/generated/connectors/connectors";
 import { useQueryClient } from "@tanstack/react-query";
 import { AddSkill } from "~/ui/AddSkill";
 import { readDrop } from "~/skills";
+import { useOpened } from "~/ui/opened";
+import { PluginInside } from "~/ui/config/PluginInside";
 import { openExternal } from "~/open";
 import {
   addMarketplace,
@@ -103,7 +105,7 @@ function mono(name: string): string {
  * image in a list. A monogram is the fallback, which is the rule the design
  * has always had: Firetower keeps no table of other people's logos.
  */
-function Mark({ of }: { of: Skill }) {
+export function Mark({ of }: { of: Skill }) {
   if (of.logo)
     return (
       <span className="plg" data-brand>
@@ -113,7 +115,7 @@ function Mark({ of }: { of: Skill }) {
   return <span className="plg">{mono(of.name)}</span>;
 }
 
-export function Plugins() {
+export function Plugins({ open: asked = null }: { open?: string | null }) {
   const [adding, setAdding] = useState(false);
   const [pasting, setPasting] = useState(false);
   /* A folder dropped on the list goes straight into the review, so the way in
@@ -128,6 +130,7 @@ export function Plugins() {
   const [query, setQuery] = useState("");
   /** The plugin added a moment ago, whose row connects without being asked. */
   const [fresh, setFresh] = useState<string | null>(null);
+  const [open, setOpen] = useOpened(asked);
 
   const catalogue = useListEntries(undefined, {
     query: { select: (rows) => rows ?? [] },
@@ -203,6 +206,9 @@ export function Plugins() {
      so the cap only decides how much of it is on screen at once. */
   const shelf = offered.slice(0, SHELF);
   const more = offered.length - shelf.length;
+
+  const opened = open ? feed.data.find((s) => s.id === open) : undefined;
+  if (opened) return <PluginInside of={opened} onBack={() => setOpen(null)} />;
 
   if (adding)
     return (
@@ -285,8 +291,8 @@ export function Plugins() {
         <>
           <h3 className="mt-6 text-ui text-dim">Yours</h3>
           <p className="mt-1 max-w-[74ch] text-meta text-dim">
-            What your own sessions open with. A list rather than a shelf — each row is
-            carrying a state and one control, and both want the width.
+            Everything you have, switched on or not. The switch decides what a new session
+            opens with; a button only appears on the rows that are waiting on you.
           </p>
           <div className="mt-2">
             {yours.map((p) => (
@@ -299,6 +305,7 @@ export function Plugins() {
                    making somebody find a second button to say so again is
                    asking the same question twice. */
                 connectNow={fresh === p.id}
+                onOpen={() => setOpen(p.id)}
                 onToggle={() => toggle(p)}
                 onGone={refresh}
                 onTrouble={setTrouble}
@@ -521,6 +528,7 @@ function Installed({
   of,
   busy,
   connectNow,
+  onOpen,
   onToggle,
   onGone,
   onTrouble,
@@ -528,6 +536,7 @@ function Installed({
   of: Skill;
   busy: boolean;
   connectNow: boolean;
+  onOpen: () => void;
   onToggle: () => void;
   onGone: () => void | Promise<void>;
   onTrouble: (why: string | null) => void;
@@ -563,13 +572,45 @@ function Installed({
   };
 
   return (
-    <Row glyph={<Mark of={of} />} name={of.name} sub={of.description}>
-      <span className="chip3">{contents(of)}</span>
-      {of.hasConnector && <Connected of={of} startNow={connectNow} />}
-      <button type="button" className="on" disabled={busy} onClick={onToggle}>
-        <Check className="h-3.5 w-3.5 text-sage" strokeWidth={2} />
-        Always on
+    <div className="r">
+      <span className="g">
+        <Mark of={of} />
+      </span>
+      {/* The name opens it. A row of controls cannot sit inside a button, and
+          the thing somebody aims at to read a plugin is its name. */}
+      <button type="button" className="tx text-left" onClick={onOpen}>
+        <b>{of.name}</b>
+        <s>{of.description}</s>
       </button>
+
+      {/* **What it is, in plain words rather than a pill.** Three bordered
+          chips on every row made a list of eight read as twenty-four
+          controls, none of which did anything. This is a fact, so it is set
+          like one. */}
+      <span className="shrink-0 text-meta text-dim">{contents(of)}</span>
+
+      {of.hasConnector && <Connected of={of} startNow={connectNow} />}
+
+      {/* On, as a state. It was a pill reading "✓ Always on" whether it was
+          on or off, which is a control that shows its label instead of its
+          value. */}
+      <button
+        type="button"
+        role="switch"
+        aria-checked={of.alwaysOn}
+        aria-label={`Always on for ${of.name}`}
+        title={
+          of.alwaysOn
+            ? "Loaded into every new session. Anybody can untick it before they send."
+            : "Not loaded unless somebody picks it when starting."
+        }
+        className="tog shrink-0"
+        disabled={busy}
+        onClick={onToggle}
+      >
+        <i />
+      </button>
+
       <div>
         <IconButton
           of={MoreHorizontal}
@@ -583,6 +624,14 @@ function Installed({
         {menu && (
           <Pop anchor={menu} onClose={() => setMenu(null)}>
             <div className="w-56 py-1">
+              <MenuItem
+                onClick={() => {
+                  setMenu(null);
+                  onOpen();
+                }}
+              >
+                What is in it
+              </MenuItem>
               {state?.connected && (
                 <MenuItem
                   disabled={going}
@@ -627,7 +676,7 @@ function Installed({
           </Pop>
         )}
       </div>
-    </Row>
+    </div>
   );
 }
 
@@ -700,13 +749,17 @@ function Connected({ of, startNow = false }: { of: Skill; startNow?: boolean }) 
   if (!state) return null;
 
   if (state.connected) {
-    /* Not a button. Clicking the word "Connected" used to disconnect, which
-       is a destructive act behind an affordance that reads as a status —
-       Disconnect is in the ⋯ now, with a confirmation. */
+    /* **A mark, not a pill.** Connected is the resting state of most rows,
+       and a bordered control on every one of them made a list read as a
+       column of buttons that do nothing. The one row that needs an action
+       keeps the only button on the page. */
     return (
-      <span className="on" title={`Connected to ${state.server}.`}>
-        <Link2 className="h-3.5 w-3.5 text-sage" strokeWidth={1.75} />
-        Connected
+      <span
+        className="shrink-0 text-sage"
+        title={`Connected to ${state.server}. Disconnect from the ⋯ menu.`}
+        aria-label={`${of.name} is connected`}
+      >
+        <Link2 className="h-4 w-4" strokeWidth={1.75} />
       </span>
     );
   }
@@ -715,7 +768,7 @@ function Connected({ of, startNow = false }: { of: Skill; startNow?: boolean }) 
      connector waiting on a git host nobody has authorized is not broken. */
   if (state.blocked) {
     return (
-      <span className="chip3" title={state.blocked}>
+      <span className="shrink-0 text-meta text-mute" title={state.blocked}>
         needs a git host
       </span>
     );

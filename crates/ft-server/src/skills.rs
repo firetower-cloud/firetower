@@ -7959,3 +7959,187 @@ mod tests {
         );
     }
 }
+
+/// One component a plugin carries, as a row of its detail.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Component {
+    pub name: String,
+    pub description: String,
+    /// Where it sits in the bundle, so somebody can find it in a repository.
+    pub path: String,
+}
+
+/// Where an installed bundle came from.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Came {
+    pub marketplace: String,
+    pub url: String,
+    pub slug: String,
+    pub commit: String,
+}
+
+/// What is actually in a plugin.
+///
+/// **The thing a marketplace owes you.** Installing from a repository means
+/// taking somebody else's instructions and somebody else's MCP server into
+/// your agent's context. Being unable to read either, before or after, is
+/// asking for trust that has not been earned — so this opens the bundle and
+/// says what is in it in the words its own author wrote.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Inside {
+    /// The manifest, as the author wrote it. Absent for a lone skill.
+    pub manifest: Option<serde_json::Value>,
+    pub skills: Vec<Component>,
+    pub commands: Vec<Component>,
+    pub agents: Vec<Component>,
+    /// The MCP server it declares, if any, with the address it will call.
+    pub server: Option<String>,
+    pub url: Option<String>,
+    pub auth: Option<String>,
+    /// Whether it ships hooks, which run commands and deserve saying out loud.
+    pub has_hooks: bool,
+    pub came: Option<Came>,
+    pub files: Vec<SkillFile>,
+}
+
+impl Skills {
+    /// Open a bundle and read what it carries.
+    pub async fn inside(&self, person: &str, id: &str) -> Result<Option<Inside>> {
+        let sql = format!(
+            "SELECT v.id AS version_id {FROM} WHERE k.id = $2 AND {visible}",
+            visible = filed_where("k", 1, Level::Viewer),
+        );
+        let Some(row) = sqlx::query(&sql)
+            .bind(person)
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await?
+        else {
+            return Ok(None);
+        };
+        let Some(version_id) = row.try_get::<Option<String>, _>("version_id").ok().flatten() else {
+            return Ok(None);
+        };
+
+        let held = self.files_with_contents(&version_id).await?;
+        let text_of = |f: &IncomingFile| -> String {
+            ft_proto::decode(&f.contents)
+                .and_then(|b| String::from_utf8(b).ok())
+                .unwrap_or_default()
+        };
+
+        let mut out = Inside {
+            manifest: None,
+            skills: Vec::new(),
+            commands: Vec::new(),
+            agents: Vec::new(),
+            server: None,
+            url: None,
+            auth: None,
+            has_hooks: false,
+            came: None,
+            files: self.files_of(&version_id).await?,
+        };
+
+        for f in &held {
+            let p = f.path.as_str();
+            if p == ".claude-plugin/plugin.json" || p == ".codex-plugin/plugin.json" {
+                if out.manifest.is_none() {
+                    out.manifest = serde_json::from_str(&text_of(f)).ok();
+                }
+            } else if p == "hooks.json" || p.ends_with("/hooks.json") {
+                out.has_hooks = true;
+            } else if let Some(c) = component_at(p, "skills/", "SKILL.md", &text_of(f)) {
+                out.skills.push(c);
+            } else if let Some(c) = component_at(p, "commands/", ".md", &text_of(f)) {
+                out.commands.push(c);
+            } else if let Some(c) = component_at(p, "agents/", ".md", &text_of(f)) {
+                out.agents.push(c);
+            } else if p == "SKILL.md" {
+                // A lone skill is its own single component, so the same screen
+                // describes both kinds without asking which it is looking at.
+                let (front, _, _) = read_frontmatter(&text_of(f));
+                out.skills.push(Component {
+                    name: said(&front, "name"),
+                    description: said(&front, "description"),
+                    path: p.to_string(),
+                });
+            }
+        }
+        out.skills.sort_by(|a, b| a.name.cmp(&b.name));
+        out.commands.sort_by(|a, b| a.name.cmp(&b.name));
+        out.agents.sort_by(|a, b| a.name.cmp(&b.name));
+
+        if let Some(c) = self.connector_of(id).await? {
+            out.server = Some(c.server);
+            out.url = Some(c.url);
+            out.auth = Some(c.auth);
+        }
+
+        out.came = sqlx::query(
+            "SELECT m.name, m.url, v.from_slug, v.from_commit \
+               FROM skill_versions v JOIN marketplaces m ON m.id = v.from_marketplace \
+              WHERE v.id = $1",
+        )
+        .bind(&version_id)
+        .fetch_optional(&self.pool)
+        .await
+        .ok()
+        .flatten()
+        .map(|r| Came {
+            marketplace: r.get("name"),
+            url: r.get("url"),
+            slug: r.get::<Option<String>, _>("from_slug").unwrap_or_default(),
+            commit: r.get::<Option<String>, _>("from_commit").unwrap_or_default(),
+        });
+
+        Ok(Some(out))
+    }
+}
+
+/// A component under `<dir>/<name>/…`, named and described by its own file.
+fn component_at(path: &str, dir: &str, ends: &str, text: &str) -> Option<Component> {
+    let rest = path.strip_prefix(dir)?;
+    if !rest.ends_with(ends) {
+        return None;
+    }
+    // `skills/<name>/SKILL.md` names the folder; `commands/<name>.md` names
+    // the file. Both forms are in the wild and both read the same way here.
+    let name = rest
+        .split_once('/')
+        .map(|(folder, _)| folder.to_string())
+        .unwrap_or_else(|| rest.trim_end_matches(ends).trim_end_matches('.').to_string());
+    let (front, body, _) = read_frontmatter(text);
+    let description = {
+        let said = said(&front, "description");
+        if said.is_empty() {
+            // No frontmatter: the first line that is not a heading is what the
+            // author would have written there anyway.
+            body.lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty() && !l.starts_with('#'))
+                .unwrap_or_default()
+                .chars()
+                .take(200)
+                .collect()
+        } else {
+            said
+        }
+    };
+    Some(Component {
+        name,
+        description,
+        path: path.to_string(),
+    })
+}
+
+fn said(front: &serde_json::Value, key: &str) -> String {
+    front
+        .get(key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string()
+}

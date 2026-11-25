@@ -31,6 +31,7 @@ import type {
   ChooseSkills,
   Collision,
   DefaultIn,
+  Inside,
   Match,
   NewSkill,
   RepoSkillDefaults,
@@ -1272,7 +1273,124 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
       > => {
       return useMutation(getDiscardSkillMutationOptions(options), queryClient);
     }
-    export const getReviewSkillUrl = (id: string,) => {
+    export const getSkillInsideUrl = (id: string,) => {
+
+
+
+
+  return `/api/v1/skills/${id}/inside`
+}
+
+/**
+ * @summary What is in a bundle, in its author's own words.
+ */
+export const skillInside = async (id: string, options?: Parameters<typeof http>[1]): Promise<Inside> => {
+
+  return http<Inside>(getSkillInsideUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getSkillInsideQueryKey = (id: string,) => {
+    return [
+    `/api/v1/skills/${id}/inside`
+    ] as const;
+    }
+
+
+export const getSkillInsideQueryOptions = <TData = Awaited<ReturnType<typeof skillInside>>, TError = ApiError>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof skillInside>>, TError, TData>>, request?: SecondParameter<typeof http>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getSkillInsideQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof skillInside>>> = ({ signal }) => skillInside(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof skillInside>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
+}
+
+export type SkillInsideQueryResult = NonNullable<Awaited<ReturnType<typeof skillInside>>>
+export type SkillInsideQueryError = ApiError
+
+
+export function useSkillInside<TData = Awaited<ReturnType<typeof skillInside>>, TError = ApiError>(
+ id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof skillInside>>, TError, TData>> & Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof skillInside>>,
+          TError,
+          Awaited<ReturnType<typeof skillInside>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSkillInside<TData = Awaited<ReturnType<typeof skillInside>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof skillInside>>, TError, TData>> & Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof skillInside>>,
+          TError,
+          Awaited<ReturnType<typeof skillInside>>
+        > , 'initialData'
+      >, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+export function useSkillInside<TData = Awaited<ReturnType<typeof skillInside>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof skillInside>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
+/**
+ * @summary What is in a bundle, in its author's own words.
+ */
+
+export function useSkillInside<TData = Awaited<ReturnType<typeof skillInside>>, TError = ApiError>(
+ id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof skillInside>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ , queryClient?: QueryClient
+ ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
+
+  const queryOptions = getSkillInsideQueryOptions(id,options)
+
+  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+/**
+ * @summary What is in a bundle, in its author's own words.
+ */
+export const useSetSkillInsideQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,updater: Awaited<ReturnType<typeof skillInside>> | undefined | ((old: Awaited<ReturnType<typeof skillInside>> | undefined) => Awaited<ReturnType<typeof skillInside>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof skillInside>>>({ exact: $exactMatch, queryKey: getSkillInsideQueryKey(id) }, updater);
+  };
+}
+
+/**
+ * @summary What is in a bundle, in its author's own words.
+ */
+export const useGetSkillInsideQueryData = () => {
+  const queryClient = useQueryClient();
+  return (id: string,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof skillInside>>>(getSkillInsideQueryKey(id));
+}
+
+
+export const getReviewSkillUrl = (id: string,) => {
 
 
 

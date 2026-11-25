@@ -847,6 +847,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(skills::match_skills))
         .routes(routes!(skills::rename_skill, skills::delete_skill))
         .routes(routes!(skills::skill_detail))
+        .routes(routes!(skills::skill_inside))
         .routes(routes!(skills::list_versions, skills::add_version))
         .routes(routes!(skills::review_skill))
         .routes(routes!(skills::approve_skill))

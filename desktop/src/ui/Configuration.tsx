@@ -78,7 +78,7 @@ function Pane({ at, open, backend, onForgot }: { at: string; open: string | null
     case "skills":
       return <Skills open={open} />;
     case "plugins":
-      return <Plugins />;
+      return <Plugins open={open} />;
     case "roles":
       return <Roles />;
     case "agent-teams":
