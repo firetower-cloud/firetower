@@ -98,7 +98,10 @@ function brings(e: Listed): string | null {
 export function Library({ open: asked = null }: { open?: string | null }) {
   const cache = useQueryClient();
   const [kind, setKind] = useState<Kind>("all");
-  const [where, setWhere] = useState<Where>("yours");
+  /* **Discover first.** What somebody opens this page to do is add
+     something; what they already have is one press away and is not a
+     question they came here with. */
+  const [where, setWhere] = useState<Where>("discover");
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [trouble, setTrouble] = useState<string | null>(null);
