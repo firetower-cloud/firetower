@@ -14311,6 +14311,7 @@
           "on",
           "builtin",
           "required",
+          "setup",
           "needsClientId"
         ],
         "properties": {
@@ -14331,13 +14332,6 @@
             ],
             "description": "Whether **you** hold a credential for it. `None` for a skill."
           },
-          "console": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Where somebody goes to create that application, when we know. Each\nvendor's console is in a different place and none of them is\nguessable from the server's address."
-          },
           "description": {
             "type": "string"
           },
@@ -14351,13 +14345,6 @@
               "null"
             ],
             "description": "The bundle's name, when the bundle holds more than this one thing.\n`None` when the component *is* the bundle, because \"from notion\" under\na row called notion is noise."
-          },
-          "guide": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The vendor's own instructions for creating an OAuth application, where\nthey have written any. A console is a form; this is the page that says\nwhich boxes to tick."
           },
           "id": {
             "type": "string",
@@ -14395,6 +14382,13 @@
               "string",
               "null"
             ]
+          },
+          "setup": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SetupLink"
+            },
+            "description": "Where somebody goes to come back with a client id and a secret — as\nmany links as the vendor's setup takes, each named by the entry.\n\n**Said by the entry, not matched on its hostname, and not named by\nus.** This was two fields called `console` and `guide`, which is how\nGoogle splits the job; every other vendor got Google's vocabulary and\na null."
           },
           "skillId": {
             "type": "string",
@@ -19005,6 +18999,23 @@
         "properties": {
           "enabled": {
             "type": "boolean"
+          }
+        }
+      },
+      "SetupLink": {
+        "type": "object",
+        "description": "One place to go to come back with a client id.",
+        "required": [
+          "label",
+          "url"
+        ],
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "The vendor's own word for it — \"Google Cloud console\", \"Create a\nGitHub OAuth app\". Never ours."
+          },
+          "url": {
+            "type": "string"
           }
         }
       },

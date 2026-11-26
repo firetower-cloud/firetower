@@ -138,8 +138,7 @@ export function ServerInside({
               of={{
                 skillId: of.skillId,
                 displayName: of.displayName,
-                console: of.console,
-                guide: of.guide,
+                setup: of.setup,
               }}
               onCancel={() => setSupplying(false)}
               onDone={async () => {

@@ -5,6 +5,7 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { SetupLink } from './setupLink';
 
 /**
  * One thing in the library.
@@ -19,13 +20,6 @@ export interface Item {
      * @nullable
      */
   connected?: boolean | null;
-  /**
-     * Where somebody goes to create that application, when we know. Each
-     * vendor's console is in a different place and none of them is
-     * guessable from the server's address.
-     * @nullable
-     */
-  console?: string | null;
   description: string;
   /**
      * The person's. Already resolved — the bundle's own, or a title-cased
@@ -39,13 +33,6 @@ export interface Item {
      * @nullable
      */
   from?: string | null;
-  /**
-     * The vendor's own instructions for creating an OAuth application, where
-     * they have written any. A console is a form; this is the page that says
-     * which boxes to tick.
-     * @nullable
-     */
-  guide?: string | null;
   /** `<skill id>:<path>`. Opaque, and the handle every write takes. */
   id: string;
   /** `skill` or `server`. */
@@ -73,6 +60,16 @@ export interface Item {
   required: boolean;
   /** @nullable */
   server?: string | null;
+  /**
+     * Where somebody goes to come back with a client id and a secret — as
+     * many links as the vendor's setup takes, each named by the entry.
+     *
+     * **Said by the entry, not matched on its hostname, and not named by
+     * us.** This was two fields called `console` and `guide`, which is how
+     * Google splits the job; every other vendor got Google's vocabulary and
+     * a null.
+     */
+  setup: SetupLink[];
   /** The bundle it lives in, which the detail screen and removal both need. */
   skillId: string;
   /** @nullable */

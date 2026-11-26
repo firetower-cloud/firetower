@@ -231,12 +231,21 @@ fn entries() -> Vec<Entry> {
         // the point of moving them is that a catalogue can say where its own
         // console is, and the cost is that a typo here is a dead button on
         // the one screen somebody reaches when they are already stuck.
-        for key in ["console", "guide"] {
-            if let Some(at) = spec.get(key) {
-                let at = at.as_str().unwrap_or_default();
+        if let Some(setup) = spec.get("setup") {
+            let links = setup
+                .as_array()
+                .unwrap_or_else(|| panic!("{slug}: setup must be a list, not {setup}"));
+            assert!(!links.is_empty(), "{slug}: an empty setup list is no list");
+            for one in links {
+                let label = one["label"].as_str().unwrap_or_default().trim();
+                let url = one["url"].as_str().unwrap_or_default();
+                // **The label is the vendor's word for the page.** The screen
+                // draws it verbatim, so an entry that leaves it out gets a
+                // button with nothing written on it.
+                assert!(!label.is_empty(), "{slug}: a setup link with no label");
                 assert!(
-                    at.starts_with("https://"),
-                    "{slug}: {key} is {at:?}, which is not a link"
+                    url.starts_with("https://"),
+                    "{slug}: {label:?} points at {url:?}, which is not a link"
                 );
             }
         }

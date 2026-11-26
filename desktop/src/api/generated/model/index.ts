@@ -311,6 +311,7 @@ export * from './setSettings.ts';
 export * from './setShare.ts';
 export * from './settingDiff.ts';
 export * from './settings.ts';
+export * from './setupLink.ts';
 export * from './setupState.ts';
 export * from './setVoiceKey.ts';
 export * from './share.ts';

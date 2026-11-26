@@ -88,10 +88,9 @@ async fn one_entry_comes_back_as_files_with_its_connector() {
     assert_eq!(d.server, "linear");
     assert_eq!(d.url, "https://mcp.linear.app/mcp");
     assert_eq!(d.auth, "oauth");
-    // Linear hands out its own clients, so it has nothing to say about a
-    // console — and nothing invents one for it.
-    assert_eq!(d.console, None);
-    assert_eq!(d.guide, None);
+    // Linear hands out its own clients, so it has nothing to say about where
+    // to make one — and nothing invents a link for it.
+    assert_eq!(d.setup, None);
 }
 
 /// **A manifest does not get to choose how it is authorized.**
@@ -113,12 +112,17 @@ async fn a_manifest_cannot_ask_to_borrow_a_credential() {
         .unwrap();
     let d = marketplace::connector_of(&files).unwrap();
     assert_eq!((d.server.as_str(), d.auth.as_str()), ("github", "oauth"));
-    // It *does* carry a console, because GitHub registers no clients — which
-    // is a different thing from choosing which credential to reuse.
+    // It *does* carry setup links, because GitHub registers no clients —
+    // which is a different thing from choosing which credential to reuse.
+    let setup = d.setup.expect("github says where to make one");
+    let links = setup.as_array().expect("a list");
+    assert!(!links.is_empty());
     assert_eq!(
-        d.console.as_deref(),
+        links[0]["url"].as_str(),
         Some("https://github.com/settings/applications/new")
     );
+    // And it names the page in GitHub's words, not ours.
+    assert!(!links[0]["label"].as_str().unwrap_or_default().is_empty());
 }
 
 /// The catalogue nobody else can read is the one that proves nothing.

@@ -74,8 +74,7 @@ pub struct Entry {
     /// catalogue row so a refresh can give them to something installed before
     /// the entry had any.
     pub scopes: Option<String>,
-    pub console: Option<String>,
-    pub guide: Option<String>,
+    pub setup: Option<Value>,
 }
 
 /// A catalogue, as it was at one commit.
@@ -317,8 +316,7 @@ fn entry_of(one: &Value, files: &BTreeMap<String, Vec<u8>>) -> Option<Entry> {
         has_connector: false,
         // Filled by `describe` from the entry's own `.mcp.json`.
         scopes: None,
-        console: None,
-        guide: None,
+        setup: None,
     };
 
     // **Only a local entry can be described from here.** One that names
@@ -346,8 +344,7 @@ fn describe(entry: &mut Entry, files: &BTreeMap<String, Vec<u8>>, under: &str) {
             entry.has_connector = true;
             if let Some(d) = connector_of(&[(rest.to_string(), body.clone())]) {
                 entry.scopes = d.scopes;
-                entry.console = d.console;
-                entry.guide = d.guide;
+                entry.setup = d.setup;
             }
         } else if rest.starts_with("assets/logo.") && body.len() <= BIGGEST_LOGO {
             let kind = match rest.rsplit('.').next().unwrap_or("png") {
@@ -476,11 +473,12 @@ pub struct Declared {
     /// What it asks to be narrowed to, bounded at connect time by what the
     /// server actually advertises.
     pub scopes: Option<String>,
-    /// Where somebody creates the OAuth application, when the server will not
-    /// hand one out.
-    pub console: Option<String>,
-    /// The vendor's own instructions for doing it.
-    pub guide: Option<String>,
+    /// Where somebody goes to come back with a client id and a secret, as
+    /// many links as that takes, each named by the entry.
+    ///
+    /// **Not `console` and `guide`.** Those were Google's two pages read as a
+    /// schema, and they spoke Google's vocabulary at every other vendor.
+    pub setup: Option<Value>,
 }
 
 pub fn connector_of(files: &[(String, Vec<u8>)]) -> Option<Declared> {
@@ -489,15 +487,6 @@ pub fn connector_of(files: &[(String, Vec<u8>)]) -> Option<Declared> {
     let servers = doc.get("mcpServers")?.as_object()?;
     let (name, server) = servers.iter().next()?;
     let url = server.get("url").and_then(Value::as_str)?.to_string();
-
-    let text = |k: &str| -> Option<String> {
-        server
-            .get(k)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|s| s.starts_with("https://"))
-            .map(str::to_owned)
-    };
 
     Some(Declared {
         server: name.clone(),
@@ -525,8 +514,25 @@ pub fn connector_of(files: &[(String, Vec<u8>)]) -> Option<Declared> {
             })
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty()),
-        console: text("console"),
-        guide: text("guide"),
+        // Kept only if every entry in it is a label and an https link, so a
+        // malformed list is no list rather than a row of dead buttons.
+        setup: server.get("setup").and_then(|v| {
+            let all = v.as_array()?;
+            let good: Vec<Value> = all
+                .iter()
+                .filter(|one| {
+                    one.get("url")
+                        .and_then(Value::as_str)
+                        .is_some_and(|u| u.starts_with("https://"))
+                        && one
+                            .get("label")
+                            .and_then(Value::as_str)
+                            .is_some_and(|l| !l.trim().is_empty())
+                })
+                .cloned()
+                .collect();
+            (!good.is_empty()).then_some(Value::Array(good))
+        }),
     })
 }
 
@@ -728,8 +734,8 @@ pub async fn save(pool: &PgPool, id: &str, got: &Fetched) -> Result<()> {
             "INSERT INTO marketplace_entries \
                (marketplace_id, slug, name, display_name, description, version, author, \
                 category, homepage, source, logo, logo_type, n_skills, n_commands, \
-                has_connector, scopes, console, guide) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)",
+                has_connector, scopes, setup) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
         )
         .bind(id)
         .bind(&e.slug)
@@ -747,8 +753,7 @@ pub async fn save(pool: &PgPool, id: &str, got: &Fetched) -> Result<()> {
         .bind(e.n_commands)
         .bind(e.has_connector)
         .bind(&e.scopes)
-        .bind(&e.console)
-        .bind(&e.guide)
+        .bind(&e.setup)
         .execute(&mut *tx)
         .await?;
     }
@@ -759,8 +764,7 @@ pub async fn save(pool: &PgPool, id: &str, got: &Fetched) -> Result<()> {
     // server to get a link back, which is a worse answer than the table was.
     sqlx::query(
         "UPDATE connectors c SET scopes = coalesce(e.scopes, c.scopes), \
-           console = coalesce(e.console, c.console), \
-           guide = coalesce(e.guide, c.guide) \
+           setup = coalesce(e.setup, c.setup) \
            FROM marketplace_entries e, skill_versions v \
           WHERE v.skill_id = c.skill_id AND v.from_marketplace = e.marketplace_id \
             AND v.from_slug = e.slug AND e.marketplace_id = $1",

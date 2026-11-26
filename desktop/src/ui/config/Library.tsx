@@ -268,8 +268,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     const of: NeedsClient = {
       skillId: id,
       displayName: i.displayName,
-      console: i.console,
-      guide: i.guide,
+      setup: i.setup,
     };
     return { of, needsClientId: i.needsClientId === true };
   };
@@ -509,8 +508,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                   setSetting({
                     skillId: i.skillId,
                     displayName: i.displayName,
-                    console: i.console,
-                    guide: i.guide,
+                    setup: i.setup,
                   })
                 }
                 onConnect={offerToConnect}
@@ -540,8 +538,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                     setSetting({
                       skillId: i.skillId,
                       displayName: i.displayName,
-                      console: i.console,
-                      guide: i.guide,
+                      setup: i.setup,
                     })
                   }
                   onConnecting={() => setAwaiting(true)}
@@ -595,8 +592,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                         setSetting({
                           skillId: i.skillId,
                           displayName: i.displayName,
-                          console: i.console,
-                          guide: i.guide,
+                          setup: i.setup,
                         })
                       }
                       onConnect={offerToConnect}
@@ -628,8 +624,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                     setSetting({
                       skillId: i.skillId,
                       displayName: i.displayName,
-                      console: i.console,
-                      guide: i.guide,
+                      setup: i.setup,
                     })
                   }
                   onConnect={offerToConnect}

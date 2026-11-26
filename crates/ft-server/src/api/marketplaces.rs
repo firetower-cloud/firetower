@@ -314,13 +314,12 @@ pub(super) async fn install_entry(
         // ours to invent — a server nobody told us about shows no link.
         {
             let _ = sqlx::query(
-                "UPDATE connectors SET scopes = coalesce($2, scopes), \
-                   console = $3, guide = $4 WHERE skill_id = $1",
+                "UPDATE connectors SET scopes = coalesce($2, scopes), setup = $3 \
+                  WHERE skill_id = $1",
             )
             .bind(made.as_str())
             .bind(&d.scopes)
-            .bind(&d.console)
-            .bind(&d.guide)
+            .bind(&d.setup)
             .execute(pool)
             .await
             .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;

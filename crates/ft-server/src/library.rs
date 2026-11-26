@@ -15,6 +15,16 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use utoipa::ToSchema;
 
+/// One place to go to come back with a client id.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupLink {
+    /// The vendor's own word for it — "Google Cloud console", "Create a
+    /// GitHub OAuth app". Never ours.
+    pub label: String,
+    pub url: String,
+}
+
 /// One thing in the library.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -46,10 +56,14 @@ pub struct Item {
     pub required: bool,
     /// What stops working without it, said where somebody is looking at it.
     pub why_required: Option<String>,
-    /// The vendor's own instructions for creating an OAuth application, where
-    /// they have written any. A console is a form; this is the page that says
-    /// which boxes to tick.
-    pub guide: Option<String>,
+    /// Where somebody goes to come back with a client id and a secret — as
+    /// many links as the vendor's setup takes, each named by the entry.
+    ///
+    /// **Said by the entry, not matched on its hostname, and not named by
+    /// us.** This was two fields called `console` and `guide`, which is how
+    /// Google splits the job; every other vendor got Google's vocabulary and
+    /// a null.
+    pub setup: Vec<SetupLink>,
 
     // Servers only.
     pub url: Option<String>,
@@ -62,10 +76,6 @@ pub struct Item {
     /// Firetower has nowhere to put yet. GitHub, Slack and Google are all
     /// here. Drawing a button that fails on the press is worse than saying so.
     pub needs_client_id: bool,
-    /// Where somebody goes to create that application, when we know. Each
-    /// vendor's console is in a different place and none of them is
-    /// guessable from the server's address.
-    pub console: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -106,7 +116,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 (SELECT f.path FROM skill_files f \
                   WHERE f.version_id = k.current_version_id AND f.path LIKE 'assets/logo.%' \
                   LIMIT 1) AS logo_path, \
-                c.server, c.url, c.auth, c.console, c.guide \
+                c.server, c.url, c.auth, c.setup \
            FROM skills k \
            LEFT JOIN connectors c ON c.skill_id = k.id \
           WHERE k.current_version_id IS NOT NULL AND ({visible}) \
@@ -263,8 +273,12 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 // plane, which meant a catalogue nobody here wrote could not
                 // say where its own console is. A server we were not told
                 // about shows no link rather than a guess.
-                console: b.try_get::<Option<String>, _>("console").ok().flatten(),
-                guide: b.try_get::<Option<String>, _>("guide").ok().flatten(),
+                setup: b
+                    .try_get::<Option<serde_json::Value>, _>("setup")
+                    .ok()
+                    .flatten()
+                    .and_then(|v| serde_json::from_value::<Vec<SetupLink>>(v).ok())
+                    .unwrap_or_default(),
             });
         }
 
@@ -293,7 +307,6 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 id: format!("{id}:{path}"),
                 skill_id: id.clone(),
                 kind: "skill".into(),
-                guide: None,
                 display_name: crate::marketplace::title_of(&name),
                 name,
                 description: said(&front, "description"),
@@ -308,7 +321,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 server: None,
                 connected: None,
                 needs_client_id: false,
-                console: None,
+                setup: Vec::new(),
             });
         }
 

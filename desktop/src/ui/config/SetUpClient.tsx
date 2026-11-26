@@ -13,7 +13,7 @@
  * you are already there.
  */
 import { useState } from "react";
-import { BookOpen, ExternalLink, Loader2 } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import { why } from "~/data";
 import { openExternal } from "~/open";
 import { setClient, useConnectorState } from "~/api/generated/connectors/connectors";
@@ -21,10 +21,16 @@ import { setClient, useConnectorState } from "~/api/generated/connectors/connect
 export type NeedsClient = {
   skillId: string;
   displayName: string;
-  /** Where the application is created. */
-  console?: string | null;
-  /** The vendor's own instructions, where they wrote any. */
-  guide?: string | null;
+  /**
+   * Where to go to come back with a client id, as many links as the vendor's
+   * setup takes, each named by the entry.
+   *
+   * **The labels are theirs.** This was a `console` and a `guide`, which is
+   * how Google splits the job — so every other vendor was described in
+   * Google's words, and a button said "Console" at somebody whose vendor
+   * calls it a developer portal.
+   */
+  setup?: { label: string; url: string }[];
 };
 
 export function SetUpClient({
@@ -68,25 +74,25 @@ export function SetUpClient({
         still authorizes their own account.
       </p>
 
-      {/* **A console is a form, not an explanation.** Google's setup is a
-          dozen steps across four screens, one of them a checkbox called "Use
-          this client for an AI-powered agent" without which none of it works.
-          No sentence beside a text field replaces that page, so where the
-          vendor has written one it is linked beside the console. */}
-      <div className="mt-3 flex flex-wrap gap-2">
-        {of.console && (
-          <button type="button" className="out" onClick={() => void openExternal(of.console!)}>
-            <ExternalLink className="h-4 w-4" strokeWidth={1.5} />
-            Open {of.displayName}&rsquo;s console
-          </button>
-        )}
-        {of.guide && (
-          <button type="button" className="out" onClick={() => void openExternal(of.guide!)}>
-            <BookOpen className="h-4 w-4" strokeWidth={1.5} />
-            Read their guide
-          </button>
-        )}
-      </div>
+      {/* **However many pages the vendor's setup takes.** Google's is a
+          console and a twelve-step guide; Twilio's is one page; somebody
+          else's might be three. The entry says how many and what they are
+          called, because naming another company's pages is not ours to do. */}
+      {(of.setup?.length ?? 0) > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {of.setup!.map((l) => (
+            <button
+              key={l.url}
+              type="button"
+              className="out"
+              onClick={() => void openExternal(l.url)}
+            >
+              <ExternalLink className="h-4 w-4" strokeWidth={1.5} />
+              {l.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <p className="mt-4 text-meta text-dim">Its redirect address has to be exactly this:</p>
       <p className="mt-1 select-all break-all rounded-lg bg-sunk px-3 py-2 font-mono text-meta text-bone">

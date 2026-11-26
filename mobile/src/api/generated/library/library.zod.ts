@@ -22,11 +22,9 @@ export const ListLibraryResponseItem = zod.object({
   "auth": zod.string().nullish(),
   "builtin": zod.boolean().describe('Firetower\'s own, which nobody can remove because the next boot puts it back.'),
   "connected": zod.boolean().nullish().describe('Whether **you** hold a credential for it. `None` for a skill.'),
-  "console": zod.string().nullish().describe('Where somebody goes to create that application, when we know. Each\nvendor\'s console is in a different place and none of them is\nguessable from the server\'s address.'),
   "description": zod.string(),
   "displayName": zod.string().describe('The person\'s. Already resolved — the bundle\'s own, or a title-cased\n`name`. A screen draws this and never has to pick.'),
   "from": zod.string().nullish().describe('The bundle\'s name, when the bundle holds more than this one thing.\n`None` when the component *is* the bundle, because "from notion" under\na row called notion is noise.'),
-  "guide": zod.string().nullish().describe('The vendor\'s own instructions for creating an OAuth application, where\nthey have written any. A console is a form; this is the page that says\nwhich boxes to tick.'),
   "id": zod.string().describe('`<skill id>:<path>`. Opaque, and the handle every write takes.'),
   "kind": zod.string().describe('`skill` or `server`.'),
   "logo": zod.string().nullish().describe('The bundle\'s own mark, shared by everything inside it.'),
@@ -35,6 +33,10 @@ export const ListLibraryResponseItem = zod.object({
   "on": zod.boolean().describe('Whether a plain agent of yours opens with it.'),
   "required": zod.boolean().describe('**Not a choice.** A Firetower feature depends on it, so it has no\nswitch and no profile can leave it out. See `builtin::REQUIRED`.'),
   "server": zod.string().nullish(),
+  "setup": zod.array(zod.object({
+  "label": zod.string().describe('The vendor\'s own word for it — "Google Cloud console", "Create a\nGitHub OAuth app". Never ours.'),
+  "url": zod.string()
+}).describe('One place to go to come back with a client id.')).describe('Where somebody goes to come back with a client id and a secret — as\nmany links as the vendor\'s setup takes, each named by the entry.\n\n**Said by the entry, not matched on its hostname, and not named by\nus.** This was two fields called `console` and `guide`, which is how\nGoogle splits the job; every other vendor got Google\'s vocabulary and\na null.'),
   "skillId": zod.string().describe('The bundle it lives in, which the detail screen and removal both need.'),
   "url": zod.string().nullish(),
   "whyRequired": zod.string().nullish().describe('What stops working without it, said where somebody is looking at it.')

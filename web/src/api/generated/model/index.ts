@@ -311,6 +311,7 @@ export * from './setSettings';
 export * from './setShare';
 export * from './settingDiff';
 export * from './settings';
+export * from './setupLink';
 export * from './setupState';
 export * from './setVoiceKey';
 export * from './share';
