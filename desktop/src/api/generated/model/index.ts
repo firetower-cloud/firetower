@@ -316,6 +316,7 @@ export * from './setVoiceKey.ts';
 export * from './share.ts';
 export * from './shareOne.ts';
 export * from './shareSkills.ts';
+export * from './shelf.ts';
 export * from './signedIn.ts';
 export * from './signIn.ts';
 export * from './skill.ts';

@@ -316,6 +316,7 @@ export * from './setVoiceKey';
 export * from './share';
 export * from './shareOne';
 export * from './shareSkills';
+export * from './shelf';
 export * from './signedIn';
 export * from './signIn';
 export * from './skill';

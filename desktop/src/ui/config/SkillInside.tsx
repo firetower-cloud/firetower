@@ -31,10 +31,10 @@ export function SkillInside({ of, onBack }: { of: Item; onBack: () => void }) {
 
       <header className="mt-5 flex items-start gap-4 border-b border-line pb-5">
         <span className="shrink-0 origin-top-left scale-[1.6]">
-          <Mark logo={of.logo} name={of.name} />
+          <Mark logo={of.logo} name={of.displayName} />
         </span>
         <div className="ml-6 min-w-0 flex-1">
-          <h2 className="font-mono text-display text-bone">{of.name}</h2>
+          <h2 className="text-display text-bone">{of.displayName}</h2>
           <p className="mt-1 max-w-[70ch] text-ui text-dim">
             {mine?.description || of.description || "no description of its own"}
           </p>

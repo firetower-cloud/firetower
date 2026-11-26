@@ -28,6 +28,9 @@ import {
   X,
 } from "lucide-react";
 import { Blank, Dropping, Note, Section } from "~/ui/config/bits";
+import { Take } from "~/ui/config/Take";
+import { AddMenu } from "~/ui/config/AddMenu";
+import { BrowseAll } from "~/ui/config/BrowseAll";
 import { why } from "~/data";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconButton, MenuItem } from "~/components/ui";
@@ -143,7 +146,19 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     const stop = setTimeout(() => setAwaiting(false), 5 * 60 * 1000);
     return () => clearTimeout(stop);
   }, [awaiting, connectedCount]);
-  const catalogue = useListEntries(undefined, { query: { select: (r) => r ?? [] } });
+  /* **Narrowed by the server, not by us.** The browser used to be handed
+     every row and filter them; with a page that is a search of page one. So
+     the query box and the segmented control travel with the request, and the
+     two shelves are two questions rather than one list cut in half. */
+  const asking = {
+    q: query.trim() || undefined,
+    kind: kind === "all" ? undefined : kind === "mcp" ? "mcp" : "skills",
+  };
+  const held = useListEntries(
+    { ...asking, installed: true },
+    { query: { select: (r) => r?.entries ?? [] } },
+  );
+  const catalogue = useListEntries({ ...asking, installed: false, page: 1 }, {});
 
   const refresh = async () => {
     await Promise.all([
@@ -153,6 +168,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     ]);
   };
 
+  /* The library is small and already here, so this one stays local. */
   const matches = (text: string) => {
     const t = query.trim().toLowerCase();
     return !t || text.toLowerCase().includes(t);
@@ -162,19 +178,12 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     () =>
       (lib.data ?? [])
         .filter((i) => kind === "all" || (kind === "mcp" ? i.kind === "server" : i.kind === "skill"))
-        .filter((i) => matches(`${i.name} ${i.description} ${i.from ?? ""}`)),
+        .filter((i) => matches(`${i.displayName} ${i.name} ${i.description} ${i.from ?? ""}`)),
     [lib.data, kind, query],
   );
 
-  const offered = useMemo(
-    () =>
-      (catalogue.data ?? [])
-        .filter((e) =>
-          kind === "all" ? true : kind === "mcp" ? e.hasConnector : e.nSkills > 0 || e.nCommands > 0,
-        )
-        .filter((e) => matches(`${e.name} ${e.description}`)),
-    [catalogue.data, kind, query],
-  );
+  const offered = catalogue.data?.entries ?? [];
+  const waiting = catalogue.data?.total ?? 0;
   /* **A card knows what it became.** An entry and the thing it installed to
      are the same object seen twice, and the catalogue row alone cannot say
      whether you have authorized it — so the two are matched by name, which
@@ -186,12 +195,20 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     return by;
   }, [lib.data]);
 
-  const have = offered.filter((e) => e.installed && !stayPut.has(e.slug));
+  /* A row pressed in this sitting is still on the shelf it was pressed on,
+     because it has not been looked at fresh yet. */
+  const have = [
+    ...(held.data ?? []),
+    ...offered.filter((e) => e.installed && stayPut.has(e.slug)),
+  ];
   const rest = offered.filter((e) => !e.installed || stayPut.has(e.slug));
   const [all, setAll] = useState(false);
+  const [browsing, setBrowsing] = useState(false);
+  /** The catalogue row a preview is open on, handed over when it was opened. */
+  const [peek, setPeek] = useState<Listed | undefined>();
   const INSTALLED = 4;
   const shown = rest.slice(0, SHELF);
-  const more = rest.length - shown.length;
+  const more = Math.max(0, waiting - shown.length);
 
   /**
    * Adding a server is already asking for its tools.
@@ -248,9 +265,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
   /* An entry nobody has installed opens too, on a preview pulled at the
      pinned commit — the handle is the catalogue's rather than the library's,
      which is what tells the two apart. */
-  const peeked = open?.startsWith("offer:")
-    ? (catalogue.data ?? []).find((e) => `offer:${e.marketplaceId}/${e.slug}` === open)
-    : undefined;
+  const peeked = open?.startsWith("offer:") ? peek : undefined;
   if (peeked)
     return (
       <OfferInside
@@ -306,16 +321,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
       <Section
         title="Skills &amp; MCP"
         action={
-          <div className="flex items-center gap-2">
-            <button type="button" className="out" onClick={() => setPasting((p) => !p)}>
-              <Link2 className="h-4 w-4" strokeWidth={1.5} />
-              Connect a server
-            </button>
-            <button type="button" className="btn primary" onClick={() => setAdding(true)}>
-              <Plus className="h-4 w-4" strokeWidth={1.75} />
-              Add a skill
-            </button>
-          </div>
+          <AddMenu onUpload={() => setAdding(true)} onConnect={() => setPasting(true)} />
         }
         controls={
           <div className="flex w-full items-center gap-3">
@@ -383,7 +389,31 @@ export function Library({ open: asked = null }: { open?: string | null }) {
           />
         )}
 
-        {where === "installed" ? (
+        {browsing ? (
+          <BrowseAll
+            kind={kind}
+            onKind={(k) => {
+              setKind(k);
+              setStayPut(new Set());
+            }}
+            onBack={() => setBrowsing(false)}
+            row={(e) => (
+              <Offer
+                key={`${e.marketplaceId}/${e.slug}`}
+                of={e}
+                item={mine.get(e.name)}
+                busy={busy === e.slug}
+                waiting={awaiting && stayPut.has(e.slug)}
+                onOpen={(id, e) => {
+                        setPeek(e);
+                        setOpen(id);
+                      }}
+                onConnect={offerToConnect}
+                onAdd={take}
+              />
+            )}
+          />
+        ) : where === "installed" ? (
           <>
             {/* **No switch here any more.** Having something and using it in
                 a particular run are different questions, and only the second
@@ -444,7 +474,10 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                       item={mine.get(e.name)}
                       busy={busy === e.slug}
                       waiting={awaiting && stayPut.has(e.slug)}
-                      onOpen={(id) => setOpen(id)}
+                      onOpen={(id, e) => {
+                        setPeek(e);
+                        setOpen(id);
+                      }}
                       onConnect={offerToConnect}
                       onAdd={take}
                     />
@@ -466,14 +499,26 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                   item={mine.get(e.name)}
                   busy={busy === e.slug}
                   waiting={awaiting && stayPut.has(e.slug)}
-                  onOpen={(id) => setOpen(id)}
+                  onOpen={(id, e) => {
+                        setPeek(e);
+                        setOpen(id);
+                      }}
                   onConnect={offerToConnect}
                   onAdd={take}
                 />
               ))}
             </div>
+            {/* **The way through, not an instruction to already know.**
+                "Search to narrow it" told somebody to name what they wanted
+                in the one place they came to find out what there is. */}
             {more > 0 && (
-              <p className="mt-3 text-meta text-dim">{more} more. Search to narrow it.</p>
+              <button
+                type="button"
+                className="out mt-3"
+                onClick={() => setBrowsing(true)}
+              >
+                Show all {waiting}
+              </button>
             )}
             {offered.length === 0 && (
               <Blank icon={Store} title="Nothing on offer">
@@ -542,10 +587,10 @@ function Thing({
   return (
     <div className="r">
       <span className="g">
-        <Mark logo={of.logo} name={of.name} />
+        <Mark logo={of.logo} name={of.displayName} />
       </span>
       <button type="button" className="tx text-left" onClick={onOpen}>
-        <b>{of.name}</b>
+        <b>{of.displayName}</b>
         <s>{of.description || "no description of its own"}</s>
       </button>
 
@@ -561,32 +606,24 @@ function Thing({
         </span>
       )}
 
-      {of.kind === "server" &&
-        (of.needsClientId && of.connected !== true ? (
-          /* **Not a Connect button.** This server registers no clients, so
-             pressing it would fail every time — and Firetower has nowhere to
-             put a hand-made client id yet. Saying so beats a control that
-             does nothing, which is what adding GitHub used to look like. */
-          <span
-            className="shrink-0 text-meta text-mute"
-            title={`${of.name} registers no OAuth clients, so it needs an application created by hand. Firetower cannot hold one yet.`}
-          >
-            needs a client id
-          </span>
-        ) : of.connected === true ? (
-          <span className="shrink-0 text-sage" title={`Connected to ${of.server}.`}>
-            <Link2 className="h-4 w-4" strokeWidth={1.75} />
-          </span>
-        ) : of.connected === false ? (
-          <button type="button" className="on" disabled={going} onClick={join}>
-            {going ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
-            ) : (
-              <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-            )}
-            Connect
-          </button>
-        ) : null)}
+      {/* **The same control as the catalogue row and the detail screen.**
+          This used to be a third variant: a sentence for a server needing an
+          application, a bare icon once connected, a differently-shaped
+          button otherwise. The sentence also still said Firetower could not
+          hold a client id, which stopped being true when the form landed. */}
+      {of.kind === "server" && (
+        <Take
+          of={{
+            hasConnector: true,
+            installed: true,
+            connected: of.connected,
+            needsClientId: of.needsClientId,
+          }}
+          busy={going}
+          onPress={join}
+          onOpen={onOpen}
+        />
+      )}
 
       <div>
         <IconButton
@@ -951,74 +988,47 @@ function Offer({
   /** What it became, once it is installed. */
   item?: Item;
   busy: boolean;
-  onOpen: (id: string) => void;
+  onOpen: (id: string, of: Listed) => void;
   onConnect: (made: { id: string; hasConnector?: boolean }) => Promise<void>;
   onAdd: (e: Listed) => Promise<void>;
   /** An authorization this row started is outstanding. */
   waiting?: boolean;
 }) {
-  const open = () => onOpen(item ? item.id : `offer:${of.marketplaceId}/${of.slug}`);
+  /* **The entry travels with the handle.** Looking it back up by id only
+     worked while the whole catalogue was in memory; with pages, opening a row
+     from page three found nothing. */
+  const open = () => onOpen(item ? item.id : `offer:${of.marketplaceId}/${of.slug}`, of);
   return (
     <div className="offer">
       <span className="g">
-        <Mark logo={of.logo} name={of.name} />
+        <Mark logo={of.logo} name={of.displayName} />
       </span>
       {/* **Every row opens.** One already installed shows what it became;
           one nobody has downloaded shows a preview pulled from its
           repository — which is the only way to read a stranger's
           instructions before agreeing to run them. */}
       <button type="button" className="tx text-left" onClick={open}>
-        <b>{of.name}</b>
+        <b>{of.displayName}</b>
         <s>{of.description}</s>
         <u>{[brings(of), of.author && `by ${of.author}`].filter(Boolean).join(", ")}</u>
       </button>
 
-      {/* **One button, named for the point of it.** "Add" then "Connect"
-          was two presses for one intention: nobody wants a copy of Notion,
-          they want an agent that can read Notion. So a row carrying a server
-          says Connect and does both, and only a skills-only row says Add,
-          because nothing follows it.
-
-          And it reports in place. The row used to jump to "Already added"
-          the instant it was pressed, so if the browser did not open there
-          was nothing left on screen to explain why. */}
-      {busy ? (
-        <span className="flex shrink-0 items-center gap-1.5 text-meta text-dim">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
-          {of.hasConnector ? "Connecting…" : "Adding…"}
-        </span>
-      ) : item?.needsClientId && item.connected !== true ? (
-        <button type="button" className="add" onClick={open}>
-          Set it up
-        </button>
-      ) : waiting ? (
-        <span
-          className="flex shrink-0 items-center gap-1.5 text-meta text-dim"
-          title="Finish in the browser; this updates itself."
-        >
-          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
-          Waiting…
-        </span>
-      ) : item?.connected === true || (of.installed && !of.hasConnector) ? (
-        <span className="flex shrink-0 items-center gap-1.5 text-meta text-sage">
-          <Check className="h-3.5 w-3.5" strokeWidth={2} />
-          {of.hasConnector ? "Connected" : "Added"}
-        </span>
-      ) : (
-        <button type="button" className="add" onClick={() => void onAdd(of)}>
-          {of.hasConnector ? (
-            <>
-              <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Connect
-            </>
-          ) : (
-            <>
-              <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-              Add
-            </>
-          )}
-        </button>
-      )}
+      {/* **The same control as every other screen.** This row said Connect
+          and the detail screen for the same entry said Add, in a different
+          shape — two names for one action, a click apart. `Take` owns the
+          words now, and both call it. */}
+      <Take
+        of={{
+          hasConnector: of.hasConnector,
+          installed: of.installed,
+          connected: item?.connected,
+          needsClientId: item?.needsClientId,
+        }}
+        busy={busy}
+        waiting={waiting}
+        onPress={() => void onAdd(of)}
+        onOpen={open}
+      />
     </div>
   );
 }

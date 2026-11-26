@@ -28,6 +28,11 @@ export interface Item {
   console?: string | null;
   description: string;
   /**
+     * The person's. Already resolved — the bundle's own, or a title-cased
+     * `name`. A screen draws this and never has to pick.
+     */
+  displayName: string;
+  /**
      * The bundle's name, when the bundle holds more than this one thing.
      * `None` when the component *is* the bundle, because "from notion" under
      * a row called notion is noise.
@@ -43,6 +48,7 @@ export interface Item {
      * @nullable
      */
   logo?: string | null;
+  /** The machine's: a folder, a command, the thing an agent types. */
   name: string;
   /**
      * **This server registers no clients**, so Connect cannot work until

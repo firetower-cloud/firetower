@@ -23,6 +23,11 @@ export interface Listed {
      */
   counted: boolean;
   description: string;
+  /**
+     * Already resolved: the entry's own, or a title-cased slug. The caller
+     * never has to know which, and never has to draw `hugging-face`.
+     */
+  displayName: string;
   hasConnector: boolean;
   /** @nullable */
   homepage?: string | null;

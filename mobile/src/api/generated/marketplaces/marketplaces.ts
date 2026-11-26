@@ -30,8 +30,8 @@ import type {
   ApiError,
   Inside,
   ListEntriesParams,
-  Listed,
   Market,
+  Shelf,
   Skill
 } from '../model';
 
@@ -267,9 +267,9 @@ export const useAddMarketplace = <TError = ApiError,
   return stringifiedParams.length > 0 ? `/api/v1/marketplaces/entries?${stringifiedParams}` : `/api/v1/marketplaces/entries`
 }
 
-export const listEntries = async (params?: ListEntriesParams, options?: Parameters<typeof http>[1]): Promise<Listed[]> => {
+export const listEntries = async (params?: ListEntriesParams, options?: Parameters<typeof http>[1]): Promise<Shelf> => {
 
-  return http<Listed[]>(getListEntriesUrl(params),
+  return http<Shelf>(getListEntriesUrl(params),
   {
     ...options,
     method: 'GET'

@@ -534,10 +534,11 @@
   }
   .offer .tx s { color: var(--color-dim); }
   .offer .tx u { color: var(--color-mute); margin-top: 1px; }
-  /* **The button needs its own shape here.** `.add` was only ever styled
-     under `.pcard`, so in a row it was a bare button: no flex, no gap, and
-     its icon stacked above its label like two controls. */
-  .offer .add {
+  /* **One shape for the one action, wherever it is drawn.** A catalogue row,
+     an installed row and a detail header each had their own button for
+     taking something — different sizes, different words, a few pixels apart.
+     `.act` is that control; `Take` is the component that picks its words. */
+  .act {
     flex: none;
     height: 28px;
     padding: 0 11px;
@@ -548,17 +549,55 @@
     align-items: center;
     gap: 6px;
     white-space: nowrap;
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
     transition:
+      opacity var(--dur-native) var(--ease-swift),
       background var(--dur-native) var(--ease-swift),
       color var(--dur-native) var(--ease-swift);
   }
-  .offer:hover .add {
-    background: var(--color-panel);
+  .act:hover {
     color: var(--color-bone);
-    box-shadow: var(--shadow-raise);
   }
-  .offer .add[disabled] {
+  .act[disabled] {
     opacity: 0.5;
+  }
+  /* **Quiet until the row is under the pointer.** A list of thirty rows each
+     carrying a lit button is thirty things asking to be pressed; the row is
+     the thing being read, and the action belongs to the one being looked at.
+     Opacity rather than display, so it keeps its space — a row must not
+     reflow under the pointer — and `:focus-within` so the keyboard still
+     reaches it. */
+  .offer .act,
+  .r .act {
+    opacity: 0;
+  }
+  .offer:hover .act,
+  .offer:focus-within .act,
+  .r:hover .act,
+  .r:focus-within .act {
+    opacity: 1;
+  }
+  /* What is already true is not an action, so it is always legible. */
+  .act-said {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .act-done {
+    color: var(--color-sage);
+  }
+  /* The detail screen has one subject and one action; nothing to reveal. */
+  .act-page {
+    height: 32px;
+    padding: 0 14px;
+    color: var(--color-bone);
+    background: var(--color-raise);
+    opacity: 1;
   }
   .offer > span:last-child {
     flex: none;
@@ -7578,121 +7617,16 @@ html:not([data-platform="macos"]) {
   /* Something already taken sits quieter than something on offer rather than
      being hidden: a Discover search returning nothing for a thing you own
      reads as "it does not exist". */
-  .pcard[data-had] {
-    opacity: 0.66;
-  }
-  .pcard {
-    display: flex;
-    flex-direction: column;
-    padding: 13px 14px 14px;
-    border-radius: 13px;
-    text-align: left;
-    transition: background var(--dur-native) var(--ease-swift);
-  }
-  .pcard:hover {
-    background: var(--color-raise);
-  }
-  .pcard .top {
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    min-width: 0;
-  }
   /* Held at a fixed height whether or not there is a second line, so every
      description in a row still starts on the same baseline. */
-  .pcard .nm {
-    min-width: 0;
-    flex: 1;
-    /* **A minimum, not a height.** It was fixed at 34px, which is right for
-       one line and clips the second — the author line drew on top of the
-       name. A card with an author is simply taller. */
-    min-height: 34px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
   /* `<s>` is this file's sub-line, as it is on every row — the element is
      borrowed for its brevity and never for its meaning, so the rule that
      takes the line off it has to follow it everywhere it is used. */
-  .pcard .nm s {
-    display: block;
-    text-decoration: none;
-    font-size: var(--text-meta);
-    color: var(--color-mute);
-    margin-top: 1px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .pcard .nm b {
-    display: block;
-    font-size: var(--text-title);
-    font-weight: 500;
-    color: var(--color-bone);
-    letter-spacing: -0.005em;
-    overflow: hidden;
-    white-space: nowrap;
-    text-overflow: ellipsis;
-  }
   /* Two lines, clamped, with the box holding its height — a one-line
      description must not raise the footer above its neighbour's. */
-  .pcard .desc {
-    margin-top: 8px;
-    font-size: var(--text-ui);
-    line-height: 1.5;
-    color: var(--color-dim);
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    min-height: 42px;
-  }
-  .pcard .foot {
-    margin-top: 11px;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-  }
-  .pcard .chip3 {
-    flex: none;
-    padding: 3px 9px;
-    border-radius: 99px;
-    background: var(--color-raise);
-    font-size: var(--text-meta);
-    color: var(--color-dim);
-    white-space: nowrap;
-  }
-  .pcard:hover .chip3,
-  .pcard:hover .plg {
-    background: var(--color-overlay);
-  }
   /* Present at rest so a shelf never reads as inert, and filled only once
      the pointer is on the cell it belongs to — twenty filled pills is a
      toolbar, not a library. */
-  .pcard .add {
-    margin-left: auto;
-    flex: none;
-    height: 28px;
-    padding: 0 11px;
-    border-radius: 99px;
-    font-size: var(--text-ui);
-    color: var(--color-dim);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    white-space: nowrap;
-    transition:
-      background var(--dur-native) var(--ease-swift),
-      color var(--dur-native) var(--ease-swift);
-  }
-  .pcard:hover .add {
-    background: var(--color-overlay);
-    color: var(--color-bone);
-  }
-  .pcard .add[disabled] {
-    opacity: 0.5;
-  }
-
   /* A plugin's mark. A monogram is the fallback where a bundle ships no
      logo of its own, which until a marketplace lands is all of them. */
   .plg {

@@ -2718,6 +2718,7 @@ async fn a_profile_hands_a_second_agent_its_own_list_and_nothing_else() {
                     &owner,
                     "admin",
                     &NewSkill {
+                        display_name: None,
                         kind: None,
                         name: name.into(),
                         description: format!("Does {name}."),
@@ -5505,6 +5506,7 @@ async fn a_skill(state: &AppState, owner: &str, name: &str) -> String {
             owner,
             &slug,
             &crate::skills::NewSkill {
+                display_name: None,
                 kind: None,
                 name: name.into(),
                 description: format!("what {name} is for"),

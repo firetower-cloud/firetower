@@ -11,4 +11,17 @@ export type ListEntriesParams = {
  * Filter by name or description
  */
 q?: string;
+/**
+ * mcp, skills, or absent for everything
+ */
+kind?: string;
+/**
+ * One-based
+ * @minimum 0
+ */
+page?: number;
+/**
+ * Only what is installed, or only what is not
+ */
+installed?: boolean;
 };

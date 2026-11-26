@@ -77,10 +77,10 @@ export function ServerInside({
 
       <header className="mt-5 flex items-start gap-4 border-b border-line pb-5">
         <span className="shrink-0 scale-[1.6] origin-top-left">
-          <Mark logo={of.logo} name={of.name} />
+          <Mark logo={of.logo} name={of.displayName} />
         </span>
         <div className="ml-6 min-w-0 flex-1">
-          <h2 className="text-display text-bone">{of.name}</h2>
+          <h2 className="text-display text-bone">{of.displayName}</h2>
           <p className="mt-1 max-w-[70ch] text-ui text-dim">{of.description}</p>
         </div>
         {/* **Live, not the snapshot the list arrived with.** This read
@@ -119,9 +119,9 @@ export function ServerInside({
           through it. */}
       {supplying && (
         <section className="mt-5 rounded-xl bg-raise p-4">
-          <h3 className="text-ui text-bone">An application for {of.name}</h3>
+          <h3 className="text-ui text-bone">An application for {of.displayName}</h3>
           <p className="mt-1 max-w-[74ch] text-meta text-dim">
-            {of.name} does not register clients itself, so somebody creates one in its
+            {of.displayName} does not register clients itself, so somebody creates one in its
             console and pastes it here — once, for everybody on this Firetower. Each
             person still authorizes their own account.
           </p>
@@ -138,7 +138,7 @@ export function ServerInside({
               onClick={() => void openExternal(of.console!)}
             >
               <ExternalLink className="h-4 w-4" strokeWidth={1.5} />
-              Open {of.name}&rsquo;s console
+              Open {of.displayName}&rsquo;s console
             </button>
           )}
           <div className="mt-4 flex flex-col gap-2">
@@ -199,9 +199,9 @@ export function ServerInside({
       <div className="mt-6 grid grid-cols-[1fr_230px] gap-9 max-[900px]:grid-cols-1">
         <div className="min-w-0">
           <p className="max-w-[68ch] text-ui leading-relaxed text-text">
-            Tools from <b>{of.name}</b>, as an agent can call them.{" "}
+            Tools from <b>{of.displayName}</b>, as an agent can call them.{" "}
             <b className="font-mid">Authorizing is per person</b>: a colleague connects their
-            own account and sees exactly what {of.name} lets that account see — a better
+            own account and sees exactly what {of.displayName} lets that account see — a better
             boundary than anything Firetower could enforce.
           </p>
 

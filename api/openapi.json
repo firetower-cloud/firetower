@@ -2890,6 +2890,35 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "description": "mcp, skills, or absent for everything",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "One-based",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "installed",
+            "in": "query",
+            "description": "Only what is installed, or only what is not",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -2898,10 +2927,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/Listed"
-                  }
+                  "$ref": "#/components/schemas/Shelf"
                 }
               }
             }
@@ -14272,6 +14298,7 @@
           "skillId",
           "kind",
           "name",
+          "displayName",
           "description",
           "on",
           "builtin",
@@ -14306,6 +14333,10 @@
           "description": {
             "type": "string"
           },
+          "displayName": {
+            "type": "string",
+            "description": "The person's. Already resolved — the bundle's own, or a title-cased\n`name`. A screen draws this and never has to pick."
+          },
           "from": {
             "type": [
               "string",
@@ -14329,7 +14360,8 @@
             "description": "The bundle's own mark, shared by everything inside it."
           },
           "name": {
-            "type": "string"
+            "type": "string",
+            "description": "The machine's: a folder, a command, the thing an agent types."
           },
           "needsClientId": {
             "type": "boolean",
@@ -14580,6 +14612,7 @@
           "marketplaceName",
           "slug",
           "name",
+          "displayName",
           "description",
           "nSkills",
           "nCommands",
@@ -14606,6 +14639,10 @@
           },
           "description": {
             "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "Already resolved: the entry's own, or a title-cased slug. The caller\nnever has to know which, and never has to draw `hugging-face`."
           },
           "hasConnector": {
             "type": "boolean"
@@ -15695,6 +15732,13 @@
           },
           "description": {
             "type": "string"
+          },
+          "displayName": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "What a person reads. `name` is what an agent sees and what somebody\ntypes, so it cannot hold a capital or a dot; absent means the library\ntitle-cases `name` instead."
           },
           "files": {
             "type": "array",
@@ -19034,6 +19078,39 @@
             "items": {
               "$ref": "#/components/schemas/ShareOne"
             }
+          }
+        }
+      },
+      "Shelf": {
+        "type": "object",
+        "description": "One page of the catalogue.\n\n**A shape and not a bare array, because a page without a count is not\nbrowsable.** The screen has to say whether there is more behind it, and\ndeciding that from \"did I get a full page\" is wrong on the one catalogue\nwhose size is an exact multiple of the page.",
+        "required": [
+          "entries",
+          "total",
+          "more",
+          "perPage"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Listed"
+            }
+          },
+          "more": {
+            "type": "boolean",
+            "description": "Whether asking for the next page is worth it."
+          },
+          "perPage": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many a page holds, so the caller need not agree with us by\nhardcoding it.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "How many match the filter, across every page."
           }
         }
       },

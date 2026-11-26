@@ -44,15 +44,28 @@ export const AddMarketplaceResponse = zod.object({
   "url": zod.string()
 }).describe('A source, as a screen lists it.')
 
+export const listEntriesQueryPageMin = 0;
+
+
+
 export const ListEntriesQueryParams = zod.object({
-  "q": zod.string().optional().describe('Filter by name or description')
+  "q": zod.string().optional().describe('Filter by name or description'),
+  "kind": zod.string().optional().describe('mcp, skills, or absent for everything'),
+  "page": zod.int().min(listEntriesQueryPageMin).optional().describe('One-based'),
+  "installed": zod.boolean().optional().describe('Only what is installed, or only what is not')
 })
 
-export const ListEntriesResponseItem = zod.object({
+export const listEntriesResponsePerPageMin = 0;
+
+
+
+export const ListEntriesResponse = zod.object({
+  "entries": zod.array(zod.object({
   "author": zod.string().nullish(),
   "category": zod.string().nullish(),
   "counted": zod.boolean().describe('**Whether those counts mean anything.** An entry whose files live in\nanother repository is not opened at catalogue time — 316 downloads to\ndraw a shelf is not a shelf. So its counts are all zero, which is not\nthe same claim as "this plugin is empty", and a row must not make the\nsecond one.'),
   "description": zod.string(),
+  "displayName": zod.string().describe('Already resolved: the entry\'s own, or a title-cased slug. The caller\nnever has to know which, and never has to draw `hugging-face`.'),
   "hasConnector": zod.boolean(),
   "homepage": zod.string().nullish(),
   "installed": zod.boolean().describe('Whether this organisation already took a copy.'),
@@ -64,8 +77,11 @@ export const ListEntriesResponseItem = zod.object({
   "name": zod.string(),
   "slug": zod.string(),
   "version": zod.string().nullish()
-}).describe('One row of a shelf.')
-export const ListEntriesResponse = zod.array(ListEntriesResponseItem)
+}).describe('One row of a shelf.')),
+  "more": zod.boolean().describe('Whether asking for the next page is worth it.'),
+  "perPage": zod.int().min(listEntriesResponsePerPageMin).describe('How many a page holds, so the caller need not agree with us by\nhardcoding it.'),
+  "total": zod.int().describe('How many match the filter, across every page.')
+}).describe('One page of the catalogue.\n\n**A shape and not a bare array, because a page without a count is not\nbrowsable.** The screen has to say whether there is more behind it, and\ndeciding that from "did I get a full page" is wrong on the one catalogue\nwhose size is an exact multiple of the page.')
 
 export const RemoveMarketplaceParams = zod.object({
   "id": zod.string().describe('Marketplace')

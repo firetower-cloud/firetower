@@ -1354,6 +1354,7 @@ mod tests {
             .to_string();
 
         let bundle = |name: &str| NewSkill {
+            display_name: None,
             kind: None,
             name: name.into(),
             description: format!("Does {name}."),

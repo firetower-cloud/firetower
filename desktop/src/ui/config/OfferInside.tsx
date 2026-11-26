@@ -7,7 +7,8 @@
  * The files are pulled at the pinned commit for this screen and thrown away —
  * nothing is stored until Add is pressed.
  */
-import { ArrowLeft, Loader2, Plus, TriangleAlert } from "lucide-react";
+import { Take } from "~/ui/config/Take";
+import { ArrowLeft, TriangleAlert } from "lucide-react";
 import { usePreviewEntry } from "~/api/generated/marketplaces/marketplaces";
 import type { Listed } from "~/api/generated/model";
 import { Mark } from "~/ui/config/Library";
@@ -35,20 +36,20 @@ export function OfferInside({
 
       <header className="mt-5 flex items-start gap-4 border-b border-line pb-5">
         <span className="shrink-0 origin-top-left scale-[1.6]">
-          <Mark logo={of.logo} name={of.name} />
+          <Mark logo={of.logo} name={of.displayName} />
         </span>
         <div className="ml-6 min-w-0 flex-1">
-          <h2 className="text-display text-bone">{of.name}</h2>
+          <h2 className="text-display text-bone">{of.displayName}</h2>
           <p className="mt-1 max-w-[70ch] text-ui text-dim">{of.description}</p>
         </div>
-        <button type="button" className="btn primary shrink-0" disabled={busy} onClick={onAdd}>
-          {busy ? (
-            <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} />
-          ) : (
-            <Plus className="h-4 w-4" strokeWidth={1.75} />
-          )}
-          Add
-        </button>
+        {/* **Said "Add" while the row for the same entry said "Connect".**
+            One action, two names, one click apart. `Take` owns the words. */}
+        <Take
+          of={{ hasConnector: of.hasConnector, installed: of.installed }}
+          busy={busy}
+          where="page"
+          onPress={onAdd}
+        />
       </header>
 
       <div className="mt-6 grid grid-cols-[1fr_230px] gap-9 max-[900px]:grid-cols-1">

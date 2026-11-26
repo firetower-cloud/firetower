@@ -25,7 +25,11 @@ pub struct Item {
     pub skill_id: String,
     /// `skill` or `server`.
     pub kind: String,
+    /// The machine's: a folder, a command, the thing an agent types.
     pub name: String,
+    /// The person's. Already resolved — the bundle's own, or a title-cased
+    /// `name`. A screen draws this and never has to pick.
+    pub display_name: String,
     pub description: String,
     /// The bundle's name, when the bundle holds more than this one thing.
     /// `None` when the component *is* the bundle, because "from notion" under
@@ -87,7 +91,8 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
     // Bundles first, with the facts that belong to the bundle rather than to
     // anything inside it.
     let bundles = sqlx::query(&format!(
-        "SELECT k.id, k.name, k.description, k.kind, k.current_version_id AS vid, \
+        "SELECT k.id, k.name, k.display_name, k.description, k.kind, \
+           k.current_version_id AS vid, \
                 (k.path <@ 'd.firetower'::ltree) AS builtin, \
                 EXISTS (SELECT 1 FROM skill_defaults d \
                          WHERE d.skill_id = k.id AND d.user_id = $1 AND d.repo_id IS NULL) AS on, \
@@ -170,6 +175,14 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
     for b in bundles {
         let id: String = b.get("id");
         let bundle_name: String = b.get("name");
+        // Resolved once, here, so no screen has to decide between a column
+        // that may be null and a slug it would have to title-case itself.
+        let bundle_title: String = b
+            .try_get::<Option<String>, _>("display_name")
+            .ok()
+            .flatten()
+            .filter(|d| !d.trim().is_empty())
+            .unwrap_or_else(|| crate::marketplace::title_of(&bundle_name));
         let bundle_on: bool = b.try_get("on").unwrap_or(false);
         let vid: Option<String> = b.get("vid");
         let logo = b
@@ -217,6 +230,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 skill_id: id.clone(),
                 kind: "server".into(),
                 name: bundle_name.clone(),
+                display_name: bundle_title.clone(),
                 description: b.get("description"),
                 from: None,
                 on: bundle_on && !muted(&id, SERVER_PATH),
@@ -274,6 +288,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 id: format!("{id}:{path}"),
                 skill_id: id.clone(),
                 kind: "skill".into(),
+                display_name: crate::marketplace::title_of(&name),
                 name,
                 description: said(&front, "description"),
                 from: None,

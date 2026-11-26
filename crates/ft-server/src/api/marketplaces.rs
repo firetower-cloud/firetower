@@ -9,7 +9,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::access::whoever;
@@ -33,6 +33,34 @@ pub struct AddMarket {
 pub struct Search {
     #[serde(default)]
     pub q: Option<String>,
+    /// `mcp`, `skills`, or absent for everything. The segmented control.
+    #[serde(default)]
+    pub kind: Option<String>,
+    /// One-based. Absent or zero is the first page.
+    #[serde(default)]
+    pub page: Option<u32>,
+    /// `true` for only what is installed, `false` for only what is not.
+    #[serde(default)]
+    pub installed: Option<bool>,
+}
+
+/// One page of the catalogue.
+///
+/// **A shape and not a bare array, because a page without a count is not
+/// browsable.** The screen has to say whether there is more behind it, and
+/// deciding that from "did I get a full page" is wrong on the one catalogue
+/// whose size is an exact multiple of the page.
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Shelf {
+    pub entries: Vec<Listed>,
+    /// How many match the filter, across every page.
+    pub total: i64,
+    /// Whether asking for the next page is worth it.
+    pub more: bool,
+    /// How many a page holds, so the caller need not agree with us by
+    /// hardcoding it.
+    pub per_page: u32,
 }
 
 #[utoipa::path(
@@ -126,14 +154,19 @@ pub(super) async fn remove_marketplace(
 
 #[utoipa::path(
     get, path = "/api/v1/marketplaces/entries", tag = "marketplaces",
-    params(("q" = Option<String>, Query, description = "Filter by name or description")),
-    responses((status = 200, body = Vec<Listed>)),
+    params(
+        ("q" = Option<String>, Query, description = "Filter by name or description"),
+        ("kind" = Option<String>, Query, description = "mcp, skills, or absent for everything"),
+        ("page" = Option<u32>, Query, description = "One-based"),
+        ("installed" = Option<bool>, Query, description = "Only what is installed, or only what is not"),
+    ),
+    responses((status = 200, body = Shelf)),
 )]
 pub(super) async fn list_entries(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Query(search): Query<Search>,
-) -> ApiResult<Json<Vec<Listed>>> {
+) -> ApiResult<Json<Shelf>> {
     let me = whoever(&principal)?;
 
     // **A source nobody has read yet is read now.** Booting must not depend on
@@ -160,10 +193,24 @@ pub(super) async fn list_entries(
         }
     }
 
-    let got = marketplace::entries(state.skills.pool(), me.org_id.as_str(), search.q.as_deref())
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
-    Ok(Json(got))
+    let got = marketplace::entries(
+        state.skills.pool(),
+        me.org_id.as_str(),
+        &marketplace::Asked {
+            q: search.q.as_deref(),
+            kind: search.kind.as_deref(),
+            installed: search.installed,
+            page: search.page.unwrap_or(1),
+        },
+    )
+    .await
+    .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+    Ok(Json(Shelf {
+        entries: got.entries,
+        total: got.total,
+        more: got.more,
+        per_page: marketplace::PER_PAGE,
+    }))
 }
 
 /// Take a copy of one entry.
@@ -183,7 +230,7 @@ pub(super) async fn install_entry(
     let me = whoever(&principal)?;
     let pool = state.skills.pool();
 
-    let (source, market_url, commit, name, description) =
+    let (source, market_url, commit, name, display_name, description) =
         marketplace::address_of(pool, me.org_id.as_str(), &id, &slug)
             .await
             .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?
@@ -210,6 +257,7 @@ pub(super) async fn install_entry(
 
     let new = crate::skills::NewSkill {
         name: name.clone(),
+        display_name: Some(display_name),
         description,
         frontmatter: serde_json::json!({ "name": name }),
         body: String::new(),
@@ -380,7 +428,7 @@ pub(super) async fn preview_entry(
     Path((id, slug)): Path<(String, String)>,
 ) -> ApiResult<Json<crate::skills::Inside>> {
     let me = whoever(&principal)?;
-    let (source, market_url, commit, _, _) =
+    let (source, market_url, commit, _, _, _) =
         marketplace::address_of(state.skills.pool(), me.org_id.as_str(), &id, &slug)
             .await
             .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?

@@ -150,6 +150,24 @@ fn entries() -> Vec<Entry> {
             "{slug}: the detail screen links the homepage, so it has to be one"
         );
 
+        // **A name for people, which the slug cannot be.** A folder is
+        // lowercase and hyphens, so an entry without this is drawn as
+        // `cal-com` or `hugging-face`. Title-casing the slug is the fallback
+        // for catalogues nobody here wrote; ours says what it is called.
+        let shown = m["displayName"].as_str().unwrap_or_default().trim();
+        assert!(
+            !shown.is_empty(),
+            "{slug}: no displayName, so the library would draw the folder name"
+        );
+        // Not asserted to be the slug under another spelling: `monday` is
+        // monday.com and `fal` is fal, so any rule tight enough to catch a
+        // wrong name also rejects right ones. What is worth catching is the
+        // copy-paste — a folder name left in the field meant to replace it.
+        assert!(
+            shown != slug || !slug.contains('-'),
+            "{slug}: displayName is the folder name, which is the thing it is for"
+        );
+
         // The catalogue and the folders cannot disagree: the row is what
         // somebody reads before installing, the folder is what they get.
         let row = listed

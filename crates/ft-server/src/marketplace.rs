@@ -53,6 +53,10 @@ pub enum Source {
 pub struct Entry {
     pub slug: String,
     pub name: String,
+    /// What a person should read. `name` and `slug` are both constrained to
+    /// lowercase and hyphens — they are a folder and a command — so this is
+    /// the only place "Cal.com" or "WorkOS" can be spelled.
+    pub display_name: Option<String>,
     pub description: String,
     pub version: Option<String>,
     pub author: Option<String>,
@@ -258,6 +262,12 @@ fn entry_of(one: &Value, files: &BTreeMap<String, Vec<u8>>) -> Option<Entry> {
 
     let mut entry = Entry {
         name: slug.clone(),
+        display_name: one
+            .get("displayName")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
         description: one
             .get("description")
             .and_then(Value::as_str)
@@ -322,6 +332,16 @@ fn describe(entry: &mut Entry, files: &BTreeMap<String, Vec<u8>>, under: &str) {
                     if let Some(d) = m.get("description").and_then(Value::as_str) {
                         entry.description = d.to_string();
                     }
+                }
+                // The manifest wins over the catalogue row: it travels with
+                // the folder, so a fork that renames itself stays renamed.
+                if let Some(d) = m
+                    .get("displayName")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    entry.display_name = Some(d.to_string());
                 }
                 if entry.version.is_none() {
                     entry.version = m.get("version").and_then(Value::as_str).map(str::to_owned);
@@ -464,6 +484,9 @@ pub struct Listed {
     pub marketplace_name: String,
     pub slug: String,
     pub name: String,
+    /// Already resolved: the entry's own, or a title-cased slug. The caller
+    /// never has to know which, and never has to draw `hugging-face`.
+    pub display_name: String,
     pub description: String,
     pub version: Option<String>,
     pub author: Option<String>,
@@ -483,6 +506,64 @@ pub struct Listed {
     pub counted: bool,
     /// Whether this organisation already took a copy.
     pub installed: bool,
+}
+
+/// Which rows a caller is asking for.
+///
+/// **Narrowing happens here and not in the client.** It used to happen in the
+/// browser over the whole catalogue, which worked only because the whole
+/// catalogue was sent; a page plus a filter applied afterwards is a search of
+/// page one, which looks like a working search that quietly cannot see most
+/// of the shelf.
+#[derive(Debug, Clone, Default)]
+pub struct Asked<'a> {
+    /// The query box, matched against a name or a description.
+    pub q: Option<&'a str>,
+    /// `mcp` for an entry carrying a server, `skills` for one carrying skills
+    /// or commands. Anything else is everything.
+    pub kind: Option<&'a str>,
+    /// Only what this organisation has, or only what it has not.
+    ///
+    /// **A page of a filtered list cannot be filtered again afterwards.** The
+    /// shelf of what you already have used to be the installed rows picked
+    /// out of the whole catalogue in the browser; with a page that reads as
+    /// "the installed things that happen to sort into the first thirty".
+    pub installed: Option<bool>,
+    /// One-based. Zero is read as the first page.
+    pub page: u32,
+}
+
+/// One page of the catalogue, and enough to know there is another.
+#[derive(Debug)]
+pub struct Shelf {
+    pub entries: Vec<Listed>,
+    /// How many match, across every page.
+    pub total: i64,
+    /// Whether asking for the next one is worth it.
+    pub more: bool,
+}
+
+/// How many rows a page holds.
+pub const PER_PAGE: u32 = 30;
+
+/// A readable name for something that did not supply one.
+///
+/// Right for most of them — `neon` is Neon, `hugging-face` is Hugging Face —
+/// and wrong in exactly the cases a rule cannot win: `cal-com` is Cal.com and
+/// `workos` is WorkOS. Those carry their own, which is why the column exists;
+/// this is so a catalogue nobody here wrote still reads like words.
+pub fn title_of(slug: &str) -> String {
+    slug.split(['-', '_'])
+        .filter(|w| !w.is_empty())
+        .map(|w| {
+            let mut c = w.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => String::new(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Add a source, or return the one already there.
@@ -558,13 +639,15 @@ pub async fn save(pool: &PgPool, id: &str, got: &Fetched) -> Result<()> {
         };
         sqlx::query(
             "INSERT INTO marketplace_entries \
-               (marketplace_id, slug, name, description, version, author, category, homepage, \
-                source, logo, logo_type, n_skills, n_commands, has_connector) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
+               (marketplace_id, slug, name, display_name, description, version, author, \
+                category, homepage, source, logo, logo_type, n_skills, n_commands, \
+                has_connector) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
         )
         .bind(id)
         .bind(&e.slug)
         .bind(&e.name)
+        .bind(&e.display_name)
         .bind(&e.description)
         .bind(&e.version)
         .bind(&e.author)
@@ -649,32 +732,66 @@ pub async fn remove(pool: &PgPool, org: &str, id: &str) -> Result<bool> {
     Ok(done.rows_affected() > 0)
 }
 
-/// Every entry this organisation can see, newest source first.
-pub async fn entries(pool: &PgPool, org: &str, query: Option<&str>) -> Result<Vec<Listed>> {
-    let term = query
+/// One page of the entries this organisation can see, built-in source first.
+///
+/// The count travels with the rows, from the same statement, so the two cannot
+/// disagree about a catalogue that changed between two queries.
+pub async fn entries(pool: &PgPool, org: &str, ask: &Asked<'_>) -> Result<Shelf> {
+    let term = ask
+        .q
         .map(str::trim)
         .filter(|t| !t.is_empty())
         .map(|t| format!("%{}%", t.to_lowercase()));
+    let kind = match ask.kind {
+        Some("mcp") => Some("mcp"),
+        Some("skills") => Some("skills"),
+        _ => None,
+    };
+    let page = ask.page.max(1);
+    let offset = i64::from(page - 1) * i64::from(PER_PAGE);
+    let installed = ask.installed;
     let rows = sqlx::query(
-        "SELECT e.marketplace_id, m.name AS marketplace_name, e.slug, e.name, e.description, \
+        "SELECT e.marketplace_id, m.name AS marketplace_name, e.slug, e.name, \
+           e.display_name, e.description, \
            e.version, e.author, e.category, e.homepage, e.logo, e.logo_type, \
            e.n_skills, e.n_commands, e.has_connector, \
            e.source->>'kind' = 'inside' AS counted, \
            EXISTS (SELECT 1 FROM skill_versions v JOIN skills k ON k.id = v.skill_id \
                    WHERE v.from_marketplace = e.marketplace_id AND v.from_slug = e.slug \
                      AND k.org_id = $1) AS installed \
+           count(*) OVER () AS matching \
          FROM marketplace_entries e JOIN marketplaces m ON m.id = e.marketplace_id \
          WHERE m.org_id = $1 \
            AND ($2::text IS NULL OR lower(e.name) LIKE $2 OR lower(e.description) LIKE $2) \
-         ORDER BY m.builtin DESC, e.name",
+           AND ($3::text IS NULL \
+                OR ($3 = 'mcp' AND e.has_connector) \
+                OR ($3 = 'skills' AND (e.n_skills > 0 OR e.n_commands > 0))) \
+           AND ($4::bool IS NULL OR $4 = EXISTS ( \
+                SELECT 1 FROM skill_versions v JOIN skills k ON k.id = v.skill_id \
+                 WHERE v.from_marketplace = e.marketplace_id AND v.from_slug = e.slug \
+                   AND k.org_id = $1)) \
+         ORDER BY m.builtin DESC, e.name \
+         LIMIT $5 OFFSET $6",
     )
     .bind(org)
     .bind(term.as_deref())
+    .bind(kind)
+    .bind(installed)
+    .bind(i64::from(PER_PAGE))
+    .bind(offset)
     .fetch_all(pool)
     .await
     .context("listing marketplace entries")?;
 
-    Ok(rows
+    // `count(*) OVER ()` is the number of rows the filter matched before the
+    // window was taken, so it comes back on every row — and on none at all
+    // when the page is past the end, which is the only case worth spelling.
+    let total: i64 = rows
+        .first()
+        .map(|r| r.get::<i64, _>("matching"))
+        .unwrap_or(0);
+
+    let entries = rows
         .into_iter()
         .map(|r| {
             let bytes: Option<Vec<u8>> = r.get("logo");
@@ -683,6 +800,10 @@ pub async fn entries(pool: &PgPool, org: &str, query: Option<&str>) -> Result<Ve
                 marketplace_id: r.get("marketplace_id"),
                 marketplace_name: r.get("marketplace_name"),
                 slug: r.get("slug"),
+                display_name: r
+                    .get::<Option<String>, _>("display_name")
+                    .filter(|d| !d.trim().is_empty())
+                    .unwrap_or_else(|| title_of(r.get::<&str, _>("name"))),
                 name: r.get("name"),
                 description: r.get("description"),
                 version: r.get("version"),
@@ -703,7 +824,13 @@ pub async fn entries(pool: &PgPool, org: &str, query: Option<&str>) -> Result<Ve
                 installed: r.get("installed"),
             }
         })
-        .collect())
+        .collect::<Vec<_>>();
+
+    Ok(Shelf {
+        more: offset + (entries.len() as i64) < total,
+        total,
+        entries,
+    })
 }
 
 /// One entry's address, for an install.
@@ -712,9 +839,9 @@ pub async fn address_of(
     org: &str,
     market: &str,
     slug: &str,
-) -> Result<Option<(Source, String, String, String, String)>> {
+) -> Result<Option<(Source, String, String, String, String, String)>> {
     let row = sqlx::query(
-        "SELECT e.source, e.name, e.description, m.url, m.commit, m.git_ref \
+        "SELECT e.source, e.name, e.display_name, e.description, m.url, m.commit, m.git_ref \
          FROM marketplace_entries e JOIN marketplaces m ON m.id = e.marketplace_id \
          WHERE e.marketplace_id = $1 AND e.slug = $2 AND m.org_id = $3",
     )
@@ -732,6 +859,9 @@ pub async fn address_of(
         r.get("url"),
         commit.unwrap_or(git_ref),
         r.get("name"),
+        r.get::<Option<String>, _>("display_name")
+            .filter(|d| !d.trim().is_empty())
+            .unwrap_or_else(|| title_of(r.get::<&str, _>("name"))),
         r.get("description"),
     )))
 }
@@ -750,4 +880,26 @@ pub async fn pin(pool: &PgPool, version_id: &str, market: &str, slug: &str, comm
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The fallback is for catalogues that supply nothing, so it has to be
+    /// right for the ordinary name and merely *not worse than the slug* for
+    /// the rest.
+    #[test]
+    fn a_slug_becomes_words_when_nobody_supplied_a_name() {
+        assert_eq!(title_of("neon"), "Neon");
+        assert_eq!(title_of("hugging-face"), "Hugging Face");
+        assert_eq!(title_of("customer-io"), "Customer Io");
+        assert_eq!(title_of("open_a_pr"), "Open A Pr");
+        // Still wrong, and still better than `cal-com` on a row — which is
+        // the whole reason an entry may carry its own.
+        assert_eq!(title_of("cal-com"), "Cal Com");
+        // Degenerate input must not panic or produce a leading space.
+        assert_eq!(title_of(""), "");
+        assert_eq!(title_of("--a--"), "A");
+    }
 }

@@ -713,6 +713,11 @@ pub(super) async fn add_from_url(
 
     let new = crate::skills::NewSkill {
         name: name.clone(),
+        // **What they typed, not what `as_name` had to make of it.** Somebody
+        // writing "Cal.com" gets a folder called `cal-com` because that is
+        // what a folder can be called, and has been shown `cal-com` ever
+        // since. The typed string was right there.
+        display_name: Some(body.name.trim().to_string()).filter(|n| !n.is_empty()),
         description: description.clone(),
         frontmatter: serde_json::json!({ "name": name, "description": description }),
         body: String::new(),

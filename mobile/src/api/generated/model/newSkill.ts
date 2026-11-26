@@ -13,6 +13,13 @@ import type { IncomingFile } from './incomingFile';
 export interface NewSkill {
   body: string;
   description: string;
+  /**
+     * What a person reads. `name` is what an agent sees and what somebody
+     * types, so it cannot hold a capital or a dot; absent means the library
+     * title-cases `name` instead.
+     * @nullable
+     */
+  displayName?: string | null;
   files: IncomingFile[];
   /**
      * Parsed, for the library to read. The bytes are kept as they arrived in

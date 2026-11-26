@@ -129,6 +129,7 @@ export const ListSkillsResponse = zod.array(ListSkillsResponseItem)
 export const CreateSkillBody = zod.object({
   "body": zod.string(),
   "description": zod.string(),
+  "displayName": zod.string().nullish().describe('What a person reads. `name` is what an agent sees and what somebody\ntypes, so it cannot hold a capital or a dot; absent means the library\ntitle-cases `name` instead.'),
   "files": zod.array(zod.object({
   "contents": zod.string().describe('base64, because a bundle may hold a font.'),
   "executable": zod.boolean().optional(),
@@ -391,6 +392,7 @@ export const AddVersionParams = zod.object({
 export const AddVersionBody = zod.object({
   "body": zod.string(),
   "description": zod.string(),
+  "displayName": zod.string().nullish().describe('What a person reads. `name` is what an agent sees and what somebody\ntypes, so it cannot hold a capital or a dot; absent means the library\ntitle-cases `name` instead.'),
   "files": zod.array(zod.object({
   "contents": zod.string().describe('base64, because a bundle may hold a font.'),
   "executable": zod.boolean().optional(),
