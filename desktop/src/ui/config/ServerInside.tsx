@@ -52,6 +52,13 @@ export function ServerInside({
   }, [connected]);
 
   const join = async () => {
+    // Known before it is attempted: installing records what the server said
+    // about handing out clients, so a request made in order to be refused is
+    // a spinner and an error where the form alone was the answer.
+    if (of.needsClientId && !connected) {
+      setSupplying(true);
+      return;
+    }
     setBusy(true);
     setBad(null);
     try {
@@ -59,7 +66,10 @@ export function ServerInside({
       await openExternal(opened.authorizeUrl);
       setAwaiting(true);
     } catch (e) {
-      setBad(why(e));
+      // A server that advertises registration and then refuses it cannot be
+      // known in advance; that one still finds out by trying.
+      if ((e as { code?: string })?.code === "ConnectorNeedsClient") setSupplying(true);
+      else setBad(why(e));
     } finally {
       setBusy(false);
     }

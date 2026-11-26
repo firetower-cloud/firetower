@@ -261,29 +261,47 @@ export function Library({ open: asked = null }: { open?: string | null }) {
    * and the readable name would both be missing in exactly the case the form
    * exists for.
    */
-  const needing = async (id: string): Promise<NeedsClient | null> => {
+  const needing = async (id: string) => {
     const rows = await listLibrary().catch(() => null);
     const i = (rows ?? lib.data ?? []).find((x) => x.skillId === id && x.kind === "server");
-    return i
-      ? { skillId: id, displayName: i.displayName, console: i.console, guide: i.guide }
-      : null;
+    if (!i) return null;
+    const of: NeedsClient = {
+      skillId: id,
+      displayName: i.displayName,
+      console: i.console,
+      guide: i.guide,
+    };
+    return { of, needsClientId: i.needsClientId === true };
   };
 
+  /**
+   * Open the browser, or the form, depending on which one this needs.
+   *
+   * **Asked before it is attempted.** Installing records what the server
+   * said about authorizing, so by the time this runs we already know whether
+   * it hands out clients — and a request made in order to be refused is a
+   * spinner, a failure and a modal where the modal alone was the answer.
+   *
+   * One case cannot be known in advance and keeps the catch: a server that
+   * advertises a registration endpoint and then refuses it. Figma does
+   * exactly that, and there is no way to find out but to try.
+   */
   const offerToConnect = async (made: { id: string; hasConnector?: boolean }) => {
+    const known = await needing(made.id);
+    if (known?.needsClientId) {
+      setSetting(known.of);
+      return;
+    }
     try {
       const opened = await connect(made.id);
       await openExternal(opened.authorizeUrl);
       setAwaiting(true);
     } catch (e) {
-      /* **An error that names a control is a control in the wrong place.**
-         The refusal for a server that registers no clients said to go and
-         find the form; the form opens here instead. Anything else is still
-         a line on the page, because it is genuinely news. */
       const says = why(e);
       // The code, not the sentence: prose is what the person reads, and a
       // reworded sentence must not quietly stop opening the form.
       const wants = (e as { code?: string })?.code === "ConnectorNeedsClient";
-      const of = wants ? await needing(made.id) : null;
+      const of = wants ? (known?.of ?? (await needing(made.id))?.of) : null;
       if (of) setSetting(of);
       else setTrouble(says);
     }
@@ -674,13 +692,23 @@ function Thing({
   const [going, setGoing] = useState(false);
 
   const join = async () => {
+    // Known before it is attempted — the row is already holding the answer.
+    // `Take` only shows Connect when this is false, so reaching here with it
+    // true means the row was drawn before the library caught up.
+    if (of.needsClientId) {
+      onSetUp();
+      return;
+    }
     setGoing(true);
     try {
       const opened = await connect(of.skillId);
       await openExternal(opened.authorizeUrl);
       onConnecting();
     } catch (e) {
-      onTrouble(why(e));
+      // A server that advertises registration and then refuses it cannot be
+      // known in advance, so this is the one that still finds out by trying.
+      if ((e as { code?: string })?.code === "ConnectorNeedsClient") onSetUp();
+      else onTrouble(why(e));
     } finally {
       setGoing(false);
     }
