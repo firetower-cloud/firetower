@@ -33,6 +33,7 @@ import {
   Puzzle,
   Server,
   Search,
+  Settings2,
   Shapes,
   Ticket,
   CircleAlert,
@@ -46,6 +47,7 @@ import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useAllRuns, useListSchedules } from "~/api/generated/schedules/schedules";
 import type { Schedule } from "~/api/generated/model";
 import { useMe } from "~/api/generated/auth/auth";
+import { deploymentMode, panesFor } from "~/ui/config/organisation";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { childrenElsewhere, doing, flat, group, isChild, placeBeat, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
 import { useHosts, useRepos, useSessions, useSkills } from "~/data";
@@ -538,18 +540,44 @@ function Customize() {
  * the counts are not here. `Configuration.tsx` already refuses counts in an
  * index for the cheaper version of the same reason: a number beside every row
  * fetches every list to render it.
+ *
+ * **The fourth row is listed by a rule, not by a condition written here.**
+ * `panesFor` answers which panes this person has on this deployment, and the
+ * property that matters is the one it protects rather than the row it adds:
+ * the list is never empty, for any role on any deployment, so hiding the
+ * deployment pane never makes the destination itself conditional. A member
+ * hovering ⌘8 sees the same three panes they have always had.
  */
 function Organisation({ path }: { path: string }) {
+  /* Already answered for every screen in this window — the gate reads it — so
+     asking here costs nothing, and asking it here rather than threading a role
+     down from `Rail` keeps the rule next to the rows it decides. */
+  const me = useMe({ query: { staleTime: 60_000 } });
+  const glyph: Record<string, LucideIcon> = {
+    people: UserRound,
+    teams: UsersRound,
+    directories: FolderOpen,
+    server: Settings2,
+  };
+  const panes = panesFor(deploymentMode(), me.data?.user);
+
   return (
     <>
-      <Row label="People" icon={UserRound} on={pane(path) === "people"} to="/configuration/people" />
-      <Row label="Teams" icon={UsersRound} on={pane(path) === "teams"} to="/configuration/teams" />
-      <Row
-        label="Directories"
-        icon={FolderOpen}
-        on={pane(path) === "directories"}
-        to="/configuration/directories"
-      />
+      {panes.map((p) => (
+        <Fragment key={p.at}>
+          {/* A sentence over the one that is not about people, because that is
+              what the group was called while it lived in Settings and it is
+              the only thing on this panel that is about the installation
+              rather than about who is in it. */}
+          {p.at === "server" && <Label>This deployment</Label>}
+          <Row
+            label={p.label}
+            icon={glyph[p.at] ?? UserRound}
+            on={pane(path) === p.at}
+            to={`/configuration/${p.at}`}
+          />
+        </Fragment>
+      ))}
     </>
   );
 }

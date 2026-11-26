@@ -41,7 +41,7 @@ export function Routes({ backend, onSwitch, onForgot }: { backend: Backend; onSw
     const asked = askedFor(path, 1);
     return <SchedulesPage open={asked === "runs" ? null : asked} runs={asked === "runs"} />;
   }
-  if (path.startsWith("/configuration")) return <Configuration backend={backend} onForgot={onForgot} />;
+  if (path.startsWith("/configuration")) return <Configuration />;
   if (path.startsWith("/updates")) return <Updates />;
   if (path.startsWith("/account")) return <Account backend={backend} onForgot={onForgot} />;
   if (path.startsWith("/setup")) return <Setup onDone={() => navigate("/")} />;

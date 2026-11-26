@@ -76,18 +76,17 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
  * only way to move between the panes with it, so `SettingsIndex` draws this at
  * the top of every one of them.
  *
- * **"Who can reach what" has gone, with all three of its panes.** People,
- * Teams and Directories are the Organisation destination's now — see
- * `destinations.ts` — and they were only ever here because they had no
- * destination to belong to. What is left is the two groups that are genuinely
- * nobody's work surface: the secrets this installation holds, and the
- * installation itself.
+ * **It is down to one pane, in two steps.** "Who can reach what" went first,
+ * with People, Teams and Directories, when the Organisation destination was
+ * made — they were only ever here because they had no destination to belong
+ * to. Then "This deployment" went the same way: the deployment pane is the
+ * organisation's installation, it is an administrator's, and it belongs beside
+ * the organisation's people rather than in a list of leftovers.
  *
- * **The group names are not `PANES`' group names, and that is deliberate.**
- * `PANES` above groups by what a thing *is*, because it is the table that says
- * what a valid pane is. These say what the group is *for* — "This deployment"
- * rather than "Server" — because they are read by somebody looking for a thing
- * to change, and a category word does not help them.
+ * What is left is the Vault, and it is here for a reason rather than by
+ * subtraction: a secret is held *by* this installation for whoever can reach
+ * it, so it is neither a work surface nor an organisation-shaped thing. It is
+ * the one pane that was never anybody else's.
  *
  * `destinations.test.ts` asserts these are exactly the panes missing from
  * `PANE_HOME`, so a pane cannot quietly belong to neither table and become
@@ -95,7 +94,6 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
  */
 export const SETTINGS: { group: string; items: { at: string; label: string }[] }[] = [
   { group: "Secrets", items: [{ at: "vault", label: "Vault" }] },
-  { group: "This deployment", items: [{ at: "server", label: "This Firetower" }] },
 ];
 
 /** Every pane Settings owns, flat, in the order the index draws them. */
@@ -113,19 +111,24 @@ export const SETTINGS_PANES = SETTINGS.flatMap((g) => g.items.map((i) => i.at));
  * impossible: reordering `SETTINGS` now moves rows in an index and nothing
  * else.
  *
- * **It is Vault.** Of the two panes left, Vault is the one somebody *goes* to:
- * a secret is added, replaced and taken away, and a deployment that is holding
- * credentials is holding them for a reason somebody comes back to. *This
- * Firetower* is a facts pane — an address, a version, who you are signed in as
- * — plus a Disconnect that is pressed once ever. Landing on the thing you read
- * once would make `⌘,` feel like it went nowhere.
+ * **It is Vault, and it was re-checked when Settings came down to one pane.**
+ * It was chosen over *This Firetower* on the argument that a secret is a thing
+ * somebody goes to while a facts pane is read once; *This Firetower* has since
+ * left for the Organisation destination, so the argument is moot and the
+ * answer is unchanged. That is the whole value of naming it: the list shrank
+ * by half and `⌘,` did not move.
  *
- * **And it is not People any more**, which is the other half of the decision.
- * People now has a rail icon, a number key and a panel; a `⌘,` that also
- * landed there would be Settings and Organisation drawn as two doors onto one
- * room — which is the exact defect that took the Settings door out of the rail
- * in the first place (`destinations.ts` carries that argument), arriving back
- * from the other side.
+ * **And it is not People**, which is the other half of the decision. People
+ * has a rail icon, a number key and a panel; a `⌘,` that also landed there
+ * would be Settings and Organisation drawn as two doors onto one room — the
+ * exact defect that took the Settings door out of the rail in the first place
+ * (`destinations.ts` carries that argument), arriving back from the other
+ * side.
+ *
+ * **A one-pane index is not an index**, and `SettingsIndex` draws nothing
+ * while that is true — see its own note. What `⌘,` means does not depend on
+ * that: it is this constant, and it would still be this constant if a second
+ * pane arrived tomorrow.
  */
 const SETTINGS_OPENS_ON = "vault";
 

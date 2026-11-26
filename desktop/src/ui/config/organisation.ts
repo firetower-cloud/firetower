@@ -483,3 +483,111 @@ export function consequenceState(loading: boolean, failed: boolean): "reading" |
   if (failed) return "unread";
   return "known";
 }
+
+/* ── The deployment, and who operates it ──────────────────────────────────
+
+   The Organisation destination's fourth pane is the deployment itself: what
+   this installation is called, whether it reports telemetry, what is running,
+   and how it lets people in. Unlike People it has no member-readable half —
+   there is no reduced shape of *how signing in is configured* that is safe and
+   useful — so the pane is not listed for a member at all.
+
+   **Not listed is not the same as not reachable.** The destination is never
+   conditional and never changes which pane it opens on: everybody lands on
+   People, which is everybody's. That is ticket 02's rule and this must not
+   bend it — see `opensOn`. */
+
+/**
+ * Whether this installation is operated by the people using it.
+ *
+ * **Self-hosted, always, today — and that is a placeholder with a reason
+ * rather than an oversight.**
+ *
+ * There is no representation of hosted-versus-self-hosted anywhere in the
+ * product: no `deployment_mode`, no `is_hosted`, no tenancy flag in `crates/`,
+ * and `/bootstrap` carries only `authModes`, `eventsPath`, `organization`,
+ * `serverId` and `version`. The approved specification contradicts itself on
+ * this — §3 F3 wants these panes absent in a hosted installation, §9 puts the
+ * hosted offering explicitly out of scope — and **how a deployment declares
+ * itself hosted is a product decision nobody has taken**, so taking it here by
+ * adding a flag to the bootstrap payload would be inventing the scope §9
+ * excluded.
+ *
+ * So the *rule* is written and tested for both modes, and the *signal* is this
+ * one function. The day there is something real to read — a bootstrap field, a
+ * build-time constant, an address — it is read here and nowhere else, and the
+ * hosted branch of `panesFor` starts being exercised by a deployment rather
+ * than only by its tests. Switching it on is a one-function change rather than
+ * an archaeology exercise.
+ */
+export type DeploymentMode = "self-hosted" | "hosted";
+
+export function deploymentMode(): DeploymentMode {
+  return "self-hosted";
+}
+
+/** One pane of the Organisation destination, as its panel lists it. */
+export type OrganisationPane = { at: string; label: string };
+
+/**
+ * The three panes that are everybody's, in the order the panel draws them.
+ *
+ * People first because it is where the destination opens and the only one of
+ * the three somebody has a daily reason to be on; Directories last because it
+ * is set up once.
+ */
+const EVERYBODYS: OrganisationPane[] = [
+  { at: "people", label: "People" },
+  { at: "teams", label: "Teams" },
+  { at: "directories", label: "Directories" },
+];
+
+/** The deployment pane, which only an operator of the deployment is shown. */
+const DEPLOYMENT: OrganisationPane = { at: "server", label: "This Firetower" };
+
+/**
+ * Whether the deployment pane is this person's, on this deployment.
+ *
+ * Two conditions, and they fail for different reasons. **A member** is not
+ * refused a reduced version — there is no reduced version: the organisation's
+ * name is an administrator's to change and the sign-in configuration is the
+ * operator's to read, and `rename_organization` and `set_telemetry_settings`
+ * are both `admin` on the server. **A hosted tenant** is not the operator at
+ * all: the proxy is the operator's, the deployment is the operator's, and
+ * telemetry about the installation is a question for whoever runs it.
+ */
+export function mayOperateDeployment(mode: DeploymentMode, me: Signed): boolean {
+  return mode === "self-hosted" && mayAdminister(me);
+}
+
+/**
+ * Which panes this destination lists, for this person, on this deployment.
+ *
+ * **Absent, never disabled and never greyed.** A disabled pane invites a
+ * support question; an absent one does not, and the specification records this
+ * as the first point where the hosted and self-hosted products present visibly
+ * different interfaces rather than the same interface configured differently.
+ *
+ * **It is never empty**, in any of the four combinations, and that is the
+ * property worth protecting rather than the contents: the three panes above
+ * are everybody's, and hiding a fourth must not make the destination itself
+ * conditional. A member pressing ⌘8 lands on a populated read-only surface,
+ * which is ticket 02's rule and the regression this function exists to not
+ * cause.
+ */
+export function panesFor(mode: DeploymentMode, me: Signed): OrganisationPane[] {
+  return mayOperateDeployment(mode, me) ? [...EVERYBODYS, DEPLOYMENT] : [...EVERYBODYS];
+}
+
+/**
+ * The pane the destination opens on — **the same one for everybody, always**.
+ *
+ * Deliberately not "the first pane you may see", which would be the same
+ * answer today and would quietly become a different one the first time the
+ * list was reordered. `⌘8`, the rail icon and the palette all navigate to a
+ * fixed address in `destinations.ts`; this is that address's pane name, in the
+ * rule, so a test can assert the two agree and that it is listed for everybody.
+ */
+export function opensOn(): string {
+  return "people";
+}

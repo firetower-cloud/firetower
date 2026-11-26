@@ -20,19 +20,24 @@ import {
   actionsFor,
   administrators,
   changeFor,
+  consequenceState,
+  deploymentMode,
+  feedState,
   grantsHeldBy,
   howMany,
   locksTheRoom,
   mayAdminister,
   mayInvite,
+  mayOperateDeployment,
   offboardingFor,
+  opensOn,
+  panesFor,
   readsFor,
   saidRole,
   tagsFor,
   teamActionsFor,
   type Account,
-  consequenceState,
-  feedState,
+  type DeploymentMode,
 } from "./organisation";
 
 const admin = { id: "u_kevin", role: "admin" } as const;
@@ -519,5 +524,118 @@ describe("what a delete confirmation can honestly say", () => {
   /** Reading wins: a failure that has not finished arriving is not yet one. */
   it("is reading rather than unread while both are true", () => {
     expect(consequenceState(true, true)).toBe("reading");
+  });
+});
+
+/* ── The deployment pane ──────────────────────────────────────────────────
+
+   Four combinations, and the one that matters is not which of them lists the
+   fourth pane — it is that **all four list something**. Hiding a pane must not
+   make the destination conditional, and ticket 02's rule is that a member
+   pressing ⌘8 lands on a populated read-only surface. This is where that is
+   kept honest.
+
+   The hosted branch is tested against a mode nothing produces yet. That is
+   deliberate: `deploymentMode()` answers self-hosted because there is no
+   hosted signal anywhere in the product, and writing the rule for both now
+   means switching it on later is one function rather than an archaeology
+   exercise. These assertions pass today and start describing a live path the
+   day that function has something to read. */
+
+const MODES: DeploymentMode[] = ["self-hosted", "hosted"];
+const WHO = [
+  ["an administrator", admin],
+  ["a member", member],
+  ["somebody whose role has not arrived", undefined],
+] as const;
+
+describe("which panes the Organisation destination lists", () => {
+  it("gives a self-hosted administrator the deployment pane", () => {
+    expect(panesFor("self-hosted", admin).map((p) => p.at)).toEqual([
+      "people",
+      "teams",
+      "directories",
+      "server",
+    ]);
+  });
+
+  /** No member-readable half to fall back to, unlike People: the name is an
+   *  administrator's to change and the sign-in configuration is the
+   *  operator's to read. So it is absent, not reduced. */
+  it("does not give a self-hosted member the deployment pane", () => {
+    expect(panesFor("self-hosted", member).map((p) => p.at)).toEqual([
+      "people",
+      "teams",
+      "directories",
+    ]);
+  });
+
+  /**
+   * **Hosted, either role.** The proxy is the operator's, the deployment is
+   * the operator's, and telemetry about the installation is a question for
+   * whoever runs it — so a hosted tenant is not shown it whatever their role.
+   */
+  it.each(WHO)("does not give %s the deployment pane in a hosted installation", (_who, me) => {
+    expect(panesFor("hosted", me).map((p) => p.at)).toEqual(["people", "teams", "directories"]);
+  });
+
+  /** Not until the server has said who you are, either — the same rule the
+   *  people reads follow, for the same reason. */
+  it("does not give it to somebody whose role has not arrived", () => {
+    expect(panesFor("self-hosted", undefined).map((p) => p.at)).not.toContain("server");
+    expect(panesFor("self-hosted", null).map((p) => p.at)).not.toContain("server");
+  });
+
+  /**
+   * **The assertion this ticket exists to not break.**
+   *
+   * In every combination of mode and role the destination lists at least one
+   * pane, and the pane it opens on is one of them. That is what stops hiding
+   * the deployment pane from turning ⌘8 into an empty or forbidden surface for
+   * anybody — the regression this change could have caused in ticket 02, which
+   * QA proved on the real server.
+   */
+  it.each(MODES.flatMap((mode) => WHO.map(([who, me]) => [mode, who, me] as const)))(
+    "always lists something, and opens on it — %s, %s",
+    (mode, _who, me) => {
+      const panes = panesFor(mode, me);
+      expect(panes.length).toBeGreaterThan(0);
+      expect(panes.map((p) => p.at)).toContain(opensOn());
+    },
+  );
+
+  /** And the pane it opens on is the same one for everybody, always. */
+  it("opens on People whoever is asking", () => {
+    expect(opensOn()).toBe("people");
+  });
+
+  /** Every pane it lists has a label to list it by. */
+  it.each(MODES)("labels every pane it lists — %s", (mode) => {
+    for (const me of [admin, member]) {
+      for (const pane of panesFor(mode, me)) expect(pane.label).toBeTruthy();
+    }
+  });
+});
+
+describe("who operates the deployment", () => {
+  it("is a self-hosted administrator and nobody else", () => {
+    expect(mayOperateDeployment("self-hosted", admin)).toBe(true);
+    expect(mayOperateDeployment("self-hosted", member)).toBe(false);
+    expect(mayOperateDeployment("hosted", admin)).toBe(false);
+    expect(mayOperateDeployment("hosted", member)).toBe(false);
+    expect(mayOperateDeployment("self-hosted", undefined)).toBe(false);
+  });
+
+  /**
+   * **The one place the mode is decided, and today it is a constant.**
+   *
+   * Pinned so that the day it starts reading something real, this test is
+   * what says so — and so a reader who finds the hardcoded answer finds a
+   * test agreeing it is hardcoded on purpose rather than by neglect. There is
+   * no hosted signal anywhere in the product: no `deployment_mode`, no
+   * `is_hosted`, and `/bootstrap` carries five fields, none of them this.
+   */
+  it("answers self-hosted, because nothing in the product says otherwise yet", () => {
+    expect(deploymentMode()).toBe("self-hosted");
   });
 });

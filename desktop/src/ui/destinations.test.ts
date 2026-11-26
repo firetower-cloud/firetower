@@ -85,15 +85,17 @@ describe("Settings' own index", () => {
    * by typing its address.
    */
   test("holds exactly the panes no destination owns", () => {
-    expect(SETTINGS_PANES).toEqual(["vault", "server"]);
+    expect(SETTINGS_PANES).toEqual(["vault"]);
     for (const at of SETTINGS_PANES) expect(destinationAt(`/configuration/${at}`)).toBeNull();
   });
 
-  /* "Who can reach what" went with its three panes rather than being left
-     behind as an empty heading. What is left is what is genuinely nobody's
-     work surface: the secrets this installation holds, and the installation. */
-  test("keeps the two groups whose panes stayed", () => {
-    expect(SETTINGS.map((g) => g.group)).toEqual(["Secrets", "This deployment"]);
+  /* Down to one, in two steps: "Who can reach what" went with People, Teams
+     and Directories, then "This deployment" followed the deployment pane into
+     Organisation. The Vault is what is left, and it is left for a reason
+     rather than by subtraction — a secret is held *by* the installation for
+     whoever can reach it, so it was never anybody else's. */
+  test("keeps the one group whose pane stayed", () => {
+    expect(SETTINGS.map((g) => g.group)).toEqual(["Secrets"]);
   });
 
   /**
@@ -172,13 +174,25 @@ describe("which destination a path is in", () => {
     expect(destinationAt("/configuration/directories")).toBe("organisation");
   });
 
-  /* **And Settings' two own neither of the eight.** Lighting a work surface
-     for a screen that is reached from the profile menu would say you are
-     somewhere you are not, so the rail marks nothing and Settings' own index
-     says where you are. */
-  test("Settings' own panes light no destination", () => {
+  /**
+   * **And so is the deployment pane, for everybody who reaches the address.**
+   *
+   * Which destination owns a pane and whether a pane is *listed* are two
+   * questions with two answers: this table says the first, and
+   * `config/organisation.ts`'s `panesFor` says the second. The rail has to
+   * light the same icon either way — somebody who typed an address that used
+   * to be Settings' gets a destination that makes sense, and what they are
+   * drawn is `Configuration.tsx`'s business.
+   */
+  test("the deployment pane is the Organisation destination too", () => {
+    expect(destinationAt("/configuration/server")).toBe("organisation");
+  });
+
+  /* **And the Vault owns none of the eight.** Lighting a work surface for a
+     screen reached from the profile menu would say you are somewhere you are
+     not, so the rail marks nothing. */
+  test("Settings' own pane lights no destination", () => {
     expect(destinationAt("/configuration/vault")).toBeNull();
-    expect(destinationAt("/configuration/server")).toBeNull();
   });
 
   /* An address from an older build, or one somebody typed. It resolves the way

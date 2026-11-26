@@ -3,12 +3,12 @@
  *
  * **One page became too many things.** It was five sections on one scroll —
  * fine at five, and this is nine now. What makes it survivable is that each
- * pane has an index: ten of them belong to a rail destination and are indexed
- * by that destination's panel, and the two Settings has left are indexed inside
- * the page by `config/SettingsIndex.tsx`, because Settings has no rail icon —
- * it is a row in the profile menu. Neither index is a second *column*: two
- * rails side by side was a busy screen where one of them was always
- * irrelevant, and that is still the thing being avoided.
+ * pane has an index: eleven of them belong to a rail destination and are
+ * indexed by that destination's panel, and the Vault — the one Settings has
+ * left — is reached from the profile menu, which is the whole of what Settings
+ * is now. Neither index is a second *column*: two rails side by side was a
+ * busy screen where one of them was always irrelevant, and that is still the
+ * thing being avoided.
  *
  * **A pane at a time is also a pane's worth of requests.** The old page asked
  * for machines, repositories, providers, trackers, agents, accounts and secrets
@@ -20,14 +20,9 @@
  * The pane is a path segment rather than state, so a pane can be linked to and
  * the back button works.
  */
-import { Unplug } from "lucide-react";
-import { useBackendKey, dropCache } from "~/backend";
-import { dropFleet, type Backend } from "~/fleet";
-import { forget, servers } from "~/servers";
 import { usePathname } from "~/shims/next-navigation";
 import { askedFor } from "~/ui/opened";
 import { paneAt } from "~/ui/config/panes";
-import { Facts, Section } from "~/ui/config/bits";
 import { Machines } from "~/ui/config/Machines";
 import { Repos } from "~/ui/config/Repos";
 import { GitHosts } from "~/ui/config/GitHosts";
@@ -37,15 +32,14 @@ import { Skills } from "~/ui/config/Skills";
 import { Roles } from "~/ui/config/Roles";
 import { AgentTeams } from "~/ui/config/AgentTeams";
 import { Secrets } from "~/ui/config/Secrets";
+import { Deployment } from "~/ui/config/Deployment";
 import { People } from "~/ui/config/People";
 import { Teams } from "~/ui/config/Teams";
 import { Directories } from "~/ui/config/Directories";
-import { useConfirm } from "~/ui/Confirm";
 import { useMe } from "~/api/generated/auth/auth";
-import { useBootstrap } from "~/api/generated/meta/meta";
-import { Button } from "~/components/ui";
+import { deploymentMode, mayOperateDeployment, opensOn } from "~/ui/config/organisation";
 
-export function Configuration({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
+export function Configuration() {
   const path = usePathname();
 
   return (
@@ -54,7 +48,7 @@ export function Configuration({ backend, onForgot }: { backend: Backend; onForgo
        panes had been rebuilt and the 48rem column was drawing a 770px page
        inside a 1120px one. */
     <div className="scroll-slim flex h-full min-h-0 flex-col overflow-y-auto">
-      <Pane at={paneAt(path)} open={askedFor(path, 2)} backend={backend} onForgot={onForgot} />
+      <Pane at={paneAt(path)} open={askedFor(path, 2)} />
     </div>
   );
 }
@@ -62,8 +56,30 @@ export function Configuration({ backend, onForgot }: { backend: Backend; onForgo
 /* `open` is the id after the pane's own segment — `/configuration/skills/sk_1`.
    The panes keep their own "which is open" state because most of the time it
    is opened by clicking a row; this is how an address gets a word in. */
-function Pane({ at, open, backend, onForgot }: { at: string; open: string | null; backend: Backend; onForgot: () => void }) {
-  switch (at) {
+function Pane({ at, open }: { at: string; open: string | null }) {
+  /* Already answered for every screen in this window — the gate reads it —
+     so asking costs nothing. */
+  const me = useMe({ query: { staleTime: 60_000 } });
+
+  /**
+   * **A pane that is not this person's falls back to the one the destination
+   * opens on**, rather than drawing a refusal.
+   *
+   * The deployment pane is listed for a self-hosted administrator and nobody
+   * else, and *not listed* is not *not reachable*: `/configuration/server` was
+   * Settings' and everybody's until this change, so it is in somebody's
+   * history and somebody's bookmark. Drawing *you cannot see this* for them
+   * would turn a moved pane into a forbidden one, which is precisely what the
+   * destination is not allowed to contain.
+   *
+   * Falling back is what `paneAt` already does for an address nobody
+   * recognises — "falls back to a real pane rather than drawing an empty
+   * screen" — and the rail agrees either way, because `destinationAt` says
+   * Organisation for this path whoever is asking.
+   */
+  const refused = at === "server" && !mayOperateDeployment(deploymentMode(), me.data?.user);
+
+  switch (refused ? opensOn() : at) {
     case "repositories":
       return <Repos live open={open} />;
     case "git-hosts":
@@ -88,72 +104,9 @@ function Pane({ at, open, backend, onForgot }: { at: string; open: string | null
       return <Directories />;
     case "vault":
       return <Secrets />;
+    case "server":
+      return <Deployment />;
     default:
-      return <ThisFiretower backend={backend} onForgot={onForgot} />;
+      return <Repos live open={open} />;
   }
-}
-
-function ThisFiretower({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
-  const confirm = useConfirm();
-  const key = useBackendKey();
-  /* Both already answered for every screen in the window — the gate reads one
-     and the rail reads the other — so saying what is running and who you are
-     here costs nothing extra. */
-  const me = useMe({ query: { staleTime: 60_000 } });
-  const boot = useBootstrap({ query: { staleTime: 60_000 } });
-  const added = servers().find((v) => v.serverId === backend.id)?.addedAt;
-  /* Forgets the server on this Mac only: the token is dropped here, the
-     server is not told, and nothing on it changes. Sessions carry on. */
-  const disconnect = async () => {
-    const ok = await confirm({
-      title: `Disconnect ${backend.org} from this Mac?`,
-      body: "The connection and its token are forgotten here. Nothing on the server changes — the sessions keep running, and you can connect again with the address and a password.",
-      action: "Disconnect",
-      tone: "danger",
-    });
-    if (!ok) return;
-    forget(key);
-    dropCache(key);
-    dropFleet(key);
-    onForgot();
-  };
-
-  return (
-    <Section
-      title="This Firetower"
-      note="The deployment this window is connected to, and the account you hold on it."
-    >
-      {/* Read rather than changed, so it is a facts pane and not a list. */}
-      <Facts
-        of={[
-          ["Address", backend.url, true],
-          [
-            "Signed in as",
-            `${backend.user}${me.data?.user?.role ? ` — ${me.data.user.role}` : ""}`,
-          ],
-          ["Running", boot.data?.version ?? "—", true],
-          ["Your things live at", `u/${backend.user}`, true],
-          ...(added
-            ? ([["Connected since", new Date(added).toLocaleDateString(undefined, { day: "numeric", month: "long" })]] as [string, React.ReactNode][])
-            : []),
-        ]}
-      />
-      <div className="whereto mt-6">
-        <span className="g">
-          <Unplug className="h-4 w-4" strokeWidth={1.75} />
-        </span>
-        <p>
-          <b>Forget this Firetower on this Mac.</b> The connection and its token are dropped here and
-          the server is not told — the sessions keep running, and you can connect again with the
-          address and a password.
-        </p>
-        <Button variant="default" size="sm" onClick={disconnect}>
-          Disconnect
-        </Button>
-      </div>
-      <p className="mt-4 text-ui text-dim">
-        This account exists on this server only. Switching Firetowers is under your avatar.
-      </p>
-    </Section>
-  );
 }

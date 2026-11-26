@@ -31,13 +31,29 @@
  * It draws nothing anywhere else. Gated on the path rather than passed a flag,
  * so another settings pane is navigable the moment it is in `SETTINGS` and
  * nobody has to remember to thread a prop through `Section`.
+ *
+ * ## And nothing at all while there is one pane
+ *
+ * *This deployment* left for the Organisation destination too, so Settings is
+ * the Vault and nothing else. **An index of one is not an index** — it is a
+ * group label and a single tab, above the page it is already on, pointing at
+ * where you are. The one thing an index is for is moving between panes, and
+ * there is nowhere to move to.
+ *
+ * Written as a count rather than deleted, because the question it answers is
+ * live: this file has lost three panes and then one, and the day something
+ * joins the Vault the index comes back without anybody having to notice it
+ * should. What `⌘,` means is not affected either way — `panes.ts` names that
+ * pane rather than counting to it.
  */
 import { navigate, usePathname } from "~/shims/next-navigation";
-import { inSettings, paneAt, SETTINGS } from "~/ui/config/panes";
+import { inSettings, paneAt, SETTINGS, SETTINGS_PANES } from "~/ui/config/panes";
 
 export function SettingsIndex() {
   const path = usePathname();
   if (!inSettings(path)) return null;
+  // An index of one is a tab pointing at the page under it. See above.
+  if (SETTINGS_PANES.length < 2) return null;
   const at = paneAt(path);
 
   return (

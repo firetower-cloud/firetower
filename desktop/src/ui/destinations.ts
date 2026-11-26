@@ -140,9 +140,8 @@ export const DESTINATIONS: Destination[] = [
  * it, so the rail stays lit on the right icon and the panel beside it offers
  * that destination's other panes.
  *
- * **Settings' two remaining panes are deliberately absent.** They have no
- * destination to light, and inventing one would mark a work surface you are
- * not in. They are listed in `config/panes.ts`'s `SETTINGS` instead, and that
+ * **The Vault is deliberately absent.** It has no destination to light, and
+ * inventing one would mark a work surface you are not in. They are listed in `config/panes.ts`'s `SETTINGS` instead, and that
  * is what the page's own index is built from — the two are checked against each
  * other in `destinations.test.ts`, because a pane that falls out of both tables
  * is a pane nothing can reach.
@@ -166,6 +165,16 @@ const PANE_HOME: Record<string, DestinationId> = {
   people: "organisation",
   teams: "organisation",
   directories: "organisation",
+  /* **The deployment pane, which was Settings' until it had somewhere better
+     to be.** It is the organisation's installation — what it is called,
+     whether it reports telemetry, what is running and how it lets people in —
+     so it belongs beside the organisation's people. Whether it is *listed* is
+     a separate question with a separate answer, in `config/organisation.ts`'s
+     `panesFor`: this table says which destination owns a pane, and the rail
+     has to light the same one whether or not the panel offered a row to get
+     there. A member who typed the address still gets a destination that makes
+     sense; what they get drawn is `Configuration.tsx`'s business. */
+  server: "organisation",
 };
 
 /**
@@ -174,7 +183,7 @@ const PANE_HOME: Record<string, DestinationId> = {
  * A workspace keeps the Dashboard's: you are still in Dashboard when you are
  * reading one, the way you are still in Customize when you are reading one
  * skill. `null` is for the screens that are nobody's — the account, the style
- * page, and Settings' own two panes and Updates — where the rail shows nothing
+ * page, and the Vault and Updates — where the rail shows nothing
  * as current rather than guessing. Nothing as current is the honest answer
  * there: you are not in a work surface, and the place you *are* in is a row in
  * the profile menu, which the rail cannot point at.

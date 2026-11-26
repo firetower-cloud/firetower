@@ -95,6 +95,19 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
           </div>
         )}
 
+        {/* **Where your own work is filed**, which came here with the
+            deployment pane: it was a row on *This Firetower* beside the
+            address and the account, and those are this screen's subject rather
+            than the installation's. `slug` rather than the username, because
+            the two can differ and only one of them appears in a path — see
+            `User.slug`, which exists so a rename never moves anything. */}
+        {user?.slug && (
+          <p className="mt-4 text-ui text-dim">
+            Your own work is filed at <span className="font-mono text-bone">u/{user.slug}</span>.
+            Anything there is yours and is reachable by nobody else until you share it.
+          </p>
+        )}
+
         {/* The address this Mac reached the server on, which is the one proven
             to work from here — not a value the server reports about itself. */}
         <section className="lsec">
