@@ -662,6 +662,22 @@ pub async fn save(pool: &PgPool, id: &str, got: &Fetched) -> Result<()> {
         .execute(&mut *tx)
         .await?;
     }
+    // **What was installed before the catalogue carried a name gets one.**
+    // A copy taken last week has `display_name` null and falls back to a
+    // title-cased slug, so GitHub reads as "Github" for ever unless somebody
+    // reinstalls it. A refresh already knows the right answer; only nulls are
+    // touched, so a name somebody edited is never overwritten.
+    sqlx::query(
+        "UPDATE skills k SET display_name = e.display_name \
+           FROM marketplace_entries e, skill_versions v \
+          WHERE v.skill_id = k.id AND v.from_marketplace = e.marketplace_id \
+            AND v.from_slug = e.slug AND e.marketplace_id = $1 \
+            AND e.display_name IS NOT NULL AND k.display_name IS NULL",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
     sqlx::query(
         "UPDATE marketplaces SET name = $2, manifest = $3, commit = $4, \
            fetched_at = now(), error = NULL WHERE id = $1",
@@ -758,7 +774,7 @@ pub async fn entries(pool: &PgPool, org: &str, ask: &Asked<'_>) -> Result<Shelf>
            e.source->>'kind' = 'inside' AS counted, \
            EXISTS (SELECT 1 FROM skill_versions v JOIN skills k ON k.id = v.skill_id \
                    WHERE v.from_marketplace = e.marketplace_id AND v.from_slug = e.slug \
-                     AND k.org_id = $1) AS installed \
+                     AND k.org_id = $1) AS installed, \
            count(*) OVER () AS matching \
          FROM marketplace_entries e JOIN marketplaces m ON m.id = e.marketplace_id \
          WHERE m.org_id = $1 \
