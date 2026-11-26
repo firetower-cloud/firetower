@@ -14627,7 +14627,8 @@
           "nCommands",
           "hasConnector",
           "counted",
-          "installed"
+          "installed",
+          "setup"
         ],
         "properties": {
           "author": {
@@ -14689,6 +14690,13 @@
           },
           "name": {
             "type": "string"
+          },
+          "setup": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SetupLink"
+            },
+            "description": "Where somebody goes to come back with a client id, as the entry says\nit. **Carried on the catalogue row, not just the installed one**, so\nthe screen can put the form up the moment it is pressed rather than\nafter the copy has been taken — which is a second and a half of\nwatching a spinner for an answer the entry was already holding."
           },
           "slug": {
             "type": "string"

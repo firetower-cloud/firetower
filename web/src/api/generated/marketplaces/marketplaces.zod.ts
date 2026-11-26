@@ -75,6 +75,10 @@ export const ListEntriesResponse = zod.object({
   "nCommands": zod.int(),
   "nSkills": zod.int(),
   "name": zod.string(),
+  "setup": zod.array(zod.object({
+  "label": zod.string().describe('The vendor\'s own word for it — "Google Cloud console", "Create a\nGitHub OAuth app". Never ours.'),
+  "url": zod.string()
+}).describe('One place to go to come back with a client id.')).describe('Where somebody goes to come back with a client id, as the entry says\nit. **Carried on the catalogue row, not just the installed one**, so\nthe screen can put the form up the moment it is pressed rather than\nafter the copy has been taken — which is a second and a half of\nwatching a spinner for an answer the entry was already holding.'),
   "slug": zod.string(),
   "version": zod.string().nullish()
 }).describe('One row of a shelf.')),

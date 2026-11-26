@@ -12,14 +12,26 @@
  * shows the same thing in place, because there is no navigation to do when
  * you are already there.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ExternalLink, Loader2 } from "lucide-react";
 import { why } from "~/data";
 import { openExternal } from "~/open";
 import { setClient, useConnectorState } from "~/api/generated/connectors/connectors";
 
 export type NeedsClient = {
-  skillId: string;
+  /** Known once it is installed. */
+  skillId?: string;
+  /**
+   * The install this form got ahead of, resolving to the skill's id.
+   *
+   * **The form opens before the copy is taken.** Installing is a second and
+   * a half — a zipball, then three questions to the server's authorization
+   * server — and all of it is to learn something the entry already said by
+   * carrying `setup`. Nobody should watch a spinner for that: the links and
+   * the redirect address are what they need, and fetching a client id from
+   * somebody's console takes minutes.
+   */
+  ready?: Promise<string>;
   displayName: string;
   /**
    * Where to go to come back with a client id, as many links as the vendor's
@@ -40,10 +52,23 @@ export function SetUpClient({
 }: {
   of: NeedsClient;
   /** Saved; the caller authorizes and refreshes. */
-  onDone: () => Promise<void> | void;
+  onDone: (skillId: string) => Promise<void> | void;
   onCancel: () => void;
 }) {
-  const state = useConnectorState(of.skillId, { query: { select: (r) => r } }).data;
+  /* Known only once the install lands, so this waits for it. */
+  const [id, setId] = useState<string | undefined>(of.skillId);
+  useEffect(() => {
+    let live = true;
+    if (!of.skillId && of.ready) {
+      void of.ready.then((got) => live && setId(got)).catch(() => {});
+    }
+    return () => {
+      live = false;
+    };
+  }, [of.skillId, of.ready]);
+  const state = useConnectorState(id ?? "", {
+    query: { select: (r) => r, enabled: !!id },
+  }).data;
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [busy, setBusy] = useState(false);
@@ -53,12 +78,16 @@ export function SetUpClient({
     setBusy(true);
     setBad(null);
     try {
-      await setClient(of.skillId, {
+      // If the copy is still being taken, this is where we wait for it —
+      // after somebody has typed, which is the one moment the wait is free.
+      const who = id ?? (await of.ready);
+      if (!who) throw new Error("that connector is not installed");
+      await setClient(who, {
         clientId: clientId.trim(),
         clientSecret: clientSecret.trim() || null,
       });
       setClientSecret("");
-      await onDone();
+      await onDone(who);
     } catch (e) {
       setBad(why(e));
     } finally {
@@ -169,7 +198,7 @@ export function SetUpClientModal({
   onCancel,
 }: {
   of: NeedsClient;
-  onDone: () => Promise<void> | void;
+  onDone: (skillId: string) => Promise<void> | void;
   onCancel: () => void;
 }) {
   return (

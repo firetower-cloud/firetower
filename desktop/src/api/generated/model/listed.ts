@@ -5,6 +5,7 @@
  * The Firetower control plane: API, scheduling, and worker transports.
  * OpenAPI spec version: 0
  */
+import type { SetupLink } from './setupLink.ts';
 
 /**
  * One row of a shelf.
@@ -44,6 +45,14 @@ export interface Listed {
   nCommands: number;
   nSkills: number;
   name: string;
+  /**
+     * Where somebody goes to come back with a client id, as the entry says
+     * it. **Carried on the catalogue row, not just the installed one**, so
+     * the screen can put the form up the moment it is pressed rather than
+     * after the copy has been taken — which is a second and a half of
+     * watching a spinner for an answer the entry was already holding.
+     */
+  setup: SetupLink[];
   slug: string;
   /** @nullable */
   version?: string | null;

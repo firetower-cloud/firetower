@@ -15,16 +15,6 @@ use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use utoipa::ToSchema;
 
-/// One place to go to come back with a client id.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct SetupLink {
-    /// The vendor's own word for it — "Google Cloud console", "Create a
-    /// GitHub OAuth app". Never ours.
-    pub label: String,
-    pub url: String,
-}
-
 /// One thing in the library.
 #[derive(Debug, Serialize, ToSchema)]
 #[serde(rename_all = "camelCase")]
@@ -63,7 +53,7 @@ pub struct Item {
     /// us.** This was two fields called `console` and `guide`, which is how
     /// Google splits the job; every other vendor got Google's vocabulary and
     /// a null.
-    pub setup: Vec<SetupLink>,
+    pub setup: Vec<crate::marketplace::SetupLink>,
 
     // Servers only.
     pub url: Option<String>,
@@ -277,7 +267,9 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                     .try_get::<Option<serde_json::Value>, _>("setup")
                     .ok()
                     .flatten()
-                    .and_then(|v| serde_json::from_value::<Vec<SetupLink>>(v).ok())
+                    .and_then(|v| {
+                        serde_json::from_value::<Vec<crate::marketplace::SetupLink>>(v).ok()
+                    })
                     .unwrap_or_default(),
             });
         }

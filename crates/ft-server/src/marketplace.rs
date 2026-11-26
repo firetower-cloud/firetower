@@ -154,6 +154,32 @@ async fn resolve_commit(
     Ok(sha)
 }
 
+/// The last couple of zipballs, keyed by the commit they are.
+///
+/// **A commit is immutable, so this can never be stale.** Reading the
+/// catalogue downloads the whole repository, and then installing anything out
+/// of it downloads the identical bytes again — 697KB for the eight files one
+/// entry needs, once per press. Two entries are enough for the case that
+/// actually happens: refresh, then install, then install something else.
+static RECENT: std::sync::Mutex<Vec<(String, std::sync::Arc<Vec<u8>>)>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// How many commits' worth to hold. Each is at most `BIGGEST_ZIP`.
+const KEEP: usize = 2;
+
+fn cached(key: &str) -> Option<std::sync::Arc<Vec<u8>>> {
+    let seen = RECENT.lock().ok()?;
+    seen.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+}
+
+fn remember_zip(key: String, bytes: std::sync::Arc<Vec<u8>>) {
+    let Ok(mut seen) = RECENT.lock() else { return };
+    seen.retain(|(k, _)| k != &key);
+    seen.push((key, bytes));
+    let over = seen.len().saturating_sub(KEEP);
+    seen.drain(..over);
+}
+
 /// Every file of a repository at one commit, keyed by its path inside it.
 async fn download(
     http: &reqwest::Client,
@@ -162,6 +188,10 @@ async fn download(
     sha: &str,
     token: Option<&str>,
 ) -> Result<BTreeMap<String, Vec<u8>>> {
+    let key = format!("{owner}/{repo}@{sha}");
+    if let Some(bytes) = cached(&key) {
+        return unpack(&bytes);
+    }
     let at = format!("https://codeload.github.com/{owner}/{repo}/zip/{sha}");
     let mut req = http.get(&at);
     if let Some(t) = token {
@@ -183,7 +213,18 @@ async fn download(
     if bytes.len() as u64 > BIGGEST_ZIP {
         bail!("that repository is larger than Firetower will read");
     }
+    // Kept only once it is known to be a zip we will read, so a refusal is
+    // not what the next press finds waiting for it.
+    let bytes = std::sync::Arc::new(bytes.to_vec());
+    let out = unpack(&bytes);
+    if out.is_ok() {
+        remember_zip(key, bytes);
+    }
+    out
+}
 
+/// A downloaded zipball, as the file map the rest of this module works on.
+fn unpack(bytes: &[u8]) -> Result<BTreeMap<String, Vec<u8>>> {
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .context("that download is not a zip archive")?;
     if zip.len() > MOST_FILES {
@@ -597,6 +638,22 @@ pub struct Listed {
     pub counted: bool,
     /// Whether this organisation already took a copy.
     pub installed: bool,
+    /// Where somebody goes to come back with a client id, as the entry says
+    /// it. **Carried on the catalogue row, not just the installed one**, so
+    /// the screen can put the form up the moment it is pressed rather than
+    /// after the copy has been taken — which is a second and a half of
+    /// watching a spinner for an answer the entry was already holding.
+    pub setup: Vec<SetupLink>,
+}
+
+/// One place to go to come back with a client id.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupLink {
+    /// The vendor's own word for it — "Google Cloud console", "Create a
+    /// GitHub OAuth app". Never ours.
+    pub label: String,
+    pub url: String,
 }
 
 /// Which rows a caller is asking for.
@@ -882,7 +939,7 @@ pub async fn entries(pool: &PgPool, org: &str, ask: &Asked<'_>) -> Result<Shelf>
     let installed = ask.installed;
     let rows = sqlx::query(
         "SELECT e.marketplace_id, m.name AS marketplace_name, e.slug, e.name, \
-           e.display_name, e.description, \
+           e.display_name, e.description, e.setup, \
            e.version, e.author, e.category, e.homepage, e.logo, e.logo_type, \
            e.n_skills, e.n_commands, e.has_connector, \
            e.source->>'kind' = 'inside' AS counted, \
@@ -952,6 +1009,10 @@ pub async fn entries(pool: &PgPool, org: &str, ask: &Asked<'_>) -> Result<Shelf>
                 has_connector: r.get("has_connector"),
                 counted: r.get("counted"),
                 installed: r.get("installed"),
+                setup: r
+                    .get::<Option<Value>, _>("setup")
+                    .and_then(|v| serde_json::from_value(v).ok())
+                    .unwrap_or_default(),
             }
         })
         .collect::<Vec<_>>();

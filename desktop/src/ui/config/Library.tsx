@@ -322,9 +322,31 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     try {
       /* An entry already installed is connected straight away; one that is
          not is installed first. Either way the id is the library's. */
-      const id = e.installed
+      const held = e.installed
         ? (lib.data ?? []).find((i) => i.name === e.name && i.kind === "server")?.skillId
-        : (await installEntry(e.marketplaceId, e.slug)).id;
+        : undefined;
+      const install = held
+        ? Promise.resolve(held)
+        : installEntry(e.marketplaceId, e.slug).then((made) => made.id);
+
+      /* **The entry already said this one needs an application.** `setup` is
+         only there because the server hands out no clients, so the form can
+         go up now rather than after a second and a half of installing — a
+         wait whose whole purpose is to learn what the row is holding. */
+      if (e.setup?.length && e.hasConnector) {
+        setSetting({
+          skillId: held,
+          ready: install,
+          displayName: e.displayName,
+          setup: e.setup,
+        });
+        setBusy(null);
+        await install;
+        await refresh();
+        return;
+      }
+
+      const id = await install;
       await refresh();
       if (id && e.hasConnector) await offerToConnect({ id, hasConnector: true });
     } catch (err) {
@@ -468,8 +490,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
           <SetUpClientModal
             of={setting}
             onCancel={() => setSetting(null)}
-            onDone={async () => {
-              const id = setting.skillId;
+            onDone={async (id) => {
               setSetting(null);
               await refresh();
               /* Straight into authorizing: supplying the application was
