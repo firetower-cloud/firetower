@@ -225,6 +225,39 @@ fn entries() -> Vec<Entry> {
             servers.len()
         );
         let (server, spec) = servers.iter().next().unwrap();
+
+        // **The entry carries its own links, so they have to be links.**
+        // These replaced a hardcoded table of hostnames in the control plane;
+        // the point of moving them is that a catalogue can say where its own
+        // console is, and the cost is that a typo here is a dead button on
+        // the one screen somebody reaches when they are already stuck.
+        for key in ["console", "guide"] {
+            if let Some(at) = spec.get(key) {
+                let at = at.as_str().unwrap_or_default();
+                assert!(
+                    at.starts_with("https://"),
+                    "{slug}: {key} is {at:?}, which is not a link"
+                );
+            }
+        }
+        // Scopes narrow; they are a list, never a bare string that would
+        // silently become one enormous scope.
+        if let Some(sc) = spec.get("scopes") {
+            let sc = sc
+                .as_array()
+                .unwrap_or_else(|| panic!("{slug}: scopes must be a list, not {sc}"));
+            assert!(
+                !sc.is_empty(),
+                "{slug}: an empty scope list asks for nothing"
+            );
+            for one in sc {
+                assert!(
+                    one.as_str().unwrap_or_default().starts_with("https://")
+                        || !one.as_str().unwrap_or_default().is_empty(),
+                    "{slug}: a blank scope"
+                );
+            }
+        }
         let url = spec["url"].as_str().unwrap_or_default().to_string();
         assert!(
             url.starts_with("https://"),

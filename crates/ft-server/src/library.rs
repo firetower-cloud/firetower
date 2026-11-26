@@ -106,7 +106,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 (SELECT f.path FROM skill_files f \
                   WHERE f.version_id = k.current_version_id AND f.path LIKE 'assets/logo.%' \
                   LIMIT 1) AS logo_path, \
-                c.server, c.url, c.auth \
+                c.server, c.url, c.auth, c.console, c.guide \
            FROM skills k \
            LEFT JOIN connectors c ON c.skill_id = k.id \
           WHERE k.current_version_id IS NOT NULL AND ({visible}) \
@@ -258,24 +258,13 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 },
                 server: Some(server),
                 needs_client_id: by_hand.iter().any(|s| s == &id),
-                console: b
-                    .try_get::<Option<String>, _>("url")
-                    .ok()
-                    .flatten()
-                    .as_deref()
-                    .and_then(|u| reqwest::Url::parse(u).ok())
-                    .and_then(|u| u.host_str().map(str::to_owned))
-                    .and_then(|h| crate::api::console_for(&h))
-                    .map(str::to_owned),
-                guide: b
-                    .try_get::<Option<String>, _>("url")
-                    .ok()
-                    .flatten()
-                    .as_deref()
-                    .and_then(|u| reqwest::Url::parse(u).ok())
-                    .and_then(|u| u.host_str().map(str::to_owned))
-                    .and_then(|h| crate::api::guide_for(&h))
-                    .map(str::to_owned),
+                // **Said by the entry, not matched on its hostname.** These
+                // were a hardcoded list of thirteen substrings in the control
+                // plane, which meant a catalogue nobody here wrote could not
+                // say where its own console is. A server we were not told
+                // about shows no link rather than a guess.
+                console: b.try_get::<Option<String>, _>("console").ok().flatten(),
+                guide: b.try_get::<Option<String>, _>("guide").ok().flatten(),
             });
         }
 

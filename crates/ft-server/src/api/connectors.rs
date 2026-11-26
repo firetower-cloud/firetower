@@ -841,40 +841,7 @@ pub(super) async fn add_from_url(
 
 #[cfg(test)]
 mod tests {
-    use super::{as_name, brand_origins, console_for, name_from};
-
-    /// Every server we ship that registers no client has somewhere to go.
-    ///
-    /// The list it is matched against is the eleven in the catalogue that
-    /// publish metadata and register nothing. A row that tells somebody to
-    /// create an OAuth application and then links nowhere is the wall this
-    /// whole form exists to remove, so a missing one is a bug and not a gap.
-    #[test]
-    fn every_server_that_needs_an_application_says_where_to_make_one() {
-        for host in [
-            "api.githubcopilot.com",
-            "mcp.slack.com",
-            "mcp.asana.com",
-            "mcp.hubspot.com",
-            "mcp.discord.com",
-            "mcp.twilio.com",
-            "api.elevenlabs.io",
-            "mcp.frontapp.com",
-            "mcp.loops.so",
-            "mcp.render.com",
-            "mcp.steel.dev",
-        ] {
-            let at = console_for(host);
-            assert!(at.is_some(), "{host} has nowhere to send anybody");
-            assert!(
-                at.unwrap().starts_with("https://"),
-                "{host}: {:?} is not a link",
-                at
-            );
-        }
-        // And a server nobody has written down says so, rather than guessing.
-        assert_eq!(console_for("mcp.linear.app"), None);
-    }
+    use super::{as_name, brand_origins, name_from};
 
     /// A name from a hostname, and the two prefixes that are noise.
     #[test]
@@ -1085,67 +1052,4 @@ async fn needs_a_client(state: &AppState, id: &str, found: &Discovered) {
     .bind(&found.scopes)
     .execute(state.skills.pool())
     .await;
-}
-
-/// The vendor's own instructions for making one, where they have written any.
-///
-/// **A console is a form, not an explanation.** Google's takes a dozen steps
-/// across four screens — enable the API, enable the MCP service, configure a
-/// consent screen, add the scopes by hand, and tick "Use this client for an
-/// AI-powered agent" without which nothing works — and no sentence Firetower
-/// can fit beside a text field is going to replace that page. So where the
-/// vendor documents it, the screen links the documentation as well as the
-/// console.
-pub fn guide_for(host: &str) -> Option<&'static str> {
-    Some(match host {
-        h if h.contains("google") => {
-            "https://developers.google.com/workspace/guides/configure-mcp-servers"
-        }
-        h if h.contains("github") => {
-            "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app"
-        }
-        h if h.contains("slack") => "https://api.slack.com/quickstart",
-        h if h.contains("discord") => {
-            "https://discord.com/developers/docs/quick-start/getting-started"
-        }
-        h if h.contains("twilio") => "https://www.twilio.com/docs/iam/oauth2-api-fga-oauth-app",
-        _ => return None,
-    })
-}
-
-/// Where somebody goes to make one, and what it has to say.
-///
-/// Each of these consoles asks a different question for the same thing, and
-/// getting the redirect wrong is the failure that wastes an afternoon — so
-/// the screen shows the exact value rather than describing it.
-///
-/// **Every entry here was opened before it was written down.** A row that
-/// says "create an application" and links nowhere leaves somebody searching a
-/// vendor's documentation for the page, which is most of the work; a row that
-/// links to a 404 is worse than linking nothing.
-///
-/// `host` is the **MCP server's**, which is the one the library row has to
-/// hand — `mcp.discord.com`, `api.githubcopilot.com`, `mcp.frontapp.com`. So
-/// the match is on a substring and not on a domain, and `frontapp` rather
-/// than `front` because a substring is all this gets to be.
-pub fn console_for(host: &str) -> Option<&'static str> {
-    Some(match host {
-        h if h.contains("github") => "https://github.com/settings/applications/new",
-        h if h.contains("slack") => "https://api.slack.com/apps",
-        h if h.contains("google") => "https://console.cloud.google.com/auth/clients",
-        h if h.contains("asana") => "https://app.asana.com/0/my-apps",
-        h if h.contains("atlassian") => "https://developer.atlassian.com/console/myapps/",
-        h if h.contains("hubspot") => "https://app.hubspot.com/developer",
-        h if h.contains("discord") => "https://discord.com/developers/applications",
-        h if h.contains("twilio") => {
-            "https://console.twilio.com/us1/account/keys-credentials/oauth-apps"
-        }
-        h if h.contains("elevenlabs") => "https://elevenlabs.io/app/developers",
-        h if h.contains("frontapp") => "https://app.frontapp.com/settings/developers",
-        h if h.contains("loops") => "https://app.loops.so/settings?page=api",
-        h if h.contains("render") => "https://dashboard.render.com/settings/oauth",
-        h if h.contains("steel") => "https://app.steel.dev/settings",
-        h if h.contains("figma") => "https://www.figma.com/developers/apps",
-        _ => return None,
-    })
 }

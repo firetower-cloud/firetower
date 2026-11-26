@@ -84,11 +84,14 @@ async fn one_entry_comes_back_as_files_with_its_connector() {
     assert!(paths.contains(&".codex-plugin/plugin.json"));
     assert!(paths.contains(&"assets/logo.png"));
 
-    let (server, url, auth, borrow) = marketplace::connector_of(&files).expect("a connector");
-    assert_eq!(server, "linear");
-    assert_eq!(url, "https://mcp.linear.app/mcp");
-    assert_eq!(auth, "oauth");
-    assert_eq!(borrow, None);
+    let d = marketplace::connector_of(&files).expect("a connector");
+    assert_eq!(d.server, "linear");
+    assert_eq!(d.url, "https://mcp.linear.app/mcp");
+    assert_eq!(d.auth, "oauth");
+    // Linear hands out its own clients, so it has nothing to say about a
+    // console — and nothing invents one for it.
+    assert_eq!(d.console, None);
+    assert_eq!(d.guide, None);
 }
 
 /// **A manifest does not get to choose how it is authorized.**
@@ -108,10 +111,13 @@ async fn a_manifest_cannot_ask_to_borrow_a_credential() {
     let files = marketplace::files_of(&e.source, OURS, &got.commit, token().as_deref())
         .await
         .unwrap();
-    let (server, _, auth, borrow) = marketplace::connector_of(&files).unwrap();
+    let d = marketplace::connector_of(&files).unwrap();
+    assert_eq!((d.server.as_str(), d.auth.as_str()), ("github", "oauth"));
+    // It *does* carry a console, because GitHub registers no clients — which
+    // is a different thing from choosing which credential to reuse.
     assert_eq!(
-        (server.as_str(), auth.as_str(), borrow),
-        ("github", "oauth", None)
+        d.console.as_deref(),
+        Some("https://github.com/settings/applications/new")
     );
 }
 

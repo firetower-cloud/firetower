@@ -300,24 +300,30 @@ pub(super) async fn install_entry(
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
 
-    if let Some((server, url, auth, scopes)) = connector {
+    if let Some(d) = connector {
         state
             .skills
-            .set_connector(made.as_str(), &server, &url, &auth)
+            .set_connector(made.as_str(), &d.server, &d.url, &d.auth)
             .await
             .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;
         // Ask the server how it wants authorizing now, so the row can say so
         // rather than finding out when somebody presses a button.
-        crate::connectors::remember(pool, made.as_str(), &url).await;
-        // What the entry asks to be narrowed to. Bounded at connect time by
-        // what the server actually advertises, so this can only subtract.
-        if let Some(asked) = scopes {
-            sqlx::query("UPDATE connectors SET scopes = $2 WHERE skill_id = $1")
-                .bind(made.as_str())
-                .bind(asked)
-                .execute(pool)
-                .await
-                .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;
+        crate::connectors::remember(pool, made.as_str(), &d.url).await;
+        // What the entry says, kept as the entry said it: the scopes it asks
+        // to be narrowed to, and the two links the form needs. None of it is
+        // ours to invent — a server nobody told us about shows no link.
+        {
+            let _ = sqlx::query(
+                "UPDATE connectors SET scopes = coalesce($2, scopes), \
+                   console = $3, guide = $4 WHERE skill_id = $1",
+            )
+            .bind(made.as_str())
+            .bind(&d.scopes)
+            .bind(&d.console)
+            .bind(&d.guide)
+            .execute(pool)
+            .await
+            .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;
         }
     }
 

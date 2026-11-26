@@ -8263,12 +8263,13 @@ pub fn read_bundle(files: &[(String, Vec<u8>)]) -> Inside {
         } else if p == "hooks.json" || p.ends_with("/hooks.json") {
             out.has_hooks = true;
         } else if p == ".mcp.json" {
-            if let Some((server, url, auth, _)) = crate::marketplace::connector_of(
-                std::slice::from_ref(&(path.clone(), bytes.clone())),
-            ) {
-                out.server = Some(server);
-                out.url = Some(url);
-                out.auth = Some(auth);
+            if let Some(d) = crate::marketplace::connector_of(std::slice::from_ref(&(
+                path.clone(),
+                bytes.clone(),
+            ))) {
+                out.server = Some(d.server);
+                out.url = Some(d.url);
+                out.auth = Some(d.auth);
             }
         } else if let Some(c) = component_at(p, "skills/", "SKILL.md", &text) {
             out.skills.push(c);

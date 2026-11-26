@@ -69,6 +69,13 @@ pub struct Entry {
     pub n_skills: i32,
     pub n_commands: i32,
     pub has_connector: bool,
+    /// What its `.mcp.json` declares about authorizing: the scopes it asks to
+    /// be narrowed to, and the two links the setup form needs. Carried on the
+    /// catalogue row so a refresh can give them to something installed before
+    /// the entry had any.
+    pub scopes: Option<String>,
+    pub console: Option<String>,
+    pub guide: Option<String>,
 }
 
 /// A catalogue, as it was at one commit.
@@ -308,6 +315,10 @@ fn entry_of(one: &Value, files: &BTreeMap<String, Vec<u8>>) -> Option<Entry> {
         n_skills: 0,
         n_commands: 0,
         has_connector: false,
+        // Filled by `describe` from the entry's own `.mcp.json`.
+        scopes: None,
+        console: None,
+        guide: None,
     };
 
     // **Only a local entry can be described from here.** One that names
@@ -333,6 +344,11 @@ fn describe(entry: &mut Entry, files: &BTreeMap<String, Vec<u8>>, under: &str) {
             entry.n_commands += 1;
         } else if rest == ".mcp.json" {
             entry.has_connector = true;
+            if let Some(d) = connector_of(&[(rest.to_string(), body.clone())]) {
+                entry.scopes = d.scopes;
+                entry.console = d.console;
+                entry.guide = d.guide;
+            }
         } else if rest.starts_with("assets/logo.") && body.len() <= BIGGEST_LOGO {
             let kind = match rest.rsplit('.').next().unwrap_or("png") {
                 "svg" => "image/svg+xml",
@@ -444,40 +460,74 @@ pub async fn files_of(
 /// **This is the step that makes an installed plugin work.** Without it a
 /// marketplace install lands the skills and silently drops the tools, which
 /// looks exactly like a plugin that does nothing.
-/// `(server name, url, how it authorizes, the scopes it asks to be narrowed to)`
-pub fn connector_of(
-    files: &[(String, Vec<u8>)],
-) -> Option<(String, String, String, Option<String>)> {
+/// The server an entry declares, as the entry describes it.
+///
+/// **Everything here comes out of the entry.** A hardcoded table of other
+/// people's consoles used to live in the control plane; a catalogue that
+/// cannot say where its own application is made is a catalogue that needs a
+/// pull request against Firetower to be useful.
+#[derive(Debug, Clone)]
+pub struct Declared {
+    /// The key this server has in `.mcp.json`, which is what the agent calls it.
+    pub server: String,
+    pub url: String,
+    /// `oauth` or `none`. Not the entry's to choose — see below.
+    pub auth: String,
+    /// What it asks to be narrowed to, bounded at connect time by what the
+    /// server actually advertises.
+    pub scopes: Option<String>,
+    /// Where somebody creates the OAuth application, when the server will not
+    /// hand one out.
+    pub console: Option<String>,
+    /// The vendor's own instructions for doing it.
+    pub guide: Option<String>,
+}
+
+pub fn connector_of(files: &[(String, Vec<u8>)]) -> Option<Declared> {
     let raw = files.iter().find(|(p, _)| p == ".mcp.json")?;
     let doc: Value = serde_json::from_slice(&raw.1).ok()?;
     let servers = doc.get("mcpServers")?.as_object()?;
     let (name, server) = servers.iter().next()?;
     let url = server.get("url").and_then(Value::as_str)?.to_string();
 
-    // **A bundle does not get to choose how it is authorized.** There used to
-    // be a `firetower` key here saying "reuse the git credential", and a
-    // manifest from a repository nobody at this company wrote is the last
-    // place that decision belongs. Everything authorizes for itself.
-    let auth = "oauth".to_string();
-    // **It may say what it needs, not how it is trusted.** `scopes` is a
-    // request to be given *less* than the server offers — `narrowed` drops
-    // anything the server did not advertise — which is the opposite of the
-    // `firetower` key that used to live here.
-    let scopes: Option<String> = server
-        .get("scopes")
-        .and_then(|v| match v {
-            Value::Array(a) => Some(
-                a.iter()
-                    .filter_map(Value::as_str)
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            ),
-            Value::String(s) => Some(s.clone()),
-            _ => None,
-        })
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    Some((name.clone(), url, auth, scopes))
+    let text = |k: &str| -> Option<String> {
+        server
+            .get(k)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| s.starts_with("https://"))
+            .map(str::to_owned)
+    };
+
+    Some(Declared {
+        server: name.clone(),
+        url,
+        // **A bundle does not get to choose how it is authorized.** There used
+        // to be a `firetower` key here saying "reuse the git credential", and
+        // a manifest from a repository nobody at this company wrote is the
+        // last place that decision belongs. Everything authorizes for itself.
+        //
+        // Saying what it *needs* is a different thing, which is why `scopes`,
+        // `console` and `guide` are read: the first can only ask for less than
+        // the server offers, and the other two are links.
+        auth: "oauth".to_string(),
+        scopes: server
+            .get("scopes")
+            .and_then(|v| match v {
+                Value::Array(a) => Some(
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                ),
+                Value::String(s) => Some(s.clone()),
+                _ => None,
+            })
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        console: text("console"),
+        guide: text("guide"),
+    })
 }
 
 // ── Storage ─────────────────────────────────────────────────────────────────
@@ -678,8 +728,8 @@ pub async fn save(pool: &PgPool, id: &str, got: &Fetched) -> Result<()> {
             "INSERT INTO marketplace_entries \
                (marketplace_id, slug, name, display_name, description, version, author, \
                 category, homepage, source, logo, logo_type, n_skills, n_commands, \
-                has_connector) \
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)",
+                has_connector, scopes, console, guide) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)",
         )
         .bind(id)
         .bind(&e.slug)
@@ -696,9 +746,29 @@ pub async fn save(pool: &PgPool, id: &str, got: &Fetched) -> Result<()> {
         .bind(e.n_skills)
         .bind(e.n_commands)
         .bind(e.has_connector)
+        .bind(&e.scopes)
+        .bind(&e.console)
+        .bind(&e.guide)
         .execute(&mut *tx)
         .await?;
     }
+    // **And what was installed before the entry declared its links gets
+    // them.** These used to be a hardcoded table inside the control plane, so
+    // removing it would otherwise have taken the console link away from
+    // everything already installed — telling people to remove and re-add a
+    // server to get a link back, which is a worse answer than the table was.
+    sqlx::query(
+        "UPDATE connectors c SET scopes = coalesce(e.scopes, c.scopes), \
+           console = coalesce(e.console, c.console), \
+           guide = coalesce(e.guide, c.guide) \
+           FROM marketplace_entries e, skill_versions v \
+          WHERE v.skill_id = c.skill_id AND v.from_marketplace = e.marketplace_id \
+            AND v.from_slug = e.slug AND e.marketplace_id = $1",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?;
+
     // **What was installed before the catalogue carried a name gets one.**
     // A copy taken last week has `display_name` null and falls back to a
     // title-cased slug, so GitHub reads as "Github" for ever unless somebody
