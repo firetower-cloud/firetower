@@ -510,7 +510,11 @@ fn as_name(text: &str) -> String {
     if out.is_empty() {
         "connector".into()
     } else {
-        out.chars().take(64).collect::<String>().trim_matches('-').to_string()
+        out.chars()
+            .take(64)
+            .collect::<String>()
+            .trim_matches('-')
+            .to_string()
     }
 }
 
@@ -531,7 +535,9 @@ fn origin_of(url: &str) -> Option<String> {
 fn brand_origins(issuer: Option<&str>, endpoint: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for from in [issuer, Some(endpoint)].into_iter().flatten() {
-        let Some(origin) = origin_of(from) else { continue };
+        let Some(origin) = origin_of(from) else {
+            continue;
+        };
         for at in [origin.clone()].into_iter().chain(parent_of(&origin)) {
             if !out.contains(&at) {
                 out.push(at);
@@ -564,7 +570,11 @@ fn tidy(said: &str) -> String {
             out = rest.trim().to_string();
         }
     }
-    if out.is_empty() { said.trim().to_string() } else { out }
+    if out.is_empty() {
+        said.trim().to_string()
+    } else {
+        out
+    }
 }
 
 #[utoipa::path(
@@ -834,7 +844,10 @@ mod tests {
         assert_eq!(as_name(&"a".repeat(80)).len(), 64);
         // Every one of these passes the rule it is checked against next.
         for typed in ["My Linear", "Sentry (Beta)", "  spaced  out  ", "!!!"] {
-            assert!(crate::skills::check_name(&as_name(typed)).is_ok(), "{typed}");
+            assert!(
+                crate::skills::check_name(&as_name(typed)).is_ok(),
+                "{typed}"
+            );
         }
     }
 
@@ -843,7 +856,10 @@ mod tests {
     fn the_logo_is_looked_for_one_label_up_as_well() {
         // Linear's issuer *is* `mcp.linear.app`, which serves no page at all.
         assert_eq!(
-            brand_origins(Some("https://mcp.linear.app/authorize"), "https://mcp.linear.app/mcp"),
+            brand_origins(
+                Some("https://mcp.linear.app/authorize"),
+                "https://mcp.linear.app/mcp"
+            ),
             ["https://mcp.linear.app", "https://linear.app"]
         );
         // A two-label host has no parent worth asking: dropping a label
@@ -854,7 +870,10 @@ mod tests {
         );
         // An issuer elsewhere is tried first, and the endpoint still follows.
         assert_eq!(
-            brand_origins(Some("https://auth.acme.io/authorize"), "https://mcp.acme.dev/mcp"),
+            brand_origins(
+                Some("https://auth.acme.io/authorize"),
+                "https://mcp.acme.dev/mcp"
+            ),
             [
                 "https://auth.acme.io",
                 "https://acme.io",

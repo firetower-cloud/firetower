@@ -2849,7 +2849,11 @@ async fn a_profile_hands_a_second_agent_its_own_list_and_nothing_else() {
         .cloned()
         .expect("the child was launched");
     let folders: Vec<&str> = spec.skills.iter().map(|b| b.name.as_str()).collect();
-    assert_eq!(folders, vec!["qa-ticked"], "and through to the worker's disk");
+    assert_eq!(
+        folders,
+        vec!["qa-ticked"],
+        "and through to the worker's disk"
+    );
     state.fleet.stop_supervising(&host.id).await;
 }
 

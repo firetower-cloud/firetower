@@ -167,7 +167,10 @@ async fn download(
     }
     if let Some(len) = r.content_length() {
         if len > BIGGEST_ZIP {
-            bail!("that repository is {} MB, which is not a marketplace", len / 1_048_576);
+            bail!(
+                "that repository is {} MB, which is not a marketplace",
+                len / 1_048_576
+            );
         }
     }
     let bytes = r.bytes().await?;
@@ -178,7 +181,10 @@ async fn download(
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .context("that download is not a zip archive")?;
     if zip.len() > MOST_FILES {
-        bail!("that repository holds {} files, which is not a marketplace", zip.len());
+        bail!(
+            "that repository holds {} files, which is not a marketplace",
+            zip.len()
+        );
     }
 
     let mut out = BTreeMap::new();
@@ -206,8 +212,8 @@ async fn download(
 
 /// Read a marketplace repository.
 pub async fn fetch(url: &str, git_ref: &str, token: Option<&str>) -> Result<Fetched> {
-    let (owner, repo) = github_of(url)
-        .context("that is not a GitHub repository address Firetower can read")?;
+    let (owner, repo) =
+        github_of(url).context("that is not a GitHub repository address Firetower can read")?;
     let http = client()?;
     let commit = resolve_commit(&http, &owner, &repo, git_ref, token).await?;
     let files = download(&http, &owner, &repo, &commit, token).await?;
@@ -273,7 +279,10 @@ fn entry_of(one: &Value, files: &BTreeMap<String, Vec<u8>>) -> Option<Entry> {
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string(),
-        version: one.get("version").and_then(Value::as_str).map(str::to_owned),
+        version: one
+            .get("version")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         author: one
             .get("author")
             .map(|a| match a {
@@ -285,8 +294,14 @@ fn entry_of(one: &Value, files: &BTreeMap<String, Vec<u8>>) -> Option<Entry> {
                     .to_string(),
             })
             .filter(|s| !s.is_empty()),
-        category: one.get("category").and_then(Value::as_str).map(str::to_owned),
-        homepage: one.get("homepage").and_then(Value::as_str).map(str::to_owned),
+        category: one
+            .get("category")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        homepage: one
+            .get("homepage")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
         slug,
         source,
         logo: None,
@@ -429,7 +444,9 @@ pub async fn files_of(
 /// **This is the step that makes an installed plugin work.** Without it a
 /// marketplace install lands the skills and silently drops the tools, which
 /// looks exactly like a plugin that does nothing.
-pub fn connector_of(files: &[(String, Vec<u8>)]) -> Option<(String, String, String, Option<String>)> {
+pub fn connector_of(
+    files: &[(String, Vec<u8>)],
+) -> Option<(String, String, String, Option<String>)> {
     let raw = files.iter().find(|(p, _)| p == ".mcp.json")?;
     let doc: Value = serde_json::from_slice(&raw.1).ok()?;
     let servers = doc.get("mcpServers")?.as_object()?;
@@ -578,7 +595,9 @@ pub async fn add(
     let url = url.trim().trim_end_matches('/').to_string();
     github_of(&url).context("that is not a GitHub repository address")?;
     let id = MarketId::new();
-    let name = github_of(&url).map(|(_, r)| r).unwrap_or_else(|| url.clone());
+    let name = github_of(&url)
+        .map(|(_, r)| r)
+        .unwrap_or_else(|| url.clone());
 
     let got: String = sqlx::query_scalar(
         "INSERT INTO marketplaces (id, org_id, url, name, git_ref, builtin, added_by) \
@@ -728,14 +747,17 @@ pub async fn list(pool: &PgPool, org: &str) -> Result<Vec<Market>> {
         .collect())
 }
 
-pub async fn one(pool: &PgPool, org: &str, id: &str) -> Result<Option<(String, String, Option<String>)>> {
-    let row = sqlx::query(
-        "SELECT url, git_ref, commit FROM marketplaces WHERE id = $1 AND org_id = $2",
-    )
-    .bind(id)
-    .bind(org)
-    .fetch_optional(pool)
-    .await?;
+pub async fn one(
+    pool: &PgPool,
+    org: &str,
+    id: &str,
+) -> Result<Option<(String, String, Option<String>)>> {
+    let row =
+        sqlx::query("SELECT url, git_ref, commit FROM marketplaces WHERE id = $1 AND org_id = $2")
+            .bind(id)
+            .bind(org)
+            .fetch_optional(pool)
+            .await?;
     Ok(row.map(|r| (r.get("url"), r.get("git_ref"), r.get("commit"))))
 }
 
@@ -884,7 +906,13 @@ pub async fn address_of(
 
 /// Remember where an installed version came from, so a row can say there is
 /// a newer one and an update can be refused.
-pub async fn pin(pool: &PgPool, version_id: &str, market: &str, slug: &str, commit: &str) -> Result<()> {
+pub async fn pin(
+    pool: &PgPool,
+    version_id: &str,
+    market: &str,
+    slug: &str,
+    commit: &str,
+) -> Result<()> {
     sqlx::query(
         "UPDATE skill_versions SET from_marketplace = $2, from_slug = $3, from_commit = $4 \
          WHERE id = $1",

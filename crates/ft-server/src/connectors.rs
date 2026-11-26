@@ -241,7 +241,9 @@ fn resource_metadata_of(header: &str) -> Option<String> {
         // every server that puts this parameter first. Slack does, and we
         // read it as a server wanting no authorization at all.
         let k = k.trim();
-        let k = k.rsplit_once(char::is_whitespace).map_or(k, |(_, name)| name);
+        let k = k
+            .rsplit_once(char::is_whitespace)
+            .map_or(k, |(_, name)| name);
         (k.eq_ignore_ascii_case("resource_metadata"))
             .then(|| v.trim().trim_matches('"').to_string())
     })
@@ -308,7 +310,6 @@ pub async fn register(at: &str, redirect: &str) -> Result<Registered> {
         client_secret: out.client_secret,
     })
 }
-
 
 /// How big a stored mark may be.
 ///
@@ -606,6 +607,69 @@ fn grant_from(text: &str) -> Result<crate::oauth::Grant> {
     })
 }
 
+/// Which connector's key a credential for this one is stored under.
+///
+/// **The credential belongs to the server, not to the folder that mentioned
+/// it.** Two bundles can declare the same address — Anthropic's own catalogue
+/// has a `slack` plugin and a `business` plugin that both point at
+/// `mcp.slack.com` — and keying the vault on the bundle made that two
+/// authorizations, two registered OAuth clients and two tokens for one
+/// account. Adding the second one showed "Connect" on a server you had just
+/// connected.
+///
+/// So everything that reads or writes a connector credential resolves through
+/// here first: the lowest skill id among the connectors sharing an address.
+/// Deterministic, so it does not move when a row is added, and it needs no
+/// migration — the first bundle anybody connected is usually the lowest.
+pub async fn credential_key(pool: &sqlx::PgPool, skill_id: &str) -> String {
+    let same: Option<String> = sqlx::query_scalar(
+        "SELECT min(o.skill_id) \
+           FROM connectors c JOIN connectors o ON o.url = c.url \
+          WHERE c.skill_id = $1",
+    )
+    .bind(skill_id)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten();
+    same.unwrap_or_else(|| skill_id.to_string())
+}
+
+/// Write down what discovery found, before anybody presses Connect.
+///
+/// **A row here with no `client_id` is the useful case.** It means the server
+/// was asked and said it registers no clients — GitHub, Slack, Google — so
+/// the screen can say "this one needs a client id made by hand" instead of
+/// drawing a Connect button that fails the moment it is pressed. Firetower
+/// swallowed that failure for a while, which made adding GitHub look like
+/// nothing had happened at all.
+///
+/// Best effort: a server that cannot be reached leaves no row, and the row is
+/// then written the first time somebody connects, as before.
+pub async fn remember(pool: &sqlx::PgPool, skill_id: &str, url: &str) {
+    let Ok(found) = discover(url).await else {
+        return;
+    };
+    let _ = sqlx::query(
+        "INSERT INTO connector_clients \
+           (skill_id, resource, authorize_url, token_url, register_url, scopes) \
+         VALUES ($1,$2,$3,$4,$5,$6) \
+         ON CONFLICT (skill_id) DO UPDATE SET \
+           resource = excluded.resource, authorize_url = excluded.authorize_url, \
+           token_url = excluded.token_url, register_url = excluded.register_url, \
+           scopes = excluded.scopes \
+         WHERE connector_clients.client_id IS NULL",
+    )
+    .bind(skill_id)
+    .bind(&found.resource)
+    .bind(&found.authorize_url)
+    .bind(&found.token_url)
+    .bind(&found.register_url)
+    .bind(&found.scopes)
+    .execute(pool)
+    .await;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -636,7 +700,10 @@ mod tests {
     #[test]
     fn the_well_known_segment_goes_after_the_origin_for_an_issuer_with_a_path() {
         assert_eq!(
-            inserted("https://access.stripe.com/mcp", "oauth-authorization-server"),
+            inserted(
+                "https://access.stripe.com/mcp",
+                "oauth-authorization-server"
+            ),
             "https://access.stripe.com/.well-known/oauth-authorization-server/mcp"
         );
         // No path, so there is nothing to insert ahead of and the two forms
@@ -711,7 +778,10 @@ mod tests {
         );
         // A bare challenge names nothing, and the caller falls back.
         assert_eq!(resource_metadata_of("Bearer"), None);
-        assert_eq!(resource_metadata_of(r#"Bearer error="invalid_token""#), None);
+        assert_eq!(
+            resource_metadata_of(r#"Bearer error="invalid_token""#),
+            None
+        );
     }
 
     /// **`resource` is the one that has to be there.** Without it the token is
@@ -743,68 +813,4 @@ mod tests {
             "the verifier never leaves here"
         );
     }
-}
-
-/// Which connector's key a credential for this one is stored under.
-///
-/// **The credential belongs to the server, not to the folder that mentioned
-/// it.** Two bundles can declare the same address — Anthropic's own catalogue
-/// has a `slack` plugin and a `business` plugin that both point at
-/// `mcp.slack.com` — and keying the vault on the bundle made that two
-/// authorizations, two registered OAuth clients and two tokens for one
-/// account. Adding the second one showed "Connect" on a server you had just
-/// connected.
-///
-/// So everything that reads or writes a connector credential resolves through
-/// here first: the lowest skill id among the connectors sharing an address.
-/// Deterministic, so it does not move when a row is added, and it needs no
-/// migration — the first bundle anybody connected is usually the lowest.
-pub async fn credential_key(pool: &sqlx::PgPool, skill_id: &str) -> String {
-    let same: Option<String> = sqlx::query_scalar(
-        "SELECT min(o.skill_id) \
-           FROM connectors c JOIN connectors o ON o.url = c.url \
-          WHERE c.skill_id = $1",
-    )
-    .bind(skill_id)
-    .fetch_optional(pool)
-    .await
-    .ok()
-    .flatten();
-    same.unwrap_or_else(|| skill_id.to_string())
-}
-
-
-/// Write down what discovery found, before anybody presses Connect.
-///
-/// **A row here with no `client_id` is the useful case.** It means the server
-/// was asked and said it registers no clients — GitHub, Slack, Google — so
-/// the screen can say "this one needs a client id made by hand" instead of
-/// drawing a Connect button that fails the moment it is pressed. Firetower
-/// swallowed that failure for a while, which made adding GitHub look like
-/// nothing had happened at all.
-///
-/// Best effort: a server that cannot be reached leaves no row, and the row is
-/// then written the first time somebody connects, as before.
-pub async fn remember(pool: &sqlx::PgPool, skill_id: &str, url: &str) {
-    let Ok(found) = discover(url).await else {
-        return;
-    };
-    let _ = sqlx::query(
-        "INSERT INTO connector_clients \
-           (skill_id, resource, authorize_url, token_url, register_url, scopes) \
-         VALUES ($1,$2,$3,$4,$5,$6) \
-         ON CONFLICT (skill_id) DO UPDATE SET \
-           resource = excluded.resource, authorize_url = excluded.authorize_url, \
-           token_url = excluded.token_url, register_url = excluded.register_url, \
-           scopes = excluded.scopes \
-         WHERE connector_clients.client_id IS NULL",
-    )
-    .bind(skill_id)
-    .bind(&found.resource)
-    .bind(&found.authorize_url)
-    .bind(&found.token_url)
-    .bind(&found.register_url)
-    .bind(&found.scopes)
-    .execute(pool)
-    .await;
 }

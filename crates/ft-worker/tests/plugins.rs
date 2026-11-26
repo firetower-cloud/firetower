@@ -332,7 +332,10 @@ async fn a_plugin_does_not_quietly_replace_a_skill_of_the_same_name() {
         name: "security-review".into(),
         kind: ft_proto::BundleKind::Plugin,
         files: vec![
-            file(".claude-plugin/plugin.json", r#"{"name":"security-review"}"#),
+            file(
+                ".claude-plugin/plugin.json",
+                r#"{"name":"security-review"}"#,
+            ),
             file(
                 "skills/code-review/SKILL.md",
                 "---\nname: code-review\n---\nTHEIRS\n",

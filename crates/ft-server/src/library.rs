@@ -128,15 +128,13 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
     // The connectors this person already holds a credential for. One query
     // rather than one per row: a library of forty servers was forty round
     // trips to answer a question the vault can answer once.
-    let held: Vec<String> = sqlx::query(
-        "SELECT name FROM secrets WHERE scope = $1 AND owner = $2",
-    )
-    .bind(crate::vault::CONNECTOR)
-    .bind(person)
-    .fetch_all(pool)
-    .await
-    .map(|rows| rows.into_iter().map(|r| r.get("name")).collect())
-    .unwrap_or_default();
+    let held: Vec<String> = sqlx::query("SELECT name FROM secrets WHERE scope = $1 AND owner = $2")
+        .bind(crate::vault::CONNECTOR)
+        .bind(person)
+        .fetch_all(pool)
+        .await
+        .map(|rows| rows.into_iter().map(|r| r.get("name")).collect())
+        .unwrap_or_default();
 
     // Which bundle's id a credential for each connector is stored under. Two
     // bundles naming one address share it, so the second one must not read as
@@ -242,7 +240,12 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 auth: b.try_get("auth").ok().flatten(),
                 // A server that asks for nothing has nothing to connect;
                 // everything else authorizes for itself, per person.
-                connected: match b.try_get::<Option<String>, _>("auth").ok().flatten().as_deref() {
+                connected: match b
+                    .try_get::<Option<String>, _>("auth")
+                    .ok()
+                    .flatten()
+                    .as_deref()
+                {
                     Some("none") => None,
                     _ => {
                         let k = key_of(&id);
@@ -265,8 +268,8 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
 
         // Every skill inside it.
         for (path, bytes) in &files {
-            let is_skill = path == "SKILL.md"
-                || (path.starts_with("skills/") && path.ends_with("/SKILL.md"));
+            let is_skill =
+                path == "SKILL.md" || (path.starts_with("skills/") && path.ends_with("/SKILL.md"));
             if !is_skill {
                 continue;
             }
@@ -318,15 +321,13 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
         }
     }
 
-    out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.sort_by_key(|a| a.name.to_lowercase());
     Ok(out)
 }
 
 /// Turn one component on or off for this person.
 pub async fn switch(pool: &PgPool, person: &str, item: &str, on: bool) -> Result<()> {
-    let (skill_id, path) = item
-        .split_once(':')
-        .context("that is not a library item")?;
+    let (skill_id, path) = item.split_once(':').context("that is not a library item")?;
 
     // Refused rather than drawn and ignored. The screen does not offer a
     // switch for these; an API call that tries anyway gets the reason.
@@ -345,12 +346,14 @@ pub async fn switch(pool: &PgPool, person: &str, item: &str, on: bool) -> Result
 
     let mut tx = pool.begin().await?;
     if on {
-        sqlx::query("DELETE FROM component_off WHERE skill_id = $1 AND person_id = $2 AND path = $3")
-            .bind(skill_id)
-            .bind(person)
-            .bind(path)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            "DELETE FROM component_off WHERE skill_id = $1 AND person_id = $2 AND path = $3",
+        )
+        .bind(skill_id)
+        .bind(person)
+        .bind(path)
+        .execute(&mut *tx)
+        .await?;
         // Switching a component on has to switch its bundle on, or nothing
         // reaches a session: the bundle is still what a pin is taken over.
         sqlx::query(

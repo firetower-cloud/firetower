@@ -51,15 +51,44 @@ async fn every_shape_the_screen_can_ask_for_is_legal_sql() {
     // bound as NULL is a filter nobody has run.
     let shapes: Vec<Asked> = vec![
         Asked::default(),
-        Asked { page: 2, ..Default::default() },
-        Asked { q: Some("mail"), ..Default::default() },
-        Asked { q: Some("  "), ..Default::default() },
-        Asked { kind: Some("mcp"), ..Default::default() },
-        Asked { kind: Some("skills"), ..Default::default() },
-        Asked { kind: Some("nonsense"), ..Default::default() },
-        Asked { installed: Some(true), ..Default::default() },
-        Asked { installed: Some(false), ..Default::default() },
-        Asked { q: Some("a"), kind: Some("mcp"), installed: Some(false), page: 2 },
+        Asked {
+            page: 2,
+            ..Default::default()
+        },
+        Asked {
+            q: Some("mail"),
+            ..Default::default()
+        },
+        Asked {
+            q: Some("  "),
+            ..Default::default()
+        },
+        Asked {
+            kind: Some("mcp"),
+            ..Default::default()
+        },
+        Asked {
+            kind: Some("skills"),
+            ..Default::default()
+        },
+        Asked {
+            kind: Some("nonsense"),
+            ..Default::default()
+        },
+        Asked {
+            installed: Some(true),
+            ..Default::default()
+        },
+        Asked {
+            installed: Some(false),
+            ..Default::default()
+        },
+        Asked {
+            q: Some("a"),
+            kind: Some("mcp"),
+            installed: Some(false),
+            page: 2,
+        },
     ];
     for ask in &shapes {
         let got = marketplace::entries(&pool, &org, ask)
@@ -101,15 +130,29 @@ async fn paging_all_the_way_down_sees_everything_once_and_halts() {
     let mut seen: Vec<String> = Vec::new();
     let mut page = 1;
     loop {
-        let got = marketplace::entries(&pool, &org, &Asked { page, ..Default::default() })
-            .await
-            .expect("a page");
-        seen.extend(got.entries.iter().map(|e| format!("{}/{}", e.marketplace_id, e.slug)));
+        let got = marketplace::entries(
+            &pool,
+            &org,
+            &Asked {
+                page,
+                ..Default::default()
+            },
+        )
+        .await
+        .expect("a page");
+        seen.extend(
+            got.entries
+                .iter()
+                .map(|e| format!("{}/{}", e.marketplace_id, e.slug)),
+        );
         if !got.more {
             break;
         }
         page += 1;
-        assert!(page < 500, "more never became false, so this would not stop");
+        assert!(
+            page < 500,
+            "more never became false, so this would not stop"
+        );
     }
 
     assert_eq!(

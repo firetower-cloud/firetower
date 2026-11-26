@@ -109,7 +109,10 @@ async fn a_manifest_cannot_ask_to_borrow_a_credential() {
         .await
         .unwrap();
     let (server, _, auth, borrow) = marketplace::connector_of(&files).unwrap();
-    assert_eq!((server.as_str(), auth.as_str(), borrow), ("github".into(), "oauth", None));
+    assert_eq!(
+        (server.as_str(), auth.as_str(), borrow),
+        ("github", "oauth", None)
+    );
 }
 
 /// The catalogue nobody else can read is the one that proves nothing.
@@ -147,6 +150,9 @@ fn an_address_is_read_in_every_form_somebody_pastes_it() {
     ] {
         assert_eq!(marketplace::github_of(form), want, "{form}");
     }
-    assert_eq!(marketplace::github_of("https://gitlab.com/acme/plugins"), None);
+    assert_eq!(
+        marketplace::github_of("https://gitlab.com/acme/plugins"),
+        None
+    );
     assert_eq!(marketplace::github_of("not a url"), None);
 }

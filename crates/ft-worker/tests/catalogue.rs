@@ -107,7 +107,12 @@ fn entries() -> Vec<Entry> {
         .as_array()
         .expect("marketplace.json lists plugins")
         .iter()
-        .map(|p| (p["name"].as_str().unwrap_or_default().to_string(), p.clone()))
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap_or_default().to_string(),
+                p.clone(),
+            )
+        })
         .collect();
 
     let mut dirs: Vec<PathBuf> = std::fs::read_dir(&mcp)
@@ -146,7 +151,10 @@ fn entries() -> Vec<Entry> {
             "{slug}: a row with no description is a row nobody can choose"
         );
         assert!(
-            m["homepage"].as_str().unwrap_or_default().starts_with("https://"),
+            m["homepage"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("https://"),
             "{slug}: the detail screen links the homepage, so it has to be one"
         );
 
@@ -241,7 +249,11 @@ fn entries() -> Vec<Entry> {
         });
         files.push(SkillFile {
             path: ".mcp.json".into(),
-            contents: encode(serde_json::to_string_pretty(&with_token).unwrap().as_bytes()),
+            contents: encode(
+                serde_json::to_string_pretty(&with_token)
+                    .unwrap()
+                    .as_bytes(),
+            ),
             executable: false,
         });
 
@@ -314,7 +326,9 @@ async fn claude_code_loads_every_entry_and_registers_its_server() {
     let root = ft_worker::plugins::root(dir.path(), &id);
     for e in &all {
         assert!(
-            root.join(&e.slug).join(".claude-plugin/plugin.json").is_file(),
+            root.join(&e.slug)
+                .join(".claude-plugin/plugin.json")
+                .is_file(),
             "{}: without its manifest Claude Code ignores the folder silently",
             e.slug
         );
@@ -479,7 +493,10 @@ async fn codex_takes_every_entry_as_a_streamable_http_server_with_our_token() {
     // what being refused the file would have cost.
     let config = std::fs::read_to_string(home.join("config.toml")).unwrap();
     assert!(config.contains("model = \"gpt-5-codex\""));
-    println!("codex: {} servers, all streamable http with a bearer token", all.len());
+    println!(
+        "codex: {} servers, all streamable http with a bearer token",
+        all.len()
+    );
 }
 
 /// The same catalogue in the shape ACP takes, for Kimi and Cursor.
@@ -526,9 +543,7 @@ async fn the_two_acp_engines_get_every_entry_in_the_shape_their_protocol_takes()
         }
         // ACP takes headers as a list of pairs rather than as an object, so a
         // pass-through here would be silently wrong rather than loudly.
-        if got["headers"][0]["name"] != "Authorization"
-            || got["headers"][0]["value"] != FAKE
-        {
+        if got["headers"][0]["name"] != "Authorization" || got["headers"][0]["value"] != FAKE {
             wrong.push(format!("{}: the credential did not translate", e.slug));
         }
     }
@@ -549,5 +564,9 @@ async fn the_two_acp_engines_get_every_entry_in_the_shape_their_protocol_takes()
         all.len(),
         "and all of them come back to be named, not dropped"
     );
-    println!("acp: {} servers translated, and all {} refusable", all.len(), refused.len());
+    println!(
+        "acp: {} servers translated, and all {} refusable",
+        all.len(),
+        refused.len()
+    );
 }

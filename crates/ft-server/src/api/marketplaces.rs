@@ -109,7 +109,9 @@ pub(super) async fn add_marketplace(
     .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
 
     read_now(&state, &id, &body.url, &git_ref, me.id.as_str()).await?;
-    mine(&state, me.org_id.as_str(), &id).await.map(|m| (StatusCode::CREATED, Json(m)))
+    mine(&state, me.org_id.as_str(), &id)
+        .await
+        .map(|m| (StatusCode::CREATED, Json(m)))
 }
 
 #[utoipa::path(

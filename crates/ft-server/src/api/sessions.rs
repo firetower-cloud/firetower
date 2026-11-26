@@ -1907,7 +1907,7 @@ pub(crate) async fn relaunch(
     // A relaunch mints a fresh token rather than reusing whatever the last
     // launch wrote: an access token has an hour on it and a session that is
     // being started again has very likely outlived one.
-    let skills = crate::api::with_connectors(&state, session.id.as_str(), &owner, skills).await;
+    let skills = crate::api::with_connectors(state, session.id.as_str(), owner, skills).await;
 
     state
         .fleet

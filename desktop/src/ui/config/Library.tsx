@@ -80,7 +80,7 @@ export function Mark({ logo, name }: { logo?: string | null; name: string }) {
   if (logo)
     return (
       <span className="plg" data-brand>
-        <img src={logo} alt="" className="h-[18px] w-[18px] rounded-[4px] object-contain" />
+        <img src={logo} alt="" className="h-[18px] w-[18px] rounded-xs object-contain" />
       </span>
     );
   return <span className="plg">{mono(name)}</span>;

@@ -8087,7 +8087,11 @@ impl Skills {
         else {
             return Ok(None);
         };
-        let Some(version_id) = row.try_get::<Option<String>, _>("version_id").ok().flatten() else {
+        let Some(version_id) = row
+            .try_get::<Option<String>, _>("version_id")
+            .ok()
+            .flatten()
+        else {
             return Ok(None);
         };
 
@@ -8162,7 +8166,9 @@ impl Skills {
             marketplace: r.get("name"),
             url: r.get("url"),
             slug: r.get::<Option<String>, _>("from_slug").unwrap_or_default(),
-            commit: r.get::<Option<String>, _>("from_commit").unwrap_or_default(),
+            commit: r
+                .get::<Option<String>, _>("from_commit")
+                .unwrap_or_default(),
         });
 
         Ok(Some(out))
@@ -8180,7 +8186,11 @@ fn component_at(path: &str, dir: &str, ends: &str, text: &str) -> Option<Compone
     let name = rest
         .split_once('/')
         .map(|(folder, _)| folder.to_string())
-        .unwrap_or_else(|| rest.trim_end_matches(ends).trim_end_matches('.').to_string());
+        .unwrap_or_else(|| {
+            rest.trim_end_matches(ends)
+                .trim_end_matches('.')
+                .to_string()
+        });
     let (front, body, _) = read_frontmatter(text);
     let description = {
         let said = said(&front, "description");
@@ -8253,12 +8263,9 @@ pub fn read_bundle(files: &[(String, Vec<u8>)]) -> Inside {
         } else if p == "hooks.json" || p.ends_with("/hooks.json") {
             out.has_hooks = true;
         } else if p == ".mcp.json" {
-            if let Some((server, url, auth, _)) =
-                crate::marketplace::connector_of(std::slice::from_ref(&(
-                    path.clone(),
-                    bytes.clone(),
-                )))
-            {
+            if let Some((server, url, auth, _)) = crate::marketplace::connector_of(
+                std::slice::from_ref(&(path.clone(), bytes.clone())),
+            ) {
                 out.server = Some(server);
                 out.url = Some(url);
                 out.auth = Some(auth);
