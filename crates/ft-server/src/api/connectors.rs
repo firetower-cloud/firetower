@@ -392,9 +392,31 @@ async fn client_for(
                 .to_string(),
         )
     })?;
-    let registered = connectors::register(&at, &redirect_uri(state))
-        .await
-        .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+    let registered = match connectors::register(&at, &redirect_uri(state)).await {
+        Ok(got) => got,
+        // **A server that advertises registration and then refuses it is the
+        // same problem as one that advertises none.** Figma publishes
+        // `api.figma.com/v1/oauth/mcp/register` and answers `403 Forbidden`,
+        // so the row offered a Connect button that could only ever fail, and
+        // failed with somebody else's error text. `needs_a_client` records
+        // what we just learned, which flips the row to "Set it up" — the
+        // answer was always there, we were just taking the server's word for
+        // what it could do instead of finding out.
+        Err(e) => {
+            tracing::info!(
+                connector = %id, at = %at,
+                "registration was refused, so this one needs an application by hand: {e:#}"
+            );
+            needs_a_client(state, id, &found).await;
+            return Err(ApiError::new(
+                ErrorCode::InvalidRequest,
+                "this server offers to hand out clients and then refuses, so it needs an \
+                 OAuth application you create once. Open it and use Set it up — the form has \
+                 the redirect URL to paste and a link to the right page."
+                    .to_string(),
+            ));
+        }
+    };
 
     sqlx::query(
         "INSERT INTO connector_clients \
@@ -992,6 +1014,34 @@ pub(super) async fn set_client(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Record that this server will not hand out a client, whatever it advertises.
+///
+/// `needs_client_id` on a library row is `client_id IS NULL AND register_url
+/// IS NULL`, so clearing the registration address is what moves the row from
+/// a Connect button that cannot work to the form that can. Only the address
+/// is dropped — the resource, the endpoints and the scopes are all still the
+/// ones discovery found, and a client somebody has already supplied is left
+/// alone.
+async fn needs_a_client(state: &AppState, id: &str, found: &Discovered) {
+    let _ = sqlx::query(
+        "INSERT INTO connector_clients \
+           (skill_id, resource, authorize_url, token_url, register_url, scopes) \
+         VALUES ($1,$2,$3,$4,NULL,$5) \
+         ON CONFLICT (skill_id) DO UPDATE SET \
+           resource = excluded.resource, authorize_url = excluded.authorize_url, \
+           token_url = excluded.token_url, register_url = NULL, \
+           scopes = excluded.scopes \
+         WHERE connector_clients.client_id IS NULL",
+    )
+    .bind(id)
+    .bind(&found.resource)
+    .bind(&found.authorize_url)
+    .bind(&found.token_url)
+    .bind(&found.scopes)
+    .execute(state.skills.pool())
+    .await;
+}
+
 /// Where somebody goes to make one, and what it has to say.
 ///
 /// Each of these consoles asks a different question for the same thing, and
@@ -1024,6 +1074,7 @@ pub fn console_for(host: &str) -> Option<&'static str> {
         h if h.contains("loops") => "https://app.loops.so/settings?page=api",
         h if h.contains("render") => "https://dashboard.render.com/settings/oauth",
         h if h.contains("steel") => "https://app.steel.dev/settings",
+        h if h.contains("figma") => "https://www.figma.com/developers/apps",
         _ => return None,
     })
 }

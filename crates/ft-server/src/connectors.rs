@@ -511,8 +511,35 @@ pub fn authorize_url(
         if let Some(scopes) = &d.scopes {
             q.append_pair("scope", scopes);
         }
+        // **Google issues a refresh token only if asked, and only once.**
+        // Without `access_type=offline` the grant is an access token with an
+        // hour on it and no way to renew — so a Drive connection works for a
+        // meeting and is dead by the afternoon, through a renewal path that
+        // has nothing to renew with. `prompt=consent` is the other half: a
+        // second authorization of an already-approved client returns no
+        // refresh token at all unless consent is asked again.
+        //
+        // Sent only to Google, because these are Google's parameters. Most
+        // servers ignore what they do not know, but "most" is not a thing to
+        // put in every authorization request on the strength of one vendor.
+        if is_google(&d.authorize_url) {
+            q.append_pair("access_type", "offline");
+            q.append_pair("prompt", "consent");
+        }
     }
     url.to_string()
+}
+
+/// Whether this authorization endpoint is Google's.
+///
+/// Matched on the host rather than on a substring: `accounts.google.com` is
+/// the issuer every Workspace MCP server names, and a hostname somebody else
+/// happens to spell with "google" in it is not it.
+fn is_google(authorize_url: &str) -> bool {
+    reqwest::Url::parse(authorize_url)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_owned))
+        .is_some_and(|h| h == "accounts.google.com" || h.ends_with(".googleapis.com"))
 }
 
 /// Turn the code the browser came back with into a grant.
@@ -689,6 +716,49 @@ mod tests {
             resource_metadata_of(linear).as_deref(),
             Some("https://mcp.linear.app/.well-known/oauth-protected-resource/mcp")
         );
+    }
+
+    /// Google hands out a refresh token only when asked, and the ask is two
+    /// parameters nobody else uses.
+    ///
+    /// Without them a Workspace connection is an access token with an hour on
+    /// it: it works while somebody is looking at it and is dead by the
+    /// afternoon, through a renewal path holding nothing to renew with.
+    #[test]
+    fn google_is_asked_for_a_refresh_token_and_nobody_else_is() {
+        let pkce = Pkce::new();
+        let google = Discovered {
+            resource: "https://drivemcp.googleapis.com/mcp/v1".into(),
+            authorize_url: "https://accounts.google.com/o/oauth2/v2/auth".into(),
+            token_url: "https://oauth2.googleapis.com/token".into(),
+            register_url: None,
+            scopes: Some("https://www.googleapis.com/auth/drive".into()),
+            name: None,
+        };
+        let at = authorize_url(&google, "cid", "http://127.0.0.1/cb", "st", &pkce);
+        assert!(at.contains("access_type=offline"), "{at}");
+        assert!(at.contains("prompt=consent"), "{at}");
+
+        let other = Discovered {
+            authorize_url: "https://mcp.linear.app/authorize".into(),
+            ..google.clone()
+        };
+        let at = authorize_url(&other, "cid", "http://127.0.0.1/cb", "st", &pkce);
+        assert!(
+            !at.contains("access_type"),
+            "only Google's parameters: {at}"
+        );
+        assert!(!at.contains("prompt="), "{at}");
+    }
+
+    /// Matched on the host, so somebody else's "google" is not Google.
+    #[test]
+    fn only_googles_own_authorization_server_counts_as_google() {
+        assert!(is_google("https://accounts.google.com/o/oauth2/v2/auth"));
+        assert!(is_google("https://drivemcp.googleapis.com/x"));
+        assert!(!is_google("https://auth.notgoogle.com/authorize"));
+        assert!(!is_google("https://google.evil.example/authorize"));
+        assert!(!is_google("not a url"));
     }
 
     /// RFC 8414 does the same for the authorization server's own document,
