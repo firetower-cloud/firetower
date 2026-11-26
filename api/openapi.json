@@ -12987,6 +12987,7 @@
           "RepoUnreachable",
           "RepoUnusable",
           "RepoInUse",
+          "ConnectorNeedsClient",
           "ActionFailed",
           "Unauthorized",
           "PasswordChangeRequired",

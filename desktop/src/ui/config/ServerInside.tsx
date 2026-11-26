@@ -13,11 +13,12 @@
  * came from, because an install here is a pinned copy and not a subscription.
  */
 import { useEffect } from "react";
-import { ArrowLeft, BookOpen, ExternalLink, Link2, Loader2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Link2, Loader2, TriangleAlert } from "lucide-react";
 import { useConnectorTools } from "~/api/generated/library/library";
 import { useSkillInside } from "~/api/generated/skills/skills";
-import { connect, setClient, useConnectorState } from "~/api/generated/connectors/connectors";
+import { connect, useConnectorState } from "~/api/generated/connectors/connectors";
 import { openExternal } from "~/open";
+import { SetUpClient } from "~/ui/config/SetUpClient";
 import { why } from "~/data";
 import type { Item } from "~/api/generated/model";
 import { Mark } from "~/ui/config/Library";
@@ -42,8 +43,6 @@ export function ServerInside({
   const [busy, setBusy] = useState(false);
   const [bad, setBad] = useState<string | null>(null);
   const [supplying, setSupplying] = useState(false);
-  const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
 
   /* Connecting happens elsewhere, so the page watches rather than waits. */
   useEffect(() => {
@@ -117,105 +116,28 @@ export function ServerInside({
           One application for this whole Firetower, not one per person: the
           people who connect afterwards each authorize their own account
           through it. */}
+      {/* **The same component the row opens in a modal.** Two copies of a
+          form is two forms that drift, and this one carries the redirect
+          address and the scope list — the two things that are wrong in a way
+          nobody can see. */}
       {supplying && (
         <section className="mt-5 rounded-xl bg-raise p-4">
           <h3 className="text-ui text-bone">An application for {of.displayName}</h3>
-          <p className="mt-1 max-w-[74ch] text-meta text-dim">
-            {of.displayName} does not register clients itself, so somebody creates one in its
-            console and pastes it here — once, for everybody on this Firetower. Each
-            person still authorizes their own account.
-          </p>
-          <p className="mt-3 text-meta text-dim">
-            Its redirect address has to be exactly this:
-          </p>
-          <p className="mt-1 select-all break-all rounded-lg bg-sunk px-3 py-2 font-mono text-meta text-bone">
-            {state?.redirectUri ?? "…"}
-          </p>
-          {/* **A console is a form, not an explanation.** Google's takes a
-              dozen steps across four screens, one of which is a checkbox
-              called "Use this client for an AI-powered agent" without which
-              none of it works. No sentence that fits beside a text field
-              replaces that page, so where the vendor has written one it is
-              linked beside the console rather than instead of it. */}
-          <div className="mt-3 flex flex-wrap gap-2">
-            {of.console && (
-              <button
-                type="button"
-                className="out"
-                onClick={() => void openExternal(of.console!)}
-              >
-                <ExternalLink className="h-4 w-4" strokeWidth={1.5} />
-                Open {of.displayName}&rsquo;s console
-              </button>
-            )}
-            {of.guide && (
-              <button type="button" className="out" onClick={() => void openExternal(of.guide!)}>
-                <BookOpen className="h-4 w-4" strokeWidth={1.5} />
-                Read their guide
-              </button>
-            )}
-          </div>
-          {/* The consent screen has to carry these, or the authorization is
-              refused for a scope nobody configured. */}
-          {state?.scopes && (
-            <>
-              <p className="mt-4 text-meta text-dim">
-                Its consent screen needs these scopes, and no others are asked for:
-              </p>
-              <p className="mt-1 select-all break-all rounded-lg bg-sunk px-3 py-2 font-mono text-meta text-text">
-                {state.scopes.split(" ").join("\n")}
-              </p>
-            </>
-          )}
-          <div className="mt-4 flex flex-col gap-2">
-            <input
-              value={clientId}
-              onChange={(e) => setClientId(e.target.value)}
-              placeholder="Client ID"
-              aria-label="Client ID"
-              className="rounded-lg bg-panel px-3 py-2 font-mono text-ui text-bone outline-none placeholder:text-mute"
-            />
-            <input
-              value={clientSecret}
-              onChange={(e) => setClientSecret(e.target.value)}
-              type="password"
-              placeholder="Client secret — leave empty if it has none"
-              aria-label="Client secret"
-              className="rounded-lg bg-panel px-3 py-2 font-mono text-ui text-bone outline-none placeholder:text-mute"
-            />
-          </div>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              className="btn primary"
-              disabled={busy || !clientId.trim()}
-              onClick={async () => {
-                setBusy(true);
-                setBad(null);
-                try {
-                  await setClient(of.skillId, {
-                    clientId: clientId.trim(),
-                    clientSecret: clientSecret.trim() || null,
-                  });
-                  setSupplying(false);
-                  setClientSecret("");
-                  await onGone();
-                  /* Straight into authorizing: supplying the application was
-                     only ever the thing standing in front of connecting. */
-                  await join();
-                } catch (e) {
-                  setBad(why(e));
-                } finally {
-                  setBusy(false);
-                }
+          <div className="mt-1">
+            <SetUpClient
+              of={{
+                skillId: of.skillId,
+                displayName: of.displayName,
+                console: of.console,
+                guide: of.guide,
               }}
-            >
-              {busy && <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.5} />}
-              Save and connect
-            </button>
-            <button type="button" className="btn quiet" onClick={() => setSupplying(false)}>
-              Cancel
-            </button>
+              onCancel={() => setSupplying(false)}
+              onDone={async () => {
+                setSupplying(false);
+                await onGone();
+                await join();
+              }}
+            />
           </div>
         </section>
       )}

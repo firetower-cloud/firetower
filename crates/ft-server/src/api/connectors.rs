@@ -430,7 +430,7 @@ async fn client_for(
     // help, with the form that does it on the same screen.
     let at = found.register_url.clone().ok_or_else(|| {
         ApiError::new(
-            ErrorCode::InvalidRequest,
+            ErrorCode::ConnectorNeedsClient,
             "this server does not hand out clients, so it needs an OAuth application you \
              create once. Open it and use Set it up — the form has the redirect URL to paste \
              and a link to the right page."
@@ -454,7 +454,7 @@ async fn client_for(
             );
             needs_a_client(state, id, &found).await;
             return Err(ApiError::new(
-                ErrorCode::InvalidRequest,
+                ErrorCode::ConnectorNeedsClient,
                 "this server offers to hand out clients and then refuses, so it needs an \
                  OAuth application you create once. Open it and use Set it up — the form has \
                  the redirect URL to paste and a link to the right page."

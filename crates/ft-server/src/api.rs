@@ -101,6 +101,16 @@ pub enum ErrorCode {
     RepoUnusable,
     /// Disconnecting would orphan running work.
     RepoInUse,
+    /// This server will not hand out an OAuth client, so one has to be made
+    /// by hand and pasted in.
+    ///
+    /// **Its own code because the screen answers it with a form.** The row
+    /// used to tell the difference by reading the sentence, which works until
+    /// somebody rewords the sentence and the form silently stops opening.
+    /// Nothing is misconfigured and there is nothing to retry: there is a
+    /// thing to supply, and the interface should put it in front of the
+    /// person rather than describe where it lives.
+    ConnectorNeedsClient,
     /// The host tried and it didn't work — nothing to commit, push rejected.
     ActionFailed,
     /// Nobody is signed in, or the session has ended. The interface shows the
@@ -122,6 +132,10 @@ impl ErrorCode {
     pub(crate) fn status(self) -> StatusCode {
         match self {
             Self::InvalidRequest => StatusCode::BAD_REQUEST,
+            // Nothing is malformed and nothing is forbidden: the request
+            // cannot be answered until somebody supplies an application, so
+            // it is the same shape of "not yet" as the hosts below.
+            Self::ConnectorNeedsClient => StatusCode::CONFLICT,
             Self::NotFound | Self::RepoNotConnected => StatusCode::NOT_FOUND,
             Self::ProviderNotConfigured => StatusCode::NOT_IMPLEMENTED,
             // The only thing that means "we do not know who you are". Anything

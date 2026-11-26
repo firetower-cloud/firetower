@@ -32,6 +32,7 @@ import { Blank, Dropping, Note, Section } from "~/ui/config/bits";
 import { Take } from "~/ui/config/Take";
 import { AddMenu } from "~/ui/config/AddMenu";
 import { BrowseAll } from "~/ui/config/BrowseAll";
+import { SetUpClientModal, type NeedsClient } from "~/ui/config/SetUpClient";
 import { why } from "~/data";
 import { useQueryClient } from "@tanstack/react-query";
 import { IconButton, MenuItem } from "~/components/ui";
@@ -232,6 +233,12 @@ export function Library({ open: asked = null }: { open?: string | null }) {
   const [browsing, setBrowsing] = useState(false);
   /** The catalogue row a preview is open on, handed over when it was opened. */
   const [peek, setPeek] = useState<Listed | undefined>();
+  /* **The form opens where Connect was pressed.** A server that will not
+     hand out a client used to answer Connect with a sentence telling
+     somebody to open the details and press a second button — three screens
+     to reach a form we already knew they needed. Nineteen entries hit that,
+     including every Google one. */
+  const [setting, setSetting] = useState<NeedsClient | null>(null);
   const INSTALLED = 4;
   const shown = rest.slice(0, SHELF);
   const more = Math.max(0, waiting - shown.length);
@@ -245,18 +252,40 @@ export function Library({ open: asked = null }: { open?: string | null }) {
    * register no clients, and a modal nobody pressed anything for is worse
    * than a Connect button that is still there.
    */
+  /**
+   * What the library knows about a server, for the form.
+   *
+   * **Asked for, not read off the render.** The row that needs this most is
+   * one installed a moment ago by the same press, and `lib.data` in this
+   * closure is whatever it held before that install — so the console link
+   * and the readable name would both be missing in exactly the case the form
+   * exists for.
+   */
+  const needing = async (id: string): Promise<NeedsClient | null> => {
+    const rows = await listLibrary().catch(() => null);
+    const i = (rows ?? lib.data ?? []).find((x) => x.skillId === id && x.kind === "server");
+    return i
+      ? { skillId: id, displayName: i.displayName, console: i.console, guide: i.guide }
+      : null;
+  };
+
   const offerToConnect = async (made: { id: string; hasConnector?: boolean }) => {
     try {
       const opened = await connect(made.id);
       await openExternal(opened.authorizeUrl);
       setAwaiting(true);
     } catch (e) {
-      /* **Said, not swallowed.** This was silent on the theory that a modal
-         nobody asked for is worse than none — true of a modal, and the reason
-         it was wrong: adding GitHub opened nothing and explained nothing, so
-         it read as a button that does not work. A line on the page is not a
-         modal. */
-      setTrouble(why(e));
+      /* **An error that names a control is a control in the wrong place.**
+         The refusal for a server that registers no clients said to go and
+         find the form; the form opens here instead. Anything else is still
+         a line on the page, because it is genuinely news. */
+      const says = why(e);
+      // The code, not the sentence: prose is what the person reads, and a
+      // reworded sentence must not quietly stop opening the form.
+      const wants = (e as { code?: string })?.code === "ConnectorNeedsClient";
+      const of = wants ? await needing(made.id) : null;
+      if (of) setSetting(of);
+      else setTrouble(says);
     }
   };
 
@@ -418,6 +447,21 @@ export function Library({ open: asked = null }: { open?: string | null }) {
       >
         {trouble && <Note icon={Puzzle}>{trouble}</Note>}
 
+        {setting && (
+          <SetUpClientModal
+            of={setting}
+            onCancel={() => setSetting(null)}
+            onDone={async () => {
+              const id = setting.skillId;
+              setSetting(null);
+              await refresh();
+              /* Straight into authorizing: supplying the application was
+                 only ever the thing standing in front of connecting. */
+              await offerToConnect({ id, hasConnector: true });
+            }}
+          />
+        )}
+
         {pasting && (
           <PasteAddress
             onClose={() => setPasting(false)}
@@ -443,6 +487,14 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                         setPeek(e);
                         setOpen(id);
                       }}
+                onSetUp={(i) =>
+                  setSetting({
+                    skillId: i.skillId,
+                    displayName: i.displayName,
+                    console: i.console,
+                    guide: i.guide,
+                  })
+                }
                 onConnect={offerToConnect}
                 onAdd={take}
               />
@@ -466,6 +518,14 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                   key={i.id}
                   of={i}
                   onOpen={() => setOpen(i.id)}
+                  onSetUp={() =>
+                    setSetting({
+                      skillId: i.skillId,
+                      displayName: i.displayName,
+                      console: i.console,
+                      guide: i.guide,
+                    })
+                  }
                   onConnecting={() => setAwaiting(true)}
                   onChanged={refresh}
                   onTrouble={setTrouble}
@@ -513,6 +573,14 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                         setPeek(e);
                         setOpen(id);
                       }}
+                      onSetUp={(i) =>
+                        setSetting({
+                          skillId: i.skillId,
+                          displayName: i.displayName,
+                          console: i.console,
+                          guide: i.guide,
+                        })
+                      }
                       onConnect={offerToConnect}
                       onAdd={take}
                     />
@@ -538,6 +606,14 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                         setPeek(e);
                         setOpen(id);
                       }}
+                  onSetUp={(i) =>
+                    setSetting({
+                      skillId: i.skillId,
+                      displayName: i.displayName,
+                      console: i.console,
+                      guide: i.guide,
+                    })
+                  }
                   onConnect={offerToConnect}
                   onAdd={take}
                 />
@@ -578,12 +654,15 @@ export function Library({ open: asked = null }: { open?: string | null }) {
 function Thing({
   of,
   onOpen,
+  onSetUp,
   onConnecting,
   onChanged,
   onTrouble,
 }: {
   of: Item;
   onOpen: () => void;
+  /** Supply the OAuth application this server will not hand out. */
+  onSetUp: () => void;
   /** An authorization is outstanding, so the list should start watching. */
   onConnecting: () => void;
   onChanged: () => Promise<void>;
@@ -656,7 +735,8 @@ function Thing({
           }}
           busy={going}
           onPress={join}
-          onOpen={onOpen}
+          // Not the detail screen: the form is the thing being asked for.
+          onOpen={onSetUp}
         />
       )}
 
@@ -1016,6 +1096,7 @@ function Offer({
   busy,
   waiting,
   onOpen,
+  onSetUp,
   onConnect,
   onAdd,
 }: {
@@ -1024,6 +1105,8 @@ function Offer({
   item?: Item;
   busy: boolean;
   onOpen: (id: string, of: Listed) => void;
+  /** Supply the OAuth application this server will not hand out. */
+  onSetUp: (item: Item) => void;
   onConnect: (made: { id: string; hasConnector?: boolean }) => Promise<void>;
   onAdd: (e: Listed) => Promise<void>;
   /** An authorization this row started is outstanding. */
@@ -1062,7 +1145,8 @@ function Offer({
         busy={busy}
         waiting={waiting}
         onPress={() => void onAdd(of)}
-        onOpen={open}
+        // "Set it up" wants the form, not the page the form lives on.
+        onOpen={item ? () => onSetUp(item) : open}
       />
     </div>
   );
