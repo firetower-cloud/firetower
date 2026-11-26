@@ -16,6 +16,8 @@ import { readFileSync } from "node:fs";
 const PORT = Number(process.argv[2] ?? 4401);
 
 const ORG = { id: "o_1", name: "Acme" };
+/** On by default, as a fresh install is, and `__reset` puts it back. */
+let telemetry = true;
 /** Where a person reaches this Firetower in a browser, as `setup_state` says. */
 const PUBLIC_URL = "https://firetower.acme.co";
 /* `slug` is what every path is keyed on — `u/kevin/…` — and it was missing,
@@ -617,6 +619,8 @@ const server = createServer(async (req, res) => {
     checkouts = START();
     PEOPLE = PEOPLE_START();
     COLLEAGUES = COLLEAGUES_START();
+    ORG.name = "Acme";
+    telemetry = true;
     TEAMS = TEAMS_START();
     TEAM_MEMBERS = TEAM_MEMBERS_START();
     GRANTS = GRANTS_START();
@@ -731,6 +735,40 @@ const server = createServer(async (req, res) => {
       res.writeHead(204, { "access-control-allow-origin": "*" });
       return res.end();
     }
+  }
+
+  /* ── The deployment, written to ───────────────────────────────────────
+     The organisation's name and telemetry, which are the two of F3's four
+     named capabilities that exist — the password minimum is a compile-time
+     constant and the sign-in configuration is environment variables read at
+     boot, so there is nothing here to stand in for them. Both are `admin` on
+     the server. */
+  if (req.method === "PATCH" && path === "/api/v1/organization") {
+    if (scene === "member") {
+      return json(res, { code: "Forbidden", message: "only an administrator can do that" }, 403);
+    }
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    const wanted = (body.name ?? "").trim();
+    if (!wanted) return json(res, { code: "InvalidRequest", message: "a name is needed" }, 400);
+    ORG.name = wanted;
+    return json(res, ORG);
+  }
+
+  if (path === "/api/v1/telemetry/settings" && req.method === "PUT") {
+    if (scene === "member") {
+      return json(res, { code: "Forbidden", message: "only an administrator can do that" }, 403);
+    }
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    telemetry = !!body.enabled;
+    return json(res, { enabled: telemetry });
   }
 
   if (req.method === "POST" && path === "/api/v1/teams") {
@@ -978,7 +1016,22 @@ const server = createServer(async (req, res) => {
   }
 
   const routes = {
-    "/api/v1/bootstrap": { version: "0.34.1", eventsPath: "/api/v1/events", authModes: ["password"], organization: ORG.name, serverId: "o_1" },
+    /* **`authModes` is scene-varied, because its loud state was otherwise
+       unphotographable.** `open` means anything that can reach the port is in,
+       and the deployment pane says so in brick — a fixture that only ever
+       answers `password` makes the one state worth warning about invisible to
+       every check at once, which is the same gap the people fixture had.
+         `proxied`   a proxy in front, and passwords still accepted;
+         `wide-open` nothing asked of anybody, which start-up allows on a
+                     loopback bind only. */
+    "/api/v1/bootstrap": {
+      version: "0.34.1",
+      eventsPath: "/api/v1/events",
+      authModes:
+        scene === "wide-open" ? ["open"] : scene === "proxied" ? ["password", "proxy"] : ["password"],
+      organization: ORG.name,
+      serverId: "o_1",
+    },
     /* `locked` and `needs-setup` are what `Gate.tsx` stands between a
        connected server and the app for, and neither could be reached. */
     /* **`member` is the scene that drives the ⌘8 trap.** People reads a
@@ -1087,6 +1140,25 @@ const server = createServer(async (req, res) => {
     "/api/v1/trackers": scene === "no-trackers" ? [] : TRACKERS,
     "/api/v1/tasks": scene === "no-tasks" ? { more: false, next: null, tasks: [] } : TASKS,
     "/api/v1/colleagues": scene === "no-people" ? [] : COLLEAGUES,
+    "/api/v1/telemetry/settings": { enabled: telemetry },
+    /* Exactly what would leave this install, which is the whole point of the
+       panel: the example is what *Show exactly what is sent* opens, and it has
+       to be readable as "no prompts, no names, nothing sensitive" rather than
+       taken on trust. */
+    "/api/v1/telemetry/preview": {
+      enabled: telemetry,
+      endpoint: "https://telemetry.firetower.cloud/v1/daily",
+      waiting: telemetry ? 3 : 0,
+      example: {
+        day: "2026-11-25",
+        version: "0.34.1",
+        installation: "a7c3…e11f",
+        workspaces: 14,
+        sessions: 62,
+        machines: 2,
+        agents: { "claude-code": 41, codex: 21 },
+      },
+    },
     /* Everybody, as an administrator is told it. **A member asking is refused
        below, before this table is reached** — see the guard above — so a
        People pane built on this list rather than on the colleague list fails

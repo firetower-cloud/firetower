@@ -82,12 +82,37 @@ const SIGN_IN: Record<string, { label: string; says: string; loud?: boolean }> =
   },
 };
 
-/** The three variables that decide it, and what each one does. */
-const DECIDED_BY: [string, string][] = [
-  ["FIRETOWER_AUTH", "Set it to `none` and no password is asked for."],
-  ["FIRETOWER_TRUSTED_PROXY_HEADER", "The header a proxy in front sets to say who the request is from."],
-  ["FIRETOWER_TRUSTED_PROXY", "Which addresses that header is believed from."],
+/**
+ * The three variables that decide it, and what each one does.
+ *
+ * Prose, with no markup in it: the first of these read *"Set it to `none`"*
+ * and the backticks came out as backticks, because nothing on this pane runs
+ * a formatter over a string. A value worth setting apart goes in `<Mono>`
+ * where it is drawn, not in a notation nothing reads.
+ */
+const DECIDED_BY: { name: string; says: React.ReactNode }[] = [
+  {
+    name: "FIRETOWER_AUTH",
+    says: (
+      <>
+        Set it to <Mono>none</Mono> and no password is asked for.
+      </>
+    ),
+  },
+  {
+    name: "FIRETOWER_TRUSTED_PROXY_HEADER",
+    says: "The header a proxy in front sets to say who the request is from.",
+  },
+  {
+    name: "FIRETOWER_TRUSTED_PROXY",
+    says: "Which addresses that header is believed from. Addresses or CIDR blocks.",
+  },
 ];
+
+/** A value, where the individual characters carry meaning. */
+function Mono({ children }: { children: React.ReactNode }) {
+  return <span className="font-mono text-bone">{children}</span>;
+}
 
 export function Deployment() {
   const boot = useBootstrap({ query: { staleTime: 60_000 } });
@@ -131,11 +156,11 @@ export function Deployment() {
           ]}
         />
         <div className="lrows mt-3">
-          {DECIDED_BY.map(([name, says]) => (
-            <div key={name} className="r">
+          {DECIDED_BY.map((v) => (
+            <div key={v.name} className="r">
               <span className="tx">
-                <b className="font-mono">{name}</b>
-                <s>{says}</s>
+                <b className="font-mono">{v.name}</b>
+                <s>{v.says}</s>
               </span>
             </div>
           ))}
