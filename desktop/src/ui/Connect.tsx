@@ -17,7 +17,7 @@ import { ArrowRight, CircleSlash2, Loader2, Lock, Server, UserRound, X } from "l
 import { Icon, IconButton } from "~/components/ui";
 import { markOf } from "~/fleet";
 import { Mark } from "~/ui/Mark";
-import { MIN_SERVER, packaged, reach, signIn, type Bootstrap } from "~/probe";
+import { candidates, MIN_SERVER, packaged, reach, signIn, type Bootstrap } from "~/probe";
 import { remember } from "~/servers";
 import { ReplacePassword } from "~/ui/ReplacePassword";
 
@@ -93,7 +93,18 @@ export function Connect({
               <Mark size={24} />
             </span>
             <h1>Looking for it…</h1>
-            <p>Trying https, then http. Only the scheme that answers is kept.</p>
+            {/* **Only when two are being tried**, which `candidates` decides
+                and this reads rather than guesses. An address that already
+                names its scheme is asked exactly once — and so is the one a
+                browser hands itself, which is the origin it was served from —
+                so the sentence was describing a second request that was never
+                made. It is still the right sentence for a bare host, where
+                https is tried first and http after. */}
+            <p>
+              {candidates(typed).length > 1
+                ? "Trying https, then http. Only the scheme that answers is kept."
+                : "Asking what is at that address, and whether it is a Firetower."}
+            </p>
             <div className="found">
               <span className="typing shrink-0">
                 <i />
@@ -267,7 +278,7 @@ function NoRoute({
       <div className="bad">
         <b>Could not reach {typed}</b>
         <span className="block">
-          A Firetower is never on the public internet, so this Mac reaches one over your mesh VPN.
+          A Firetower is never on the public internet, so it is reached over your mesh VPN.
         </span>
         <ul className="mt-2 space-y-1">
           <li>Is Tailscale running and signed in?</li>

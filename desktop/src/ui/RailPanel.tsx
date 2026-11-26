@@ -52,7 +52,7 @@ import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { childrenElsewhere, doing, flat, group, isChild, placeBeat, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
 import { useHosts, useRepos, useSessions, useSkills } from "~/data";
 import { isPersonal } from "~/filing";
-import { key } from "~/platform";
+import { advertisedKey } from "~/installed-app";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 import { useNow } from "~/ui/clock";
@@ -233,6 +233,9 @@ const worstFirst = (every: Workspace[]) => (a: Workspace, b: Workspace) =>
 function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => void }) {
   const path = usePathname();
   const start = useStart();
+  /* The row is the way in either way; the keycap is only drawn where the key
+     is actually listened for. See `~/installed-app`. */
+  const newKey = advertisedKey("N");
   const { data: sessions, loading, error } = useSessions();
   const me = useMe();
   const [by, setBy] = useState<By>(heldBy);
@@ -297,7 +300,7 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
             <Icon of={Pencil} size={14} />
           </span>
           <span className="min-w-0 flex-1 truncate text-bone">New workspace</span>
-          <span className="shrink-0 text-micro text-mute">{key("N")}</span>
+          {newKey && <span className="shrink-0 text-micro text-mute">{newKey}</span>}
         </button>
 
         {loading && <p className="px-2.5 py-1 text-ui text-mute">Loading…</p>}
@@ -785,10 +788,10 @@ function Head({ name, onCollapse }: { name: string; onCollapse: () => void }) {
       <Glyph
         of={Search}
         label="Find anything"
-        hint={key("K")}
+        hint={advertisedKey("K")}
         onPick={() => window.dispatchEvent(new CustomEvent("firetower:palette"))}
       />
-      <Glyph of={PanelLeftClose} label="Hide this panel" hint={key("\\")} onPick={onCollapse} />
+      <Glyph of={PanelLeftClose} label="Hide this panel" hint={advertisedKey("\\")} onPick={onCollapse} />
     </div>
   );
 }

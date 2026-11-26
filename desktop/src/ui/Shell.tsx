@@ -21,6 +21,7 @@ import "@xterm/xterm/css/xterm.css";
 import { Search as SearchIcon, X } from "lucide-react";
 import { token, wsBase } from "~/client/http";
 import { findPaths, resolvePath } from "~/paths";
+import { installedApp } from "~/installed-app";
 import { isMac } from "~/platform";
 
 type State = "connecting" | "live" | "closed";
@@ -100,9 +101,17 @@ export function Shell({
         const k = e.key.toLowerCase();
         // Copy and paste: the browser's, and nobody else's business.
         if (k === "c" || k === "v") return false;
-        // Ours — and stopped here, so the palette's ⌘K and the rest of the
-        // app's shortcuts never hear them. ⌘J goes on up: it is the panel's.
-        if (k === "k" || k === "f") {
+        /* Ours — and stopped here, so the palette's ⌘K and the rest of the
+           app's shortcuts never hear them. ⌘J goes on up: it is the panel's.
+
+           **⌘F is the only one of the two a browser keeps.** It is the one
+           shortcut the served client has, and it was measured arriving in
+           Chrome and in Safari with the browser's own find bar suppressed —
+           `~/installed-app` and `evidence/ticket-06/`. Clearing the buffer
+           goes with every other ⌘ chord there, and it is the one removal with
+           no button behind it: the door is the one every terminal has, which
+           is to type `clear`. */
+        if (k === "f" || (k === "k" && installedApp())) {
           e.preventDefault();
           e.stopPropagation();
           if (k === "k") term.clear();

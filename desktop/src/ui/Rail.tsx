@@ -16,6 +16,13 @@
  * argument in full. What the rail keeps of Updates is the mark on the avatar,
  * which is `ProfileMenu`'s.
  *
+ * **In a browser the number keys are gone, and so are their keycaps.** Which
+ * is measured rather than assumed — `evidence/ticket-06/` has both browsers
+ * driven with real keystrokes — and is the user's call rather than this file's:
+ * Chrome delivers `⌘1`–`⌘8` and Safari never does, and a rail that promised a
+ * shortcut half the browsers swallow would be `STYLE.md`'s fifth rule
+ * inverted. The icons are unchanged and are the way in. `~/installed-app`.
+ *
  * ## Hover previews, and so does focus
  *
  * Pointing at a destination swaps the panel's contents without navigating.
@@ -29,7 +36,8 @@ import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
-import { isGlobalMod, key } from "~/platform";
+import { advertisedKey, installedApp } from "~/installed-app";
+import { isGlobalMod } from "~/platform";
 import { useStart } from "~/start";
 import { SETTINGS_HOME } from "~/ui/config/panes";
 import { DESTINATIONS, destinationAt, type DestinationId } from "~/ui/destinations";
@@ -124,6 +132,22 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
         setPalette(false);
         return;
       }
+      /* **Nothing below this line in a browser**, which is the whole of the
+         shortcut decision at this surface. Measured rather than guessed:
+         Chrome delivers ⌘1–⌘8 and Safari never does, so half of them would
+         work in one browser and none in the other — and the user's answer to
+         that was to keep none of it but ⌘F, which is not here. The run is in
+         `evidence/ticket-06/` and the reasoning in `~/installed-app`.
+
+         Above it, deliberately: Escape still closes the preview and the
+         palette, because the palette is still openable from the panel's
+         Search glyph and a thing you can open has to be closable.
+
+         Every destination is still its icon, ⌘, is still the Settings row in
+         the profile menu, ⌘K is still the panel's Search glyph, ⌘N is still
+         the row above it and ⌘\ is still a glyph at each end of the panel.
+         Nothing here is the only way to anything. */
+      if (!installedApp()) return;
       /* The *global* modifier only. ⌃ is the inspector's inside a workspace,
          and `e.metaKey || e.ctrlKey` would take it here first. */
       if (!isGlobalMod(e)) return;
@@ -190,7 +214,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
             key={d.id}
             icon={d.icon}
             label={d.label}
-            hint={key(d.key)}
+            hint={advertisedKey(d.key)}
             on={d.id === here}
             peeked={peek === d.id && previews(d.id)}
             onPick={() => go(d.href)}

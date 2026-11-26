@@ -10,6 +10,7 @@ import { lazy, Suspense } from "react";
 import type { Backend } from "~/fleet";
 import { BackendProvider, dropCache } from "~/backend";
 import { bridge } from "~/bridge";
+import { installedApp } from "~/installed-app";
 import { StartProvider } from "~/start";
 import { Connect } from "~/ui/Connect";
 import { servers, onServers, tokensKnown } from "~/servers";
@@ -175,10 +176,19 @@ function Window() {
   useEffect(() => startCourier(), []);
 
   /* Ember, on the dock: summed across every server, because the person glancing
-     at it does not care whose machine stopped. */
+     at it does not care whose machine stopped.
+
+     **Only where there is a dock.** `bridge.setBadge` is already a no-op in a
+     browser, so this is not a fix for anything visible — it is the call site
+     F4 has to find and delete, named in `~/installed-app` rather than left as
+     a no-op that reads like a live feature. The fleet is still read: `Rail`
+     and `Titlebar` subscribe to it either way, and the sum is what the island
+     and the dock share. */
   const fleet = useFleet();
   const waiting = fleet.reduce((n, f) => n + waitingIn(f.sessions), 0);
-  useEffect(() => bridge.setBadge(waiting || null), [waiting]);
+  useEffect(() => {
+    if (installedApp()) bridge.setBadge(waiting || null);
+  }, [waiting]);
 
   const pick = (next: string) => {
     setWhich(next);

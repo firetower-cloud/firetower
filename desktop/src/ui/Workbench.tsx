@@ -43,7 +43,8 @@ import { useDirectories } from "~/data";
 import { useEndAgent, useEndWorkspace } from "~/ui/end";
 import { useConfirm } from "~/ui/Confirm";
 import { drag } from "~/drag";
-import { isGlobalMod, isLocalMod, key } from "~/platform";
+import { advertisedKey, installedApp } from "~/installed-app";
+import { isGlobalMod, isLocalMod } from "~/platform";
 
 /** The rail can be dragged between these. */
 const RAIL_MIN = 288;
@@ -219,7 +220,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     const left = tabs.slice(1, at).filter((t) => t.id !== "chat").map((t) => t.id);
     const all = tabs.filter((t) => t.id !== "chat").map((t) => t.id);
     return [
-      { label: "Close", shortcut: key("W"), disabled: id === "chat", onPick: () => closeTab(id) },
+      { label: "Close", shortcut: advertisedKey("W"), disabled: id === "chat", onPick: () => closeTab(id) },
       { label: "Close others", disabled: others.length === 0, onPick: () => closeTabs(others) },
       { label: "Close to the right", disabled: right.length === 0, onPick: () => closeTabs(right) },
       { label: "Close to the left", disabled: left.length === 0, onPick: () => closeTabs(left) },
@@ -353,6 +354,17 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
         return;
       }
 
+      /* **The window's own keys, and so only where there is a window.** ⌘\,
+         ⌘J and ⌘W are gone on a served page along with every other ⌘ chord
+         but ⌘F — `~/installed-app` has the measurement and the decision. Each
+         still has its control: the rail has a glyph to show it and its own
+         tab row to hide it, the terminal has its button in the header and its
+         own close, and a tab has an × and a Close in its menu.
+
+         Below the inspector's ⌃1–⌃3 above, which are the *local* modifier and
+         are not what was being argued about: no browser claims Ctrl with a
+         digit on a Mac or Alt with one anywhere else. */
+      if (!installedApp()) return;
       if (!isGlobalMod(e)) return;
       if (inTerminal && e.key.toLowerCase() !== "j") return;
       if (e.key === "\\") {
@@ -391,6 +403,11 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const endAgent = useEndAgent();
   const me = useMe();
   const directories = useDirectories();
+  /* The two shortcuts this screen advertises in prose rather than through a
+     `hint` prop. Null where there is no key to name, which is what takes the
+     suffix off the title and the line out of the terminal's header. */
+  const termKey = advertisedKey("J");
+  const railKey = advertisedKey("\\");
   const tabMenu = useMenu<string>();
   const chipMenu = useMenu<string>();
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -609,7 +626,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                   setShell(true);
                   setTerm(!term);
                 }}
-                title={`Terminal  ${key("J")}`}
+                title={termKey ? `Terminal  ${termKey}` : "Terminal"}
                 aria-label="Terminal"
                 className={`gbtn ${term ? "bg-overlay text-bone" : ""}`}
               >
@@ -645,7 +662,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 them — rather than one toggle that is in the wrong place half
                 the time. */}
             {!open && (
-              <IconButton of={PanelRight} onClick={() => setOpen(true)} label="Show the rail" hint={`Show the rail  ${key("\\")}`} />
+              <IconButton of={PanelRight} onClick={() => setOpen(true)} label="Show the rail" hint={railKey ? `Show the rail  ${railKey}` : undefined} />
             )}
           </div>
         </div>
@@ -722,7 +739,14 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
               <span className="text-meta text-dim">Shell</span>
               <span className="font-mono text-micro text-mute">{place.branch}</span>
-              <span className="ml-auto text-micro text-mute">{key("J")} hides</span>
+              {/* The `ml-auto` is the row's layout and not the line's, so it
+                  stays on a spacer when there is no key to name — without it
+                  the close button walks left to meet the branch. */}
+              {termKey ? (
+                <span className="ml-auto text-micro text-mute">{termKey} hides</span>
+              ) : (
+                <span className="ml-auto" />
+              )}
               <button
                 onClick={() => {
                   setShell(false);

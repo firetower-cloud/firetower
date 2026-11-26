@@ -38,7 +38,7 @@ export function Setup({ onDone }: { onDone: () => void }) {
           <Building2 className="h-6 w-6" strokeWidth={1.75} />
         </span>
         <h1>Name this Firetower</h1>
-        <p>What the people who run it call themselves. It is what this Mac shows in the strip.</p>
+        <p>What the people who run it call themselves. It is the name the title bar shows, beside yours.</p>
         <label className="in">
           <input autoFocus value={org} onChange={(e) => setOrg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && org.trim() && name.mutate({ data: { name: org.trim() } }, { onSuccess: refresh })} placeholder="Westlabs" aria-label="What to call this Firetower" className="bg-transparent placeholder:text-mute focus:outline-none" />
         </label>

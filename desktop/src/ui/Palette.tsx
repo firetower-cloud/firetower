@@ -15,7 +15,7 @@ import { useFleet } from "~/fleet";
 import { Fragment } from "react";
 import { group, shortRepo } from "~/api/workspaces";
 import { navigate } from "~/shims/next-navigation";
-import { key } from "~/platform";
+import { advertisedKey, installedApp } from "~/installed-app";
 import { SETTINGS_HOME } from "~/ui/config/panes";
 import { DESTINATIONS } from "~/ui/destinations";
 
@@ -77,15 +77,23 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       ...DESTINATIONS.map((d) => ({
         id: `c:${d.id}`,
         label: d.label,
-        hint: key(d.key),
+        hint: advertisedKey(d.key),
         kind: "command" as const,
         run: () => navigate(d.href),
       })),
-      { id: "c:new", label: "New workspace", hint: key("N"), kind: "command", run: () => navigate("/new") },
-      { id: "c:settings", label: "Settings", hint: key(","), kind: "command", run: () => navigate(SETTINGS_HOME) },
+      { id: "c:new", label: "New workspace", hint: advertisedKey("N"), kind: "command", run: () => navigate("/new") },
+      { id: "c:settings", label: "Settings", hint: advertisedKey(","), kind: "command", run: () => navigate(SETTINGS_HOME) },
       { id: "c:updates", label: "Updates", kind: "command", run: () => navigate("/updates") },
       { id: "c:account", label: "Account", kind: "command", run: () => navigate("/account") },
-      { id: "c:connect", label: "Connect to a Firetower…", kind: "command", run: () => navigate("/connect") },
+      /* **The one command that needs more than one Firetower to mean
+         anything.** It is the switcher's second row by another route, and the
+         palette is still openable in a browser from the panel's Search glyph
+         — so leaving it here would be the one place a served page still
+         offered to connect to somewhere else. The rest of this list is
+         addresses within this Firetower and is everybody's. */
+      ...(installedApp()
+        ? [{ id: "c:connect", label: "Connect to a Firetower…", kind: "command" as const, run: () => navigate("/connect") }]
+        : []),
       ...(import.meta.env.DEV ? [{ id: "c:style", label: "Open the style guide", kind: "command" as const, run: () => navigate("/style") }] : []),
     ];
 

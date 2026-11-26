@@ -34,6 +34,7 @@
  */
 import { useSyncExternalStore } from "react";
 import { bridge } from "~/bridge";
+import { installedApp } from "~/installed-app";
 import type { AppChannel } from "~/channel";
 import { appChannel, endpointFor, rememberInstalledFrom } from "~/channel";
 import type { Progress } from "~/update-shell";
@@ -98,7 +99,7 @@ export function look(): Promise<void> {
 }
 
 async function ask(): Promise<void> {
-  if (!bridge.native || taking) return;
+  if (!installedApp() || taking) return;
 
   /* Asked once and kept. Its own try, so a shell that will not say which build
      it is does not also cost us the check. */

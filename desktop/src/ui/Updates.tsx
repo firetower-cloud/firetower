@@ -58,7 +58,7 @@ import {
   wouldEnd,
 } from "~/api/updates";
 import { useBackendKey } from "~/backend";
-import { bridge } from "~/bridge";
+import { installedApp } from "~/installed-app";
 import type { AppChannel } from "~/channel";
 import { installedFrom, revealChannels, setAppChannel, useAppChannel, useChannelsRevealed } from "~/channel";
 import type { Span } from "~/releases";
@@ -409,7 +409,13 @@ function Reveal({ shown, revealed }: { shown: boolean; revealed: boolean }) {
  * restart — which is why pressing the control asks for one straight away
  * rather than waiting up to ten minutes to be believed.
  *
- * Nothing in a browser tab: a tab has no build of its own to move.
+ * **Nothing in a browser tab, and the rest of this screen stays.** A tab has
+ * no build of its own to move — it updates by being reloaded — so the whole
+ * section goes. What is above and below it is about the control plane and the
+ * machines, which is just as real on a page a control plane served, and the
+ * headline below already falls back to the deployment's answer because
+ * `build.newer` is null where there is no build to check. `~/installed-app`
+ * carries the rule.
  */
 function Copy({ status, shown }: { status: UpdateStatus | undefined; shown: boolean }) {
   const build = useBuild();
@@ -438,7 +444,7 @@ function Copy({ status, shown }: { status: UpdateStatus | undefined; shown: bool
     };
   }, [spanOpen, build.version, build.newer]);
 
-  if (!bridge.native) return null;
+  if (!installedApp()) return null;
 
   /* No confirmation. Nothing is lost — the servers and their tokens stay, and
      what it ends is this window, which is the thing the button says. */

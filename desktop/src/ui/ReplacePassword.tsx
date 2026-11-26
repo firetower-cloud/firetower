@@ -114,8 +114,8 @@ export function ReplacePassword({
           ) : (
             <>
               {username ? <><span className="text-text">{username}</span>&apos;s password </> : "Your password "}
-              was set by an administrator, who has seen it. Choose your own in a browser, then come
-              back here.
+              was set by an administrator, who has seen it. Choose your own on the control plane,
+              then sign in with it.
             </>
           )}
         </p>

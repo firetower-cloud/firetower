@@ -3,19 +3,24 @@
  *
  * `auth/me` is asked on every visit rather than trusted from the sign-in: the
  * stored user can be stale, and whether a password still has to be replaced is
- * a fact about the server, not about this Mac.
+ * a fact about the server, not about this client.
  *
  * **No password form.** Passwords are replaced on the control plane's own
  * interface, which is one address this app already knows and is never a
  * version behind the server. What is left here is the two things that are
- * about this Mac rather than about the account: sign out revokes this Mac's
- * token on the server, and forget drops the server from this Mac without
+ * about this client rather than about the account: sign out revokes this
+ * client's token on the server, and forget drops the server from it without
  * asking the server anything — for the day it is no longer reachable.
+ *
+ * **Forget is the installed app's alone.** It is half of being able to hold
+ * several Firetowers at once, and a page served by one can only ever reach
+ * that one — see `~/installed-app`. Sign out is everybody's.
  */
 import { useMutation } from "@tanstack/react-query";
 import { ExternalLink, KeyRound, LogOut, Trash2, UsersRound } from "lucide-react";
 import { useLogout, useMe } from "~/api/generated/auth/auth";
 import { useBackendKey, dropCache } from "~/backend";
+import { installedApp } from "~/installed-app";
 import { forget, servers } from "~/servers";
 import { navigate } from "~/shims/next-navigation";
 import { openExternal } from "~/open";
@@ -40,6 +45,9 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
     onSuccess: onForgot,
   });
 
+  /* Dropping a Firetower is only meaningful where there can be another one.
+     Read once: the heading's note and the control itself have to agree. */
+  const canForget = installedApp();
   const user = me.data?.user;
   const org = me.data?.organization;
   const stored = servers().find((s) => s.serverId === key);
@@ -108,7 +116,7 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
           </p>
         )}
 
-        {/* The address this Mac reached the server on, which is the one proven
+        {/* The address this client reached the server on, which is the one proven
             to work from here — not a value the server reports about itself. */}
         <section className="lsec">
           <h2>Password</h2>
@@ -124,32 +132,50 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
           </div>
         </section>
 
+        {/* **"This sign-in", not "this Mac".** The two controls under it are
+            about the connection this client holds rather than about the
+            account, which is what the heading has always been for — and the
+            client is a window on a Mac in one build and a tab in somebody's
+            browser in the other, so naming one of the two was never right and
+            is now wrong on the surface most people will use. */}
         <section className="lsec">
-          <h2>This Mac</h2>
+          <h2>This sign-in</h2>
           <p className="note">
-            Both of these are about this Mac rather than about your account. Neither touches anything running
-            on the server.
+            {canForget
+              ? "Both of these are about this connection rather than about your account. Neither touches anything running on the server."
+              : "This is about this connection rather than about your account. It does not touch anything running on the server."}
           </p>
           <div className="card1 flex flex-wrap items-center gap-3">
             <button disabled={leave.isPending} onClick={() => leave.mutate(true)} className="btn plain"><LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />Sign out</button>
-            <span className="aside1">revokes this Mac&rsquo;s token on the server</span>
+            <span className="aside1">revokes this token on the server</span>
             {/* **Brick, and it says Firetower.** It was dim and said "server",
                 which is the one control on this screen that cannot be undone
-                drawn as the quietest thing on it. */}
-            <button
-              disabled={leave.isPending}
-              onClick={() =>
-                void confirm({
-                  title: `Forget ${backend.org} on this Mac?`,
-                  body: "The token is dropped here; the server is not told, and its sessions carry on.",
-                  action: "Forget this Firetower",
-                  tone: "danger",
-                }).then((ok) => ok && leave.mutate(false))
-              }
-              className="btn danger ml-auto"
-            >
-              <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Forget this Firetower
-            </button>
+                drawn as the quietest thing on it.
+
+                **And it is the installed app's only.** Forgetting a Firetower
+                is half of multi-installation switching — it drops the token
+                here and leaves the server alone, so that a client pointed at
+                several can stop being pointed at one. A served page is pointed
+                at the Firetower that sent it and nothing else, so forgetting
+                it would sign somebody out of the page they are reading and
+                land them back on its own door. Sign out is the control that
+                means that, and it is right there. See `~/installed-app`. */}
+            {canForget && (
+              <button
+                disabled={leave.isPending}
+                onClick={() =>
+                  void confirm({
+                    title: `Forget ${backend.org} here?`,
+                    body: "The token is dropped here; the server is not told, and its sessions carry on.",
+                    action: "Forget this Firetower",
+                    tone: "danger",
+                  }).then((ok) => ok && leave.mutate(false))
+                }
+                className="btn danger ml-auto"
+              >
+                <Trash2 className="h-3.5 w-3.5" strokeWidth={1.75} />Forget this Firetower
+              </button>
+            )}
           </div>
         </section>
 

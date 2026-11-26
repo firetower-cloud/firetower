@@ -12,6 +12,22 @@
  * still goes to the dock and to the island; this is the narrower, cheaper
  * thing that was added back inside the window.
  *
+ * ## Served in a browser, the menu is its first page and the avatar has one mark
+ *
+ * There is one Firetower behind a page a control plane served — it is the
+ * origin the page came from — so the second page, the row that opens it and
+ * the mark beside that row are all answers to a question that cannot be
+ * asked. The ember dot goes with them for the same reason and not a different
+ * one: *waiting somewhere you are not* needs an elsewhere, and there is none.
+ *
+ * **What is left is one mark, and it is `.news`.** That is the specification's
+ * F4 — "one of the two marks the avatar can draw" — and it is the right one of
+ * the two: a deployment with an upgrade waiting is just as real in a browser,
+ * and `Updates` still offers it. What a browser cannot light it with is *this
+ * app's own build*, which `update.ts` already settles by never checking
+ * outside a shell, so `updatesRow`'s two trains come down to one without this
+ * file doing anything about it. See `~/installed-app`.
+ *
  * ## Two marks on the avatar, and exactly two things that may set them
  *
  * Settings and Updates used to be icons in the rail as well as rows in here,
@@ -60,7 +76,7 @@ import { dropCache } from "~/backend";
 import { useUpdatesRow } from "~/data";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
 import { forget } from "~/servers";
-import { key } from "~/platform";
+import { advertisedKey, installedApp } from "~/installed-app";
 import { navigate } from "~/shims/next-navigation";
 import { useTheme, type Theme } from "~/theme";
 import { SETTINGS_HOME } from "~/ui/config/panes";
@@ -91,6 +107,11 @@ export function ProfileMenu({
      this button and the row inside the menu have to agree, and two calls could
      straddle a refetch and disagree for a frame. */
   const updates = useUpdatesRow();
+  /* An elsewhere to be waited on in needs more than one Firetower, which a
+     served page never has. Read here rather than in `Rail`, which computes the
+     fact: the fact is still true of the fleet, and what changes is whether
+     this avatar has anywhere to put it. */
+  const elsewhere = waitingElsewhere && installedApp();
 
   const open = (el: HTMLElement) => {
     setPage("profile");
@@ -103,7 +124,7 @@ export function ProfileMenu({
         onClick={(e) => open(e.currentTarget)}
         aria-haspopup="menu"
         aria-expanded={!!anchor}
-        title={`${who} — ${backend.org}${waitingElsewhere ? " · someone is waiting elsewhere" : ""}${updates.dot ? ` · ${updates.label}` : ""}`}
+        title={`${who} — ${backend.org}${elsewhere ? " · someone is waiting elsewhere" : ""}${updates.dot ? ` · ${updates.label}` : ""}`}
         aria-label="You, and which Firetower you are in"
         className="group relative grid h-10 w-10 shrink-0 place-items-center rounded-full"
       >
@@ -114,7 +135,7 @@ export function ProfileMenu({
         >
           {initials(who)}
         </span>
-        {waitingElsewhere && (
+        {elsewhere && (
           <span className="pointer-events-none absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-ember ring-2 ring-ground" />
         )}
         {/* Bottom right, and never ember: the two marks have to stay tellable
@@ -125,7 +146,7 @@ export function ProfileMenu({
       {anchor && (
         <Pop anchor={anchor} onClose={() => setAnchor(null)} beside width={page === "switch" ? 296 : 252}>
           {page === "profile" ? (
-            <Profile backend={backend} who={who} elsewhere={waitingElsewhere} updates={updates} onSwitch={() => setPage("switch")} onClose={() => setAnchor(null)} onForgot={onForgot} />
+            <Profile backend={backend} who={who} elsewhere={elsewhere} updates={updates} onSwitch={() => setPage("switch")} onClose={() => setAnchor(null)} onForgot={onForgot} />
           ) : (
             <FiretowerSwitcher backend={backend} onSwitch={onSwitch} onBack={() => setPage("profile")} onClose={() => setAnchor(null)} />
           )}
@@ -150,7 +171,15 @@ export function initials(username: string): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-function Profile({
+/**
+ * The menu's first page, which in a browser is the whole menu.
+ *
+ * Exported for `installed-only.test.tsx`, which renders it on both sides of
+ * the shell question. It is only drawn inside the popover above, so a static
+ * render of `ProfileMenu` reaches the avatar and nothing under it — and the
+ * row this change takes away is in here.
+ */
+export function Profile({
   backend,
   who,
   elsewhere,
@@ -196,28 +225,38 @@ function Profile({
       </div>
       <Rule />
 
-      <button onClick={onSwitch} className="mrow">
-        <span className="server-mark grid h-6 w-6 shrink-0 place-items-center text-micro" data-reach={backend.reach}>
-          {backend.mark}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-bone">Switch Firetower</span>
-          <span className="block truncate text-meta text-mute">
-            In {backend.org} · {fleet.length} connected
-          </span>
-        </span>
-        {elsewhere && <span className="h-2 w-2 shrink-0 rounded-full bg-ember" title="Waiting somewhere you are not" />}
-        <span className="shrink-0 text-mute">
-          <Icon of={ChevronRight} size={14} />
-        </span>
-      </button>
+      {/* **The door to the second page, and the only one.** Gone in a browser
+          with the page behind it: `onSwitch` is the only thing that sets
+          `page`, so taking this away is what makes `page === "switch"`
+          unreachable rather than a branch left hanging. The popover's width
+          follows — it is 252 on this page and only widens to 296 for the
+          switcher. */}
+      {installedApp() && (
+        <>
+          <button onClick={onSwitch} className="mrow">
+            <span className="server-mark grid h-6 w-6 shrink-0 place-items-center text-micro" data-reach={backend.reach}>
+              {backend.mark}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-bone">Switch Firetower</span>
+              <span className="block truncate text-meta text-mute">
+                In {backend.org} · {fleet.length} connected
+              </span>
+            </span>
+            {elsewhere && <span className="h-2 w-2 shrink-0 rounded-full bg-ember" title="Waiting somewhere you are not" />}
+            <span className="shrink-0 text-mute">
+              <Icon of={ChevronRight} size={14} />
+            </span>
+          </button>
 
-      <Rule />
+          <Rule />
+        </>
+      )}
       <Item icon={KeyRound} label="Account" onPick={() => go("/account")} />
       {/* The only Settings there is, and the only place ⌘, is advertised.
           `SETTINGS_HOME` rather than the path, so this row, the key and the
           palette's command cannot drift to three different panes. */}
-      <Item icon={Settings2} label="Settings" hint={key(",")} onPick={() => go(SETTINGS_HOME)} />
+      <Item icon={Settings2} label="Settings" hint={advertisedKey(",")} onPick={() => go(SETTINGS_HOME)} />
       {/* The row says which version; the mark on the avatar only says there is
           one. Neither is enough alone — a number nobody can see until they
           open a menu is not a signal, and a dot you cannot act on is noise. */}
@@ -264,7 +303,7 @@ function Profile({
         onPick={() =>
           void confirm({
             title: `Sign out of ${backend.org}?`,
-            body: "This Mac's token is revoked on the server. The sessions carry on; you can sign in again with your password.",
+            body: "This sign-in is revoked on the server. The sessions carry on; you can sign in again with your password.",
             action: "Sign out",
             tone: "danger",
           }).then((ok) => ok && leave.mutate())
