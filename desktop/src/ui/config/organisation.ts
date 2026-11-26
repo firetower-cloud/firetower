@@ -473,10 +473,21 @@ export function feedState(
  * no grants, so the dialog said *nobody loses access* over an irreversible
  * delete and the people who did lose it found out afterwards.
  *
- * `unread` rather than refusing outright: an administrator who is only a
- * Viewer somewhere gets that refusal every time, and a team they want gone
- * would be undeletable forever. Saying what is not known is what *the
- * consequence stated before confirming* has to mean when it cannot be read.
+ * `unread` rather than refusing outright, **and the reason first written here
+ * was wrong**: it said an administrator who is only a Viewer somewhere would be
+ * refused every time, so a team they wanted gone would be undeletable. That
+ * cannot happen. `may_administer` short-circuits for an administrator of the
+ * organisation — the directory exists or it is a 404 — and this dialog is only
+ * ever drawn for one. The claim came from a review's hypothesis and was not
+ * checked against the handler.
+ *
+ * The real reason is narrower and still holds: a read can fail for reasons
+ * that are nobody's permissions — a timeout, a 5xx, a directory removed
+ * between the list and the grants on it. **This dialog's job is to state the
+ * consequence, not to gate on it**, so a read that failed should not turn into
+ * a functional refusal of an unrelated delete. Saying what is not known is
+ * what *the consequence stated before confirming* has to mean when it cannot
+ * be read.
  */
 export function consequenceState(loading: boolean, failed: boolean): "reading" | "unread" | "known" {
   if (loading) return "reading";
