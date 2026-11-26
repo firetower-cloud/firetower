@@ -16,6 +16,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowLeft,
   Check,
   Link2,
   Loader2,
@@ -106,6 +107,14 @@ export function Library({ open: asked = null }: { open?: string | null }) {
      question they came here with. */
   const [where, setWhere] = useState<Where>("discover");
   const [query, setQuery] = useState("");
+  /* **Typing is not a request.** One per keystroke is a request per
+     keystroke, and the answers come back out of order. The shelf and the
+     browse list both read the settled value. */
+  const [settled, setSettled] = useState("");
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(query.trim()), 250);
+    return () => clearTimeout(t);
+  }, [query]);
   const [busy, setBusy] = useState<string | null>(null);
   /* **Rows added in this sitting stay where they were.** Pressing a button
      and having the thing you pressed jump to another part of the page is how
@@ -151,7 +160,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
      the query box and the segmented control travel with the request, and the
      two shelves are two questions rather than one list cut in half. */
   const asking = {
-    q: query.trim() || undefined,
+    q: settled || undefined,
     kind: kind === "all" ? undefined : kind === "mcp" ? "mcp" : "skills",
   };
   const held = useListEntries(
@@ -342,6 +351,18 @@ export function Library({ open: asked = null }: { open?: string | null }) {
               ))}
             </div>
             <span className="h-5 w-px bg-line" />
+            {/* **One header, not two.** Browsing everything used to open a
+                panel carrying its own filter and its own search box, inside
+                a page that already had both — so the screen showed two of
+                each. The page owns them; this slot is the only thing that
+                differs, because "installed or discover" is not a question
+                somebody is asking while looking at all of it. */}
+            {browsing ? (
+              <button type="button" className="out" onClick={() => setBrowsing(false)}>
+                <ArrowLeft className="h-4 w-4" strokeWidth={1.5} />
+                Library
+              </button>
+            ) : (
             <div className="seg2" role="tablist">
               {(["installed", "discover"] as Where[]).map((w) => (
                 <button
@@ -363,13 +384,14 @@ export function Library({ open: asked = null }: { open?: string | null }) {
                 </button>
               ))}
             </div>
+            )}
             <label className="srch ml-auto">
               <Search className="h-4 w-4 text-mute" strokeWidth={1.5} />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search"
-                aria-label="Search the library"
+                placeholder={browsing ? "Search everything" : "Search"}
+                aria-label={browsing ? "Search the whole catalogue" : "Search the library"}
               />
             </label>
           </div>
@@ -392,11 +414,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
         {browsing ? (
           <BrowseAll
             kind={kind}
-            onKind={(k) => {
-              setKind(k);
-              setStayPut(new Set());
-            }}
-            onBack={() => setBrowsing(false)}
+            query={settled}
             row={(e) => (
               <Offer
                 key={`${e.marketplaceId}/${e.slug}`}
