@@ -374,6 +374,18 @@ async fn client_for(
 ) -> Result<(Discovered, String), ApiError> {
     use sqlx::Row as _;
     let pool = state.skills.pool();
+    // **Read before either branch, because both have to narrow.** It was
+    // applied only where discovery runs, so the first press of Connect asked
+    // for the curated set and every press after it — once a client id was
+    // stored and the early return took over — asked for everything the
+    // server advertises. Measured on Drive: one scope, then three.
+    let wanted: Option<String> =
+        sqlx::query_scalar("SELECT scopes FROM connectors WHERE skill_id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
     let held = sqlx::query(
         "SELECT resource, authorize_url, token_url, register_url, client_id, scopes \
            FROM connector_clients WHERE skill_id = $1",
@@ -392,7 +404,10 @@ async fn client_for(
                     authorize_url: r.get("authorize_url"),
                     token_url: r.get("token_url"),
                     register_url: r.get("register_url"),
-                    scopes: r.get("scopes"),
+                    scopes: connectors::narrowed(
+                        r.get::<Option<String>, _>("scopes").as_deref(),
+                        wanted.as_deref(),
+                    ),
                 },
                 client_id,
             ));
@@ -407,13 +422,6 @@ async fn client_for(
     // an entry that wants to read, compose and send should ask for that and
     // nothing else. `narrowed` can only subtract, so a catalogue from a
     // repository nobody here wrote cannot widen what is requested.
-    let wanted: Option<String> =
-        sqlx::query_scalar("SELECT scopes FROM connectors WHERE skill_id = $1")
-            .bind(id)
-            .fetch_optional(pool)
-            .await
-            .ok()
-            .flatten();
     found.scopes = connectors::narrowed(found.scopes.as_deref(), wanted.as_deref());
     // **Says where the answer is, because there is one.** This sentence was
     // written before `set_client` existed and still ended "which Firetower
