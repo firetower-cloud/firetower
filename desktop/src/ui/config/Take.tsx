@@ -25,6 +25,29 @@ export type Taking = {
   needsClientId?: boolean;
 };
 
+/** What the control has to say, which is a decision and not a rendering. */
+export type Says = "busy" | "done" | "set-up" | "waiting" | "offer";
+
+/**
+ * **A fact outranks a guess, and this order is where that is said.**
+ *
+ * `waiting` means "a browser tab was opened and has not reported back" — an
+ * inference drawn from what we did. `connected` is the control plane
+ * answering that the credential is held. Asking the inference first left
+ * Canva, authorized and recorded, spinning on "Waiting…" until a five-minute
+ * timer gave up.
+ *
+ * Then `needsClientId`, because a server that hands out no clients will never
+ * report one and must not sit on Connect for ever either.
+ */
+export function says(of: Taking, busy?: boolean, waiting?: boolean): Says {
+  if (busy) return "busy";
+  if (of.connected === true || (of.installed && !of.hasConnector)) return "done";
+  if (of.installed && of.needsClientId) return "set-up";
+  if (waiting) return "waiting";
+  return "offer";
+}
+
 export function Take({
   of,
   busy,
@@ -45,52 +68,49 @@ export function Take({
 }) {
   const shape = where === "page" ? "act act-page" : "act";
 
-  if (busy) {
-    return (
-      <span className="act-said">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
-        {of.hasConnector ? "Connecting…" : "Adding…"}
-      </span>
-    );
+  switch (says(of, busy, waiting)) {
+    case "busy":
+      return (
+        <span className="act-said">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+          {of.hasConnector ? "Connecting…" : "Adding…"}
+        </span>
+      );
+    case "done":
+      return (
+        <span className="act-said act-done">
+          <Check className="h-3.5 w-3.5" strokeWidth={2} />
+          {of.hasConnector ? "Connected" : "Added"}
+        </span>
+      );
+    case "set-up":
+      return (
+        <button type="button" className={shape} onClick={onOpen ?? onPress}>
+          Set it up
+        </button>
+      );
+    case "waiting":
+      return (
+        <span className="act-said" title="Finish in the browser; this updates itself.">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+          Waiting…
+        </span>
+      );
+    default:
+      return (
+        <button type="button" className={shape} onClick={onPress}>
+          {of.hasConnector ? (
+            <>
+              <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Connect
+            </>
+          ) : (
+            <>
+              <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
+              Add
+            </>
+          )}
+        </button>
+      );
   }
-  // Before "connected", because a server that cannot hand out a client is
-  // never going to report one and would otherwise sit on Connect for ever.
-  if (of.installed && of.needsClientId && of.connected !== true) {
-    return (
-      <button type="button" className={shape} onClick={onOpen ?? onPress}>
-        Set it up
-      </button>
-    );
-  }
-  if (waiting) {
-    return (
-      <span className="act-said" title="Finish in the browser; this updates itself.">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
-        Waiting…
-      </span>
-    );
-  }
-  if (of.connected === true || (of.installed && !of.hasConnector)) {
-    return (
-      <span className="act-said act-done">
-        <Check className="h-3.5 w-3.5" strokeWidth={2} />
-        {of.hasConnector ? "Connected" : "Added"}
-      </span>
-    );
-  }
-  return (
-    <button type="button" className={shape} onClick={onPress}>
-      {of.hasConnector ? (
-        <>
-          <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Connect
-        </>
-      ) : (
-        <>
-          <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
-          Add
-        </>
-      )}
-    </button>
-  );
 }

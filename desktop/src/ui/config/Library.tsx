@@ -150,8 +150,25 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     },
   });
   const connectedCount = (lib.data ?? []).filter((i) => i.connected === true).length;
+  /* **It said the poll stops as soon as something connects. It did not.**
+     The effect only restarted the five-minute timer when the count moved, so
+     a server that authorized straight away kept the two-second poll running
+     and kept its row on "Waiting…" for the rest of the five minutes. The
+     count when the wait began is the baseline; one more than that is the
+     answer arriving. */
+  const countWhenAsked = useRef(0);
+  useEffect(() => {
+    if (awaiting) countWhenAsked.current = connectedCount;
+    // Only when the wait begins: re-reading it every render would move the
+    // baseline up with the answer and never fire.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [awaiting]);
   useEffect(() => {
     if (!awaiting) return;
+    if (connectedCount > countWhenAsked.current) {
+      setAwaiting(false);
+      return;
+    }
     const stop = setTimeout(() => setAwaiting(false), 5 * 60 * 1000);
     return () => clearTimeout(stop);
   }, [awaiting, connectedCount]);
