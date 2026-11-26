@@ -994,18 +994,91 @@ mod tests {
         );
     }
 
-    /// Every response this module can produce carries the headers, including
-    /// the ones that are not a file at all.
-    #[test]
-    fn nothing_leaves_here_unhardened() {
-        let bare = hardened(StatusCode::NOT_FOUND.into_response(), POLICY);
-        let headers = bare.headers();
-        assert_eq!(headers[header::CONTENT_SECURITY_POLICY], POLICY);
-        assert_eq!(headers[header::X_FRAME_OPTIONS], "DENY");
-        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
-        assert_eq!(headers[header::REFERRER_POLICY], "same-origin");
+    /// A GET, which is the only kind of request that reaches this module.
+    fn get(path: &str) -> Request {
+        Request::builder()
+            .uri(path)
+            .body(Body::empty())
+            .expect("a request")
+    }
 
-        // And a file carries its own bundle's policy rather than a default.
+    /// Whatever came back carries all four headers, and a policy that is one
+    /// of the two this module has rather than something invented.
+    fn assert_hardened(response: &Response, path: &str) {
+        let headers = response.headers();
+        let policy = headers
+            .get(header::CONTENT_SECURITY_POLICY)
+            .unwrap_or_else(|| panic!("{path} left here with no content policy"))
+            .to_str()
+            .expect("a readable policy");
+        assert!(
+            policy == POLICY || policy == SITE_POLICY,
+            "{path} left here with a policy that is neither bundle's: {policy}"
+        );
+        assert_eq!(headers[header::X_FRAME_OPTIONS], "DENY", "{path}");
+        assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff", "{path}");
+        assert_eq!(headers[header::REFERRER_POLICY], "same-origin", "{path}");
+    }
+
+    /// Every response this module can produce carries the headers, **asked of
+    /// [`serve`]**, which is the only way into it.
+    ///
+    /// **It used to call `hardened` directly and never `serve` at all.** That
+    /// is a test of a four-line function that inserts four headers, which has
+    /// never been the part anybody gets wrong: what goes wrong is a branch
+    /// that forgets to call it. QA stripped `hardened` from the 404 branch and
+    /// this module stayed green at eighteen passing tests while the served
+    /// page came back with no policy, no `X-Frame-Options` and no `nosniff` —
+    /// on the commit whose whole purpose is these headers.
+    ///
+    /// So the paths below are one per branch `serve` can take, and the request
+    /// goes in at the front door.
+    ///
+    /// **Which of them are reachable depends on what is embedded**, and that
+    /// is the point of asserting on all of them rather than on the one this
+    /// checkout happens to have: with both bundles built, `/` and `/login` are
+    /// files and an unknown path is the site's own 404 page; with neither —
+    /// which is every `backend-ci` run — all five non-API paths are the
+    /// unbuilt sentence. Both arrangements are a branch of `serve`, both are
+    /// asserted, and neither can be the one nobody checks.
+    ///
+    /// Proved by the method that found the hole, rather than by adding an
+    /// assertion and trusting it: `hardened` was stripped from each branch in
+    /// turn and this was watched to fail. Four of the five fail — the API
+    /// 404, a served file, and the site's 404 page with the bundles built;
+    /// the unbuilt sentence with them moved aside, which is the only branch a
+    /// `backend-ci` run reaches at all. The fifth is the bare `StatusCode`
+    /// fallback under `Site::get("404.html")`, and it did not fail because it
+    /// cannot be reached: it needs the site bundle present *and* missing its
+    /// own 404 page, which a `next build` export always has. It is a belt on
+    /// braces rather than a branch, and worth saying so here so the next
+    /// reader does not spend an afternoon trying to drive it.
+    #[tokio::test]
+    async fn nothing_leaves_here_unhardened() {
+        for path in [
+            // An API path nothing claimed: JSON, and never a page.
+            "/api/nope",
+            // The application's shell, or the sentence where it was not built.
+            "/",
+            "/index.html",
+            // The administration site keeps its own paths.
+            "/login",
+            // Nothing by either name: the site's 404 page, or a bare one.
+            "/assets/nothing-is-here.js",
+            "/deep/unknown/path",
+        ] {
+            assert_hardened(&serve(get(path)).await, path);
+        }
+    }
+
+    /// And a file carries **its own bundle's** policy rather than a default.
+    ///
+    /// Apart from the sweep above, which can only say the policy is one of the
+    /// two: this is the half that says which, and it is the difference between
+    /// the administration site being allowed its inline scripts and the
+    /// application being allowed them too.
+    #[test]
+    fn each_bundle_keeps_its_own_policy() {
         let site = Bundle::Site
             .describe("organization.html", b"<!doctype html>".to_vec())
             .into_response();
