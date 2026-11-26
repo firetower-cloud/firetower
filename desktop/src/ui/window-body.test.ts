@@ -51,7 +51,9 @@ describe("what the window draws", () => {
     for (const real of lists) {
       for (const which of asked) {
         for (const path of paths) {
-          expect(bodyFor(real, serverOn(real, which), path)).not.toBe("nothing");
+          for (const installed of [true, false]) {
+            expect(bodyFor(real, serverOn(real, which), path, installed)).not.toBe("nothing");
+          }
         }
       }
     }
@@ -59,18 +61,46 @@ describe("what the window draws", () => {
 
   it("draws that server's door when its token has gone", () => {
     const real = [row("a", "")];
-    expect(bodyFor(real, serverOn(real, "a"), "/")).toBe("door");
+    expect(bodyFor(real, serverOn(real, "a"), "/", true)).toBe("door");
     // Including when the choice has not caught up, which is the sign-in case.
-    expect(bodyFor(real, serverOn(real, null), "/")).toBe("door");
+    expect(bodyFor(real, serverOn(real, null), "/", true)).toBe("door");
   });
 
   it("draws the app once the token has arrived", () => {
     const real = [row("a")];
-    expect(bodyFor(real, serverOn(real, null), "/")).toBe("app");
+    expect(bodyFor(real, serverOn(real, null), "/", true)).toBe("app");
   });
 
   it("draws the door for no servers, and for an asked-for connection", () => {
-    expect(bodyFor([], null, "/")).toBe("connect");
-    expect(bodyFor([row("a")], "a", "/connect")).toBe("connect");
+    expect(bodyFor([], null, "/", true)).toBe("connect");
+    expect(bodyFor([row("a")], "a", "/connect", true)).toBe("connect");
+  });
+
+  /**
+   * **`/connect` is the installed app's address and nothing else's.**
+   *
+   * A page a control plane served can reach that control plane and no other,
+   * so the screen for naming a *different* one has nothing to do there — and
+   * the address was the last way to it once the switcher, *Connect a
+   * Firetower…* and the palette's command had gone. Hand-typed it used to
+   * draw, and attaching a second server from it left somebody with no
+   * switcher to reach it and no *Forget* to undo it.
+   *
+   * It falls through to the app, which `Routes.tsx` draws as Home for every
+   * address it does not recognise. The pair is the point: the Tauri build is
+   * unchanged, which is where `/connect` is a real screen somebody asked for.
+   */
+  it("offers no connect screen to a served page, and still does inside the app", () => {
+    const real = [row("a")];
+    expect(bodyFor(real, "a", "/connect", true)).toBe("connect");
+    expect(bodyFor(real, "a", "/connect", false)).toBe("app");
+  });
+
+  /* The first run is not the same question and must survive it: with nothing
+     in the registry there is a sign-in to draw whoever is asking, and
+     `Connect` answers the *where* half from the origin by itself. */
+  it("still draws the first sign-in in a browser, with no servers at all", () => {
+    expect(bodyFor([], null, "/", false)).toBe("connect");
+    expect(bodyFor([], null, "/connect", false)).toBe("connect");
   });
 });

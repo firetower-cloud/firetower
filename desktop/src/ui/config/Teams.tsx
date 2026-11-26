@@ -475,15 +475,27 @@ function DeleteTeam({
   const reading = directories.loading || answers.some((a) => a.isPending);
   /* **A read that failed is not an answer of "none".** `answers[i].data` is
      undefined whether a directory holds no grants or could not be asked, and
-     `grantsHeldBy` cannot tell those apart — so a 403 on one directory used to
-     render *nobody loses access* over an irreversible delete, and the people
-     who did lose it found out afterwards.
+     `grantsHeldBy` cannot tell those apart — so a failure on one directory
+     used to render *nobody loses access* over an irreversible delete, and the
+     people who did lose it found out afterwards.
 
-     Not fatal, deliberately: an administrator who is only a Viewer somewhere
-     gets that 403 every time, and a team they want gone would otherwise be
-     undeletable forever. So the dialog says what it does not know and lets
-     them decide knowing it — which is what *the consequence stated before
-     confirming* has to mean when the consequence cannot be read. */
+     Not fatal, deliberately — and **the reason first written here was wrong**,
+     so it is worth replacing rather than deleting. It said an administrator
+     who is only a Viewer somewhere would be refused every time, leaving a team
+     they wanted gone undeletable. That cannot happen: `may_administer`
+     (`crates/ft-server/src/api/access.rs:93`) short-circuits for an
+     administrator of the organisation — the directory exists, or it is a 404 —
+     and this dialog is drawn for nobody else. **There is no 403 path to this
+     state at all.**
+
+     The real reason is narrower and still holds: a read can fail for causes
+     that are nobody's permissions — a timeout, a 5xx, a directory removed
+     between the list and the grants on it. **This dialog's job is to state the
+     consequence, not to gate on it**, so a read that failed must not become a
+     functional refusal of an unrelated delete. It says what it does not know
+     and lets an administrator decide knowing it, which is what *the
+     consequence stated before confirming* has to mean when the consequence
+     cannot be read. `consequenceState` carries the same correction. */
   const consequence = consequenceState(
     reading,
     !!directories.error || answers.some((a) => a.isError),

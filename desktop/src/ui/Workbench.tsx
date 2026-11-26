@@ -55,6 +55,77 @@ const TERM_DEFAULT = 256;
 
 type Side = "diff" | "files" | "ship" | "overview";
 
+/**
+ * What a keystroke means inside a workspace, or nothing.
+ *
+ * **Pure and exported for the same reason as `Rail.tsx`'s `railKey`**: the
+ * gate it carries is otherwise inside a `useEffect`, which
+ * `renderToStaticMarkup` cannot reach, so the workbench's keyboard had no
+ * test in either client. A transcription of the handler it came from and
+ * nothing more — the caller does the `preventDefault`, once, for exactly the
+ * branches that used to do it themselves.
+ *
+ * **The two modifiers are the whole shape of this, and only one of them
+ * goes.** `⌃1`–`⌃3` are the inspector's tabs on the *local* modifier, which
+ * `platform.ts` keeps deliberately apart from the window's — and they are
+ * untouched on a served page, because no browser claims Ctrl with a digit on
+ * a Mac or Alt with one anywhere else, and they were never part of what was
+ * being argued about. `⌘\`, `⌘J` and `⌘W` are the window's and go with every
+ * other ⌘ chord but `⌘F`. Each keeps a control: the rail has a glyph to show
+ * it and its own tab row to hide it, the terminal has its button in the
+ * header and its own close, and a tab has an × and a *Close* in its menu. See
+ * `~/installed-app`.
+ *
+ * `inTerminal` is a boolean rather than a function, unlike `railKey`'s: this
+ * handler already read it unconditionally on every keystroke, and the local
+ * modifier's branch above the gate needs it, so making it lazy here would
+ * change nothing and hide that.
+ */
+export type WorkbenchKey =
+  | { at: "side"; side: Side }
+  | { at: "panel" }
+  | { at: "terminal" }
+  | { at: "close" }
+  | null;
+
+export function workbenchKey(
+  e: { key: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean },
+  where: { installed: boolean; inTerminal: boolean; mayAct: boolean },
+): WorkbenchKey {
+  /* The inspector's tabs, on the *local* modifier. They were ⌘1–⌘3 until the
+     rail took the global number row for its six destinations: a destination
+     is global, a panel tab is local to one workspace, and the modifier is
+     what says which. */
+  const to: Record<string, Side> = { "1": "diff", "2": "files", "3": "ship" };
+  if (isLocalMod(e) && to[e.key] && !where.inTerminal) {
+    // The Commit panel is not a viewer's; neither is the shortcut to it.
+    if (to[e.key] === "ship" && !where.mayAct) return null;
+    return { at: "side", side: to[e.key] };
+  }
+
+  if (!where.installed) return null;
+  if (!isGlobalMod(e)) return null;
+  /* A focused terminal owns the keyboard. `⌘J` is the one gesture that is
+     about the panel rather than what is in it. */
+  if (where.inTerminal && e.key.toLowerCase() !== "j") return null;
+  if (e.key === "\\") return { at: "panel" };
+  const k = e.key.toLowerCase();
+  if (k === "j") return { at: "terminal" };
+  /* **⌘P is deliberately unbound.** It opened `QuickOpen` — a finder scoped
+     to this workspace's files — which was deprecated and is gone. Nothing is
+     put in its place, because reassigning a key somebody has muscle memory
+     for is worse than leaving it quiet. Changing that is the user's call, not
+     this file's.
+
+     **What went with it: there is no way to reach a file by typing its
+     name.** `Palette.tsx` searches workspaces and the rail's destinations,
+     not files — the drawing's own palette specimen draws a file row, which
+     the build has never done. The file tree is the only route now. Recorded
+     in `check-hook-delta.mjs` as REPORTED. */
+  if (k === "w") return { at: "close" };
+  return null;
+}
+
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
   const hostOf = useHostOf();
   const { data: sessions } = useSessions();
@@ -336,60 +407,25 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   }, [immersive]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      /* A focused terminal owns the keyboard. `⌘J` is the one gesture that
-         is about the panel rather than what is in it. */
-      const inTerminal = !!(document.activeElement as HTMLElement | null)?.closest(".xterm");
-
-      /* The inspector's tabs, on the *local* modifier. They were ⌘1–⌘3 until
-         the rail took the global number row for its six destinations: a
-         destination is global, a panel tab is local to one workspace, and the
-         modifier is what says which. */
-      const to: Record<string, Side> = { "1": "diff", "2": "files", "3": "ship" };
-      if (isLocalMod(e) && to[e.key] && !inTerminal) {
-        // The Commit panel is not a viewer's; neither is the shortcut to it.
-        if (to[e.key] === "ship" && !mayAct) return;
-        e.preventDefault();
-        setSide(to[e.key]);
+      const act = workbenchKey(e, {
+        installed: installedApp(),
+        inTerminal: !!(document.activeElement as HTMLElement | null)?.closest(".xterm"),
+        mayAct,
+      });
+      if (!act) return;
+      e.preventDefault();
+      if (act.at === "side") {
+        setSide(act.side);
         setOpen(true);
-        return;
-      }
-
-      /* **The window's own keys, and so only where there is a window.** ⌘\,
-         ⌘J and ⌘W are gone on a served page along with every other ⌘ chord
-         but ⌘F — `~/installed-app` has the measurement and the decision. Each
-         still has its control: the rail has a glyph to show it and its own
-         tab row to hide it, the terminal has its button in the header and its
-         own close, and a tab has an × and a Close in its menu.
-
-         Below the inspector's ⌃1–⌃3 above, which are the *local* modifier and
-         are not what was being argued about: no browser claims Ctrl with a
-         digit on a Mac or Alt with one anywhere else. */
-      if (!installedApp()) return;
-      if (!isGlobalMod(e)) return;
-      if (inTerminal && e.key.toLowerCase() !== "j") return;
-      if (e.key === "\\") {
-        e.preventDefault();
+      } else if (act.at === "panel") {
         setOpen((o) => !o);
-      }
-      if (e.key.toLowerCase() === "j") {
-        e.preventDefault();
+      } else if (act.at === "terminal") {
         setShell(true);
         setTerm((t) => !t);
-      }
-      /* **⌘P is deliberately unbound.** It opened `QuickOpen` — a finder
-         scoped to this workspace's files — which was deprecated and is gone.
-         Nothing is put in its place, because reassigning a key somebody has
-         muscle memory for is worse than leaving it quiet. Changing that is
-         the user's call, not this file's.
-
-         **What went with it: there is no way to reach a file by typing its
-         name.** `Palette.tsx` searches workspaces and the rail's
-         destinations, not files — the drawing's own palette specimen draws a
-         file row, which the build has never done. The file tree is the only
-         route now. Recorded in `check-hook-delta.mjs` as REPORTED. */
-      if (e.key.toLowerCase() === "w") {
-        e.preventDefault();
-        if (activeRef.current !== "chat") closeTab(activeRef.current);
+      } else if (activeRef.current !== "chat") {
+        /* The conversation is pinned and cannot be closed — `Tabs.tsx` says
+           why — so ⌘W over it is claimed and does nothing, exactly as before. */
+        closeTab(activeRef.current);
       }
     };
     window.addEventListener("keydown", onKey);

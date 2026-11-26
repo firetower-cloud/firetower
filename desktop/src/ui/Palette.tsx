@@ -28,6 +28,55 @@ type Item = {
   run: () => void;
 };
 
+/**
+ * Every address this palette offers, in order.
+ *
+ * Every destination the rail has, so the palette is a second way to the same
+ * places rather than a shorter list of its own — and the one way in for
+ * somebody who has collapsed the panel and does not know the number keys yet.
+ * "Everything, across servers" used to open `/fleet`; that screen went with
+ * the "all" scope, and the fleet is a menu under the avatar now.
+ *
+ * **Settings and Updates are written out rather than mapped.** They were in
+ * `EVERY` while they were doors in the rail, and taking them out of the rail
+ * would have quietly taken them out of here too — which is the one place that
+ * would hurt, because the palette is the second way to everything and these
+ * two now have exactly one first way. They are not destinations, so they get
+ * no number and no rail icon; they are still addresses, so they stay typeable.
+ *
+ * **Exported because the list is longer than the palette draws at rest.** Nine
+ * rows are shown until somebody types, and *Connect to a Firetower…* is the
+ * thirteenth — so the one entry this ticket gates is the one a static render
+ * can never see. A test that could only read the rendered list would have
+ * asserted nothing about it, which is the failure this whole file exists to
+ * stop.
+ */
+export function commands(): Item[] {
+  return [
+    ...DESTINATIONS.map((d) => ({
+      id: `c:${d.id}`,
+      label: d.label,
+      hint: advertisedKey(d.key),
+      kind: "command" as const,
+      run: () => navigate(d.href),
+    })),
+    { id: "c:new", label: "New workspace", hint: advertisedKey("N"), kind: "command", run: () => navigate("/new") },
+    { id: "c:settings", label: "Settings", hint: advertisedKey(","), kind: "command", run: () => navigate(SETTINGS_HOME) },
+    { id: "c:updates", label: "Updates", kind: "command", run: () => navigate("/updates") },
+    { id: "c:account", label: "Account", kind: "command", run: () => navigate("/account") },
+    /* **The one command that needs more than one Firetower to mean
+       anything.** It is the switcher's second row by another route, and the
+       palette is still openable in a browser from the panel's Search glyph —
+       so leaving it here would be the one place a served page still offered
+       to connect to somewhere else. The rest of this list is addresses within
+       this Firetower and is everybody's. */
+    ...(installedApp()
+      ? [{ id: "c:connect", label: "Connect to a Firetower…", kind: "command" as const, run: () => navigate("/connect") }]
+      : []),
+    ...(import.meta.env.DEV ? [{ id: "c:style", label: "Open the style guide", kind: "command" as const, run: () => navigate("/style") }] : []),
+  ];
+}
+
 export function Palette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const fleet = useFleet();
   const [q, setQ] = useState("");
@@ -59,45 +108,7 @@ export function Palette({ open, onClose }: { open: boolean; onClose: () => void 
       ),
     );
 
-    /* Every destination the rail has, so the palette is a second way to the
-       same places rather than a shorter list of its own — and the one way in
-       for somebody who has collapsed the panel and does not know the number
-       keys yet. "Everything, across servers" used to open `/fleet`; that
-       screen went with the "all" scope, and the fleet is a menu under the
-       avatar now.
-
-       **Settings and Updates are written out rather than mapped.** They were
-       in `EVERY` while they were doors in the rail, and taking them out of the
-       rail would have quietly taken them out of here too — which is the one
-       place that would hurt, because the palette is the second way to
-       everything and these two now have exactly one first way. They are not
-       destinations, so they get no number and no rail icon; they are still
-       addresses, so they stay typeable. */
-    const commands: Item[] = [
-      ...DESTINATIONS.map((d) => ({
-        id: `c:${d.id}`,
-        label: d.label,
-        hint: advertisedKey(d.key),
-        kind: "command" as const,
-        run: () => navigate(d.href),
-      })),
-      { id: "c:new", label: "New workspace", hint: advertisedKey("N"), kind: "command", run: () => navigate("/new") },
-      { id: "c:settings", label: "Settings", hint: advertisedKey(","), kind: "command", run: () => navigate(SETTINGS_HOME) },
-      { id: "c:updates", label: "Updates", kind: "command", run: () => navigate("/updates") },
-      { id: "c:account", label: "Account", kind: "command", run: () => navigate("/account") },
-      /* **The one command that needs more than one Firetower to mean
-         anything.** It is the switcher's second row by another route, and the
-         palette is still openable in a browser from the panel's Search glyph
-         — so leaving it here would be the one place a served page still
-         offered to connect to somewhere else. The rest of this list is
-         addresses within this Firetower and is everybody's. */
-      ...(installedApp()
-        ? [{ id: "c:connect", label: "Connect to a Firetower…", kind: "command" as const, run: () => navigate("/connect") }]
-        : []),
-      ...(import.meta.env.DEV ? [{ id: "c:style", label: "Open the style guide", kind: "command" as const, run: () => navigate("/style") }] : []),
-    ];
-
-    const all = [...sessions, ...commands];
+    const all = [...sessions, ...commands()];
     if (!q.trim()) return all.slice(0, 9);
 
     // Subsequence match, the way every palette worth using does it: "vs" finds

@@ -24,6 +24,30 @@ import { findPaths, resolvePath } from "~/paths";
 import { installedApp } from "~/installed-app";
 import { isMac } from "~/platform";
 
+/**
+ * Which ⌘ chord the terminal takes from xterm, and what it means.
+ *
+ * **`⌘F` is the only one a served page keeps**, which is the whole of the
+ * shortcut decision at this surface: it was measured arriving in Chrome and in
+ * Safari with the browser's own find bar suppressed, and clearing the buffer
+ * goes with every other ⌘ chord there. It is the one removal with no button
+ * behind it, and the door is the one every terminal has — typing `clear`. See
+ * `~/installed-app` and `evidence/ticket-06/`.
+ *
+ * Pure and exported because the gate otherwise lives inside xterm's
+ * `attachCustomKeyEventHandler`, set up in an effect, which
+ * `renderToStaticMarkup` cannot reach. `Inspector.tsx`'s `tabsFor` is the
+ * precedent; `installed-only.test.tsx` asserts both answers.
+ *
+ * Copy and paste are not here. They are the browser's before they are
+ * anybody's, and the caller returns them to it above this.
+ */
+export function terminalKey(k: string, installed: boolean): "find" | "clear" | null {
+  if (k === "f") return "find";
+  if (k === "k" && installed) return "clear";
+  return null;
+}
+
 type State = "connecting" | "live" | "closed";
 
 export function Shell({
@@ -103,18 +127,12 @@ export function Shell({
         if (k === "c" || k === "v") return false;
         /* Ours — and stopped here, so the palette's ⌘K and the rest of the
            app's shortcuts never hear them. ⌘J goes on up: it is the panel's.
-
-           **⌘F is the only one of the two a browser keeps.** It is the one
-           shortcut the served client has, and it was measured arriving in
-           Chrome and in Safari with the browser's own find bar suppressed —
-           `~/installed-app` and `evidence/ticket-06/`. Clearing the buffer
-           goes with every other ⌘ chord there, and it is the one removal with
-           no button behind it: the door is the one every terminal has, which
-           is to type `clear`. */
-        if (k === "f" || (k === "k" && installedApp())) {
+           Which of the two is ours is `terminalKey` above. */
+        const claimed = terminalKey(k, installedApp());
+        if (claimed) {
           e.preventDefault();
           e.stopPropagation();
-          if (k === "k") term.clear();
+          if (claimed === "clear") term.clear();
           else setFinding("");
           return false;
         }
