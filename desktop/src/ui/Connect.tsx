@@ -37,6 +37,7 @@ export function Connect({
   onDone,
   onCancel,
   at,
+  fixed,
 }: {
   /** Handed the new server's id, so the app can switch to it. */
   onDone: (serverId: string) => void;
@@ -51,9 +52,41 @@ export function Connect({
    * invalidated.
    */
   at?: string;
+  /**
+   * Whether that address is **the only one there is**.
+   *
+   * True on a page a control plane served: the origin it came from is the
+   * Firetower it is for, there is no second one to name, and `probe.ts`'s
+   * `ownFiretower` is where that is decided — `{ ask: false }` *is* this.
+   *
+   * **It takes the whole address question away, not just the route to it.**
+   * `#/connect` was shut first and that was not enough: four screens reach
+   * the `where` stage by a back button, and a sign-in screen's *Use a
+   * different address* is one step from the first thing a served page draws.
+   * Driven, it attached a second Firetower and wrote its registry row — and
+   * on a served page there is then no switcher to reach it and no *Forget* to
+   * undo it, which is the state ticket 06 exists to make unreachable.
+   *
+   * So there is one way into that stage and this closes it: `back` below is
+   * the only binding in this file that sets it, and the four screens that
+   * offer a way out are handed that one binding. `connect-stages.test.ts`
+   * counts both — one setter, four readers — so a fifth screen can be added
+   * but cannot quietly open a fifth door.
+   *
+   * **Not `installedApp()`**, which is the predicate for everything else this
+   * ticket gates and is the wrong one here: a `pnpm dev` tab has no shell
+   * either, and it genuinely must ask — vite's origin is not a control plane,
+   * so `ownFiretower` answers `{ ask: true }` there and the question is real.
+   * The two differ in exactly that case, and this is the half that is about
+   * the address rather than about the shell.
+   */
+  fixed?: boolean;
 }) {
   const [typed, setTyped] = useState(at ?? "");
   const [stage, setStage] = useState<Stage>(at ? { at: "reaching" } : { at: "where" });
+  /* The one way back to the address question, so there is one thing to take
+     away. Undefined is what every screen below reads as "do not offer it". */
+  const back = fixed ? undefined : () => setStage({ at: "where" });
 
   const find = async (address: string) => {
     setStage({ at: "reaching" });
@@ -146,7 +179,7 @@ export function Connect({
             typed={stage.typed}
             detail={stage.detail}
             onRetry={() => find(stage.typed)}
-            onBack={() => setStage({ at: "where" })}
+            onBack={back}
           />
         )}
 
@@ -155,7 +188,7 @@ export function Connect({
             typed={stage.typed}
             detail={stage.detail}
             onRetry={() => find(stage.typed)}
-            onBack={() => setStage({ at: "where" })}
+            onBack={back}
           />
         )}
 
@@ -165,8 +198,8 @@ export function Connect({
             username={stage.user}
             retryLabel="Sign in again"
             onRetry={() => setStage({ at: "who", url: stage.url, boot: stage.boot })}
-            onBack={() => setStage({ at: "where" })}
-            backLabel="Use a different address"
+            onBack={back}
+            backLabel={back ? "Use a different address" : undefined}
           />
         )}
 
@@ -174,7 +207,7 @@ export function Connect({
           <Who
             url={stage.url}
             boot={stage.boot}
-            onBack={() => setStage({ at: "where" })}
+            onBack={back}
             onLocked={(user) => setStage({ at: "locked", url: stage.url, boot: stage.boot, user })}
             onIn={(token, user) => {
               const serverId = stage.boot.serverId ?? stage.url;
@@ -261,7 +294,8 @@ function NoRoute({
   typed: string;
   detail: string;
   onRetry: () => void;
-  onBack: () => void;
+  /** Absent where the address is fixed: there is no other one to try. */
+  onBack?: () => void;
 }) {
   return (
     <>
@@ -288,10 +322,14 @@ function NoRoute({
         <span className="mt-2 block font-mono text-micro text-mute">{detail}</span>
       </div>
 
+      {/* One way out and one way back where there are two, and only the way
+          back where the address is the one this page came from. */}
       <div className="mt-5 flex gap-2">
-        <button onClick={onBack} className="btn plain flex-1 justify-center">
-          Try another address
-        </button>
+        {onBack && (
+          <button onClick={onBack} className="btn plain flex-1 justify-center">
+            Try another address
+          </button>
+        )}
         <button onClick={onRetry} className="btn primary flex-1 justify-center">
           Try again
         </button>
@@ -323,7 +361,8 @@ function Refused({
   typed: string;
   detail: string;
   onRetry: () => void;
-  onBack: () => void;
+  /** Absent where the address is fixed: there is no other one to try. */
+  onBack?: () => void;
 }) {
   return (
     <>
@@ -351,10 +390,14 @@ function Refused({
         <span className="mt-2 block font-mono text-micro text-mute">{detail}</span>
       </div>
 
+      {/* One way out and one way back where there are two, and only the way
+          back where the address is the one this page came from. */}
       <div className="mt-5 flex gap-2">
-        <button onClick={onBack} className="btn plain flex-1 justify-center">
-          Try another address
-        </button>
+        {onBack && (
+          <button onClick={onBack} className="btn plain flex-1 justify-center">
+            Try another address
+          </button>
+        )}
         <button onClick={onRetry} className="btn primary flex-1 justify-center">
           Try again
         </button>
@@ -382,7 +425,8 @@ function Who({
   onIn: (token: string, user: string) => void;
   /** The password was correct and has to be replaced before anything else. */
   onLocked: (user: string) => void;
-  onBack: () => void;
+  /** Absent where the address is fixed: there is no different one to use. */
+  onBack?: () => void;
 }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -439,7 +483,7 @@ function Who({
             {url.replace(/^https?:\/\//, "")} · {boot.version}
           </s>
         </span>
-        <IconButton of={X} onClick={onBack} label="Use a different address" />
+        {onBack && <IconButton of={X} onClick={onBack} label="Use a different address" />}
       </div>
 
       <h1 className="mt-6">Who are you here?</h1>

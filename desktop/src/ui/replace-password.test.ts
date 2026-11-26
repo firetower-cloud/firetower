@@ -13,12 +13,39 @@
  * defect had two: the path itself, and that both of this screen's buttons use
  * it — the one met at the door and the one met mid-session when an
  * administrator has reset a password under a running app.
+ *
+ * **And there were two screens, not one.** The first fix pinned this file and
+ * left `Account.tsx` opening the bare origin, which is the same control with
+ * the same destination and the same way of failing — a button that looks like
+ * a way out of the app and lands you back inside it. Fixing one of two and
+ * testing the one you fixed is how a defect survives its own regression test,
+ * so the sweep below is over every screen rather than over this one.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { passwordPage } from "./ReplacePassword";
 
 const source = readFileSync(new URL("./ReplacePassword.tsx", import.meta.url), "utf8");
+
+/** Every `.ts`/`.tsx` under `src`, the walk `reuse.test.ts` established. */
+function sources(): { path: string; text: string }[] {
+  const root = fileURLToPath(new URL("../", import.meta.url));
+  const out: { path: string; text: string }[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== "generated") walk(path);
+      } else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
+        out.push({ path: `src/${path.slice(root.length).split(sep).join("/")}`, text: readFileSync(path, "utf8") });
+      }
+    }
+  };
+  walk(root);
+  return out;
+}
 
 describe("where a password is replaced", () => {
   it("is a page on the control plane that is not the application", () => {
@@ -48,6 +75,38 @@ describe("where a password is replaced", () => {
     const routed = [...source.matchAll(/openExternal\(passwordPage\(origin\)\)/g)].length;
     expect(calls).toBe(2);
     expect(routed).toBe(calls);
+  });
+
+  /**
+   * **The sweep, which is what would have caught the second screen.**
+   *
+   * `origin` is this app's name for *the Firetower this window is signed in
+   * to*, and since the renderer took `/` that address is the application
+   * itself. So handing it to `openExternal` is never right: whatever the
+   * caller wanted, it is a path on the control plane and not the root. Asked
+   * of every screen rather than of the two known ones, because the question
+   * is "is there a third" and a list of two cannot answer it.
+   */
+  it("is never the bare origin, on any screen", () => {
+    const offenders = sources()
+      .filter((f) => /openExternal\(\s*origin\s*\)/.test(f.text))
+      .map((f) => f.path);
+    expect(offenders).toEqual([]);
+  });
+
+  /* The two screens that send somebody to this Firetower's own interface, by
+     name — so that a third arriving is a decision rather than an accident.
+     Every other `openExternal` in the app points at somewhere else entirely:
+     a pull request, an artifact, a provider's settings page, an agent's
+     device-code page. */
+  it("is reached through the one rule, from both of the screens that send you there", () => {
+    const sending = sources()
+      .filter((f) => /passwordPage\(/.test(f.text))
+      .map((f) => f.path)
+      .sort();
+    expect(sending).toEqual(["src/ui/Account.tsx", "src/ui/ReplacePassword.tsx"]);
+    const account = sources().find((f) => f.path === "src/ui/Account.tsx")!.text;
+    expect(account).toContain("openExternal(passwordPage(origin))");
   });
 
   it("still carries no password form of its own, which is the whole reason it sends you away", () => {

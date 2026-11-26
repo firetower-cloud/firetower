@@ -24,6 +24,7 @@ import { installedApp } from "~/installed-app";
 import { forget, servers } from "~/servers";
 import { navigate } from "~/shims/next-navigation";
 import { openExternal } from "~/open";
+import { passwordPage } from "~/ui/ReplacePassword";
 import type { Backend } from "~/fleet";
 
 import { why } from "~/data";
@@ -117,7 +118,17 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
         )}
 
         {/* The address this client reached the server on, which is the one proven
-            to work from here — not a value the server reports about itself. */}
+            to work from here — not a value the server reports about itself.
+
+            **Through `passwordPage`, not the bare origin.** This is the second
+            half of the defect `42b3bfad` fixed on the other screen and only
+            there: serving the application at `/` took that path off the
+            administration site, so this button opened the very app it was
+            pressed in — a control that looks like a way out and is a way back
+            to where you already are. There were exactly two screens that send
+            somebody to this Firetower's own web interface, and the rule they
+            both go through now lives in `ReplacePassword.tsx` beside the
+            reasoning for it. `replace-password.test.ts` pins both. */}
         <section className="lsec">
           <h2>Password</h2>
           <p className="note">
@@ -125,7 +136,7 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
             already knows, and never a version behind the server.
           </p>
           <div className="card1">
-            <button onClick={() => void openExternal(origin)} className="btn plain">
+            <button onClick={() => void openExternal(passwordPage(origin))} className="btn plain">
               Open {origin.replace(/^https?:\/\//, "")}
               <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
             </button>

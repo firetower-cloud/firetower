@@ -312,6 +312,13 @@ function Window() {
              that is decided and why. */
           <Connect
             at={own.ask || connecting ? undefined : own.url}
+            /* **The address question goes with the address.** `own.ask` is
+               false exactly when the origin answered *where* — so there is no
+               second Firetower to name, and the back buttons that reach that
+               question are not drawn. Shutting `#/connect` was not enough:
+               four screens reach it by a back button, and one of them is one
+               step from the first thing a served page draws. */
+            fixed={!own.ask}
             onDone={(serverId) => {
               setWhich(serverId);
               navigate("/");
@@ -324,6 +331,10 @@ function Window() {
              click away — this is one server's door, not the app's. */
           <Connect
             at={adrift.url}
+            /* The same, for a token that has died: a served page is signed
+               out of the one Firetower there is, and the way back in is that
+               Firetower rather than a different one. */
+            fixed={!own.ask}
             onDone={(serverId) => {
               // The cache for this server is full of the refusals that
               // arrived while the token was dead; keeping it would render

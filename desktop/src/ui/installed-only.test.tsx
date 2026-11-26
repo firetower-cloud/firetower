@@ -25,12 +25,25 @@
  * fifteenth module that reads `~/installed-app` and is not listed here fails
  * this file, and a listed module that stops reading it fails too.
  *
- * **Four gates cannot be reached by `renderToStaticMarkup` at all** — they sit
- * inside a `useEffect` or inside xterm's key handler, and effects do not run
- * in a static render. Each of those exports its decision as a pure function
- * instead, the way `Inspector.tsx` exports `tabsFor` and `shownTab` for
- * `inspector-tabs.test.ts`, and the function is asserted here. The handlers
- * call them; they do not re-implement them.
+ * **Two gates cannot be reached by a render at all** — `App`'s dock badge is
+ * inside a `useEffect` and `Shell`'s key claim is inside xterm's own handler,
+ * and effects do not run in a static render. Three more are drawn *and* ask
+ * the question somewhere a render cannot see: `Rail` and `Workbench` keep
+ * their keyboards in effects, and `Palette` draws nine rows of a list whose
+ * gated entry is the thirteenth. Each exports its decision as a pure function
+ * for the half that is out of reach, the way `Inspector.tsx` exports
+ * `tabsFor` and `shownTab` for `inspector-tabs.test.ts`. The handlers call
+ * them; they do not re-implement them.
+ *
+ * **Nothing is left uncovered, and that was not true an hour ago.** This file
+ * recorded `Workbench` as impossible to render — "six `useSyncExternalStore`
+ * sites with no server snapshot" — and marked it *measured*. It was not: five
+ * of the six pass one, and the only blockers are `useSocket`, which throws
+ * outside its provider, and `useConversation`, which is the single store in
+ * the app without a server snapshot. Both are stood in for above and the
+ * workbench draws. A comment in this codebase that says *measured* and is
+ * wrong is worse than one that says nothing, so the claim is corrected here
+ * rather than quietly dropped.
  *
  * `renderToStaticMarkup` with a seeded cache, as the earlier tickets
  * established: no jsdom, no testing-library, no network.
@@ -42,10 +55,11 @@ import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { getMeQueryKey } from "~/api/generated/auth/auth";
-import { getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
+import { getGetSessionQueryKey, getListSessionsQueryKey } from "~/api/generated/sessions/sessions";
+import { getListHostsQueryKey } from "~/api/generated/hosts/hosts";
 import { getGetUpdatesQueryKey, getListRunsQueryKey } from "~/api/generated/updates/updates";
 import type { Backend, Fleet } from "~/fleet";
-import type { UpdateStatus } from "~/api/generated/model";
+import type { Session, UpdateStatus } from "~/api/generated/model";
 
 /* The shell, stood in for. A live object, so one test can ask the same thing
    both questions. */
@@ -93,6 +107,36 @@ vi.mock("~/fleet", async (orig) => ({
   useFleet: () => fleet.rows,
 }));
 
+/**
+ * The two things a workspace needs that are not data.
+ *
+ * `useSocket` throws outside its provider, and `useConversation` is the one
+ * `useSyncExternalStore` in the app with no server snapshot — React refuses a
+ * static render outright for that, which is why `Workbench` could not be
+ * drawn here before. Both are stood in for rather than worked around in
+ * shipped code: giving `useConversation` a server snapshot would be changing
+ * the app for a test's benefit, and it is a live subscription to a socket
+ * that is genuinely absent here.
+ */
+vi.mock("~/api/socket", async (orig) => ({
+  ...(await orig<typeof import("~/api/socket")>()),
+  useSocket: () => ({ follow: () => () => {}, live: true }),
+}));
+vi.mock("~/api/conversation", async (orig) => {
+  const real = await orig<typeof import("~/api/conversation")>();
+  return {
+    ...real,
+    useConversation: () => ({
+      conversation: real.nothing,
+      echo: () => {},
+      settle: () => {},
+      remember: () => {},
+      stopping: false,
+      older: { more: false, loading: false, load: () => {} },
+    }),
+  };
+});
+
 /** The registry, which `Account` reads for the address it signed in on. */
 vi.mock("~/servers", async (orig) => ({
   ...(await orig<typeof import("~/servers")>()),
@@ -120,6 +164,20 @@ const STATUS: UpdateStatus = {
     manifest: { packages: [], url: "https://releases.example/manifest.json" },
   } as unknown as UpdateStatus["channel"],
 };
+
+/** One workspace, so the workbench has something to draw. */
+const WORK = {
+  id: "s_1",
+  agent: "ClaudeCode",
+  hostId: "h_1",
+  title: "A task",
+  name: "work",
+  branch: "main",
+  status: "Idle",
+  createdAt: "2026-11-01T00:00:00Z",
+  mayWrite: true,
+  path: "u/kevin",
+} as unknown as Session;
 
 function cache() {
   const c = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnMount: false } } });
@@ -152,6 +210,7 @@ type Parts = {
   Rail: typeof import("~/ui/Rail").Rail;
   Palette: typeof import("~/ui/Palette").Palette;
   Resize: typeof import("~/ui/Resize").Resize;
+  Workbench: typeof import("~/ui/Workbench").Workbench;
   StartProvider: typeof import("~/start").StartProvider;
 };
 
@@ -165,14 +224,18 @@ type Parts = {
 async function draw(
   installed: boolean,
   what: (m: Parts) => React.ReactElement,
-  { platform = "MacIntel", here = HERE }: { platform?: string; here?: Backend } = {},
+  {
+    platform = "MacIntel",
+    here = HERE,
+    seed,
+  }: { platform?: string; here?: Backend; seed?: (c: QueryClient) => void } = {},
 ): Promise<string> {
   vi.resetModules();
   vi.stubGlobal("navigator", { platform });
   stubWindow();
   shell.bridge.native = installed;
   fleet.rows = [{ backend: here, sessions: [], error: null } satisfies Fleet];
-  const [titlebar, menu, account, updates, rail, palette, resize, start] = await Promise.all([
+  const [titlebar, menu, account, updates, rail, palette, resize, workbench, start] = await Promise.all([
     import("~/ui/Titlebar"),
     import("~/ui/ProfileMenu"),
     import("~/ui/Account"),
@@ -180,10 +243,13 @@ async function draw(
     import("~/ui/Rail"),
     import("~/ui/Palette"),
     import("~/ui/Resize"),
+    import("~/ui/Workbench"),
     import("~/start"),
   ]);
+  const client = cache();
+  seed?.(client);
   return renderToStaticMarkup(
-    <QueryClientProvider client={cache()}>
+    <QueryClientProvider client={client}>
       {what({
         Titlebar: titlebar.Titlebar,
         Profile: menu.Profile,
@@ -193,6 +259,7 @@ async function draw(
         Rail: rail.Rail,
         Palette: palette.Palette,
         Resize: resize.Resize,
+        Workbench: workbench.Workbench,
         StartProvider: start.StartProvider,
       })}
     </QueryClientProvider>,
@@ -258,10 +325,10 @@ beforeEach(() => {
  * function and that is asserted instead. Named per module rather than left to
  * be inferred, because *how* a thing is covered is the part that rots.
  *
- * `but` says what is **not** reached, where something is not. One module has
- * one, and writing it down is the point: a gap nobody can see is the defect
- * this table exists to stop, so the gaps are in the table rather than absent
- * from it.
+ * `but` says what is **not** reached, where something is not. Nothing has one
+ * today; the field stays because the next thing that cannot be covered should
+ * be written down rather than left out, and the test below counts them so an
+ * unexplained gap cannot appear silently.
  */
 const COVERED: Record<string, { how: "rendered" | "called" | "rule"; by: string; but?: string }> = {
   "src/App.tsx": { how: "rule", by: "dockBadge — the gate is inside a useEffect" },
@@ -278,20 +345,13 @@ const COVERED: Record<string, { how: "rendered" | "called" | "rule"; by: string;
   "src/ui/Titlebar.tsx": { how: "rendered", by: "the mark, the gutter and the window's buttons" },
   "src/ui/Updates.tsx": { how: "rendered", by: "the This app section" },
   "src/ui/Workbench.tsx": {
-    how: "rule",
-    by: "workbenchKey — the gate is inside a useEffect",
-    /* **Measured, not assumed.** `Workbench` cannot be reached by
-       `renderToStaticMarkup`: it needs the socket provider, and its subtree
-       calls `useSyncExternalStore` with no server snapshot in six places —
-       `workspace/outbox.ts`, `overlay.ts`, `layout.ts`, `api/conversation.ts`,
-       `api/notes.ts`, `api/checkouts.ts` — which React refuses outright. So
-       the three keycaps it draws (⌘W in a tab's menu, ⌘J on the terminal
-       button and in the shell's header, ⌘\ on *Show the rail*) are covered by
-       `advertisedKey`'s own pair in `installed-app.test.ts` and by the four
-       components that do render, not here. Giving them a render would mean
-       server snapshots on six stores, which is a change to shipped code for a
-       test's benefit. */
-    but: "its three keycaps are not render-covered; only the handler's rule is",
+    how: "rendered",
+    /* The terminal button is the one of its three keycaps a render at rest
+       reaches — the other two are behind the shell panel being open and the
+       rail being collapsed, which a static render has no way to set. All
+       three are the same call to the same function in one file, so what is
+       asserted is the file reading it. The handler is `workbenchKey`. */
+    by: "the terminal button's keycap; workbenchKey for the handler",
   },
 };
 
@@ -335,11 +395,12 @@ describe("the list of gated modules", () => {
     }
   });
 
-  /* The gaps, counted. One, and it is named — which is the difference between
-     a documented limit and an oversight. */
-  it("has exactly one module with something it does not reach", () => {
+  /* The gaps, counted. None — and the count is the assertion rather than the
+     absence, so a gap arriving has to be written into the table to pass
+     rather than simply going unmentioned. */
+  it("reaches everything it lists, and says so where it does not", () => {
     const gaps = Object.entries(COVERED).filter(([, c]) => c.but);
-    expect(gaps.map(([m]) => m)).toEqual(["src/ui/Workbench.tsx"]);
+    expect(gaps.map(([m]) => m)).toEqual([]);
   });
 });
 
@@ -600,6 +661,38 @@ describe("the shortcuts, where they are drawn", () => {
       expect(html).toContain("Find anything");
       expect(html).toContain("Hide this panel");
     }
+  });
+
+  /**
+   * The workbench, which is where the window's other three keys are named.
+   *
+   * It needs a workspace, a socket and a conversation to draw at all — the
+   * first is seeded, the other two are stood in for above. The terminal
+   * button is the one of its three keycaps a render at rest reaches: the
+   * other two are behind state a static render has no way to set, the shell
+   * panel being open and the rail being collapsed. All three are the same
+   * call to the same function in the same file, so what is asserted here is
+   * the file reading it, not one of three independent decisions.
+   */
+  it("takes ⌘J off the terminal button and leaves the button", async () => {
+    const { app, tab } = await both(
+      (m) => <m.Workbench backend={HERE} workspace="s_1" />,
+      {
+        seed: (c) => {
+          c.setQueryData(getListSessionsQueryKey(undefined), [WORK]);
+          c.setQueryData(getGetSessionQueryKey("s_1"), WORK);
+          /* `compute.type` rather than a bare row: `useHosts` filters on it,
+             and a host without one is what `machineGone` reads as retired. */
+          c.setQueryData(getListHostsQueryKey(), [
+            { hostId: "h_1", name: "studio", state: "Online", compute: { type: "Server" } },
+          ]);
+        },
+      },
+    );
+    expect(app).toContain('title="Terminal  ⌘J"');
+    expect(tab).toContain('aria-label="Terminal"');
+    expect(tab).toContain('title="Terminal"');
+    expect(tab).not.toContain("⌘J");
   });
 
   it("takes the keycaps out of the palette and leaves its commands", async () => {

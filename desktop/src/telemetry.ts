@@ -21,15 +21,22 @@
  *
  * ## A multi-seat organisation is counted once
  *
- * Whichever desktop gets there first delivers the day and acknowledges it;
- * every other one asks and is told nothing is owed. Twelve teammates with the
- * app open send one digest between them, not twelve copies.
+ * Whichever client gets there first delivers the day and acknowledges it;
+ * every other one asks and is told nothing is owed. Twelve teammates with
+ * Firetower open send one digest between them, not twelve copies.
+ *
+ * **A client is a window or a browser tab.** This starts from `App`, which is
+ * the renderer, so a page a control plane served is a courier exactly as the
+ * installed app is — there is nothing native on this path and nothing for
+ * `~/installed-app` to gate. The telemetry pane says so in those words now;
+ * it used to say *the desktop app*, which was the client it was written in
+ * rather than the client it is read in.
  *
  * ## Failure is the ordinary path
  *
  * None of this is awaited by anything that draws. A digest that does not go
  * today goes tomorrow, and an install offline for a fortnight delivers its
- * backlog when somebody next opens the app — the whole backlog, in one round:
+ * backlog the next time somebody has Firetower open — the whole backlog, in one round:
  * `carry` empties the outbox rather than taking one batch out of it. So every
  * failure here is silent and nothing is retried in a hurry.
  *

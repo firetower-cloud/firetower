@@ -279,7 +279,17 @@ function Name() {
  * counter the most guarded act in the window. The ticket is explicit that these
  * follow the panes already here rather than the administration site's.
  */
-function Telemetry() {
+/**
+ * The telemetry switch, its three states, and who actually does the sending.
+ *
+ * Exported for `deployment-telemetry.test.tsx`, which renders it in each of
+ * the three. **Its rule being tested was not the same as this asking it**:
+ * reverting the line below to `q.data?.enabled ?? true` left the whole suite
+ * green, because `telemetryState` had a test and nothing asserted that this
+ * pane consulted it. That is the same shape as `bodyFor` being exported,
+ * tested and re-derived inline by the window.
+ */
+export function Telemetry() {
   const cache = useQueryClient();
   const confirm = useConfirm();
   const q = usePreview();
@@ -347,9 +357,19 @@ function Telemetry() {
       <Facts
         of={[
           ["Goes to", <span key="to" className="font-mono">{q.data?.endpoint ?? "—"}</span>],
+          /* **Whichever client is open, and never this server.** It said
+             *the desktop app*, which is false in the client most people now
+             read it in: `startCourier` runs in the renderer, so a browser tab
+             with Firetower open is the courier — QA watched one POST to the
+             gateway while this row denied it. The sentence names both rather
+             than picking the one it happens to be read in, because the thing
+             somebody on a telemetry screen is asking is *what talks to the
+             network*, and the answer is "a client, not the control plane" in
+             either. `~/telemetry` carries the rest, including why a
+             multi-seat organisation still sends one digest and not twelve. */
           [
             "Sent by",
-            "The desktop app, next time somebody opens it. This server never connects out.",
+            "Whichever client is open — this page in a browser, or the app on somebody's machine. This server never connects out.",
           ],
           ...(on
             ? ([["Waiting", `${waiting} ${waiting === 1 ? "day" : "days"}`]] as [string, React.ReactNode][])
