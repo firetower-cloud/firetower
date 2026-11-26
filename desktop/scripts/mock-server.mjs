@@ -1141,6 +1141,12 @@ const server = createServer(async (req, res) => {
     "/api/v1/tasks": scene === "no-tasks" ? { more: false, next: null, tasks: [] } : TASKS,
     "/api/v1/colleagues": scene === "no-people" ? [] : COLLEAGUES,
     "/api/v1/telemetry/settings": { enabled: telemetry },
+    /* **What the client is owed to post**, which `telemetry.ts` polls on a
+       timer whatever screen is open — so without it every run of the harness
+       logged a 404 that had nothing to do with what it was driving, and a real
+       failure would have been one more line in the noise. Empty: the courier
+       has nothing to carry, which is the quiet case and the right default. */
+    "/api/v1/telemetry/pending": [],
     /* Exactly what would leave this install, which is the whole point of the
        panel: the example is what *Show exactly what is sent* opens, and it has
        to be readable as "no prompts, no names, nothing sensitive" rather than

@@ -36,6 +36,7 @@ import {
   saidRole,
   tagsFor,
   teamActionsFor,
+  telemetryState,
   type Account,
   type DeploymentMode,
 } from "./organisation";
@@ -500,6 +501,76 @@ describe("what the People pane is doing", () => {
 
   it("is neither settling nor in error when both came back", () => {
     expect(feedState(ok, ok)).toEqual({ settling: false, error: null });
+  });
+
+  /**
+   * **The case that let the first fix through: `me` errored, feed healthy.**
+   *
+   * There was no test for it, and the fix read `feed?.error ?? me.error`
+   * unconditionally — so a populated, cached People list was replaced by an
+   * error screen the moment a *background refetch* of `/auth/me` blipped. A
+   * list on screen is a list somebody can use, and the role it was chosen by
+   * has already been read; `me` only matters while there is nothing to show.
+   */
+  it("keeps a healthy list when a later check of the role fails", () => {
+    const state = feedState({ pending: false, error: new Error("me blipped") }, ok);
+    expect(state.error).toBeNull();
+    expect(state.settling).toBe(false);
+  });
+
+  /** And a refetch of the role does not put a spinner over a drawn list —
+   *  `pending` is false for a query that already has data in this client. */
+  it("does not settle a list that is already on screen", () => {
+    expect(feedState({ pending: false, error: null }, ok).settling).toBe(false);
+  });
+
+  /** When both failed, it is the list's own error that is shown: it is the
+   *  one about the thing the reader is looking at. */
+  it("prefers the list's error when both failed", () => {
+    const boom = new Error("list");
+    const state = feedState({ pending: false, error: new Error("me") }, { pending: false, error: boom });
+    expect(state.error).toBe(boom);
+  });
+});
+
+/**
+ * What the telemetry row may assert about a switch it has not read.
+ *
+ * **`enabled ?? true` was two states wearing one name** — *not loaded yet* and
+ * *loaded, and on*. Driven with the preview read failing, the pane said
+ * **Telemetry on** and offered a brick *Turn telemetry off* against a server
+ * holding `{"enabled": false}`: the opposite of the truth, no trouble line, no
+ * retry, and the guess falling in the loud direction.
+ */
+describe("what the telemetry row has actually read", () => {
+  it("is unread while it is reading", () => {
+    expect(telemetryState({ pending: true, error: null, data: undefined })).toBe("unread");
+  });
+
+  /** The one that was wrong. A read that failed is not an answer of *on*. */
+  it("is unread when the read failed, whatever the row would rather say", () => {
+    expect(telemetryState({ pending: false, error: new Error("nope"), data: undefined })).toBe("unread");
+    // And not even when a stale answer is still in hand.
+    expect(telemetryState({ pending: false, error: new Error("nope"), data: { enabled: true } })).toBe("unread");
+  });
+
+  it("is unread when the read came back with nothing in it", () => {
+    expect(telemetryState({ pending: false, error: null, data: undefined })).toBe("unread");
+  });
+
+  it("says on and off when the server said so", () => {
+    expect(telemetryState({ pending: false, error: null, data: { enabled: true } })).toBe("on");
+    expect(telemetryState({ pending: false, error: null, data: { enabled: false } })).toBe("off");
+  });
+
+  /**
+   * The optimistic default survives exactly where it is harmless: a read that
+   * *succeeded* without the field is a server older than the field, and
+   * collection was on before it existed. That is a different thing from a read
+   * that did not happen.
+   */
+  it("reads a successful answer with no field as on", () => {
+    expect(telemetryState({ pending: false, error: null, data: {} })).toBe("on");
   });
 });
 

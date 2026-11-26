@@ -168,6 +168,82 @@ describe("a keychain that refuses the token", () => {
   });
 });
 
+/**
+ * The organisation renaming itself.
+ *
+ * **The chrome on this Mac reads the registry, not the server.** `Backend.org`
+ * — the title bar, the profile menu's five readers, the switcher row — comes
+ * from the stored row, which is written once at sign-in from `/bootstrap`.
+ * Nothing wrote it again, so renaming the organisation left every one of them
+ * on the old name, and a reload rehydrated the old name from disk rather than
+ * correcting it. That is why it never self-healed.
+ */
+describe("an organisation that renamed itself", () => {
+  it("writes the new name to the registry, so a reload keeps it", async () => {
+    const S = await fresh();
+    S.remember(server() as never);
+    await settle();
+    expect(S.servers()[0]?.org).toBe("Acme");
+
+    S.renamed("s_acme", "Northwind");
+
+    expect(S.servers()[0]?.org).toBe("Northwind");
+    // And on disk, which is the half that survives a reload.
+    expect(onDisk()).toContain("Northwind");
+    expect(onDisk()).not.toContain("Acme");
+  });
+
+  it("tells whoever is watching, so the chrome repaints without a round trip", async () => {
+    const S = await fresh();
+    S.remember(server() as never);
+    await settle();
+
+    let seen = "";
+    S.onServers(() => (seen = S.servers()[0]?.org ?? ""));
+    S.renamed("s_acme", "Northwind");
+
+    expect(seen).toBe("Northwind");
+  });
+
+  /** A name is not a credential, so nothing about the keychain has changed —
+   *  unlike `updateToken`, which drops `kept` until a write is confirmed. */
+  it("does not disturb what the keychain is holding", async () => {
+    const S = await fresh();
+    S.remember(server() as never);
+    await settle();
+    const before = rowFor();
+
+    S.renamed("s_acme", "Northwind");
+
+    expect(rowFor()?.kept).toBe(before?.kept);
+    expect(S.servers()[0]?.token).toBe(TOKEN);
+  });
+
+  /** Renaming one Firetower must not touch another's row. */
+  it("renames only the server it was told about", async () => {
+    const S = await fresh();
+    S.remember(server() as never);
+    S.remember(server({ serverId: "s_apex", org: "Apex" }) as never);
+    await settle();
+
+    S.renamed("s_acme", "Northwind");
+
+    const byId = Object.fromEntries(S.servers().map((x) => [x.serverId, x.org]));
+    expect(byId).toEqual({ s_acme: "Northwind", s_apex: "Apex" });
+  });
+
+  /** A server this Mac does not know is not a reason to invent a row. */
+  it("does nothing for a server that is not in the registry", async () => {
+    const S = await fresh();
+    S.remember(server() as never);
+    await settle();
+
+    S.renamed("s_nobody", "Northwind");
+
+    expect(S.servers().map((x) => x.org)).toEqual(["Acme"]);
+  });
+});
+
 describe("a keychain that works", () => {
   it("says nothing, and still keeps no token on disk", async () => {
     const S = await fresh();

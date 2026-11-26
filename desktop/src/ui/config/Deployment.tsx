@@ -58,9 +58,12 @@ import { useMe } from "~/api/generated/auth/auth";
 import { useBootstrap } from "~/api/generated/meta/meta";
 import { useRenameOrganization } from "~/api/generated/organization/organization";
 import { getPreviewQueryKey, usePreview, useSetTelemetrySettings } from "~/api/generated/telemetry/telemetry";
-import { why } from "~/data";
+import { useBackendKey } from "~/backend";
+import { renamed } from "~/servers";
+import { trouble, why } from "~/data";
 import { useConfirm } from "~/ui/Confirm";
-import { Facts, Section } from "~/ui/config/bits";
+import { telemetryState } from "~/ui/config/organisation";
+import { Facts, Section, Trouble } from "~/ui/config/bits";
 
 /**
  * The three ways in, in words.
@@ -188,6 +191,7 @@ export function Deployment() {
 function Name() {
   const me = useMe();
   const cache = useQueryClient();
+  const key = useBackendKey();
   const rename = useRenameOrganization();
   const current = me.data?.organization?.name ?? "";
   const [draft, setDraft] = useState<string | null>(null);
@@ -201,8 +205,17 @@ function Name() {
     setSaid(null);
     rename
       .mutateAsync({ data: { name: value.trim() } })
-      .then(() => {
+      .then((org) => {
         setDraft(null);
+        /* **Both halves, or the promise above is a lie.** Invalidating moves
+           what is read off the server — this field, the account screen's
+           heading. The chrome is the other half and does not come from there:
+           the title bar, the profile menu and the switcher all read
+           `Backend.org`, which is a *stored* field on this Mac's registry row,
+           written once at sign-in. Without this the old name survived even a
+           reload, because a reload rehydrates from that row. `renamed` writes
+           it and `fleet.ts` repaints on the registry changing. */
+        renamed(key, org.name);
         return cache.invalidateQueries();
       })
       .catch((e) => setSaid(why(e)));
@@ -211,9 +224,15 @@ function Name() {
   return (
     <section className="lsec">
       <h2>Name</h2>
+      {/* **Named by what actually draws it.** This said *the rail*, which
+          draws the name nowhere — the rail is eight icons and an avatar, and
+          the closest it comes is that avatar's tooltip. The title bar is the
+          one that carries `org / user` at rest, and it was also the one that
+          went on saying the old name. A sentence that promises the wrong
+          furniture is how the thing it promises goes unchecked. */}
       <p className="note">
-        What this Firetower is called, wherever it names itself — the sign-in screen, the rail, and
-        the window somebody opens on a machine that has never seen it.
+        What this Firetower is called, wherever it names itself — the title bar, the Firetower
+        switcher, and the sign-in screen on a machine that has never seen it.
       </p>
       <div className="card1 flex flex-wrap items-center gap-3">
         <input
@@ -268,7 +287,12 @@ function Telemetry() {
   const [showing, setShowing] = useState(false);
   const [said, setSaid] = useState<string | null>(null);
 
-  const on = q.data?.enabled ?? true;
+  /* **Three states, not a defaulted boolean.** `q.data?.enabled ?? true` said
+     *on* for a read that had failed, and offered the brick control to turn off
+     something the server was already reporting as off. `telemetryState` is the
+     rule; what it answers is what this draws. */
+  const state = telemetryState({ pending: q.isPending, error: q.error, data: q.data });
+  const on = state === "on";
   const waiting = q.data?.waiting ?? 0;
 
   const save = (enabled: boolean) => {
@@ -278,6 +302,28 @@ function Telemetry() {
       .then(() => cache.invalidateQueries({ queryKey: getPreviewQueryKey() }))
       .catch((e) => setSaid(why(e)));
   };
+
+  /* A switch that cannot read its own position is not a switch. The rows
+     below describe a setting this pane has not got, and the control under
+     them would act on a guess — so the section says what happened and offers
+     the read again, which is the shape every other list on this surface takes
+     when its read fails. */
+  if (state === "unread") {
+    return (
+      <section className="lsec">
+        <h2>Telemetry</h2>
+        <p className="note">
+          Daily counts about this installation, so the people who build Firetower can tell how it is
+          actually used.
+        </p>
+        {q.isPending ? (
+          <p className="mt-2 text-ui text-mute">Reading whether it is on…</p>
+        ) : (
+          <Trouble kind={trouble(q.error) ?? "error"} error={why(q.error)} onRetry={() => void q.refetch()} />
+        )}
+      </section>
+    );
+  }
 
   return (
     <section className="lsec">

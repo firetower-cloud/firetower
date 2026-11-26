@@ -159,7 +159,17 @@ function ensureTicking() {
   const sweep = () => servers().forEach((s) => s.token && ask(s));
   sweep();
   ticking = setInterval(sweep, 10_000);
-  onServers(sweep);
+  /* **`changed()` as well as `sweep()`, and before it.** The registry is half
+     of what `asBackend` reads — the name, the monogram, the address — so a
+     row changing is on its own a reason to repaint, with nothing to ask
+     anybody. It used to be `sweep` alone, which repainted only once a
+     `/sessions` round trip came back: an organisation renaming itself left
+     the title bar on the old name until the network answered, and on a server
+     that was not answering, until the next ten-second tick. */
+  onServers(() => {
+    changed();
+    sweep();
+  });
 }
 
 /** Every connected server, with what it last said. */

@@ -454,6 +454,20 @@ export function howMany(n: number): string {
  * forever: a spinner behind ⌘8 that could not resolve and offered no way out,
  * on the destination the whole surface exists to make reachable. `me`'s own
  * error is the one to show, because `me` is the request that failed.
+ *
+ * **`me`'s error matters only while there is no feed, and the first fix for
+ * the above missed that.** It read `feed?.error ?? me.error`, unconditionally
+ * — so once a populated list was cached and healthy, a *background refetch* of
+ * `/auth/me` failing replaced it with an error screen. A list on screen is a
+ * list somebody can use, and the role it was chosen by has already been read;
+ * blanking it because a later check of something else blipped is the same
+ * family of defect as the one that fix was for, one case narrower. So the
+ * feed, once it exists, is the only thing that can put this pane in error.
+ *
+ * `settling` is asked the same way and comes out right already: a refetch with
+ * data in hand is not `pending` in this client's query layer, so a `me` that
+ * is re-checked behind a drawn list does not put a spinner over it. The guard
+ * that matters is `!feed`, which is about there being nothing to show yet.
  */
 export function feedState(
   me: { pending: boolean; error: unknown },
@@ -461,8 +475,33 @@ export function feedState(
 ): { settling: boolean; error: unknown } {
   return {
     settling: me.pending || (!feed && !me.error) || !!feed?.pending,
-    error: feed?.error ?? me.error ?? null,
+    error: (feed ? feed.error : me.error) ?? null,
   };
+}
+
+/**
+ * What the telemetry row may assert about a switch it has not read.
+ *
+ * **Three states, because `enabled ?? true` was doing two jobs.** It meant
+ * both *not loaded yet* and *loaded, and it is on*, so a preview read that
+ * failed drew **Telemetry on** and a brick *Turn telemetry off* — against a
+ * server holding `{"enabled": false}`. The opposite of the truth, with no
+ * trouble line and no retry, and the guess fell in the loud direction: a
+ * destructive control offered for a state the server denies.
+ *
+ * A switch that cannot read its own position says so. `on` and `off` are
+ * answers; `unread` is the absence of one, and the pane draws `Section`'s own
+ * trouble for it rather than a third rendering of the same idea.
+ *
+ * The optimistic default survives only where it is harmless and right:
+ * `preview` answers `enabled` for every installation, and a *successful* read
+ * missing the field is a server older than the field, where collection was on.
+ */
+export function telemetryState(
+  q: { pending: boolean; error: unknown; data?: { enabled?: boolean } | undefined },
+): "on" | "off" | "unread" {
+  if (q.pending || q.error || !q.data) return "unread";
+  return q.data.enabled === false ? "off" : "on";
 }
 
 /**
