@@ -444,6 +444,7 @@ pub async fn files_of(
 /// **This is the step that makes an installed plugin work.** Without it a
 /// marketplace install lands the skills and silently drops the tools, which
 /// looks exactly like a plugin that does nothing.
+/// `(server name, url, how it authorizes, the scopes it asks to be narrowed to)`
 pub fn connector_of(
     files: &[(String, Vec<u8>)],
 ) -> Option<(String, String, String, Option<String>)> {
@@ -458,8 +459,25 @@ pub fn connector_of(
     // manifest from a repository nobody at this company wrote is the last
     // place that decision belongs. Everything authorizes for itself.
     let auth = "oauth".to_string();
-    let borrow: Option<String> = None;
-    Some((name.clone(), url, auth, borrow))
+    // **It may say what it needs, not how it is trusted.** `scopes` is a
+    // request to be given *less* than the server offers — `narrowed` drops
+    // anything the server did not advertise — which is the opposite of the
+    // `firetower` key that used to live here.
+    let scopes: Option<String> = server
+        .get("scopes")
+        .and_then(|v| match v {
+            Value::Array(a) => Some(
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            ),
+            Value::String(s) => Some(s.clone()),
+            _ => None,
+        })
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    Some((name.clone(), url, auth, scopes))
 }
 
 // ── Storage ─────────────────────────────────────────────────────────────────

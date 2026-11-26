@@ -26,6 +26,7 @@ export const ListLibraryResponseItem = zod.object({
   "description": zod.string(),
   "displayName": zod.string().describe('The person\'s. Already resolved — the bundle\'s own, or a title-cased\n`name`. A screen draws this and never has to pick.'),
   "from": zod.string().nullish().describe('The bundle\'s name, when the bundle holds more than this one thing.\n`None` when the component *is* the bundle, because "from notion" under\na row called notion is noise.'),
+  "guide": zod.string().nullish().describe('The vendor\'s own instructions for creating an OAuth application, where\nthey have written any. A console is a form; this is the page that says\nwhich boxes to tick.'),
   "id": zod.string().describe('`<skill id>:<path>`. Opaque, and the handle every write takes.'),
   "kind": zod.string().describe('`skill` or `server`.'),
   "logo": zod.string().nullish().describe('The bundle\'s own mark, shared by everything inside it.'),

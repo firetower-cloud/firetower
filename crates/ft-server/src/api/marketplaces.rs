@@ -300,7 +300,7 @@ pub(super) async fn install_entry(
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
 
-    if let Some((server, url, auth, borrow)) = connector {
+    if let Some((server, url, auth, scopes)) = connector {
         state
             .skills
             .set_connector(made.as_str(), &server, &url, &auth)
@@ -309,10 +309,12 @@ pub(super) async fn install_entry(
         // Ask the server how it wants authorizing now, so the row can say so
         // rather than finding out when somebody presses a button.
         crate::connectors::remember(pool, made.as_str(), &url).await;
-        if let Some(kind) = borrow {
-            sqlx::query("UPDATE connectors SET borrow = $2 WHERE skill_id = $1")
+        // What the entry asks to be narrowed to. Bounded at connect time by
+        // what the server actually advertises, so this can only subtract.
+        if let Some(asked) = scopes {
+            sqlx::query("UPDATE connectors SET scopes = $2 WHERE skill_id = $1")
                 .bind(made.as_str())
-                .bind(kind)
+                .bind(asked)
                 .execute(pool)
                 .await
                 .map_err(|e| ApiError::new(ErrorCode::ActionFailed, e.to_string()))?;

@@ -39,6 +39,13 @@ export interface Item {
      * @nullable
      */
   from?: string | null;
+  /**
+     * The vendor's own instructions for creating an OAuth application, where
+     * they have written any. A console is a form; this is the page that says
+     * which boxes to tick.
+     * @nullable
+     */
+  guide?: string | null;
   /** `<skill id>:<path>`. Opaque, and the handle every write takes. */
   id: string;
   /** `skill` or `server`. */

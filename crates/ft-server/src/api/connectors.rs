@@ -59,6 +59,12 @@ pub struct ConnectorState {
     /// whose git host nobody has authorized is not broken — it is waiting on
     /// a different screen, and saying so is cheaper than a failed attempt.
     pub blocked: Option<String>,
+    /// Exactly what will be asked for, already narrowed by what the entry
+    /// said it needs. **Shown because a consent screen has to carry them**:
+    /// Google refuses the whole authorization over one scope nobody
+    /// configured, and "it didn't work" is all the person doing the
+    /// configuring would otherwise get.
+    pub scopes: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -134,6 +140,23 @@ pub(super) async fn connector_state(
         _ => (true, None),
     };
 
+    // What the server offered, as discovery recorded it, bounded by what the
+    // entry asked to be narrowed to — which is what `client_for` will send.
+    let offered: Option<String> =
+        sqlx::query_scalar("SELECT scopes FROM connector_clients WHERE skill_id = $1")
+            .bind(&id)
+            .fetch_optional(state.skills.pool())
+            .await
+            .ok()
+            .flatten();
+    let wanted: Option<String> =
+        sqlx::query_scalar("SELECT scopes FROM connectors WHERE skill_id = $1")
+            .bind(&id)
+            .fetch_optional(state.skills.pool())
+            .await
+            .ok()
+            .flatten();
+
     Ok(Json(ConnectorState {
         redirect_uri: redirect_uri(&state),
         auth: row.auth,
@@ -141,6 +164,7 @@ pub(super) async fn connector_state(
         url: row.url,
         connected,
         blocked,
+        scopes: connectors::narrowed(offered.as_deref(), wanted.as_deref()),
     }))
 }
 
@@ -375,9 +399,22 @@ async fn client_for(
         }
     }
 
-    let found = connectors::discover(url)
+    let mut found = connectors::discover(url)
         .await
         .map_err(|e| ApiError::new(ErrorCode::ActionFailed, format!("{e:#}")))?;
+    // **What the entry says it needs, bounded by what the server offers.**
+    // Gmail advertises twenty scopes including the whole mailbox and delete;
+    // an entry that wants to read, compose and send should ask for that and
+    // nothing else. `narrowed` can only subtract, so a catalogue from a
+    // repository nobody here wrote cannot widen what is requested.
+    let wanted: Option<String> =
+        sqlx::query_scalar("SELECT scopes FROM connectors WHERE skill_id = $1")
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            .ok()
+            .flatten();
+    found.scopes = connectors::narrowed(found.scopes.as_deref(), wanted.as_deref());
     // **Says where the answer is, because there is one.** This sentence was
     // written before `set_client` existed and still ended "which Firetower
     // cannot do for you yet" — so somebody pressing Connect on one of the
@@ -1040,6 +1077,32 @@ async fn needs_a_client(state: &AppState, id: &str, found: &Discovered) {
     .bind(&found.scopes)
     .execute(state.skills.pool())
     .await;
+}
+
+/// The vendor's own instructions for making one, where they have written any.
+///
+/// **A console is a form, not an explanation.** Google's takes a dozen steps
+/// across four screens — enable the API, enable the MCP service, configure a
+/// consent screen, add the scopes by hand, and tick "Use this client for an
+/// AI-powered agent" without which nothing works — and no sentence Firetower
+/// can fit beside a text field is going to replace that page. So where the
+/// vendor documents it, the screen links the documentation as well as the
+/// console.
+pub fn guide_for(host: &str) -> Option<&'static str> {
+    Some(match host {
+        h if h.contains("google") => {
+            "https://developers.google.com/workspace/guides/configure-mcp-servers"
+        }
+        h if h.contains("github") => {
+            "https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/creating-an-oauth-app"
+        }
+        h if h.contains("slack") => "https://api.slack.com/quickstart",
+        h if h.contains("discord") => {
+            "https://discord.com/developers/docs/quick-start/getting-started"
+        }
+        h if h.contains("twilio") => "https://www.twilio.com/docs/iam/oauth2-api-fga-oauth-app",
+        _ => return None,
+    })
 }
 
 /// Where somebody goes to make one, and what it has to say.

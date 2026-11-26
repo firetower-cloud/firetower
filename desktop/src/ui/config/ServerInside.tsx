@@ -13,7 +13,7 @@
  * came from, because an install here is a pinned copy and not a subscription.
  */
 import { useEffect } from "react";
-import { ArrowLeft, ExternalLink, Link2, Loader2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, BookOpen, ExternalLink, Link2, Loader2, TriangleAlert } from "lucide-react";
 import { useConnectorTools } from "~/api/generated/library/library";
 import { useSkillInside } from "~/api/generated/skills/skills";
 import { connect, setClient, useConnectorState } from "~/api/generated/connectors/connectors";
@@ -131,15 +131,41 @@ export function ServerInside({
           <p className="mt-1 select-all break-all rounded-lg bg-sunk px-3 py-2 font-mono text-meta text-bone">
             {state?.redirectUri ?? "…"}
           </p>
-          {of.console && (
-            <button
-              type="button"
-              className="out mt-3"
-              onClick={() => void openExternal(of.console!)}
-            >
-              <ExternalLink className="h-4 w-4" strokeWidth={1.5} />
-              Open {of.displayName}&rsquo;s console
-            </button>
+          {/* **A console is a form, not an explanation.** Google's takes a
+              dozen steps across four screens, one of which is a checkbox
+              called "Use this client for an AI-powered agent" without which
+              none of it works. No sentence that fits beside a text field
+              replaces that page, so where the vendor has written one it is
+              linked beside the console rather than instead of it. */}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {of.console && (
+              <button
+                type="button"
+                className="out"
+                onClick={() => void openExternal(of.console!)}
+              >
+                <ExternalLink className="h-4 w-4" strokeWidth={1.5} />
+                Open {of.displayName}&rsquo;s console
+              </button>
+            )}
+            {of.guide && (
+              <button type="button" className="out" onClick={() => void openExternal(of.guide!)}>
+                <BookOpen className="h-4 w-4" strokeWidth={1.5} />
+                Read their guide
+              </button>
+            )}
+          </div>
+          {/* The consent screen has to carry these, or the authorization is
+              refused for a scope nobody configured. */}
+          {state?.scopes && (
+            <>
+              <p className="mt-4 text-meta text-dim">
+                Its consent screen needs these scopes, and no others are asked for:
+              </p>
+              <p className="mt-1 select-all break-all rounded-lg bg-sunk px-3 py-2 font-mono text-meta text-text">
+                {state.scopes.split(" ").join("\n")}
+              </p>
+            </>
           )}
           <div className="mt-4 flex flex-col gap-2">
             <input

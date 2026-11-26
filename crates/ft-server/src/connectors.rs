@@ -530,6 +530,37 @@ pub fn authorize_url(
     url.to_string()
 }
 
+/// Narrow what will be asked for to what an entry says it needs.
+///
+/// **A catalogue may subtract and never add.** The scopes a server advertises
+/// are the ceiling — they are the server's own statement of what this
+/// resource covers — and a manifest from a repository nobody here wrote does
+/// not get to raise it. What it *can* do is ask for less, which is the only
+/// sensible thing to do with a list like Gmail's: twenty scopes including
+/// full mailbox access and delete, where reading, composing and sending is
+/// the job. Anything declared that the server did not offer is dropped, and
+/// an entry declaring nothing gets what the server offered.
+///
+/// Google makes the narrowing load-bearing rather than merely polite: it
+/// refuses the whole authorization if a scope is not already on the consent
+/// screen somebody configured, so asking for all twenty mostly just fails.
+pub fn narrowed(offered: Option<&str>, wanted: Option<&str>) -> Option<String> {
+    let offered = offered?.split_whitespace().collect::<Vec<_>>();
+    let Some(wanted) = wanted else {
+        return Some(offered.join(" ")).filter(|s| !s.is_empty());
+    };
+    let kept: Vec<&str> = wanted
+        .split_whitespace()
+        .filter(|w| offered.contains(w))
+        .collect();
+    // An entry that narrowed to nothing the server recognises is an entry
+    // whose list has gone stale; the ceiling is a better answer than none.
+    if kept.is_empty() {
+        return Some(offered.join(" ")).filter(|s| !s.is_empty());
+    }
+    Some(kept.join(" "))
+}
+
 /// Whether this authorization endpoint is Google's.
 ///
 /// Matched on the host rather than on a substring: `accounts.google.com` is
@@ -716,6 +747,39 @@ mod tests {
             resource_metadata_of(linear).as_deref(),
             Some("https://mcp.linear.app/.well-known/oauth-protected-resource/mcp")
         );
+    }
+
+    /// An entry may ask for less than a server offers, and never for more.
+    ///
+    /// Gmail advertises twenty scopes including the whole account; the entry
+    /// asks for four. The ceiling is the server's own statement of what the
+    /// resource covers, so a catalogue from a repository nobody here wrote
+    /// cannot raise it — which is the difference between curating a request
+    /// and letting a manifest grant itself access.
+    #[test]
+    fn an_entry_can_narrow_what_is_asked_for_but_never_widen_it() {
+        let offered = Some("read write admin");
+        assert_eq!(narrowed(offered, Some("read")).as_deref(), Some("read"));
+        assert_eq!(
+            narrowed(offered, Some("read write")).as_deref(),
+            Some("read write")
+        );
+        // Asking for something the server never offered gets nothing extra.
+        assert_eq!(
+            narrowed(offered, Some("read delete")).as_deref(),
+            Some("read"),
+            "a scope the server did not advertise is dropped, not passed on"
+        );
+        // Declaring nothing means the server's own list.
+        assert_eq!(narrowed(offered, None).as_deref(), Some("read write admin"));
+        // A list that has gone entirely stale falls back rather than asking
+        // for nothing, which no server treats as "no access".
+        assert_eq!(
+            narrowed(offered, Some("delete")).as_deref(),
+            Some("read write admin")
+        );
+        // Nothing offered is nothing to narrow.
+        assert_eq!(narrowed(None, Some("read")), None);
     }
 
     /// Google hands out a refresh token only when asked, and the ask is two

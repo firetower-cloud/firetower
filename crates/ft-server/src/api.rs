@@ -17,7 +17,7 @@ mod annotations;
 pub(crate) mod artifacts;
 mod auth;
 mod connectors;
-pub use connectors::console_for;
+pub use connectors::{console_for, guide_for};
 mod consumption;
 mod conversation;
 mod events;

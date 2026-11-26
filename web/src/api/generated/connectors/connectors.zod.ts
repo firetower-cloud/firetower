@@ -66,6 +66,7 @@ export const ConnectorStateResponse = zod.object({
   "blocked": zod.string().nullish().describe('Why it cannot be connected here, when that is the answer. A connector\nwhose git host nobody has authorized is not broken — it is waiting on\na different screen, and saying so is cheaper than a failed attempt.'),
   "connected": zod.boolean().describe('Whether this person holds a credential for it.'),
   "redirectUri": zod.string().describe('Where the browser comes back to, for somebody registering an\napplication by hand. **Said rather than guessed**: it is built from\n`api_url`, and the difference between that and the address a person\ntypes in the app is the mistake that loses an authorization at the\nlast step with nothing to say why.'),
+  "scopes": zod.string().nullish().describe('Exactly what will be asked for, already narrowed by what the entry\nsaid it needs. **Shown because a consent screen has to carry them**:\nGoogle refuses the whole authorization over one scope nobody\nconfigured, and "it didn\'t work" is all the person doing the\nconfiguring would otherwise get.'),
   "server": zod.string().describe('What the agent calls this server.'),
   "url": zod.string()
 }).describe('Whether **you** are connected, and how this one is authorized at all.')

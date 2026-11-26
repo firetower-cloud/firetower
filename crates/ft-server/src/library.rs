@@ -46,6 +46,10 @@ pub struct Item {
     pub required: bool,
     /// What stops working without it, said where somebody is looking at it.
     pub why_required: Option<String>,
+    /// The vendor's own instructions for creating an OAuth application, where
+    /// they have written any. A console is a form; this is the page that says
+    /// which boxes to tick.
+    pub guide: Option<String>,
 
     // Servers only.
     pub url: Option<String>,
@@ -263,6 +267,15 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                     .and_then(|u| u.host_str().map(str::to_owned))
                     .and_then(|h| crate::api::console_for(&h))
                     .map(str::to_owned),
+                guide: b
+                    .try_get::<Option<String>, _>("url")
+                    .ok()
+                    .flatten()
+                    .as_deref()
+                    .and_then(|u| reqwest::Url::parse(u).ok())
+                    .and_then(|u| u.host_str().map(str::to_owned))
+                    .and_then(|h| crate::api::guide_for(&h))
+                    .map(str::to_owned),
             });
         }
 
@@ -291,6 +304,7 @@ pub async fn items(pool: &PgPool, person: &str, person_slug: &str) -> Result<Vec
                 id: format!("{id}:{path}"),
                 skill_id: id.clone(),
                 kind: "skill".into(),
+                guide: None,
                 display_name: crate::marketplace::title_of(&name),
                 name,
                 description: said(&front, "description"),

@@ -32,6 +32,15 @@ export interface ConnectorState {
      * last step with nothing to say why.
      */
   redirectUri: string;
+  /**
+     * Exactly what will be asked for, already narrowed by what the entry
+     * said it needs. **Shown because a consent screen has to carry them**:
+     * Google refuses the whole authorization over one scope nobody
+     * configured, and "it didn't work" is all the person doing the
+     * configuring would otherwise get.
+     * @nullable
+     */
+  scopes?: string | null;
   /** What the agent calls this server. */
   server: string;
   url: string;
