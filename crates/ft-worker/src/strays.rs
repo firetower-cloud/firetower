@@ -551,43 +551,72 @@ mod tests {
         );
     }
 
-    /// **The one that matters.** The tmux server is forked from the first
-    /// session a worker ever started and carries that session's tag for life,
-    /// while being the parent of every pane of every other session on the
-    /// machine. Killing it takes the whole worker down.
+    /// **The one that matters.** A tmux server is forked from the first
+    /// `new-session` a client ever ran and keeps that client's environment for
+    /// life, while being the parent of every pane of every other session on
+    /// the machine. Killing it takes the whole worker down with it.
     ///
-    /// Asked with no server pid passed in, so that what spares it here is the
-    /// second guard — the executable — on its own. The decoy is what keeps the
-    /// test honest: it carries the same tag and is found, so an empty answer
-    /// cannot be mistaken for a careful one.
+    /// On a server of this test's own, on a socket of its own, because the
+    /// alternative is a test that asks whatever server the machine happens to
+    /// be running — which on a laptop is one started long ago from an
+    /// untagged shell, so there is nothing to spare and the test quietly
+    /// proves nothing. A private socket makes the dangerous case on purpose,
+    /// the same way the real one came about, and the premise is asserted
+    /// rather than assumed: a server forked from a tagged client really does
+    /// carry the tag.
+    ///
+    /// Asked with no server pid passed in, so what spares it is the second
+    /// guard — the executable — on its own. And the decoy is what keeps the
+    /// whole thing honest: it carries the same tag and must be found, so an
+    /// empty answer cannot pass for a careful one.
     #[tokio::test]
     async fn the_tmux_server_is_spared_though_it_carries_a_tag() {
         let tag = invented();
-        // If there is no server yet this starts one, and it is ours: a server
-        // inherits the environment of the client that forked it, which is the
-        // whole reason it ends up carrying a tag at all.
-        let name = format!("firetower-{tag}");
-        let _ = tokio::process::Command::new("tmux")
+        let socket = format!("ft-{tag}");
+
+        let started = tokio::process::Command::new("tmux")
             .env(ft_core::SESSION_ENV, &tag)
-            .args(["new-session", "-d", "-s", &name, "sleep", "30"])
+            .args([
+                "-L",
+                &socket,
+                "new-session",
+                "-d",
+                "-s",
+                "probe",
+                "sleep",
+                "30",
+            ])
             .output()
-            .await;
+            .await
+            .expect("tmux should run");
+        assert!(
+            started.status.success(),
+            "tmux: {}",
+            String::from_utf8_lossy(&started.stderr)
+        );
 
-        let Some(server) = tmux_server().await else {
-            eprintln!("no tmux server to ask; skipping");
-            return;
-        };
-        let Some(carried) = describe(server, &mut vec![0u8; argmax()]).and_then(|it| it.session)
-        else {
-            eprintln!("the server on this machine carries no tag; skipping");
-            return;
-        };
+        let asked = tokio::process::Command::new("tmux")
+            .args(["-L", &socket, "display-message", "-p", "#{pid}"])
+            .output()
+            .await
+            .expect("tmux should run");
+        let server: i32 = String::from_utf8_lossy(&asked.stdout)
+            .trim()
+            .parse()
+            .expect("tmux should name its own server");
 
-        let decoy = detached(&carried);
-        let found = strays(&[&carried], None);
+        let carried = describe(server, &mut vec![0u8; argmax()]).and_then(|it| it.session);
+        assert_eq!(
+            carried.as_deref(),
+            Some(tag.as_str()),
+            "the premise: a server forked from a tagged client carries the tag"
+        );
+
+        let decoy = detached(&tag);
+        let found = strays(&[&tag], None);
         stop(decoy);
         let _ = tokio::process::Command::new("tmux")
-            .args(["kill-session", "-t", &name])
+            .args(["-L", &socket, "kill-server"])
             .output()
             .await;
 
