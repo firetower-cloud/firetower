@@ -160,9 +160,49 @@ pub fn available() -> bool {
     // Writable is asked by trying, because the mount can be read-only in ways
     // that permissions do not show — a worker created without `--privileged` is
     // exactly that case.
-    std::fs::create_dir_all(root.join("ft-probe"))
-        .and_then(|()| std::fs::remove_dir(root.join("ft-probe")))
-        .is_ok()
+    //
+    // `create_dir` and not `create_dir_all`: what is being asked is whether we
+    // can make a cgroup, and finding one already there is not an answer to
+    // that. See [`probe`] for what that distinction used to cost.
+    let probe = probe();
+    if let Err(e) = std::fs::create_dir(&probe) {
+        tracing::debug!(probe = %probe.display(), "cgroups are not ours to write: {e}");
+        return false;
+    }
+
+    // Ours alone, so taking it away can take nobody else's answer with it.
+    match std::fs::remove_dir(&probe) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::debug!(probe = %probe.display(), "the probe cgroup would not go away again: {e}");
+            false
+        }
+    }
+}
+
+/// A probe directory no other call is using.
+///
+/// It used to be one fixed `ft-probe` for the whole machine, which turned a
+/// question into a race. `create_dir_all` is content to find the directory
+/// already there, so two sessions starting at once both believed they had made
+/// it, the first removed it, and the second's `rmdir` failed with `ENOENT` —
+/// which read as a host with no usable cgroups. Measured at 51 wrong answers
+/// in 80 concurrent calls.
+///
+/// The cost of a wrong `false` is not a workspace that goes unaccounted. It is
+/// [`create`] returning early, so the workspace has no cgroup at all, so
+/// [`kill`] finds nothing to kill and teardown leaves every process that
+/// workspace started running — the exact leak this module was changed to close,
+/// reinstated by nothing more than two sessions starting at the same moment.
+///
+/// A name of our own makes it a local question again. The pid is not enough on
+/// its own: `available` is asked once per session and twice per start, and two
+/// of those overlap inside one worker as readily as between two.
+fn probe() -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Path::new(ROOT).join(format!("ft-probe-{}-{n}", std::process::id()))
 }
 
 /// The cgroup a workspace's directory name makes.
@@ -494,6 +534,23 @@ async fn sigkill(dir: &Path, pids: &[i32]) {
     }
 
     for pid in pids {
+        // Strictly positive, because `kill` reads everything else as a
+        // broadcast rather than as a pid. Zero is every process in *our* own
+        // process group, which is the worker: a teardown that killed itself
+        // would take every other session on the machine with it. `-1` is every
+        // process this user may signal at all, and any other negative number
+        // is a whole process group.
+        //
+        // Not a worry about malformed files. `cgroup.procs` is written by the
+        // kernel, but by the kernel's view of the pid namespace it was read
+        // from — a process belonging to another namespace has no pid in ours
+        // and reads here as `0`. One comparison against a worker that kills
+        // itself is a trade worth making whatever the odds.
+        if *pid <= 0 {
+            tracing::debug!(pid, "not a pid in this namespace; left alone");
+            continue;
+        }
+
         // Nothing to do with the answer. `ESRCH` means it went while we were
         // reading, which is the point of the exercise, and anything else is a
         // process the next round will find still here.
@@ -837,6 +894,79 @@ mod tests {
             gone(pid).await,
             "a detached process should not survive its workspace"
         );
+    }
+
+    /// Two sessions starting at once must not take each other's answer away.
+    ///
+    /// The probe used to be one directory for the whole machine, and this is
+    /// the shape of what that cost: 80 callers at once, 51 of which were told
+    /// the host had no cgroups because somebody else had just removed the
+    /// directory they were both using. What makes it worth a test rather than
+    /// a comment is where that `false` lands — `create` bails, the workspace
+    /// gets no cgroup, and teardown has nothing to kill.
+    ///
+    /// Consistency is the assertion, because the right answer differs by
+    /// machine: `true` on a worker, `false` on a laptop, and the same both
+    /// ways however many ask at once.
+    #[test]
+    fn two_sessions_asking_at_once_get_the_same_answer() {
+        let alone = available();
+
+        let answers: Vec<bool> = std::thread::scope(|scope| {
+            let asking: Vec<_> = (0..80).map(|_| scope.spawn(available)).collect();
+            asking
+                .into_iter()
+                .map(|ask| ask.join().expect("the thread should not panic"))
+                .collect()
+        });
+
+        let wrong = answers.iter().filter(|answer| **answer != alone).count();
+        assert_eq!(
+            wrong, 0,
+            "{wrong} of 80 concurrent calls disagreed with {alone}"
+        );
+
+        // And nothing of ours left in the hierarchy on the way through.
+        let ours = format!("ft-probe-{}-", std::process::id());
+        let left: Vec<String> = std::fs::read_dir(ROOT)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(&ours))
+            .collect();
+        assert!(left.is_empty(), "probes left behind: {left:?}");
+    }
+
+    /// A number out of `cgroup.procs` is not necessarily a pid, and `kill` is
+    /// not forgiving about the difference: `0` is every process in the
+    /// worker's own process group, and a negative number is a process group of
+    /// its own. A process in another pid namespace reads as `0` from here.
+    ///
+    /// What this asserts is that the test survived at all, with a process of
+    /// ours alongside it: without the guard, `kill(0, SIGKILL)` would take the
+    /// test runner and everything beside it, which is exactly what it would do
+    /// to a worker.
+    #[tokio::test]
+    async fn a_number_that_is_not_a_pid_is_never_signalled() {
+        let dir = tempfile::tempdir().unwrap();
+        let bystander = detached();
+
+        // No `cgroup.kill` in this directory, so this is the path where a
+        // number from the file becomes an argument to `kill`. `-12345` stands
+        // for the negatives; `-1`, which means every process this user owns,
+        // is not a thing to write into a test on somebody's laptop.
+        tokio::fs::write(dir.path().join("cgroup.procs"), "0\n-12345\n")
+            .await
+            .unwrap();
+
+        sigkill(dir.path(), &members(dir.path()).await).await;
+
+        assert!(
+            alive(bystander),
+            "a process in the worker's own group must not be swept up"
+        );
+        unsafe { libc::kill(bystander, libc::SIGKILL) };
     }
 
     /// The leak, against the kernel: a process that outlived the shell that
