@@ -131,7 +131,22 @@ export function Deployment() {
 
       <section className="lsec">
         <h2>What is running</h2>
-        <Facts of={[["Version", boot.data?.version ?? "—", true]]} />
+        {/* Two rows, because the version alone cannot answer what this
+            section is read for. `version` is the last release's number, so
+            every image built from `main` between two releases carries the
+            same one — a deployment that pulled a new image and one that
+            silently did not both say 0.59.1. `build` is taken from the
+            interface actually compiled in, so it moves whenever the interface
+            does. Absent on a server too old to send it, and on one built
+            without the bundles. */}
+        <Facts
+          of={[
+            ["Version", boot.data?.version ?? "—", true],
+            ...(boot.data?.build
+              ? [["Build", boot.data.build, true] as [string, string, boolean]]
+              : []),
+          ]}
+        />
       </section>
 
       <section className="lsec">

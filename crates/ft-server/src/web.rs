@@ -41,6 +41,8 @@ use axum::{
     Json,
 };
 use rust_embed::RustEmbed;
+use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
 
 /// The application. Empty until `cd desktop && pnpm build`; `just build` fills it.
 #[derive(RustEmbed)]
@@ -349,6 +351,79 @@ fn unbuilt(renderer: bool, site: bool) -> Option<&'static str> {
              on :3000.\n",
         ),
     }
+}
+
+/// A short fingerprint of the interface this binary carries.
+///
+/// **A version number cannot tell two builds apart, and that is what this is
+/// for.** `CARGO_PKG_VERSION` names the last release, so every image built
+/// from `main` between two releases reports the same one — the `edge` tag is
+/// rebuilt on every push and calls itself whatever the previous release was
+/// called. A deployment that pulled a new image and a deployment that failed
+/// to therefore show the same *Version* on the deployment screen, and the
+/// question that screen exists to answer ("is what I deployed actually
+/// running?") cannot be answered there.
+///
+/// Taken from the embedded filenames rather than from git, because git is not
+/// present where the answer is needed: `.dockerignore` keeps `.git` out of the
+/// build context, so a SHA read at compile time would be blank in exactly the
+/// image whose identity is in doubt. Both bundlers write a content hash into
+/// the filenames they emit — which is the same property [`Bundle::hashed`]
+/// relies on to pin them forever — so the set of names changes whenever the
+/// interface does, and is available wherever the bundles are.
+///
+/// Names only, not bodies: the names already carry the hashes, and hashing a
+/// few hundred short strings costs nothing beside re-reading several megabytes.
+/// Sorted, because `RustEmbed`'s iteration order is not promised to be stable.
+///
+/// `None` when neither bundle was built, which is every `cargo test` run and
+/// every `cargo run` without a prior `just build`. There is no interface to
+/// fingerprint there, and a constant standing in for one would be a lie told
+/// on the screen that is meant to settle this.
+pub fn interface_build() -> Option<&'static str> {
+    static BUILD: OnceLock<Option<String>> = OnceLock::new();
+    BUILD
+        .get_or_init(|| {
+            fingerprint(
+                [Bundle::Renderer, Bundle::Site]
+                    .into_iter()
+                    .flat_map(|bundle| bundle.names()),
+            )
+        })
+        .as_deref()
+}
+
+/// The digest itself, over whatever names it is handed.
+///
+/// Separate from [`interface_build`] so that it can be driven with names: the
+/// bundles are absent under `cargo test` — which is the point of
+/// [`unbuilt`] — so a test calling the public function could only ever observe
+/// the `None` branch, and the properties worth holding are all in this one.
+fn fingerprint<'a>(names: impl Iterator<Item = std::borrow::Cow<'a, str>>) -> Option<String> {
+    let mut names: Vec<_> = names.collect();
+    if names.is_empty() {
+        return None;
+    }
+    // `RustEmbed`'s iteration order is not promised, and two orderings of one
+    // interface must not read as two interfaces.
+    names.sort_unstable();
+
+    let mut digest = Sha256::new();
+    for name in names {
+        digest.update(name.as_bytes());
+        // A separator, so two different splits of the same concatenated text
+        // cannot collide: `ab` + `c` and `a` + `bc` are different sets of
+        // files and have to hash differently.
+        digest.update([0]);
+    }
+    // Six bytes of it, as hex. Long enough that two interfaces will not
+    // collide, short enough to read off a screen and compare.
+    Some(
+        digest.finalize()[..6]
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
 }
 
 /// A file from a bundle, and the headers that go with it.
@@ -789,6 +864,74 @@ mod tests {
     /// So the decision is tested where it actually lives. It is a pure
     /// predicate over a filename; these filenames are invented, and the shapes
     /// they are invented in are the shapes each bundler really writes.
+    /// What the fingerprint is for, stated as the thing that must not happen.
+    ///
+    /// The defect it answers: an `edge` image built from `main` reports the
+    /// previous release's version, so a deployment that pulled it and one that
+    /// did not show the same *Version* on the deployment screen. Two different
+    /// interfaces must therefore produce two different strings, and one
+    /// interface must produce one — whatever order it arrives in.
+    mod the_interface_fingerprint {
+        use super::super::{fingerprint, interface_build, Bundle};
+        use std::borrow::Cow;
+
+        fn of(names: &[&'static str]) -> Option<String> {
+            fingerprint(names.iter().map(|name| Cow::Borrowed(*name)))
+        }
+
+        /// The assertion a constant would fail. A changed asset name is a
+        /// changed interface, which is every rebuild of either bundler.
+        #[test]
+        fn two_interfaces_do_not_share_a_fingerprint() {
+            assert_ne!(
+                of(&["assets/index-a1b2c3.js", "index.html"]),
+                of(&["assets/index-d4e5f6.js", "index.html"]),
+            );
+        }
+
+        /// And one interface is one answer, however it was iterated.
+        /// `RustEmbed` promises no order, so an unsorted digest would have
+        /// reported a fresh build on a rebuild of identical files.
+        #[test]
+        fn one_interface_reads_the_same_in_any_order() {
+            assert_eq!(of(&["a.js", "b.js", "c.js"]), of(&["c.js", "a.js", "b.js"]),);
+        }
+
+        /// The separator earns itself here. Concatenated with nothing between
+        /// them, these two different sets of files are the same bytes.
+        #[test]
+        fn a_differently_split_set_of_names_is_a_different_interface() {
+            assert_ne!(of(&["ab", "c"]), of(&["a", "bc"]));
+        }
+
+        /// Six bytes, as hex, so it can be read off a screen and compared.
+        #[test]
+        fn it_is_twelve_hexadecimal_characters() {
+            let id = of(&["index.html"]).expect("names were given");
+            assert_eq!(id.len(), 12);
+            assert!(id.chars().all(|c| c.is_ascii_hexdigit()), "{id}");
+        }
+
+        /// **No bundle is no answer**, rather than a constant standing in for
+        /// one. A binary built without the interface has nothing to identify,
+        /// and the screen this feeds is the one somebody reads to settle what
+        /// is deployed — a stable string there would be the lie it exists to
+        /// catch. This is the state `unbuilt` already explains in prose.
+        #[test]
+        fn nothing_built_is_no_fingerprint() {
+            assert_eq!(of(&[]), None);
+        }
+
+        /// The public function agrees with the bundles it actually has, on
+        /// whichever machine this runs: none under `backend-ci`, possibly both
+        /// on a laptop that has run `just build`.
+        #[test]
+        fn the_binary_claims_a_build_exactly_when_it_carries_one() {
+            let carries = Bundle::Renderer.built() || Bundle::Site.built();
+            assert_eq!(interface_build().is_some(), carries);
+        }
+    }
+
     #[test]
     fn the_cache_rule_holds_with_no_bundle_on_disk() {
         use Bundle::{Renderer, Site};
