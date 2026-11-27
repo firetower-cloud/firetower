@@ -503,6 +503,32 @@ impl Store {
             .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
             .collect())
     }
+
+    /// Every session that has ever worked in this session's workspace,
+    /// including this one and including the ended.
+    ///
+    /// The counterpart to `others_in_workspace`, which answers who is *still*
+    /// there and is how the last agent out is recognised. This answers who was
+    /// ever there, which is a different question and has one caller: the
+    /// processes a workspace leaves behind carry the id of the session that
+    /// started them, so reclaiming a workspace means knowing every id it ever
+    /// went by. A sibling that ended last week and left a dev server running
+    /// is exactly the case that the destroying session's own id would miss.
+    pub async fn sessions_in_workspace(&self, session_id: &SessionId) -> Result<Vec<SessionId>> {
+        let rows = sqlx::query(
+            "SELECT session_id AS id
+               FROM workspaces
+              WHERE path = (SELECT path FROM workspaces WHERE session_id = ?)",
+        )
+        .bind(session_id.as_str())
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows
+            .into_iter()
+            .map(|r| SessionId::from_stored(r.get::<String, _>("id")))
+            .collect())
+    }
 }
 
 #[cfg(test)]
