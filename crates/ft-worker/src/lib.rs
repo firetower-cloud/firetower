@@ -5908,15 +5908,28 @@ mod tests {
             .parse()
             .expect("the shell should have said the pid");
 
-        // Started is not the same as running: until it has `exec`ed there is
-        // no environment on it to read, and teardown would find nothing.
-        for _ in 0..200 {
-            if running(pid) {
-                break;
+        // Started is not the same as findable, and teardown is about to go
+        // looking. On Linux the shell joined the cgroup before it forked, so
+        // the child is in it from birth and running is the whole of it. On
+        // macOS the handle is the environment, and a process has none to read
+        // until it has finished `exec`ing — see `strays::visible`, which is
+        // the same wait the tests over there do, for the same reason.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            #[cfg(target_os = "macos")]
+            let ready = crate::strays::visible(pid, session.as_str());
+            #[cfg(not(target_os = "macos"))]
+            let ready = running(pid);
+
+            if ready {
+                return Some(pid);
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        Some(pid)
+
+        // Rather than handing back a decoy nothing can see, which would make
+        // the assertions below pass for the wrong reason.
+        panic!("the decoy {pid} never became something teardown could find")
     }
 
     /// Whether a pid is still a process that is running.

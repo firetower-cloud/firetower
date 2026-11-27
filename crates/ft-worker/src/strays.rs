@@ -378,6 +378,22 @@ fn parse(block: &[u8]) -> Option<Described> {
     })
 }
 
+/// Whether a process has reached the state [`kill`] could find it in.
+///
+/// Test-only, and shared with the teardown test over in `lib.rs`, which starts
+/// the same kind of decoy and has to wait for the same moment. Both halves
+/// matter and neither implies the other: a pid the process list has not
+/// published yet is not scanned, and a process that has not finished `exec`ing
+/// has no environment to read the tag out of. See `tests::detached` for what
+/// waiting on anything earlier costs.
+#[cfg(all(test, target_os = "macos"))]
+pub(crate) fn visible(pid: i32, tag: &str) -> bool {
+    pids().contains(&pid)
+        && describe(pid, &mut vec![0u8; argmax()])
+            .and_then(|it| it.session)
+            .is_some_and(|it| it == tag)
+}
+
 /// The next NUL-terminated string, leaving the cursor after it.
 #[cfg(target_os = "macos")]
 fn next<'a>(rest: &mut &'a [u8]) -> Option<&'a [u8]> {
@@ -439,18 +455,50 @@ mod tests {
             .parse()
             .expect("the shell should have said the pid");
 
-        // Started, but not yet `exec`ed: a process has no arguments to read
-        // until it has them, and the tests ask immediately.
-        for _ in 0..200 {
-            if describe(pid, &mut vec![0u8; argmax()])
-                .and_then(|it| it.session)
-                .is_some_and(|it| it == tag)
-            {
-                break;
+        // Started is not the same as findable, and the gap is where a test
+        // asks its question a moment too early and calls the answer a bug.
+        //
+        // A process reaches the state [`strays`] needs only once it has
+        // `exec`ed. Before that the kernel has no saved environment for it at
+        // all — a fork of the shell reads back with the shell's arguments and
+        // no environment, tag included — and during the `exec` itself there is
+        // a window where it cannot be read at all. Both were watched happening
+        // on a laptop, in microseconds; a loaded CI runner starting a debug
+        // binary stays in them for long enough to be scanned in the middle,
+        // which is what made this fail there and nowhere else.
+        //
+        // So the wait is for exactly what the scan reads — the process list
+        // and the environment on it — and not for some earlier state that
+        // merely implies them.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            if visible(pid, tag) {
+                return pid;
             }
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        pid
+
+        // Loudly, and here rather than in whichever assertion came next. A
+        // decoy that cannot be seen is how every test that uses one passes for
+        // the wrong reason — the selector could be returning nothing at all
+        // and they would still be green.
+        panic!("the decoy never became visible to a scan: {}", why(pid));
+    }
+
+    /// What the scan can see about one pid, for an assertion that failed to
+    /// explain itself. A pid and "not found" is the start of the question
+    /// rather than the answer to it, and on a machine somebody cannot log in
+    /// to it is the whole of what they get.
+    fn why(pid: i32) -> String {
+        format!(
+            "pid {pid}: listed={}, described={:?}",
+            pids().contains(&pid),
+            describe(pid, &mut vec![0u8; argmax()]).map(|it| format!(
+                "tag={:?} exec={:?}",
+                it.session,
+                it.exec.file_name()
+            ))
+        )
     }
 
     /// Not a test: the process the tests above go looking for, which has to be
@@ -490,7 +538,7 @@ mod tests {
         stop(theirs);
 
         let pids: Vec<i32> = found.iter().map(|stray| stray.pid).collect();
-        assert!(pids.contains(&ours), "{pids:?} should hold {ours}");
+        assert!(pids.contains(&ours), "{pids:?} should hold {}", why(ours));
         assert!(
             !pids.contains(&theirs),
             "another session's process is not ours to kill: {pids:?}"
@@ -550,7 +598,8 @@ mod tests {
         );
         assert!(
             pids.contains(&decoy),
-            "and the tag must still select, or this proves nothing: {pids:?}"
+            "and the tag must still select, or this proves nothing: {pids:?}, {}",
+            why(decoy)
         );
     }
 
@@ -568,7 +617,8 @@ mod tests {
 
         assert!(
             without.iter().any(|stray| stray.pid == pretender),
-            "the process is there to be found"
+            "the process is there to be found: {}",
+            why(pretender)
         );
         assert!(
             !with.iter().any(|stray| stray.pid == pretender),
