@@ -1,5 +1,37 @@
 # Changelog
 
+## [0.58.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.57.0...firetower-v0.58.0) (2026-11-24)
+
+
+### Features
+
+* **server:** an agent can read a whole skill, and one file of its bundle ([dd6a89d](https://github.com/firetower-cloud/firetower/commit/dd6a89dedf4113c077e6a87bb678da1dae44029b))
+* workspaces that name themselves ([1b2f7f2](https://github.com/firetower-cloud/firetower/commit/1b2f7f28f392acb7761b2e9b314451f8977299ab))
+* workspaces that name themselves ([960480f](https://github.com/firetower-cloud/firetower/commit/960480f2b0cc77e1847fbcf31bd20a2e9a5c7c37))
+
+
+### Bug Fixes
+
+* **server:** the skill listing's worked example comes back as text, and a size reaches megabytes ([41185e7](https://github.com/firetower-cloud/firetower/commit/41185e76ea2614f8f33f07ad99e1ecb37578d01a))
+
+## [0.57.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.3...firetower-v0.57.0) (2026-11-22)
+
+
+### Features
+
+* an agent can ask for a deletion, and cannot perform one ([33a1e96](https://github.com/firetower-cloud/firetower/commit/33a1e9613cf7f2d74380e19dc2e45a78ecd6c87b))
+* **desktop:** the Agent teams screen, the map, and a profile editor with no delegation on it ([e725dc6](https://github.com/firetower-cloud/firetower/commit/e725dc6c9e77049224e38e388a4f755821783af3))
+* **desktop:** the team map as a canvas, and one form for the drawer and the profile editor ([42ffd94](https://github.com/firetower-cloud/firetower/commit/42ffd94d2f335e07df4040d9e4d8c660b84c49eb))
+* **release:** promote the beta pin without typing a version ([#487](https://github.com/firetower-cloud/firetower/issues/487)) ([513173c](https://github.com/firetower-cloud/firetower/commit/513173ce058cdd3d9e129a9ca0b79af4677b2d9d))
+* schedule a team, and say how many agents a run starts ([865fdd8](https://github.com/firetower-cloud/firetower/commit/865fdd896a360b43dea9156de37476581034e8b0))
+* **server:** agent teams — delegation as a tree you can see, not a column on a profile ([a557353](https://github.com/firetower-cloud/firetower/commit/a55735338003419218dddef9c9a78655d2af1e76))
+
+
+### Bug Fixes
+
+* a child is told what it leads, so a team is as deep as it was drawn ([6991308](https://github.com/firetower-cloud/firetower/commit/6991308d51f2c648c4bd96e0332d6f0f3aa99878))
+* the deletion question belongs in the conversation, and it is one question ([694f1fe](https://github.com/firetower-cloud/firetower/commit/694f1fe7c81448c8920b0b6d326e364356271e10))
+
 ## [0.56.3](https://github.com/firetower-cloud/firetower/compare/firetower-v0.56.2...firetower-v0.56.3) (2026-11-19)
 
 

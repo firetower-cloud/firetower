@@ -175,6 +175,7 @@ export * from './mentioned.ts';
 export * from './modelUsage.ts';
 export * from './monthlyOn.ts';
 export * from './named.ts';
+export * from './namedBy.ts';
 export * from './nameOrganization.ts';
 export * from './newAgentTeam.ts';
 export * from './newCheckout.ts';

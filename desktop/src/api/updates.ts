@@ -14,6 +14,8 @@ import type {
   UpgradePlan,
 } from "./generated/model";
 import { Channel, ManifestOutcome } from "./generated/model";
+import type { AppChannel } from "~/channel";
+import { isNewer } from "~/releases";
 
 /**
  * What the Updates screen works out for itself.
@@ -241,6 +243,78 @@ export function diffLines(diff: string): { kind: "add" | "del" | "hunk" | "meta"
    *says*, which is the half the API deliberately leaves to a screen. */
 
 /**
+ * Whether this copy is running something general access has not reached.
+ *
+ * The state leaving beta produces: a copy is never moved backwards, so it
+ * keeps the build it has until general access catches up. Named once and read
+ * twice — `ThisApp` draws a block about it, and `channelsShown` treats it as
+ * one of the ways to be already on beta.
+ */
+export function aheadOfGeneral(
+  version: string | null | undefined,
+  generalPin: string | null | undefined,
+): boolean {
+  return !!version && !!generalPin && isNewer(version, generalPin);
+}
+
+/** What this copy of the app is, as far as the question below is concerned. */
+export type ThisCopy = {
+  /** The channel this copy is set to. */
+  channel: AppChannel;
+  /** Which channel the running build came from, when it is known. */
+  from: AppChannel | null;
+  /** Whether it is running something general access has not reached. */
+  ahead: boolean;
+};
+
+/**
+ * Whether the Updates screen names the release channels at all.
+ *
+ * **Hidden by default, for everybody, administrators included.** Beta is for
+ * the few who want every release as it is cut; for everybody else it was a
+ * larger version number on the one screen whose job is to say what is running
+ * and what is out — and for a reader who does not administer this Firetower,
+ * a larger version number with no control beside it at all. So the page does
+ * not mention it until somebody asks, through the line at the foot.
+ *
+ * **Reveal, never permit.** The preference decides what is *drawn*, and
+ * nothing else. An installation's channel is still the tag in
+ * `firetower.yml`, still install-wide, still an administrator's, and still
+ * only moved by the switch flow that rewrites the file and upgrades behind
+ * it. Turning this on grants nothing and moves nothing.
+ *
+ * **Anybody already on beta sees beta, whatever the preference says.** Four
+ * ways to be already on it, and the screen owes an explanation for all four:
+ *
+ *   * the *installation* is on beta — the thing everybody connected to it is
+ *     running, which the page cannot sensibly decline to name;
+ *   * *this copy* is set to beta — it is taking beta builds right now;
+ *   * this copy *came from* beta, which is what `installedFrom` records
+ *     before an install so the provenance survives the relaunch;
+ *   * this copy is *ahead* of general access, which is the state leaving beta
+ *     produces and the one the screen already has a block for. Reachable with
+ *     no provenance at all — a build installed by hand from the release page
+ *     — and the honest reading of it is the same: this is a pre-release
+ *     build, and a screen pretending otherwise is lying about what is
+ *     installed.
+ *
+ * A screen that denied the existence of the channel it is on would be a worse
+ * bug than the one this fixes.
+ */
+export function channelsShown(
+  revealed: boolean,
+  installation: ChannelStatus | null,
+  copy: ThisCopy,
+): boolean {
+  if (revealed) return true;
+  /* `recognised` is not asked for: the server resolves an unrecognised tag to
+     general access before this is read — see `running_from` — so a channel of
+     beta is a tag that said beta. */
+  if (installation?.channel === Channel.beta) return true;
+  return copy.channel === "beta" || copy.from === "beta" || copy.ahead;
+}
+
+/**
  * Whether this control plane can answer about channels at all.
  *
  * **The client is newer than the server it is pointed at more often than the
@@ -370,8 +444,33 @@ export function rowVerdict(
  *
  * The version is the manifest's, never the newest release — a manifest that
  * could not be read says so rather than putting a zero here.
+ *
+ * **A row names a version only when this installation is on that channel.**
+ * Beta's number under a general-access hero is the whole of the confusion
+ * this closes: it is larger than the one the hero is reporting, no upgrade
+ * from here can reach it, and the control beside it is a channel switch and
+ * not an update — so a reader who does not administer this Firetower is shown
+ * a bigger number with nothing at all to press. The row keeps its name and
+ * what the channel offers, which is what the row is for. The number is what
+ * beta holds, and that is beta's business until somebody is on it.
+ *
+ * **General access names its own either way, which is the rule and not an
+ * exception to it.** It is the floor every installation is offered, so it is
+ * never the number that is out of reach — and somebody on beta is told what
+ * general access holds because that is the version leaving beta waits for,
+ * which the sentence under the rows is entirely about. An unrecognised or
+ * pinned tag is treated as general access, and `on` already says so, so those
+ * follow the same rule without being named here.
+ *
+ * **Never by emptying the field.** `Offer.version` keeps coming back from the
+ * control plane and the switch confirmation still names the version it would
+ * install, from the plan — that is the moment somebody is accepting beta, and
+ * a confirmation that would not say what it is installing is worse than the
+ * confusion being fixed here. This is a row declining to draw a number, not
+ * the number going away.
  */
 export function rowOffers(offer: Offer): string {
+  if (!offer.on && offer.channel !== Channel.general) return offer.offers;
   const holds = offer.version
     ? offer.since
       ? `${offer.version}, promoted ${ago(offer.since)}.`

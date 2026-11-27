@@ -93,6 +93,7 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "children" => children(state, request).await,
         "update" => update(state, request).await,
         "plan" => plan(state, request).await,
+        "rename_workspace" => rename_workspace(state, request).await,
         "create_profile" => create_profile(state, request).await,
         "update_profile" => update_profile(state, request).await,
         "list_profiles" => list_profiles(state, request).await,
@@ -105,6 +106,7 @@ pub(crate) async fn handle(state: &AppState, request: &AgentRequest) -> Result<S
         "create_skill" => create_skill(state, request).await,
         "update_skill" => update_skill(state, request).await,
         "list_skills" => list_skills(state, request).await,
+        "get_skill" => get_skill(state, request).await,
         "propose_schedule" => propose_schedule(state, request).await,
         "list_schedules" => list_schedules(state, request).await,
         "pause_schedule" => pause_schedule(state, request).await,
@@ -1568,6 +1570,83 @@ async fn plan(state: &AppState, request: &AgentRequest) -> Result<String> {
          step starts or finishes.",
         plan.len()
     ))
+}
+
+/// The name the workspace wears in the rail, written by the agent in it.
+///
+/// A workspace is labelled with the first line of whoever's prompt started it,
+/// cut to 80 characters, because that is all the client had to go on at the
+/// moment it was created. Open with a paragraph and the rail becomes a column
+/// of sentence fragments. The agent knows what the work actually is by the end
+/// of its first turn; this is how it says so.
+///
+/// **Three refusals, and only one of them is an error.**
+///
+/// A child is an error — it asked for something it cannot have, and the reason
+/// is worth it reading. A child placed `here` shares its lead's workspace, so a
+/// child renaming would retitle the row the person is watching rather than
+/// anything of its own. It should not get this far: the instruction to rename
+/// is only given to a session with no parent. This is the backstop for the
+/// cases where it cannot be withheld — a child reading its lead's shared
+/// `AGENTS.md`, or one that reasons its way to the tool unprompted.
+///
+/// An empty or unparseable name is an error too, for the ordinary reason: the
+/// agent passed something wrong and can pass something right.
+///
+/// **An already-named workspace is not.** It comes back as a plain statement of
+/// fact, because the alternative is worse in a way that is easy to miss: an
+/// agent handed an error retries it, or apologises for it in the conversation,
+/// or explains to the person that it was unable to rename their workspace —
+/// which is three ways of spending somebody's attention on a label. A sentence
+/// saying the place is already named ends the matter in one turn.
+async fn rename_workspace(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = state
+        .db
+        .session(&request.session_id)
+        .await?
+        .context("the session that asked no longer exists")?;
+    if session.parent_id.is_some() {
+        bail!(
+            "only a session with no lead can name a workspace — you are working in your lead's, \
+             and renaming it would retitle the workspace they are watching. Carry on with the \
+             work and say nothing about this."
+        );
+    }
+
+    let asked = text(&request.input, "name").context("`name` is what to call this workspace")?;
+    // The endpoint a person renames through has validated a name since before
+    // this tool existed, so it is called rather than copied: two readings of
+    // what a valid name is would be a bug waiting for the first disagreement.
+    // Both paths genuinely have the same rule — trim, refuse empty — because
+    // length is advice in the tool's description and is not enforced anywhere.
+    let name = crate::api::sessions::valid_name(&asked).map_err(|why| anyhow::anyhow!("{why}"))?;
+
+    // `Agent`, which is the whole guarantee — the write happens only if nobody
+    // has deliberately named this place, decided inside the statement rather
+    // than by reading first. See `Db::rename_session`.
+    match state
+        .db
+        .rename_session(&session.id, &name, ft_core::NamedBy::Agent)
+        .await?
+    {
+        None => Ok(format!(
+            "This workspace is now called \"{name}\". It appears in the rail within a few \
+             seconds; nothing else to do, and nothing to tell the person."
+        )),
+        // Said as a fact with no suggestion of a remedy, deliberately. Any
+        // hint that there might be a way round it is an invitation to spend
+        // another turn looking for one.
+        Some(ft_core::NamedBy::Human) => Ok(
+            "Already named, by the person who started it. Their name stays; carry on with the \
+             work."
+                .into(),
+        ),
+        Some(ft_core::NamedBy::Agent) => Ok(
+            "Already named — this workspace has been named once and that is all it gets. \
+             Nothing was changed; carry on with the work."
+                .into(),
+        ),
+    }
 }
 
 /// A child's progress note to its lead, mid-task.
@@ -3703,6 +3782,341 @@ async fn update_skill(state: &AppState, request: &AgentRequest) -> Result<String
     }
 }
 
+/// Everything one skill's current version says, so an agent can read it
+/// rather than ask somebody to paste it in.
+///
+/// **The index and the single file are one tool, and that is the design.** A
+/// bundle may hold two megabytes of reference material — [`BIGGEST_FILE`] is
+/// what a drop is allowed — and a read that returned every file's contents
+/// would spend all of that on a question that was almost always about the
+/// instructions. So the plain call answers with the body and a *listing* of
+/// the rest, path and size and whether it runs, and `file` fetches one of
+/// those whole. The cheap call stays cheap, and nothing large arrives in
+/// somebody's context without being asked for.
+///
+/// **Viewer is the whole bar, and deliberately not what `update_skill`
+/// asks.** That one refuses a skill shared read-only, which is right for a
+/// write. This is a read, and the skills most worth reading are exactly the
+/// ones somebody else wrote: a colleague's, shared into a directory, and the
+/// builtins Firetower ships — none of which the owner may write. Borrowing
+/// the write's gate would have made the tool useless for the library it
+/// exists to read.
+///
+/// Prose, like `get_profile` and `list_skills`, because that is what this
+/// surface returns.
+///
+/// [`BIGGEST_FILE`]: crate::skills::BIGGEST_FILE
+async fn get_skill(state: &AppState, request: &AgentRequest) -> Result<String> {
+    let session = authoring_session(state, request).await?;
+    let owner = session.owner.as_str();
+    let wanted = text(&request.input, "name").context("name the skill to read")?;
+    // The same resolution and the same wording `update_skill` uses, so a name
+    // that works for one works for the other.
+    let skill = state
+        .skills
+        .by_name(owner, &wanted)
+        .await?
+        .with_context(|| format!("you have no skill called \"{wanted}\""))?;
+
+    /* **A held draft has no published version, and "no such skill" about one
+    the person is looking at in their library is a lie.** `detail` reads the
+    *current* version and a held one is never current, so a skill whose only
+    version is held reaches here with `version == 0` and would otherwise fall
+    out of the read below as a bare not-found. Say what is actually true.
+
+    And say it to whoever is asking, which is the half `update_skill` had
+    wrong first: approving is an action only somebody with Writer has, so a
+    reader of a colleague's draft is not sent off to approve it. */
+    if skill.version == 0 {
+        match (skill.held, skill.may_write) {
+            (true, true) => bail!(
+                "\"{}\" is held, pending your review — there is no published version to read. \
+                 Its contents are on the review card on the Skills screen, which is where you \
+                 approve it; it reads here once you have.",
+                skill.name
+            ),
+            (true, false) => bail!(
+                "\"{}\" is held, pending its owner's review — there is no published version to \
+                 read. Approving it is theirs to do, so the thing to do here is tell them it is \
+                 waiting.",
+                skill.name
+            ),
+            // Neither held nor published: a version was discarded or deleted
+            // out from under the row. Rare, and still not a missing skill.
+            _ => bail!(
+                "\"{}\" has no published version — it is in the library with nothing behind it \
+                 to read.",
+                skill.name
+            ),
+        }
+    }
+
+    let detail = state
+        .skills
+        .detail(owner, skill.id.as_str())
+        .await?
+        .with_context(|| format!("\"{}\" could not be read", skill.name))?;
+
+    if let Some(path) = text(&request.input, "file") {
+        return one_bundled_file(state, &skill, &detail, &path).await;
+    }
+
+    // The frontmatter's description rather than the row's. They agree on
+    // every skill that went through `compose_skill_md`, and where an imported
+    // one disagrees the frontmatter is what the model is actually handed.
+    let description = detail
+        .frontmatter
+        .get("description")
+        .and_then(Value::as_str)
+        .unwrap_or(&skill.description);
+    let mut out = vec![format!("**{}** — {description}", skill.name), String::new()];
+
+    /* **What this read does not let you do, said rather than left to the
+    refusal.** `update_skill` points here for anything that depends on what a
+    skill already says, so an agent arrives holding a change it means to make
+    — and three states turn that change into a refusal it could have known
+    about a call earlier. `get_profile` says the same kind of thing for the
+    same reason. */
+    if skill.builtin {
+        out.push(
+            "- One Firetower ships. Read it and build on it; `update_skill` cannot change it."
+                .into(),
+        );
+    } else if !skill.may_write {
+        out.push(
+            "- Shared with you to read, not to change — `update_skill` will refuse it. Writing \
+             your own with what you learn here is the way round it."
+                .into(),
+        );
+    }
+    if skill.held {
+        out.push(
+            "- A newer version of this is held, pending review, and is not what follows. What is \
+             below is the published version — the one that actually runs."
+                .into(),
+        );
+    }
+    if out.len() > 2 {
+        out.push(String::new());
+    }
+
+    out.push("Instructions:".into());
+    out.push(match detail.body.trim().is_empty() {
+        true => "(none)".into(),
+        false => capped(
+            detail.body.trim(),
+            "; the Skills screen shows the instructions whole",
+        ),
+    });
+    out.push(String::new());
+
+    /* The bundle, **named and measured and not included** — the whole reason
+    this tool is two calls rather than one. `SKILL.md` is left out of the list
+    because its contents are the paragraph above; it is still readable by
+    name, which is what makes the listing a view of the bundle rather than a
+    different set of paths. */
+    let bundled: Vec<&crate::skills::SkillFile> = detail
+        .files
+        .iter()
+        .filter(|f| f.path != "SKILL.md")
+        .collect();
+    if bundled.is_empty() {
+        out.push("Bundled files: none — this skill is its instructions and nothing else.".into());
+    } else {
+        out.push(format!(
+            "Bundled files ({}) — named, not included. Read one by calling `get_skill` again \
+             with `file`{}; one file per call, because a single reference can be larger than \
+             everything above it.",
+            bundled.len(),
+            match worth_an_example(&bundled) {
+                Some(path) => format!(", e.g. `file: \"{path}\"`"),
+                None => String::new(),
+            }
+        ));
+        for file in bundled {
+            out.push(format!(
+                "- `{}` — {}{}",
+                file.path,
+                in_bytes(file.size),
+                match file.executable {
+                    true => ", executable",
+                    false => "",
+                }
+            ));
+        }
+    }
+    Ok(out.join("\n"))
+}
+
+/// One file of a bundle, whole — the other half of [`get_skill`].
+async fn one_bundled_file(
+    state: &AppState,
+    skill: &crate::skills::Skill,
+    detail: &crate::skills::SkillDetail,
+    wanted: &str,
+) -> Result<String> {
+    // **Refused by naming what is there**, the way every other by-name
+    // refusal on this surface works — see [`one_named`]. No near-match and no
+    // guess: a path that is nearly right is a file the agent invented, and
+    // handing back a different one under the name it asked for is how an
+    // agent comes to report the contents of something it never read.
+    let Some(listed) = detail.files.iter().find(|f| f.path == wanted) else {
+        bail!(
+            "\"{}\" has no file at `{wanted}`. What it holds: {}. Ask for one of those by its \
+             exact path.",
+            skill.name,
+            detail
+                .files
+                .iter()
+                .map(|f| format!("`{}`", f.path))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    };
+    let bytes = state
+        .skills
+        .files_with_contents(skill.version_id.as_str())
+        .await?
+        .into_iter()
+        .find(|f| f.path == wanted)
+        .and_then(|f| ft_proto::decode(&f.contents))
+        .with_context(|| format!("`{wanted}` could not be read out of \"{}\"", skill.name))?;
+
+    // **A file that is not text is named and measured, not dumped.**
+    // `ReviewFile` settled this for the review card — a bundle may hold a
+    // font or an image, and `String::from_utf8_lossy` on one is a screenful
+    // of replacement characters that the agent has no way to recognise as
+    // nothing. The size is the useful fact that survives.
+    let Ok(text) = String::from_utf8(bytes) else {
+        return Ok(format!(
+            "`{wanted}` in \"{}\" — {}, and not text: a font, an image, something compiled. It \
+             can be named and measured and not shown; nothing here can hand you its contents.",
+            skill.name,
+            in_bytes(listed.size)
+        ));
+    };
+    Ok(format!(
+        "`{wanted}` in \"{}\" — {}{}:\n\n{}",
+        skill.name,
+        in_bytes(listed.size),
+        match listed.executable {
+            true => ", executable",
+            false => "",
+        },
+        capped(&text, " from the end of the file")
+    ))
+}
+
+/// The path to put in the listing's `e.g.`, chosen so that copying it works.
+///
+/// **A worked example that fails costs the call it was meant to save.** This
+/// was `bundled[0]`, which is only the first path *alphabetically* — so a
+/// bundle of `assets/logo.png` and `references/voice.md` pointed the agent at
+/// the image, answered "not text", and spent a round trip on the tool's own
+/// suggestion. A small version of exactly the waste the two-call shape exists
+/// to prevent, and the worse one for being self-inflicted.
+///
+/// **Decided from the listing alone, never by reading bytes.** Opening every
+/// file to pick an example is the cost this tool is built to avoid, so the
+/// guess goes on what a path says about itself: an extension known to be
+/// text, then anything not known to be binary, and a file that does not run
+/// ahead of one that does. Alphabetical order breaks a tie, so the hint stays
+/// the same between two reads of an unchanged bundle.
+///
+/// `None` when the whole bundle looks binary — the caller then offers no
+/// example at all, because no example is better than one written to fail.
+fn worth_an_example<'a>(bundled: &[&'a crate::skills::SkillFile]) -> Option<&'a str> {
+    const TEXT: &[&str] = &[
+        "md", "markdown", "txt", "rst", "json", "yaml", "yml", "toml", "ini", "csv", "tsv", "xml",
+        "html", "css", "sh", "bash", "zsh", "py", "rb", "js", "ts", "sql", "env",
+    ];
+    const BINARY: &[&str] = &[
+        "png", "jpg", "jpeg", "gif", "webp", "avif", "ico", "bmp", "tiff", "pdf", "zip", "gz",
+        "bz2", "xz", "tar", "woff", "woff2", "ttf", "otf", "eot", "mp3", "mp4", "mov", "wav",
+        "wasm", "so", "dylib", "dll", "exe", "bin", "o", "a", "class", "jar", "db", "sqlite",
+    ];
+    // From the last segment, so a dot in a directory name is not read as an
+    // extension — `references/v1.2/README` has none.
+    let extension = |f: &crate::skills::SkillFile| {
+        f.path
+            .rsplit('/')
+            .next()
+            .and_then(|name| name.rsplit_once('.'))
+            .map(|(_, e)| e.to_lowercase())
+    };
+    let rank = |f: &crate::skills::SkillFile| match extension(f) {
+        Some(e) if TEXT.contains(&e.as_str()) => 2,
+        Some(e) if BINARY.contains(&e.as_str()) => 0,
+        // No extension, or one neither list knows. A `Makefile` or a
+        // `references/NOTES` is text far more often than it is a font.
+        _ => 1,
+    };
+    bundled
+        .iter()
+        .filter(|f| rank(f) > 0)
+        // `min_by_key` keeps the first of equals, which is what makes the
+        // order alphabetical rather than whichever the comparison landed on.
+        .min_by_key(|f| (-rank(f), u8::from(f.executable)))
+        .map(|f| f.path.as_str())
+}
+
+/// A size as somebody reads it, in the units `skills::check` refuses in —
+/// kilobytes for the instructions, megabytes for a file.
+///
+/// **The megabyte step is not a nicety.** [`BIGGEST_FILE`] is two megabytes,
+/// and this number is the whole of what an agent has to decide whether a file
+/// is worth a call on. Capping the units at KB reported that file as
+/// `2048 KB` — the one size this design exists to handle, written in the unit
+/// that makes it look like any other.
+///
+/// [`BIGGEST_FILE`]: crate::skills::BIGGEST_FILE
+fn in_bytes(size: i64) -> String {
+    const KB: i64 = 1024;
+    const MB: i64 = 1024 * KB;
+    match size {
+        n if n < KB => format!("{n} bytes"),
+        n if n < MB => format!("{} KB", n / KB),
+        // One decimal, where the two refusals in `skills::check` round to a
+        // whole number: those name a limit, and this reports a measurement —
+        // "1 MB" for anything from 1.0 to 1.9 is the wrong answer to "is this
+        // worth a call".
+        n => format!("{:.1} MB", n as f64 / MB as f64),
+    }
+}
+
+/// Text on its way into an agent's context, capped.
+///
+/// **The figure and the marker are [`hand_back_body`]'s**, which caps a
+/// child's last turn for the same reason: a page that arrives whole is a page
+/// of somebody's context spent without them choosing to spend it. A skill's
+/// body may be [`BIGGEST_BODY`] and a bundled file [`BIGGEST_FILE`], both of
+/// which the library accepts and neither of which belongs in one tool result.
+///
+/// The head only, where the hand-back keeps both ends. A conversation's last
+/// words are worth as much as its first; a document is read from the top, and
+/// a head spliced onto a tail reads as continuous prose that is not.
+///
+/// `rest` is where the whole of it is, and is a different answer for the two
+/// callers — which is why it is an argument rather than a sentence in here.
+/// The Skills screen shows a skill's instructions; it does not show a bundled
+/// file's bytes, because `SkillDetail` does not carry them, so a marker that
+/// sent somebody there for one would be sending them nowhere.
+///
+/// [`BIGGEST_BODY`]: crate::skills::BIGGEST_BODY
+/// [`BIGGEST_FILE`]: crate::skills::BIGGEST_FILE
+fn capped(text: &str, rest: &str) -> String {
+    const ROOM: usize = 6000;
+    let total = text.chars().count();
+    if total <= ROOM {
+        return text.to_string();
+    }
+    format!(
+        "{}\n\n[… {} characters cut{rest} …]",
+        text.chars().take(ROOM).collect::<String>(),
+        total - ROOM
+    )
+}
+
 /// The skills the session's owner can see, so the agent builds on them.
 async fn list_skills(state: &AppState, request: &AgentRequest) -> Result<String> {
     let session = authoring_session(state, request).await?;
@@ -3729,7 +4143,13 @@ async fn list_skills(state: &AppState, request: &AgentRequest) -> Result<String>
             format!("- {}{}{}: {}", s.name, scripts, held, s.description)
         })
         .collect();
-    Ok(format!("The skills you can see:\n{}", lines.join("\n")))
+    // The pointer `list_teams` ends with, for the same reason: this is the
+    // index, and the moment an agent is holding it is the moment it wants one
+    // of them whole.
+    Ok(format!(
+        "The skills you can see:\n{}\n\n`get_skill` reads one whole.",
+        lines.join("\n")
+    ))
 }
 
 /// One child, as a line the lead can read.

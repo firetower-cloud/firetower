@@ -16,6 +16,7 @@ fn argv(start: Start) -> Vec<String> {
             start,
             &Default::default(),
             None,
+            false,
         )
         .expect("Claude Code is driven headless")
 }
@@ -90,6 +91,7 @@ fn a_restarted_agent_is_handed_the_conversation() {
             Start::Carrying("they asked for drawings".into()),
             &Default::default(),
             None,
+            false,
         )
         .expect("Claude Code is driven headless");
 
@@ -118,6 +120,7 @@ fn codex_takes_no_flags_either_way() {
         Start::Fresh,
         &Default::default(),
         None,
+        false,
     );
     let resumed = Agent::Codex.launch_headless(
         "s_01example",
@@ -125,6 +128,7 @@ fn codex_takes_no_flags_either_way() {
         Start::Resume,
         &Default::default(),
         None,
+        false,
     );
     assert_eq!(fresh, resumed);
 }
@@ -148,6 +152,7 @@ fn claude_is_launched_with_the_settings_its_pickers_show() {
             ft_core::Start::Fresh,
             &Default::default(),
             None,
+            false,
         )
         .expect("Claude Code is driven");
 
@@ -182,6 +187,7 @@ fn every_agent_is_told_where_an_artifact_goes() {
                 start,
                 &Default::default(),
                 None,
+                false,
             )
             .expect("Claude Code is driven headless");
 
@@ -192,4 +198,72 @@ fn every_agent_is_told_where_an_artifact_goes() {
             "the path is the one thing it cannot be left to guess"
         );
     }
+}
+
+/// Only a session with no lead is told to name the workspace.
+///
+/// **The gate is the test.** A child placed `here` shares its lead's workspace,
+/// so a child that renamed would retitle the row the person is watching — the
+/// control plane refuses it either way, and this is what stops it burning a
+/// turn finding that out. The two assertions are one requirement: told, and not
+/// told.
+#[test]
+fn only_a_session_with_no_lead_is_told_to_name_the_workspace() {
+    let appended = |name_yourself| {
+        let argv = Agent::ClaudeCode
+            .launch_headless(
+                "s_01example",
+                &Asking::CannotAsk,
+                Start::Fresh,
+                &Default::default(),
+                None,
+                name_yourself,
+            )
+            .expect("Claude Code is driven headless");
+        after(&argv, "--append-system-prompt").expect("there is a system prompt")
+    };
+
+    let told = appended(true);
+    assert!(
+        told.contains("rename_workspace"),
+        "the tool is named, because the instruction is useless without it: {told}"
+    );
+    assert!(
+        told.contains(".firetower/artifacts/"),
+        "and it rides alongside the artifact guidance rather than replacing it"
+    );
+
+    let child = appended(false);
+    assert!(
+        !child.contains("rename_workspace"),
+        "a child is not told to rename a workspace it shares: {child}"
+    );
+    assert!(
+        child.contains(".firetower/artifacts/"),
+        "which costs it nothing else"
+    );
+}
+
+/// The instruction gates itself too, in words, for the one path where nothing
+/// else can.
+///
+/// Codex, Kimi and Cursor have no append-a-prompt flag and read this out of
+/// `AGENTS.md` — one file beside the checkouts, which a child placed `here`
+/// reads as its lead's. There is no per-session copy to withhold, so on that
+/// path the first sentence is the whole gate: a child that reads it and stops
+/// has not spent a turn being refused by the server.
+///
+/// Asserted on the constant rather than through a launch, because the launch is
+/// exactly the channel this is *not* for.
+#[test]
+fn the_instruction_tells_a_child_it_is_not_theirs_to_do() {
+    let said = ft_core::NAME_GUIDANCE;
+    assert!(
+        said.contains("Only if you have no lead"),
+        "the condition comes before the instruction, or an agent reads the          instruction first and acts on it: {said}"
+    );
+    assert!(
+        said.find("no lead").unwrap() < said.find("Call `rename_workspace`").unwrap(),
+        "and it comes first in the text, not as a footnote: {said}"
+    );
 }

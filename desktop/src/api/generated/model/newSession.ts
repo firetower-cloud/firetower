@@ -8,6 +8,7 @@
 import type { Agent } from './agent.ts';
 import type { DirectoryId } from './directoryId.ts';
 import type { HostId } from './hostId.ts';
+import type { NamedBy } from './namedBy.ts';
 import type { NewCheckout } from './newCheckout.ts';
 import type { Preferred } from './preferred.ts';
 import type { RepoId } from './repoId.ts';
@@ -49,6 +50,7 @@ export interface NewSession {
      * @nullable
      */
   name?: string | null;
+  nameSetBy?: null | NamedBy;
   /**
      * The profile to start as, by id. Omit for a plain agent with no persona.
      *

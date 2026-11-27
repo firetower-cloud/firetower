@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.34.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.33.0...desktop-v0.34.0) (2026-11-24)
+
+
+### Features
+
+* workspaces that name themselves ([1b2f7f2](https://github.com/firetower-cloud/firetower/commit/1b2f7f28f392acb7761b2e9b314451f8977299ab))
+* workspaces that name themselves ([960480f](https://github.com/firetower-cloud/firetower/commit/960480f2b0cc77e1847fbcf31bd20a2e9a5c7c37))
+
+## [0.33.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.32.0...desktop-v0.33.0) (2026-11-23)
+
+
+### Features
+
+* **desktop:** a way off the old delegation, from the profile that has it ([25e0038](https://github.com/firetower-cloud/firetower/commit/25e0038417ee20ef0c0e311a2ba3928975d2df1a))
+* **desktop:** the old delegation is a warning, at the top of the form ([f4d6b5c](https://github.com/firetower-cloud/firetower/commit/f4d6b5cc15e07f29b7a1b2a36be06fddcee88824))
+
+
+### Bug Fixes
+
+* **desktop:** shorter labels on the old-reach notice, and ask what the team is called ([78214c2](https://github.com/firetower-cloud/firetower/commit/78214c2829887a6bc2cc82ca3a423a907eb403f9))
+
+## [0.32.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.31.1...desktop-v0.32.0) (2026-11-22)
+
+
+### Features
+
+* an agent can ask for a deletion, and cannot perform one ([33a1e96](https://github.com/firetower-cloud/firetower/commit/33a1e9613cf7f2d74380e19dc2e45a78ecd6c87b))
+* **desktop:** one profile form for the page and the drawer, with dropdowns and a markdown editor ([eb40bbf](https://github.com/firetower-cloud/firetower/commit/eb40bbf8f17fb0f8a1d1cc64625d025f9b82e35b))
+* **desktop:** the Agent teams screen, the map, and a profile editor with no delegation on it ([e725dc6](https://github.com/firetower-cloud/firetower/commit/e725dc6c9e77049224e38e388a4f755821783af3))
+* **desktop:** the instructions editor previews, in the app's own renderer ([ce8d7f8](https://github.com/firetower-cloud/firetower/commit/ce8d7f80ed831a4305dabb2228bbc870f6a7406e))
+* **desktop:** the team map as a canvas, and one form for the drawer and the profile editor ([42ffd94](https://github.com/firetower-cloud/firetower/commit/42ffd94d2f335e07df4040d9e4d8c660b84c49eb))
+* **desktop:** the Team panel shows every generation, not just the first ([ff70d17](https://github.com/firetower-cloud/firetower/commit/ff70d1760b3cbdf657c3df5604ce1bba8317e480))
+* schedule a team, and say how many agents a run starts ([865fdd8](https://github.com/firetower-cloud/firetower/commit/865fdd896a360b43dea9156de37476581034e8b0))
+* **server:** agent teams — delegation as a tree you can see, not a column on a profile ([a557353](https://github.com/firetower-cloud/firetower/commit/a55735338003419218dddef9c9a78655d2af1e76))
+
+
+### Bug Fixes
+
+* a child is told what it leads, so a team is as deep as it was drawn ([6991308](https://github.com/firetower-cloud/firetower/commit/6991308d51f2c648c4bd96e0332d6f0f3aa99878))
+* **desktop:** drop the profile tab's band, and put the map back when the drawer closes ([d5f0b30](https://github.com/firetower-cloud/firetower/commit/d5f0b30e101baafd513552286fb1062766710a13))
+* **desktop:** one field on the position tab, and the standard input treatment everywhere ([0b4f557](https://github.com/firetower-cloud/firetower/commit/0b4f5579406003999b422a0d62c8f2378059ff8a))
+* **desktop:** take the explanations off the profile form ([94bb2ab](https://github.com/firetower-cloud/firetower/commit/94bb2ab3683664becd2b4ec741758966370b2cf4))
+* **desktop:** the lead is a card like the others, and the new-profile sheet drops its footnote ([1950db6](https://github.com/firetower-cloud/firetower/commit/1950db6f55de7f6f2e1d94c47223e4cb59d8c397))
+* **desktop:** the QA on the teams screen — one box per field, a drawer beside the map, and a way to make a profile from where you need one ([108b63a](https://github.com/firetower-cloud/firetower/commit/108b63a1d692f880f3690690c77f6de8cdba69e2))
+* **desktop:** the teams map and its drawer, at the desk's own density ([61a1890](https://github.com/firetower-cloud/firetower/commit/61a18909414bbcbf1cffdf85ceb4e1a2c23e9b46))
+* **desktop:** two more explanations off the profile form ([a2910ef](https://github.com/firetower-cloud/firetower/commit/a2910ef300d691dacb8667cfec50051e1ac3bb39))
+* the deletion question belongs in the conversation, and it is one question ([694f1fe](https://github.com/firetower-cloud/firetower/commit/694f1fe7c81448c8920b0b6d326e364356271e10))
+
 ## [0.31.1](https://github.com/firetower-cloud/firetower/compare/desktop-v0.31.0...desktop-v0.31.1) (2026-11-19)
 
 

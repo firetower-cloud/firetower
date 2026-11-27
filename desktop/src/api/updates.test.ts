@@ -9,8 +9,10 @@ import type {
   UpgradePlan,
 } from "./generated/model";
 import {
+  aheadOfGeneral,
   canStart,
   channelBlock,
+  channelsShown,
   countEnded,
   diffLines,
   duration,
@@ -328,6 +330,91 @@ const bothOffers = (over: { general?: Partial<Offer>; beta?: Partial<Offer> } = 
   }),
 ];
 
+/**
+ * **Hidden by default, for everybody — and never hidden from somebody on it.**
+ *
+ * The preference is a disclosure control: it decides what the page draws and
+ * grants nothing. What it must never do is deny the channel this copy or this
+ * installation is actually running, which is four separate ways in.
+ */
+describe("whether the screen names the channels at all", () => {
+  const copy = (over: Partial<Parameters<typeof channelsShown>[2]> = {}) => ({
+    channel: "general" as const,
+    from: null,
+    ahead: false,
+    ...over,
+  });
+
+  /* The default page: a general-access installation, a copy on general
+     access, nobody having asked for anything. Administrators included —
+     there is no second variant for them. */
+  it("is off until somebody asks, for an administrator as much as anybody", () => {
+    for (const mayChange of [true, false]) {
+      expect(channelsShown(false, channel({ offers: bothOffers(), mayChange }), copy())).toBe(false);
+    }
+  });
+
+  it("is on once they ask", () => {
+    expect(channelsShown(true, channel({ offers: bothOffers() }), copy())).toBe(true);
+    expect(channelsShown(true, channel({ offers: bothOffers(), mayChange: false }), copy())).toBe(true);
+  });
+
+  /* **The edge the preference must not win.** Everybody connected to this
+     Firetower is running beta; a page that would not name it is lying about
+     what is installed. */
+  it("is on when the installation is on beta, whatever the preference says", () => {
+    const onBeta = channel({ channel: "beta", tag: "beta", offers: bothOffers() });
+    expect(channelsShown(false, onBeta, copy())).toBe(true);
+  });
+
+  it("is on when this copy is set to beta, whatever the preference says", () => {
+    expect(channelsShown(false, channel({ offers: bothOffers() }), copy({ channel: "beta" }))).toBe(true);
+  });
+
+  /* `installedFrom` writes this before an install, so the provenance survives
+     the relaunch. A copy that came from beta is running a beta build even if
+     the preference has since been set back to general access. */
+  it("is on when this copy came from beta, whatever the preference says", () => {
+    expect(channelsShown(false, channel({ offers: bothOffers() }), copy({ from: "beta" }))).toBe(true);
+  });
+
+  /* Ahead with no provenance at all — a build installed by hand off the
+     release page. The honest reading is the same one `ThisApp` already draws
+     a block for: this is a pre-release build. */
+  it("is on when this copy is ahead of general access, whatever the preference says", () => {
+    expect(channelsShown(false, channel({ offers: bothOffers() }), copy({ ahead: true }))).toBe(true);
+  });
+
+  /* An unrecognised tag is resolved to general access by the server before
+     this is read, so it is treated as general access here too — the same rule
+     the rest of the screen follows. */
+  it("is off for a tag that names no channel, which is treated as general access", () => {
+    for (const tag of ["latest", "edge", "0.55.0"]) {
+      const odd = channel({ tag, recognised: false, offers: bothOffers() });
+      expect(channelsShown(false, odd, copy()), tag).toBe(false);
+    }
+  });
+
+  /* A control plane too old to report a channel at all. Nothing to name, and
+     nothing about this copy saying otherwise. */
+  it("is off when the server cannot say what the installation is on", () => {
+    expect(channelsShown(false, null, copy())).toBe(false);
+    expect(channelsShown(false, null, copy({ from: "beta" }))).toBe(true);
+  });
+});
+
+describe("whether this copy is ahead of general access", () => {
+  it("is what leaving beta produces, and needs both figures to say so", () => {
+    expect(aheadOfGeneral("0.30.0", "0.29.1")).toBe(true);
+    expect(aheadOfGeneral("0.29.1", "0.29.1")).toBe(false);
+    expect(aheadOfGeneral("0.28.1", "0.29.1")).toBe(false);
+    /* A server too old to say leaves it unknown, and unknown is not ahead. */
+    expect(aheadOfGeneral("0.30.0", null)).toBe(false);
+    expect(aheadOfGeneral(null, "0.29.1")).toBe(false);
+    expect(aheadOfGeneral(undefined, undefined)).toBe(false);
+  });
+});
+
 describe("whether this control plane can speak about channels at all", () => {
   it("reads the answer rather than a version", () => {
     expect(servesChannels(status())).toBe(true);
@@ -482,9 +569,75 @@ describe("what a channel row holds", () => {
   });
 
   it("leaves the date off when the manifest records none — beta has none by design", () => {
-    expect(rowOffers(offer({ channel: "beta", version: "0.56.0", since: null }))).toBe(
+    expect(rowOffers(offer({ channel: "beta", version: "0.56.0", since: null, on: true }))).toBe(
       "Releases a maintainer has promoted. 0.56.0.",
     );
+  });
+});
+
+/**
+ * **A row names a version only when this installation is on that channel.**
+ *
+ * What general access was reading was beta's number — larger than the one the
+ * hero reports, out of reach of any upgrade from here, and next to a channel
+ * switch rather than an update. A reader who does not administer this
+ * Firetower got the bigger number and no control at all.
+ *
+ * General access names its own either way, which is the rule rather than an
+ * exception: it is the floor every installation is offered, so it is never
+ * the number that cannot be had, and somebody on beta is told what general
+ * holds because that is the version leaving beta waits for.
+ */
+describe("whose version a row may name", () => {
+  it("leaves beta's number off for an installation on general access", () => {
+    const [, beta] = bothOffers();
+    expect(rowOffers(beta)).toBe("Every release, as soon as it is cut.");
+    expect(rowOffers(beta)).not.toMatch(/\d+\.\d+\.\d+/);
+  });
+
+  /* The row this installation is on is unchanged — the hero's number and the
+     row's are then the same number, which is the point. */
+  it("still names general access's own number there", () => {
+    const [general] = bothOffers();
+    expect(rowOffers(general)).toBe("Releases a maintainer has promoted. 0.54.1.");
+  });
+
+  it("names both when the installation is on beta", () => {
+    const [general, beta] = bothOffers({
+      general: { on: false, action: null },
+      beta: { on: true, action: null },
+    });
+    expect(rowOffers(beta)).toBe("Every release, as soon as it is cut. 0.56.0.");
+    expect(rowOffers(general)).toBe("Releases a maintainer has promoted. 0.54.1.");
+  });
+
+  /* An unrecognised tag, an exact-version pin and a missing updater are all
+     treated as general access, and `on` already says so — so they get general
+     access's number and not beta's, without the rule naming them. */
+  it("treats a tag that names no channel as general access, beta's number included", () => {
+    const [general, beta] = bothOffers({
+      general: { action: "pin" },
+      beta: { action: "switch" },
+    });
+    expect(rowOffers(general)).toContain("0.54.1");
+    expect(rowOffers(beta)).not.toMatch(/\d+\.\d+\.\d+/);
+  });
+
+  /**
+   * **The field is not emptied — the row declines to draw it.** The API is
+   * additive-only and `servesChannels` reads field *presence*, so nulling
+   * `version` server-side would be a different and worse change. It is also
+   * what the switch confirmation needs: `SwitchPanel` names the version it
+   * would install, because that is the moment somebody is accepting beta and
+   * a confirmation that will not say what it is installing is worse than the
+   * problem being fixed. It takes it from `UpgradePlan.channelChange`, which
+   * nothing here touches; `shoot-channels.mjs` asserts the rendered button
+   * still reads "Switch to beta and upgrade to 0.56.0".
+   */
+  it("keeps the version on the offer for the confirmation to name", () => {
+    const beta = switchOffer(channel({ offers: bothOffers() }));
+    expect(rowOffers(beta!)).not.toMatch(/\d+\.\d+\.\d+/);
+    expect(beta?.version).toBe("0.56.0");
   });
 });
 

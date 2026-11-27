@@ -62,6 +62,8 @@ pub const CHILDREN: &str = "children";
 pub const UPDATE: &str = "update";
 /// The plan the agent is keeping, drawn live in the workspace.
 pub const PLAN: &str = "plan";
+/// Name this workspace for the work, once, on the first turn.
+pub const RENAME_WORKSPACE: &str = "rename_workspace";
 /// Save a reusable agent profile, so a person can ask for one in words rather
 /// than filling the form in by hand.
 pub const CREATE_PROFILE: &str = "create_profile";
@@ -91,6 +93,8 @@ pub const CREATE_SKILL: &str = "create_skill";
 pub const UPDATE_SKILL: &str = "update_skill";
 /// List the saved skills, so the agent builds on them rather than beside.
 pub const LIST_SKILLS: &str = "list_skills";
+/// The whole of one skill: its instructions, and what is bundled with it.
+pub const GET_SKILL: &str = "get_skill";
 /// Propose work on a clock, for a person to approve. **It never runs until
 /// they do** — the same rule `create_skill` applies to a bundle that ships a
 /// script.
@@ -219,6 +223,33 @@ the subscription and whether the profile is the person's default. Both are \
 named in the answer; when you copy a profile, say which of them did not come \
 with it rather than letting the person assume the copy is identical.";
 
+/// What `get_skill` is for, and — the harder half — what it is not for.
+///
+/// The anti-trigger is `get_profile`'s, pointed at the thing that actually
+/// happens: an agent holding `list_skills` and a question about one skill
+/// reads all ten to find it. The index answers that for a line each, and one
+/// skill's instructions are a page.
+///
+/// The second half is `file`, which only earns its keep if the model knows
+/// the listing leaves contents out **on purpose**. Said as the reason rather
+/// than as a rule, because a model told why does not then ask for every file
+/// one after another — which is the same read it was just talked out of.
+const GET_SKILL_DESCRIPTION: &str = "\
+The whole of one saved skill, by name: what it does, its full SKILL.md \
+instructions, and a list of the files bundled with it. Reach for it when \
+somebody asks what a skill SAYS, when you are copying one, or before \
+`update_skill` when the change depends on what it already says — that tool \
+writes only the fields you pass, so this is where the rest of it comes from. \
+THE FILE LIST GIVES PATHS AND SIZES AND NOT CONTENTS, on purpose: pass \
+`file` with one of those exact paths to read that one file whole. Ask for \
+one when you need it, not for all of them — a single reference file can be \
+larger than the instructions and everything else together, which is the \
+reason this is two calls. NOT for finding out which skills exist or what one \
+is roughly for — that is `list_skills`, which answers for every skill at \
+once and costs a line each. Reading ten skills one at a time to work out \
+which you wanted is the mistake this warns against. A skill held for review \
+has no published version yet and says so rather than reading.";
+
 const UPDATE_DESCRIPTION: &str = "\
 Post a short progress note to the agent that started you — your lead — while \
 you keep working. Use it at a real milestone: a plan settled, a surprise \
@@ -241,6 +272,39 @@ feeds the same panel, and this exists for engines that have none. \
 Restate the whole plan each call, like a todo list: 3-8 steps, one \
 `doing` at a time, the rest `pending` or `done`. Update it when a step starts \
 or finishes. It does not pause you and nobody is asked to approve it.";
+
+/// What `rename_workspace` does, as the agent reads it.
+///
+/// **This description is most of the feature.** The guards in the control plane
+/// decide whether a name may be written; nothing but these words decides
+/// whether the name is any good, and the failure they exist to prevent is an
+/// agent that restates the opening sentence in fewer characters. So the
+/// distinction — the work, not the request — is first and is given an example,
+/// which is the only form of that instruction an agent reliably follows.
+///
+/// The other three facts are here because each one is a turn somebody would
+/// otherwise waste: it can be done once, so there is no point holding it back
+/// until the work is understood; it is the label in the rail, so it is read by
+/// a person scanning a list rather than by anything; and a child may not call
+/// it, said with the reason, so a child that reads this in a shared `AGENTS.md`
+/// does not try.
+const RENAME_WORKSPACE_DESCRIPTION: &str = "\
+Name this workspace for the work. Call it ONCE, as your first action after the \
+person's opening message. \
+Name what the work *is*, not how the request was phrased: \"Staging deploy \
+failures\", not \"can you look at why the deploy keeps falling over\". Keep it \
+to about forty characters. \
+This is the label in the left rail — what somebody reads to find this \
+conversation again among twenty others — so it is written for a person \
+scanning a list, not for you. \
+**You get one.** Firetower records that the workspace has been named and a \
+second call writes nothing, so do not wait until you understand the work \
+better; a short title from the opening message is what this is for. A name a \
+person chose is never overwritten. \
+Only a session with no lead may call this: a child started in its lead's \
+workspace shares it, so a child renaming would retitle the row the person is \
+actually watching. \
+If it refuses or fails, carry on with the work and say nothing about it.";
 
 /// The configuration file that tells an agent to start this.
 pub fn mcp_config(exe: &std::path::Path, session_id: &str, workspace: &std::path::Path) -> Value {
@@ -467,6 +531,19 @@ async fn answer(
                             "required": ["steps"],
                         },
                     }, {
+                        "name": RENAME_WORKSPACE,
+                        "description": RENAME_WORKSPACE_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "type": "string",
+                                    "description": "The title, around forty characters. What the work is — \"Tax lines in invoice export\" — rather than how it was asked for.",
+                                },
+                            },
+                            "required": ["name"],
+                        },
+                    }, {
                         "name": CREATE_PROFILE,
                         "description": "Save a reusable agent profile — a persona a workspace can be started as, or a team can hold a position on. A PROFILE IS WHAT AN AGENT IS: its name, what it does, its instructions, its skills, and how it runs. IT IS NOT WHO IT HANDS WORK TO — that is a team, and `create_team` is the tool for it. Each of the three things a profile says about where it runs — the engine, the placement, and the machine for its own workspace — is either a commitment or left open for whichever lead delegates to it. Unless they have already said otherwise, AGREE ON THE SHAPE BEFORE YOU CALL THIS — don't silently assume. In one short, plain-language exchange, put the choices to them with a recommended default each, and let them correct you: (1) what it does and when to reach for it; (2) its goal and how it should work (the instructions); (3) which engine it runs on, or open so each child runs on its lead's; (4) placement — the lead's own workspace (`here`), one of its own (`new`), or open so the lead decides; (5) kept yours, or filed in a directory a teammate can reach. LEAVING A FIELD OPEN IS THE DEFAULT, not a gap: omit `agent` and `placement` unless they asked for something particular, and a child then runs wherever and however its lead does. You CAN set its run settings, the skills it loads, and what a lead may do if a child runs out — `get_profile` reports all of them for a profile you are copying. TWO THINGS YOU CANNOT SET: the subscription — a profile that pins an engine runs on the owner's default for it, and one that leaves the engine open has none to set — and whether it is the person's default for new workspaces, because setting one unsets another. If they asked for either, create the profile and then SAY YOU COULD NOT APPLY IT and that it is set on Settings → Harness → Profiles — never let silence read as \"applied\". Take anything they already specified and don't re-ask it. Then call this once. It appears on the Profiles screen immediately, theirs to edit or delete. Check `list_profiles` first so you refine an existing one rather than duplicate it. IF THEY ASKED FOR SOMETHING THAT LEADS OTHERS, make the profiles first and then call `create_team` — passing `can_delegate` or `delegate_scope` here is refused.",
                         "inputSchema": {
@@ -643,7 +720,7 @@ async fn answer(
                         },
                     }, {
                         "name": UPDATE_SKILL,
-                        "description": "Change a saved skill, by name — \"make the changelog skill terser\", \"add an example\". Writes a new version; a running session keeps the one it started with. Only the fields you pass change; the bundled files carry forward unless you send a new set. A change that ships a script is held for review.",
+                        "description": "Change a saved skill, by name — \"make the changelog skill terser\", \"add an example\". Writes a new version; a running session keeps the one it started with. Only the fields you pass change; the bundled files carry forward unless you send a new set — read `get_skill` first when the change depends on what it already says. A change that ships a script is held for review.",
                         "inputSchema": {
                             "type": "object",
                             "properties": {
@@ -669,8 +746,19 @@ async fn answer(
                         },
                     }, {
                         "name": LIST_SKILLS,
-                        "description": "List the skills the person can see — name, description, whether it ships a script, and whether it's held for their review. Read this before creating one, to build on what exists rather than make a near-duplicate.",
+                        "description": "List the skills the person can see — name, description, whether it ships a script, and whether it's held for their review. Read this before creating one, to build on what exists rather than make a near-duplicate. `get_skill` reads one whole.",
                         "inputSchema": { "type": "object", "properties": {} },
+                    }, {
+                        "name": GET_SKILL,
+                        "description": GET_SKILL_DESCRIPTION,
+                        "inputSchema": {
+                            "type": "object",
+                            "properties": {
+                                "name": { "type": "string", "description": "The skill to read, by name, as `list_skills` shows it." },
+                                "file": { "type": "string", "description": "Optional. One bundled file to read whole, by the exact path the file list gives, e.g. \"references/format.md\". Omit it for the instructions and the list." },
+                            },
+                            "required": ["name"],
+                        },
                     }, {
                         "name": PROPOSE_SCHEDULE,
                         "description": "Propose work that runs on a clock — a dependency audit every Monday, a flaky-test hunt overnight. IT IS OFF WHEN YOU CREATE IT AND NEVER RUNS UNTIL THE PERSON TURNS IT ON, so say that when you tell them: it appears on the Schedules screen for them to read and approve. Each run starts its OWN NEW WORKSPACE and follows `prompt` with nobody present, so write `prompt` for somebody who cannot ask you a follow-up question: say what to do and what to leave alone. AGREE THE SHAPE FIRST unless they already said — what it should do, how often, which repository, and that nobody will be there to answer it. Runs cannot be closer together than 15 minutes. Check `list_schedules` first so you refine one rather than duplicate it. YOU CANNOT turn one on, edit one, or delete one, and there is no way to end a workspace a run left behind — that is theirs to do.",
@@ -741,10 +829,10 @@ async fn answer(
                 .and_then(Value::as_str)
                 .unwrap_or(TOOL);
             let text = match name {
-                SPAWN | CHILDREN | UPDATE | PLAN | CREATE_PROFILE | UPDATE_PROFILE
-                | LIST_PROFILES | GET_PROFILE | CREATE_TEAM | UPDATE_TEAM | LIST_TEAMS
-                | GET_TEAM | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL | LIST_SKILLS
-                | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
+                SPAWN | CHILDREN | UPDATE | PLAN | RENAME_WORKSPACE | CREATE_PROFILE
+                | UPDATE_PROFILE | LIST_PROFILES | GET_PROFILE | CREATE_TEAM | UPDATE_TEAM
+                | LIST_TEAMS | GET_TEAM | LIST_COMPUTE | CREATE_SKILL | UPDATE_SKILL
+                | LIST_SKILLS | GET_SKILL | PROPOSE_SCHEDULE | LIST_SCHEDULES | PAUSE_SCHEDULE => {
                     delegate(session_id, name, &id, &arguments).await
                 }
                 // **The one tool that asks a person before it acts**, and
@@ -797,6 +885,31 @@ async fn ask(
         .and_then(Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| format!("{tool_name}-{}", input.to_string().len()));
+
+    // **Naming the workspace is never put to anybody.**
+    //
+    // Declaring the tool above is what normally keeps it off this path: a
+    // `tools/call` naming it is routed to the control plane rather than turned
+    // into a question. But what reaches here is a question the *engine* raised
+    // about a call it is holding, and in `auto` mode that is a classifier's
+    // judgement — `plan`, `spawn` and `update` are waved through today and
+    // nothing promises `rename_workspace` always will be, on every engine, for
+    // ever.
+    //
+    // A card would defeat the whole point. The agent calls this on its first
+    // turn, before it has done anything the person cares about, and a rename
+    // that stops to ask is a modal interruption about a rail label. So the
+    // answer is decided here instead of being asked: the worst this tool can
+    // do is write a line of text into a name the control plane has already
+    // decided it may write, once.
+    //
+    // Narrowly this one tool, not Firetower's tools in general.
+    // `request_deletion` is also declared and must still reach a person —
+    // asking is what it is *for* — so a blanket rule here would be a hole in
+    // the one place that cannot have one.
+    if tool_name == format!("mcp__{SERVER}__{RENAME_WORKSPACE}") {
+        return settle(json!({ "behavior": "allow" }), &input);
+    }
 
     // Already settled, so nobody is asked twice. This is what makes "always"
     // mean now rather than from the next session onwards.
@@ -1114,6 +1227,7 @@ mod tests {
                 CHILDREN,
                 UPDATE,
                 PLAN,
+                RENAME_WORKSPACE,
                 CREATE_PROFILE,
                 UPDATE_PROFILE,
                 LIST_PROFILES,
@@ -1126,6 +1240,7 @@ mod tests {
                 CREATE_SKILL,
                 UPDATE_SKILL,
                 LIST_SKILLS,
+                GET_SKILL,
                 PROPOSE_SCHEDULE,
                 LIST_SCHEDULES,
                 PAUSE_SCHEDULE,
@@ -1193,6 +1308,93 @@ mod tests {
         let decision: Value = serde_json::from_str(text).unwrap();
         assert_eq!(decision["behavior"], "deny");
         assert!(decision["message"].as_str().unwrap().contains("Firetower"));
+    }
+
+    /// **Naming the workspace never reaches a person.**
+    ///
+    /// The one requirement of this feature that correct code cannot satisfy on
+    /// its own: a rename that stops to ask about itself defeats the point of
+    /// renaming. Two things have to hold and both are asserted here, because
+    /// each covers a different way the card could appear.
+    ///
+    /// Declaring the tool is the first: a `tools/call` naming it is routed to
+    /// the control plane rather than turned into a question, which is what
+    /// `plan`, `spawn` and `update` already rely on. The session here does not
+    /// exist, so the delegation fails — and *that it failed as a delegation*,
+    /// in words, rather than coming back as a permission decision, is the
+    /// assertion.
+    ///
+    /// The second is the engine asking anyway. In `auto` mode that is a
+    /// classifier's judgement, and nothing promises it waves this through on
+    /// every engine for ever, so a question about this tool is answered here
+    /// instead of being carried to somebody.
+    #[tokio::test]
+    async fn naming_the_workspace_is_never_put_to_a_person() {
+        let called = json!({
+            "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+            "params": { "name": RENAME_WORKSPACE, "arguments": { "name": "Staging deploys" } },
+        });
+        let response = answer(&called, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            serde_json::from_str::<Value>(text)
+                .ok()
+                .and_then(|d| d.get("behavior").cloned())
+                .is_none(),
+            "a declared tool is delegated, not turned into a decision: {text}"
+        );
+        assert!(text.contains("Firetower"), "{text}");
+
+        // And if the engine raises a question about it regardless, it is
+        // answered here rather than carried to whoever is watching — which
+        // this session has nobody to be, so a question would come back denied.
+        let asked = json!({
+            "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+            "params": { "name": TOOL, "arguments": {
+                "tool_name": format!("mcp__{SERVER}__{RENAME_WORKSPACE}"),
+                "input": { "name": "Staging deploys" },
+                "tool_use_id": "toolu_rename" } },
+        });
+        let response = answer(&asked, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let decision: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(decision["behavior"], "allow", "{text}");
+        assert_eq!(
+            decision["updatedInput"],
+            json!({ "name": "Staging deploys" }),
+            "the agent's own arguments come back with the allow"
+        );
+    }
+
+    /// Deleting still asks, which is what the exemption above must not widen
+    /// into.
+    ///
+    /// `request_deletion` is declared beside `rename_workspace` and exists in
+    /// order to put a question to somebody. A rule that waved Firetower's own
+    /// tools through in general would be a hole in the one place that cannot
+    /// have one, so the narrowness is asserted rather than left to the comment.
+    #[tokio::test]
+    async fn deleting_is_still_put_to_a_person() {
+        let request = json!({
+            "jsonrpc": "2.0", "id": 8, "method": "tools/call",
+            "params": { "name": TOOL, "arguments": {
+                "tool_name": format!("mcp__{SERVER}__{REQUEST_DELETION}"),
+                "input": { "items": [] },
+                "tool_use_id": "toolu_delete" } },
+        });
+        let response = answer(&request, "s_no-such-session-at-all", nowhere(), &none())
+            .await
+            .unwrap();
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        let decision: Value = serde_json::from_str(text).unwrap();
+        assert_eq!(
+            decision["behavior"], "deny",
+            "nobody could be asked, and the safe end of that is still a denial: {text}"
+        );
     }
 
     #[test]

@@ -15067,6 +15067,14 @@
           }
         }
       },
+      "NamedBy": {
+        "type": "string",
+        "description": "Who last deliberately named a workspace.\n\nThe whole of what makes the agent's self-rename safe. `None` on a workspace\n— which is every workspace that exists today, and every one whose name was\nderived from a prompt — means nobody has chosen a name and the agent may\nclaim it once. Anything else means it may not, ever again: a second agent\nwrite is refused because naming is once, and a human write is refused\nbecause a person always wins.\n\nSpelled in lower case on the wire because that is how it is spelled in the\ncolumn, and the value crosses between the two often enough that two\nspellings would be two things to keep in step. The wire convention — an\nenum value stays the symbol it is — exists so a *client* reads the same\nword the code does, and here the client, the code and the database all read\nthe same word.",
+        "enum": [
+          "agent",
+          "human"
+        ]
+      },
       "NewAgentTeam": {
         "type": "object",
         "description": "What the API accepts to create or replace a team.\n\n**Declarative.** What is sent is the team: a position that is not in\n`positions` is removed, with its subtree. That is the same contract the\nYAML file has, which is what lets one round-trip into the other.",
@@ -15662,6 +15670,17 @@
               "null"
             ],
             "description": "What to call the workspace. Omit to derive one from the branch.\n\nThe name a person reads in the rail, not an identifier: it is free text,\nit can be changed afterwards, and two workspaces may share one. The\nbranch is what has to be unique, and git enforces that itself."
+          },
+          "nameSetBy": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/NamedBy",
+                "description": "Whether the `name` above was *chosen* rather than derived.\n\nOmit — which every client but one does — and it was derived, which is\nwhat the desktop and the phone do when they cut the first line of the\nprompt to 80 characters. A derived name is not a choice, so it leaves\nthe workspace claimable and the agent names it on its first turn.\n\nThe web's New Workspace form is the exception: its name field is one a\nperson types into, so it sends [`NamedBy::Human`] and the agent leaves\nthat name alone for good. This is the only case where the feature could\notherwise overwrite something somebody wrote."
+              }
+            ]
           },
           "profile": {
             "type": [

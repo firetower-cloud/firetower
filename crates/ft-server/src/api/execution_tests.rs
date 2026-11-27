@@ -3567,6 +3567,9 @@ async fn a_model_the_picker_does_not_offer_is_imported_and_reaches_the_launch() 
             ft_core::Start::Fresh,
             &carried,
             None,
+            // A child, which is the one thing this says about naming: it is
+            // not told to name a workspace it shares with its lead.
+            false,
         )
         .expect("Claude Code is launched with an argv");
     let at = argv
@@ -10785,4 +10788,986 @@ async fn deleting_a_profile_a_team_holds_names_the_teams() {
         "and nothing was deleted"
     );
     state.fleet.stop_supervising(&host.id).await;
+}
+// ─── Reading a whole skill ──────────────────────────────────────────────────
+
+/// A skill of this owner's with a bundle of a given shape, live.
+///
+/// Apart from [`a_skill`] because these tests are about the *files*: the
+/// listing, the one-file read, and the two kinds of file that cannot simply
+/// be printed. Contents arrive as bytes rather than text so a font can be put
+/// in one.
+async fn a_skill_holding(
+    state: &AppState,
+    owner: &str,
+    name: &str,
+    body: &str,
+    files: &[(&str, &[u8], bool)],
+    hold: bool,
+) -> String {
+    let org = state.db.org().await.unwrap();
+    let slug = state.access.personal_root(owner).await.unwrap();
+    let description = format!("what {name} is for");
+    let skill_md = format!("---\nname: {name}\ndescription: {description}\n---\n\n{body}\n");
+    let mut bundle = vec![crate::skills::IncomingFile {
+        path: "SKILL.md".into(),
+        contents: ft_proto::encode(skill_md.as_bytes()),
+        executable: false,
+    }];
+    bundle.extend(
+        files
+            .iter()
+            .map(|(path, bytes, executable)| crate::skills::IncomingFile {
+                path: (*path).into(),
+                contents: ft_proto::encode(bytes),
+                executable: *executable,
+            }),
+    );
+    state
+        .skills
+        .create(
+            &org,
+            owner,
+            &slug,
+            &crate::skills::NewSkill {
+                name: name.into(),
+                display_name: None,
+                description: description.clone(),
+                frontmatter: serde_json::json!({ "name": name, "description": description }),
+                body: body.into(),
+                files: bundle,
+                notes: None,
+                kind: None,
+            },
+            hold,
+        )
+        .await
+        .unwrap()
+        .as_str()
+        .to_string()
+}
+
+/// **The feature, as one test: can an agent read a skill without being handed
+/// the whole bundle?**
+///
+/// Not "does the tool print the body". Both halves are asserted, because
+/// either alone passes while the design is broken. The plain call has to
+/// carry the instructions and *name* every bundled file with its size and
+/// whether it runs — and must NOT carry a byte of their contents, which is
+/// the entire reason this is two calls rather than one. Then the second call
+/// has to turn one of those listed paths into that file, whole.
+///
+/// The negative is the load-bearing assertion. A tool that returned
+/// everything would pass every positive here.
+#[tokio::test]
+async fn an_agent_can_read_a_whole_skill_and_then_one_of_its_files() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill_holding(
+        &state,
+        &owner,
+        "changelog",
+        "# Changelog helper\n\nRead the diff, then write the entry.",
+        &[
+            (
+                "references/format.md",
+                b"KEEP A CHANGELOG, with the sections in this order." as &[u8],
+                false,
+            ),
+            ("scripts/build.sh", b"#!/bin/sh\necho building\n", true),
+        ],
+        false,
+    )
+    .await;
+
+    // ── the index ─────────────────────────────────────────────────────────
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "k1",
+            "get_skill",
+            serde_json::json!({ "name": "changelog" }),
+        ),
+    )
+    .await
+    .expect("a skill its owner can see is one they can read");
+
+    for expected in [
+        "changelog",
+        "what changelog is for",
+        // The instructions, whole.
+        "Read the diff, then write the entry.",
+        // Every file named, with its size and the bit that says it runs.
+        "references/format.md",
+        "scripts/build.sh",
+        "bytes",
+        "executable",
+        // And how to get one of them, which is the half that makes the
+        // listing usable rather than merely honest.
+        "`file`",
+    ] {
+        assert!(
+            said.contains(expected),
+            "the read has to carry {expected:?}: {said}"
+        );
+    }
+    // **The point of the design.** No file's contents come with the index.
+    assert!(
+        !said.contains("KEEP A CHANGELOG"),
+        "a bundled file's contents must not arrive uninvited: {said}"
+    );
+    assert!(!said.contains("echo building"), "nor a script's: {said}");
+    // `SKILL.md` is not listed beside them: its contents are the paragraph
+    // above, and listing it would read as a file worth a second call.
+    assert!(
+        !said.contains("`SKILL.md`"),
+        "the instructions are not offered again as a file to fetch: {said}"
+    );
+
+    // ── one file ──────────────────────────────────────────────────────────
+    let one = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "k2",
+            "get_skill",
+            serde_json::json!({ "name": "changelog", "file": "references/format.md" }),
+        ),
+    )
+    .await
+    .expect("a path the listing gave is one the tool reads");
+    assert!(
+        one.contains("KEEP A CHANGELOG, with the sections in this order."),
+        "the file asked for arrives whole: {one}"
+    );
+    assert!(
+        !one.contains("echo building"),
+        "and only the one asked for: {one}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **Viewer is the whole bar, and that is not what `update_skill` asks.**
+///
+/// A skill shared read-only — a colleague's, filed where this owner can
+/// reach it — is refused by the write and must be *read* by this. Getting
+/// this wrong makes the tool useless for exactly the library skills people
+/// most want read, so both tools are driven at one skill and the two answers
+/// are asserted against each other.
+#[tokio::test]
+async fn a_skill_shared_to_read_is_read_here_and_refused_by_the_write() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = a_skill_holding(
+        &state,
+        ana.id.as_str(),
+        "house-style",
+        "# House style\n\nShort sentences. No exclamation marks.",
+        &[],
+        false,
+    )
+    .await;
+    // Shared to read and no further, which is the state the write refuses.
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Skill,
+            &hers,
+            &owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "v1",
+            "get_skill",
+            serde_json::json!({ "name": "house-style" }),
+        ),
+    )
+    .await
+    .expect("Viewer is enough to read a skill");
+    assert!(
+        said.contains("Short sentences. No exclamation marks."),
+        "a skill shared to read is readable whole: {said}"
+    );
+    // And the read says, before the agent finds out by being refused, that
+    // changing it is not on the table.
+    assert!(
+        said.contains("not to change"),
+        "the read says what it does not let you do: {said}"
+    );
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "v2",
+            "update_skill",
+            serde_json::json!({ "name": "house-style", "body": "clobbered" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("read, not to change"),
+        "which the write still refuses: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A held draft is answered as held, not as missing.**
+///
+/// `detail` reads the *current* version and a held one is never current, so
+/// the honest-looking implementation says "no skill called that" about
+/// something the person is looking at in their library. Said for both
+/// readers, because `update_skill` already got this wrong once in the other
+/// direction: approving is an action only Writer has, so a reader of
+/// somebody else's draft is not told to go and approve it.
+#[tokio::test]
+async fn a_held_skill_says_it_is_held_rather_than_missing() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill_holding(
+        &state,
+        &owner,
+        "deployer",
+        "# Deployer\n\nShips it.",
+        &[("scripts/ship.sh", b"#!/bin/sh\n", true)],
+        true,
+    )
+    .await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "h1",
+            "get_skill",
+            serde_json::json!({ "name": "deployer" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("held, pending your review"),
+        "the owner is told what is actually true of it: {refused}"
+    );
+    assert!(
+        refused.contains("no published version"),
+        "and why there is nothing to read: {refused}"
+    );
+    assert!(
+        !refused.contains("you have no skill called"),
+        "never a not-found about a skill they can see in their library: {refused}"
+    );
+
+    // The same draft, read by somebody who may only look at it. Approving is
+    // not theirs to do and the answer must not send them to do it.
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    let hers = a_skill_holding(
+        &state,
+        ana.id.as_str(),
+        "her-deployer",
+        "# Deployer\n\nShips it.",
+        &[("scripts/ship.sh", b"#!/bin/sh\n", true)],
+        true,
+    )
+    .await;
+    state
+        .access
+        .set_exception(
+            crate::access::FiledKind::Skill,
+            &hers,
+            &owner,
+            crate::access::Level::Viewer,
+        )
+        .await
+        .unwrap();
+    let told = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "h2",
+            "get_skill",
+            serde_json::json!({ "name": "her-deployer" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        told.contains("its owner's review"),
+        "a reader is told whose review it is waiting on: {told}"
+    );
+    assert!(
+        !told.contains("pending your review"),
+        "and not sent to perform an approval they cannot do: {told}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A file that is not text is named and measured, not dumped**, and a path
+/// that is not in the bundle is refused by naming the ones that are.
+///
+/// The first is `ReviewFile`'s rule for the same bytes on the review card: a
+/// bundle may hold a font, and `from_utf8_lossy` on one is a screenful of
+/// replacement characters an agent has no way to read as nothing. The second
+/// is `one_named`'s rule — no near-match and no guess, because handing back a
+/// different file under the name that was asked for is how an agent comes to
+/// report the contents of something it never read.
+#[tokio::test]
+async fn a_binary_file_is_named_and_a_path_that_is_not_there_is_refused_by_name() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    a_skill_holding(
+        &state,
+        &owner,
+        "brand",
+        "# Brand\n\nUse the mark.",
+        &[
+            // Not UTF-8 by construction: a lone continuation byte.
+            (
+                "assets/logo.png",
+                &[0x89, b'P', b'N', b'G', 0x80, 0xff],
+                false,
+            ),
+            ("references/voice.md", b"Plain words." as &[u8], false),
+        ],
+        false,
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "b1",
+            "get_skill",
+            serde_json::json!({ "name": "brand", "file": "assets/logo.png" }),
+        ),
+    )
+    .await
+    .expect("a binary file is an answer, not a failure — it exists and was asked for");
+    assert!(
+        said.contains("assets/logo.png") && said.contains("6 bytes"),
+        "it is named and measured: {said}"
+    );
+    // **And the listing's own worked example has to survive being copied.**
+    // This bundle is the shape that caught it: `assets/logo.png` sorts first,
+    // so the hint used to point at the image and answer "not text" — a round
+    // trip spent on the tool's own suggestion.
+    let listed = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "b0",
+            "get_skill",
+            serde_json::json!({ "name": "brand" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        listed.contains("e.g. `file: \"references/voice.md\"`"),
+        "the example names a file that will actually come back as text: {listed}"
+    );
+    assert!(
+        !listed.contains("e.g. `file: \"assets/logo.png\"`"),
+        "and never the first path alphabetically just because it is first: {listed}"
+    );
+    assert!(
+        said.contains("not text"),
+        "and says why there is nothing to show: {said}"
+    );
+    assert!(
+        !said.contains('\u{fffd}'),
+        "never a mojibake dump of bytes that are not text: {said}"
+    );
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "b2",
+            "get_skill",
+            // One character off a real path — the shape a guess would get
+            // wrong silently.
+            serde_json::json!({ "name": "brand", "file": "references/voices.md" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("references/voice.md") && refused.contains("assets/logo.png"),
+        "the refusal names what is actually in the bundle: {refused}"
+    );
+    assert!(
+        !refused.contains("Plain words."),
+        "and does not quietly serve the near-match instead: {refused}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A file bigger than one tool result is cut, and says how much was cut.**
+///
+/// The failure this design exists to avoid, in its last form: the listing
+/// keeps a 2 MB reference out of the index, and nothing would keep it out of
+/// the index's second call. `hand_back_body`'s cap and marker, for the same
+/// reason it has them.
+#[tokio::test]
+async fn a_file_too_big_for_one_answer_is_cut_and_says_so() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let huge = "x".repeat(20_000);
+    let mut long = huge.clone().into_bytes();
+    long.extend_from_slice(b"THE-VERY-END");
+    a_skill_holding(
+        &state,
+        &owner,
+        "encyclopedia",
+        "# Encyclopedia\n\nLook it up.",
+        &[("references/all.md", &long, false)],
+        false,
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "c1",
+            "get_skill",
+            serde_json::json!({ "name": "encyclopedia", "file": "references/all.md" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        said.contains("characters cut"),
+        "the cut is marked rather than silent: {said}"
+    );
+    assert!(
+        !said.contains("THE-VERY-END"),
+        "and it is a cut, not a reflow: {said}"
+    );
+    assert!(
+        said.chars().count() < 20_000,
+        "a file bigger than one answer does not become one: {} characters",
+        said.chars().count()
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A bundle with nothing text-shaped in it offers no worked example, and a
+/// megabyte file says megabytes.**
+///
+/// The two ends of what the listing has to get right. No example is better
+/// than one written to fail, so the `e.g.` clause goes rather than naming a
+/// font. And the size is the whole of what an agent has to decide whether a
+/// file is worth a call on it: `BIGGEST_FILE` is two megabytes, and reporting
+/// that as `2048 KB` writes the one size this design exists to handle in the
+/// unit that makes it look like any other.
+#[tokio::test]
+async fn a_bundle_of_binaries_offers_no_example_and_a_big_file_reads_in_megabytes() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    let heavy = vec![0u8; 1_500_000];
+    a_skill_holding(
+        &state,
+        &owner,
+        "typeface",
+        "# Typeface\n\nUse the family.",
+        &[
+            ("assets/body.woff2", &heavy, false),
+            ("assets/mark.png", &[0x89, b'P', b'N', b'G'], false),
+        ],
+        false,
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "m1",
+            "get_skill",
+            serde_json::json!({ "name": "typeface" }),
+        ),
+    )
+    .await
+    .unwrap();
+    assert!(
+        !said.contains("e.g."),
+        "nothing here would come back as text, so no example is offered: {said}"
+    );
+    assert!(
+        said.contains("1.4 MB"),
+        "the size is in the unit that makes it a decision: {said}"
+    );
+    assert!(
+        !said.contains("KB"),
+        "and not the kilobytes that made two megabytes look ordinary: {said}"
+    );
+    // The listing still does its job — both files named, neither included.
+    assert!(
+        said.contains("assets/body.woff2") && said.contains("assets/mark.png"),
+        "every file is still named: {said}"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+// ── Naming the workspace ────────────────────────────────────────────────
+//
+// Through `delegate::handle` rather than against `Db::rename_session`, for the
+// reason the delegation tests above are: what the agent reaches is the
+// dispatch, and the guards worth proving — which session asked, whether it has
+// a lead, whether anybody has named the place already — are all resolved on
+// that side of the seam. The database tests beside `rename_session` prove the
+// write; these prove what the agent is told.
+
+/// A plain session of this owner's, with no lead and no profile.
+///
+/// What a person starts, which is the only kind of session this tool is for.
+async fn a_workspace_of_their_own(
+    state: &AppState,
+    host: &Host,
+    owner: &str,
+    called: &str,
+) -> ft_core::SessionId {
+    let id = ft_core::SessionId::new();
+    state
+        .db
+        .insert_session(
+            &id,
+            &host.id,
+            owner,
+            None,
+            "Something",
+            "so when i start a conversation in a new workspace, the",
+            None,
+            None,
+            "ClaudeCode",
+            ft_core::WorkspaceSize::Medium,
+            ft_core::Share::Equal,
+            &ft_core::Step::plan(false, false),
+            // Derived, the way the desktop derives one. Nobody chose it, so
+            // nothing is stamped and the agent may claim it.
+            Some(called),
+        )
+        .await
+        .unwrap();
+    id
+}
+
+/// What the rail would show for this session.
+async fn shown_in_the_rail(state: &AppState, id: &ft_core::SessionId) -> String {
+    state.db.session(id).await.unwrap().unwrap().name
+}
+
+/// The first call names the workspace; the second is told so, in words.
+///
+/// **The second half is the part that matters.** An error there would be read
+/// by the agent as something to recover from — retry it, apologise for it, or
+/// explain to the person that it could not rename their workspace — and all
+/// three spend somebody's attention on a label. `handle` returning `Ok` is the
+/// assertion, as much as the text is.
+#[tokio::test]
+async fn an_agent_names_its_workspace_once_and_is_told_plainly_the_second_time() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let mine = a_workspace_of_their_own(
+        &state,
+        &host,
+        &owner,
+        "so when i start a conversation in a new workspace, the",
+    )
+    .await;
+
+    let said = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &mine,
+            "n1",
+            "rename_workspace",
+            serde_json::json!({ "name": "Agent-named workspaces" }),
+        ),
+    )
+    .await
+    .expect("a workspace nobody has named is the agent's to name");
+    assert!(said.contains("Agent-named workspaces"), "{said}");
+    assert_eq!(
+        shown_in_the_rail(&state, &mine).await,
+        "Agent-named workspaces"
+    );
+
+    let again = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &mine,
+            "n2",
+            "rename_workspace",
+            serde_json::json!({ "name": "Second thoughts" }),
+        ),
+    )
+    .await
+    .expect("being already named is not an error");
+    assert!(again.contains("Already named"), "{again}");
+    assert_eq!(
+        shown_in_the_rail(&state, &mine).await,
+        "Agent-named workspaces",
+        "a refusal writes nothing"
+    );
+}
+
+/// A name a person set is never renamed by the agent, however many turns pass.
+#[tokio::test]
+async fn a_name_a_person_chose_is_never_taken_by_the_agent() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+    let mine = a_workspace_of_their_own(&state, &host, &owner, "Q4 billing migration").await;
+    // Through the same call the rename endpoint makes, which is what stamps
+    // `human` — see `sessions::rename_session`.
+    state
+        .db
+        .rename_session(&mine, "Q4 billing migration", ft_core::NamedBy::Human)
+        .await
+        .unwrap();
+
+    for req in ["n1", "n2", "n3"] {
+        let said = crate::delegate::handle(
+            &state,
+            &asks(
+                &host,
+                &mine,
+                req,
+                "rename_workspace",
+                serde_json::json!({ "name": "Billing" }),
+            ),
+        )
+        .await
+        .expect("still not an error, however many times it is tried");
+        assert!(said.contains("Already named"), "{said}");
+    }
+    assert_eq!(
+        shown_in_the_rail(&state, &mine).await,
+        "Q4 billing migration"
+    );
+}
+
+/// A child cannot rename the workspace it is standing in.
+///
+/// It shares that workspace with its lead when it was placed `here`, so the row
+/// it would retitle is the one the person is actually watching. This is the
+/// backstop rather than the mechanism — a child is not told to rename at all —
+/// so the refusal is asserted along with its lead's label not having moved.
+#[tokio::test]
+async fn a_child_cannot_rename_its_leads_workspace() {
+    let (state, _principal, host, ready, owner) = fixture().await;
+    let lead = a_lead_that_delegates(&state, &host, &ready, &owner, Agent::ClaudeCode).await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &lead,
+            "s1",
+            "spawn",
+            serde_json::json!({ "goal": "read the diff", "placement": "here" }),
+        ),
+    )
+    .await
+    .expect("a lead may start a child here");
+    let child = child_of(&state, &lead, "s1").await;
+
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &child.id,
+            "n1",
+            "rename_workspace",
+            serde_json::json!({ "name": "Diff review" }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("no lead"), "{refused}");
+    assert_eq!(
+        shown_in_the_rail(&state, &lead).await,
+        "lead",
+        "the row the person is watching is untouched"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Empty input is refused, and refusing leaves the workspace claimable.
+///
+/// The second half is what makes the refusal safe to make: nothing is stamped,
+/// so the agent's next call with a real name still lands. A refusal that burned
+/// the one write would be worse than accepting the blank.
+#[tokio::test]
+async fn an_empty_name_is_refused_and_leaves_the_workspace_claimable() {
+    let (state, _principal, host, _ready, owner) = fixture().await;
+
+    let blank = a_workspace_of_their_own(&state, &host, &owner, "derived blank").await;
+    let refused = crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &blank,
+            "n1",
+            "rename_workspace",
+            serde_json::json!({ "name": "   " }),
+        ),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(refused.contains("`name`"), "{refused}");
+    assert_eq!(
+        shown_in_the_rail(&state, &blank).await,
+        "derived blank",
+        "a refused name leaves the workspace claimable"
+    );
+    assert_eq!(
+        state.db.workspace_named_by(&blank).await.unwrap(),
+        None,
+        "and leaves nothing stamped, so the agent may try again with a real one"
+    );
+}
+
+/// What the worker was told about naming, for the workspace it was asked to
+/// create.
+///
+/// Off the frame rather than out of the database, for the reason
+/// `settings_told_to` is: whether a session is told to name itself is an
+/// environment variable on the frame that starts it and is on no row anywhere.
+fn told_to_name_itself(created: &Created, id: &ft_core::SessionId) -> bool {
+    created
+        .lock()
+        .unwrap()
+        .iter()
+        .find(|spec| &spec.session_id == id)
+        .expect("the worker was asked to create it")
+        .env
+        .iter()
+        .any(|(name, _)| name == ft_core::NAME_WORKSPACE_ENV)
+}
+
+/// A name typed into the create form is closed to the agent; a derived one is
+/// not.
+///
+/// Through `create_session_as` rather than against `stamp_created_name`,
+/// because the wiring is the thing that could be wrong: the stamp works and
+/// the question is whether an optional field on the request reaches it. The
+/// desktop and the phone send no field at all, which is the second case here
+/// and the one that has to leave the workspace claimable — if a derived name
+/// came up stamped, the agent would be blocked on every workspace there is.
+#[tokio::test]
+async fn only_a_name_somebody_typed_is_closed_to_the_agent() {
+    let (state, _principal, host, ready, owner, _created, _frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+
+    let chosen = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "name": "Q4 billing migration",
+            "nameSetBy": "human",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a bare workspace with a name somebody typed");
+    assert_eq!(
+        state.db.workspace_named_by(&chosen.id).await.unwrap(),
+        Some(ft_core::NamedBy::Human),
+    );
+
+    // And what the desktop and the phone send: a name, and nothing about who
+    // chose it, because nobody did.
+    let derived = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "name": "so when i start a conversation in a new workspace",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a bare workspace with a derived name");
+    assert_eq!(
+        state.db.workspace_named_by(&derived.id).await.unwrap(),
+        None,
+        "a derived name is not a choice, and the agent may still claim it"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// Only a session with no lead is *told* to name its workspace.
+///
+/// The gate, on the frame the worker actually receives. The tool refuses a
+/// child either way — `a_child_cannot_rename_its_leads_workspace` is that —
+/// and this is what stops a child burning its first turn finding out.
+///
+/// `placement: "new"` for the child, so both sessions arrive as workspaces the
+/// worker was asked to create and the two frames can be compared directly. A
+/// child placed `here` never gets a frame of its own at all, which is the
+/// sharing this whole requirement is about.
+#[tokio::test]
+async fn a_child_is_not_told_to_name_the_workspace() {
+    let (state, _principal, host, ready, owner, created, _frames) = frames_fixture().await;
+    ready.store(true, Ordering::SeqCst);
+    says_it_has(&state, &host, &[(Agent::ClaudeCode, true)]).await;
+
+    let mine = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "so when i start a conversation in a new workspace, the",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch::default(),
+    )
+    .await
+    .expect("a workspace somebody started");
+    assert!(
+        told_to_name_itself(&created, &mine.id),
+        "a session with no lead names the place it is in"
+    );
+
+    let child = super::sessions::create_session_as(
+        state.clone(),
+        owner.clone(),
+        "admin".into(),
+        serde_json::from_value(serde_json::json!({
+            "prompt": "read the diff",
+            "hostId": host.id.as_str(),
+        }))
+        .unwrap(),
+        super::sessions::Launch {
+            lineage: Some(super::sessions::Lineage {
+                parent: mine.id.clone(),
+                reason: None,
+                req: None,
+            }),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("a child in a workspace of its own");
+    assert!(
+        !told_to_name_itself(&created, &child.id),
+        "a child is not told to rename a workspace it may be sharing"
+    );
+
+    state.fleet.stop_supervising(&host.id).await;
+}
+
+/// **A long name is kept whole, whoever wrote it.**
+///
+/// Length is advice now — roughly forty characters, said in the tool's own
+/// description and in the guidance block — and nothing counts it on either
+/// path. Driven through the endpoint and through the tool rather than against
+/// the validator, because what this pins is the wiring: a cap lived here
+/// briefly and silently shortened a name somebody had typed into the rename
+/// box. Both halves are asserted because "nothing truncates" is a claim about
+/// both doors, and a test of one would have passed while the other cut.
+#[tokio::test]
+async fn a_long_name_is_kept_whole_on_both_paths() {
+    let (state, principal, host, _ready, owner) = fixture().await;
+    let mine = a_workspace_of_their_own(&state, &host, &owner, "derived").await;
+
+    let typed = format!(
+        "{} and then some more of it, well past eighty characters, every one of which they meant",
+        "Q4 billing migration"
+    );
+    assert!(typed.chars().count() > 80, "the test's own premise");
+
+    let Json(renamed) = super::sessions::rename_session(
+        State(state.clone()),
+        Extension(principal),
+        Path(mine.as_str().to_string()),
+        Json(serde_json::from_value(serde_json::json!({ "name": typed.clone() })).unwrap()),
+    )
+    .await
+    .expect("a person may rename their own workspace");
+    assert_eq!(
+        renamed.name, typed,
+        "and what it answers with is what it wrote"
+    );
+    assert_eq!(
+        shown_in_the_rail(&state, &mine).await,
+        typed,
+        "nothing a person typed is dropped"
+    );
+
+    // And the agent, writing the same column through its own door, is held to
+    // the same rule — which is the whole reason one validator serves both.
+    let theirs = a_workspace_of_their_own(&state, &host, &owner, "derived too").await;
+    crate::delegate::handle(
+        &state,
+        &asks(
+            &host,
+            &theirs,
+            "n1",
+            "rename_workspace",
+            serde_json::json!({ "name": typed.clone() }),
+        ),
+    )
+    .await
+    .expect("a long title is a title, not something to argue about");
+    assert_eq!(
+        shown_in_the_rail(&state, &theirs).await,
+        typed,
+        "nothing counts the characters on this path either"
+    );
 }

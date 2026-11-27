@@ -5637,6 +5637,43 @@ html:not([data-platform="macos"]) {
     color: var(--color-mute);
   }
 
+  /* ── The line that puts the channels on the page ────────────────────
+     A footnote, and deliberately not a control. Beta is for the few who
+     want every release as it is cut; for everybody else it was a second
+     version number on the screen that says what is running. So: one
+     underlined line, `mute` — the tier spent on counts and timestamps —
+     under a rule, at the foot, below everything the screen is for. A
+     styled toggle here would be competing with the buttons above it,
+     which is the whole thing this is not. */
+  .upd-foot {
+    margin-top: 52px;
+    padding-top: 18px;
+    border-top: 1px solid var(--color-line-soft);
+  }
+  /* `dim` rather than `mute`, and the one judgement call in here. `mute` is
+     documented in `globals.css` as below the contrast floor and spent on
+     counts, timestamps and placeholders — none of which anybody has to find.
+     This is a control, and a control nobody can find is not a quiet control,
+     it is a missing one. What makes it hard to find is where it is: the
+     bottom of the page, under a rule, below everything the screen is for. */
+  .upd-foot-act {
+    border: 0;
+    background: none;
+    padding: 0;
+    font: inherit;
+    font-size: var(--text-micro);
+    color: var(--color-dim);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--color-dim) 40%, transparent);
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+  .upd-foot-act:hover,
+  .upd-foot-act:focus-visible {
+    color: var(--color-text);
+    text-decoration-color: currentColor;
+  }
+
   /* ── A changelog span ───────────────────────────────────────────────
      One version, its date, and its section. A row that opens, on the plan
      panel's recessed ground. */
@@ -7394,6 +7431,128 @@ html:not([data-platform="macos"]) {
   .mapdrawer .sh-foot .where b {
     font-weight: 500;
     color: var(--color-dim);
+  }
+
+  /* ── A warning that has to be read ───────────────────────────────
+     For the one thing on a form that is going to stop working. Amber,
+     because the sheet already settled this where `.formfoot .msg.warn`
+     did: brick refuses, amber approaches, and **not ember** — ember
+     answers whether an agent is waiting on you, and a second loud thing on
+     screen costs it the only job it has.
+
+     A tinted panel with a deep hairline rather than a tinted sentence: the
+     other notes on this form are bands of `--color-raise` and a reader who
+     has learned to skim those will skim one more. This one is a different
+     object. */
+  .warnbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: var(--color-amber-tint);
+    box-shadow: inset 0 0 0 1px var(--color-amber-deep);
+  }
+  .warnbox > .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    margin-top: 1px;
+    color: var(--color-amber);
+  }
+  .warnbox .say {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .warnbox .say > b {
+    font-size: 0.90625rem;
+    font-weight: 500;
+    color: var(--color-amber);
+  }
+  /* `--color-text` is a cool grey and the tint is warm, so the sentence
+     read as pasted in from another surface. Mixed toward the box's own
+     amber rather than given a hue of its own: no new token, and it warms
+     correctly in both themes because both ends are already per-theme. */
+  .warnbox .say > p {
+    margin-top: -4px;
+    font-size: 0.875rem;
+    line-height: 1.55;
+    color: color-mix(in srgb, var(--color-amber) 22%, var(--color-text));
+  }
+  /* **Everything inside takes the tint, not the sheet.**
+     A row, a pill and a quiet button all default to a neutral surface, and
+     a neutral surface on a warm tint reads as a hole punched in the box
+     rather than as something sitting in it.
+
+     The theme selector is on the rules they default to, so those carry
+     `[data-theme="light"]` and beat a bare `.warnbox .kidrow` on source
+     order at equal specificity. These match it rather than fight it. */
+  .warnbox .kidrow,
+  [data-theme="light"] .warnbox .kidrow {
+    background: color-mix(in srgb, var(--color-amber-deep) 30%, transparent);
+    color: var(--color-bone);
+  }
+  .warnbox .kidrow .g {
+    color: var(--color-amber);
+  }
+  /* `--color-dim` is a cool grey; on amber it reads as disabled rather than
+     secondary, which is the wrong thing to say about the other choice. */
+  .warnbox .btn.quiet {
+    color: var(--color-amber);
+  }
+  .warnbox .btn.quiet:hover {
+    background: color-mix(in srgb, var(--color-amber-deep) 30%, transparent);
+    color: var(--color-amber);
+  }
+  /* The primary stays ink-on-bone: it is the recommended action and it has
+     to out-rank the tint it sits on. */
+  .warnbox .btn.primary {
+    background: var(--color-bone);
+    color: var(--color-panel);
+  }
+  .warnbox .bad {
+    color: var(--color-brick);
+  }
+
+  /* A read-only list of profiles, in the row shape the rest of the app
+     reads lists in. **Removed once and brought back**: it went when the
+     drawer stopped listing what a position hands work to, and the profile
+     editor's old-reach notice wants exactly the same thing — a mark and a
+     name per row. */
+  .kidlist {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .kidrow {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-height: 34px;
+    padding: 0 11px;
+    border-radius: 10px;
+    background: var(--color-overlay);
+    font-size: 0.90625rem;
+    color: var(--color-text);
+  }
+  [data-theme="light"] .kidrow {
+    background: var(--color-raise);
+  }
+  .kidrow .g {
+    display: grid;
+    place-items: center;
+    flex: none;
+    color: var(--color-dim);
+  }
+  .kidrow .n {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .nobody {

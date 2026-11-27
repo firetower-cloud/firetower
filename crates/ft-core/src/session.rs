@@ -400,6 +400,19 @@ pub struct NewSession {
     /// branch is what has to be unique, and git enforces that itself.
     #[serde(default)]
     pub name: Option<String>,
+    /// Whether the `name` above was *chosen* rather than derived.
+    ///
+    /// Omit — which every client but one does — and it was derived, which is
+    /// what the desktop and the phone do when they cut the first line of the
+    /// prompt to 80 characters. A derived name is not a choice, so it leaves
+    /// the workspace claimable and the agent names it on its first turn.
+    ///
+    /// The web's New Workspace form is the exception: its name field is one a
+    /// person types into, so it sends [`NamedBy::Human`] and the agent leaves
+    /// that name alone for good. This is the only case where the feature could
+    /// otherwise overwrite something somebody wrote.
+    #[serde(default)]
+    pub name_set_by: Option<NamedBy>,
     #[serde(default)]
     pub size: WorkspaceSize,
     /// How this workspace competes when the machine is busy.
@@ -434,6 +447,54 @@ pub struct NewSession {
     /// the repositories; a list — including an empty one — overrides them.
     #[serde(default)]
     pub skills: Option<Vec<String>>,
+}
+
+/// Who last deliberately named a workspace.
+///
+/// The whole of what makes the agent's self-rename safe. `None` on a workspace
+/// — which is every workspace that exists today, and every one whose name was
+/// derived from a prompt — means nobody has chosen a name and the agent may
+/// claim it once. Anything else means it may not, ever again: a second agent
+/// write is refused because naming is once, and a human write is refused
+/// because a person always wins.
+///
+/// Spelled in lower case on the wire because that is how it is spelled in the
+/// column, and the value crosses between the two often enough that two
+/// spellings would be two things to keep in step. The wire convention — an
+/// enum value stays the symbol it is — exists so a *client* reads the same
+/// word the code does, and here the client, the code and the database all read
+/// the same word.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum NamedBy {
+    /// The agent, on its first turn, through `rename_workspace`.
+    Agent,
+    /// A person, through the rename endpoint or the create form.
+    Human,
+}
+
+impl NamedBy {
+    /// What the column holds, and what a refusal calls them.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            NamedBy::Agent => "agent",
+            NamedBy::Human => "human",
+        }
+    }
+
+    /// Parsed back out of the column.
+    ///
+    /// `from_stored` rather than `from_str`, following the ids: this reads one
+    /// specific thing — what the `name_set_by` column holds — and a
+    /// `FromStr` impl would advertise a general parse of arbitrary text that
+    /// nothing wants.
+    pub fn from_stored(value: &str) -> Option<NamedBy> {
+        match value {
+            "agent" => Some(NamedBy::Agent),
+            "human" => Some(NamedBy::Human),
+            _ => None,
+        }
+    }
 }
 
 /// One repository to check out, as the API accepts it.

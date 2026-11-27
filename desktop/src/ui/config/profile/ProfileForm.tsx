@@ -50,12 +50,14 @@ import {
   RefreshCw,
   Server,
   ShieldCheck,
+  TriangleAlert,
   User,
   UserRound,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { AgentMark, AGENT_LABEL } from "~/components/AgentMark";
-import { Icon } from "~/components/ui";
+import { Icon, IconButton } from "~/components/ui";
 import { Pop } from "~/ui/Pop";
 import { WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
@@ -67,7 +69,13 @@ import { quota, usable } from "~/api/accounts";
 import { machineLabel, machines, stateLabel } from "~/api/environments";
 import { canRun } from "~/components/WhereItRuns";
 import { useAgentControls } from "~/api/generated/agents/agents";
-import { getListRolesQueryKey } from "~/api/generated/roles/roles";
+import { getListRolesQueryKey, updateRole, useListRoles } from "~/api/generated/roles/roles";
+import {
+  createAgentTeam,
+  getListAgentTeamsQueryKey,
+} from "~/api/generated/agent-teams/agent-teams";
+import { useConfirm } from "~/ui/Confirm";
+import { why } from "~/data";
 import { useQueryClient } from "@tanstack/react-query";
 import { pinnedAccountFits } from "~/ui/config/Roles";
 import type { Agent, Control, ControlKind, NewRole, Role } from "~/api/generated/model";
@@ -336,6 +344,9 @@ export function ProfileForm({
      nobody is how a deprecation becomes furniture. */
   const oldReach = !!role?.canDelegate;
   const cache = useQueryClient();
+  // The profiles the old reach names, so the notice can list them rather
+  // than count them.
+  const roles = useListRoles();
 
   // The agents to pin to are the ones Firetower can actually drive, read from
   // the server rather than listed here — so a fourth or a tenth agent turns up
@@ -502,6 +513,18 @@ export function ProfileForm({
 
   return (
       <div className="form">
+        {/* **First, because it is the one thing on this form that is going to
+            stop working.** It sat between two run-limit fields, in the same
+            quiet band every other note uses, eleven fields down — which is
+            the shape of something nobody has to read. */}
+        {oldReach && (
+          <OldReach
+            role={role!}
+            all={(roles.data ?? []).filter((r) => r.id !== role!.id)}
+            onCleared={(next) => setDraft((d) => ({ ...d, ...next }))}
+          />
+        )}
+
         <Field label="Name">
           <span className="box">
             <input
@@ -777,31 +800,6 @@ export function ProfileForm({
             compatibility window closes, nothing writes it any more, and
             somebody looking at this profile has to be able to find out why it
             still delegates. */}
-        {oldReach && (
-          <Group
-            label="Delegation"
-            hint="This profile carries the old per-profile reach. It is still read, and nothing writes it any more."
-          >
-            <WhereTo className="aside">
-              <b>Delegation moved to teams.</b> This profile still carries{" "}
-              {role?.delegateScope?.length
-                ? `a list of ${role.delegateScope.length} profile${role.delegateScope.length === 1 ? "" : "s"} it may hand work to`
-                : "reach over every profile you can see"}
-              , from before teams existed. It goes on working until the old column is dropped, and
-              saving this profile will not change it.{" "}
-              <button
-                type="button"
-                className="underline underline-offset-2"
-                onClick={() => navigate("/configuration/agent-teams")}
-              >
-                Make a team with {role?.name ?? "this profile"} as its lead
-              </button>{" "}
-              and start that instead — a team says who is under whom, and two teams can hold the
-              same profile with different reports in each.
-            </WhereTo>
-          </Group>
-        )}
-
         {/* **Drawn for every profile now**, because any profile can lead a
             team — there is no Manager flag left to hide it behind, and a
             profile that is bare here and leads in another team would otherwise
@@ -887,5 +885,270 @@ export function ProfileForm({
           </Group>
         )}
       </div>
+  );
+}
+
+/**
+ * A profile that still carries the old per-profile reach, and the way off it.
+ *
+ * **The notice was a dead end.** It said this profile reaches four others,
+ * did not say which four, and offered a link to a blank Agent teams screen —
+ * so the only way to act on it was to remember the list and rebuild it by
+ * hand. A message that names a problem and withholds both the detail and the
+ * fix is worse than no message: it is the same work plus an interruption.
+ *
+ * So it lists them, and it does the work:
+ *
+ * - **Make this a team** writes the team the notice was describing — this
+ *   profile as the lead, everything it reaches underneath — and clears the
+ *   old reach in the same press. Nothing is lost and nothing is left behind
+ *   to be deprecated a second time.
+ * - **Just remove it** is for a reach somebody no longer wants. It asks
+ *   first, because the list is not recoverable once it is gone.
+ *
+ * This is what makes dropping the columns possible later. They are still
+ * *read* — a profile carrying them still delegates by them — so dropping
+ * them today would take a working Manager's reach away with no warning. A
+ * column can only be dropped once the people holding it have somewhere to
+ * go, and this is that somewhere.
+ */
+function OldReach({
+  role,
+  all,
+  onCleared,
+}: {
+  role: Role;
+  /** Every other profile, for naming the ids the reach holds. */
+  all: Role[];
+  onCleared: (next: { canDelegate: boolean; delegateScope: string[] }) => void;
+}) {
+  const [busy, setBusy] = useState<"team" | "clear" | null>(null);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  /* The team's name is asked for rather than taken from the profile. They
+     are different things — a profile is one agent and a team is a group —
+     and a team called the same as its lead reads as a duplicate in the
+     list. Prefilled with the profile's name, because that is the likeliest
+     answer and it makes the ask one keystroke to accept. */
+  const [naming, setNaming] = useState<string | null>(null);
+  const cache = useQueryClient();
+  const confirm = useConfirm();
+
+  /* **What it actually reaches, resolved now.** An empty scope meant "any
+     profile the owner can see" — the default before scope existed — so the
+     list is every other profile rather than nothing. An id whose profile has
+     since been deleted simply drops out, which is what every read of this
+     column already does. */
+  const scope = role.delegateScope ?? [];
+  const reaches = scope.length ? all.filter((r) => scope.includes(r.id)) : all;
+
+  const clear = { canDelegate: false, delegateScope: [] as string[] };
+  /* Written straight through rather than left for Save. The reach is not a
+     field of this form — the form has no control for it and never sends it
+     changed — so leaving it in the draft would mean the button appeared to
+     do nothing until somebody pressed Save for an unrelated reason. */
+  const write = async (extra?: () => Promise<void>) => {
+    await updateRole(role.id, {
+      name: role.name,
+      does: role.does,
+      instructions: role.instructions,
+      placement: role.placement,
+      agent: role.agent,
+      machine: role.machine,
+      account: role.account,
+      settings: role.settings,
+      onUsageLimit: role.onUsageLimit,
+      onChildLimit: role.onChildLimit,
+      includeAlwaysOn: role.includeAlwaysOn,
+      includeRepoDefaults: role.includeRepoDefaults,
+      skillScope: role.skillScope ?? [],
+      ...clear,
+    });
+    await extra?.();
+    await cache.invalidateQueries({ queryKey: getListRolesQueryKey() });
+    onCleared(clear);
+  };
+
+  const makeTeam = async (teamName: string) => {
+    setNaming(null);
+    setBusy("team");
+    setTrouble(null);
+    try {
+      let made: { id: string } | null = null;
+      await write(async () => {
+        made = await createAgentTeam({
+          name: teamName.trim(),
+          positions: [
+            { key: "lead", parent: null, profile: role.id, extraInstructions: "" },
+            ...reaches.map((r, i) => ({
+              key: `m${i}`,
+              parent: "lead",
+              profile: r.id,
+              extraInstructions: "",
+            })),
+          ],
+        });
+        await cache.invalidateQueries({ queryKey: getListAgentTeamsQueryKey() });
+      });
+      // Onto the map, which is the thing that now answers the question this
+      // notice was about.
+      if (made) navigate(`/configuration/agent-teams/${(made as { id: string }).id}`);
+    } catch (e) {
+      setTrouble(why(e));
+      setBusy(null);
+    }
+  };
+
+  const justClear = async () => {
+    const ok = await confirm({
+      title: "Remove the old delegation?",
+      body: `${role.name} stops being able to hand work to ${reaches.length} profile${reaches.length === 1 ? "" : "s"}. The list is not kept.`,
+      action: "Remove it",
+      tone: "danger",
+    });
+    if (!ok) return;
+    setBusy("clear");
+    setTrouble(null);
+    try {
+      await write();
+    } catch (e) {
+      setTrouble(why(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="warnbox">
+      <span className="g" aria-hidden>
+        <Icon of={TriangleAlert} size={16} />
+      </span>
+      <div className="say">
+        {/* **Amber, not ember.** Ember answers one question — is an agent
+            waiting on you — and spending it here would cost it the only
+            thing it is for. Amber is the step the other signals have no
+            word for: still working, but not for much longer. That is
+            exactly what this is. */}
+        <b>Old delegation</b>
+        <p>
+          {role.name} hands work to these from before teams existed. It still works, and
+          nothing writes it any more.
+        </p>
+
+      {/* **Named, not counted.** The count was the whole of what the notice
+          said, and a count is not something anybody can act on. */}
+        {reaches.length > 0 && (
+          <div className="kidlist">
+            {reaches.map((r) => (
+              <span key={r.id} className="kidrow">
+                <span className="g">
+                  {r.agent ? (
+                    <AgentMark agent={r.agent as Agent} size={14} />
+                  ) : (
+                    <CircleDashed className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  )}
+                </span>
+                <span className="n">{r.name}</span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {trouble && <p className="bad">{trouble}</p>}
+
+        <div className="pickrow">
+          <button
+            type="button"
+            onClick={() => setNaming(role.name)}
+            disabled={!!busy}
+            className="btn primary"
+          >
+            {busy === "team" ? "Moving…" : "Move to a team (recommended)"}
+          </button>
+          <button type="button" onClick={justClear} disabled={!!busy} className="btn quiet">
+            {busy === "clear" ? "Removing…" : "Just remove old delegation"}
+          </button>
+        </div>
+      </div>
+
+      {naming !== null && (
+        <NameTheTeam
+          value={naming}
+          under={reaches.length}
+          onChange={setNaming}
+          onClose={() => setNaming(null)}
+          onMake={() => makeTeam(naming)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** What the team is called, before it is made. */
+function NameTheTeam({
+  value,
+  under,
+  onChange,
+  onClose,
+  onMake,
+}: {
+  value: string;
+  /** How many go under the lead, for the foot to say what is about to exist. */
+  under: number;
+  onChange: (v: string) => void;
+  onClose: () => void;
+  onMake: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[70] grid place-items-start justify-center bg-scrim pt-[10vh] backdrop-blur-[2px]"
+      onMouseDown={onClose}
+    >
+      <div
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal
+        aria-label="Name the team"
+        className="flex w-[26rem] flex-col overflow-hidden rounded-xl border border-line lift shadow-(--shadow-float)"
+      >
+        <div className="flex items-start gap-2 border-b border-line px-4 py-3">
+          <span className="min-w-0 flex-1">
+            <span className="block text-ui text-bone">Move to a team</span>
+            <span className="block truncate text-micro text-mute">
+              What it is called in the list
+            </span>
+          </span>
+          <IconButton of={X} label="Close" onClick={onClose} />
+        </div>
+
+        <div className="dbody scroll-slim">
+          <div className="form">
+            <label className="fld">
+              <span>Name</span>
+              <span className="box">
+                <input
+                  value={value}
+                  onChange={(e) => onChange(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && value.trim() && onMake()}
+                  placeholder="Product"
+                  autoFocus
+                />
+              </span>
+            </label>
+          </div>
+        </div>
+
+        <div className="sh-foot">
+          <span className="where">
+            {under} profile{under === 1 ? "" : "s"} under the lead.
+          </span>
+          <button onClick={onClose} className="btn quiet">
+            Cancel
+          </button>
+          <button onClick={onMake} disabled={!value.trim()} className="btn primary disabled:opacity-50">
+            Make team
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

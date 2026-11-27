@@ -33,11 +33,18 @@ export type ChannelAct = { channel: Channel; act: Act };
 export function ChannelSection({
   channel,
   blocked,
+  shown,
   onAct,
 }: {
   channel: ChannelStatus;
   /** A run is going, so nothing may be started. */
   blocked: boolean;
+  /**
+   * Whether this copy draws the channels at all — `channelsShown` in
+   * `api/updates.ts`. With it off the section stops being a chooser and
+   * becomes a statement of what this Firetower runs.
+   */
+  shown: boolean;
   onAct: (act: ChannelAct) => void;
 }) {
   const may = (channel.mayChange ?? false) && !blocked;
@@ -51,28 +58,53 @@ export function ChannelSection({
 
   return (
     <>
+      {/* **The decision blocks are drawn either way, and that is deliberate.**
+          They are not about beta: they are what an installation is told when
+          its image line names no channel, or names an exact version, or there
+          is no updater to ask — and each one is in the way of every upgrade
+          until somebody fixes it. Hiding them with the channels would leave an
+          installation frozen with nothing on the screen saying why. One of
+          them has to name `:beta` to do its job, because it is one of the two
+          tags the line may be changed to; there, the name is the instruction.
+          See `Tags`. */}
       {block && <Trouble channel={channel} block={block} pin={may ? pin : undefined} onAct={onAct} />}
       {manifest && <Manifest trouble={manifest} url={channel.manifest.url} />}
       <section className="upd-sec">
-        <h2>Channel for this Firetower</h2>
+        <h2>{shown ? "Channel for this Firetower" : "Releases for this Firetower"}</h2>
         <p className="note">
-          Which releases this deployment is offered, for everybody connected to it. The channel is the
-          image tag in <code className="font-mono">firetower.yml</code>, read back from the container
-          that is running. Nothing else records it.
+          {shown ? (
+            <>
+              Which releases this deployment is offered, for everybody connected to it. The channel is
+              the image tag in <code className="font-mono">firetower.yml</code>, read back from the
+              container that is running. Nothing else records it.
+            </>
+          ) : (
+            <>
+              This Firetower runs the releases a maintainer has promoted, for everybody connected to
+              it. Which one it is on is the image tag in{" "}
+              <code className="font-mono">firetower.yml</code>, read back from the container that is
+              running. Nothing else records it.
+            </>
+          )}
         </p>
-        <div className="mt-3">
-          {channel.offers.map((offer) => (
-            <ChannelRow
-              key={offer.channel}
-              offer={offer}
-              channel={channel}
-              mayChange={channel.mayChange ?? false}
-              blocked={blocked}
-              onAct={onAct}
-            />
-          ))}
-        </div>
-        <After channel={channel} saidAlready={!!manifest} />
+        {/* A row per channel is a comparison, and a comparison of one is a
+            list that asks what the other one was. So with the channels hidden
+            there are no rows: the paragraph above is the whole answer. */}
+        {shown && (
+          <div className="mt-3">
+            {channel.offers.map((offer) => (
+              <ChannelRow
+                key={offer.channel}
+                offer={offer}
+                channel={channel}
+                mayChange={channel.mayChange ?? false}
+                blocked={blocked}
+                onAct={onAct}
+              />
+            ))}
+          </div>
+        )}
+        <After channel={channel} saidAlready={!!manifest} shown={shown} />
       </section>
     </>
   );
@@ -129,7 +161,15 @@ function ChannelRow({
  * A member gets the one that answers "why does my colleague have this" — the
  * question a channel creates, on the only screen that can answer it.
  */
-function After({ channel, saidAlready }: { channel: ChannelStatus; saidAlready: boolean }) {
+function After({
+  channel,
+  saidAlready,
+  shown,
+}: {
+  channel: ChannelStatus;
+  saidAlready: boolean;
+  shown: boolean;
+}) {
   const may = channel.mayChange ?? false;
   const onBeta = channel.channel === Channel.beta && channel.recognised;
 
@@ -137,7 +177,11 @@ function After({ channel, saidAlready }: { channel: ChannelStatus; saidAlready: 
      somebody who cannot change it, the question the channel creates is "why
      does my colleague have this" — and the answer is whose it is and where
      their own copy's channel is. What leaving beta would cost is an
-     administrator's problem, and they are not one. */
+     administrator's problem, and they are not one.
+
+     With the channels hidden there is no channel to explain and no copy's
+     channel to point at, so the same line answers the question that is left:
+     who moves this Firetower, and what moving it costs everybody else. */
   if (!may) {
     return (
       <div className="note2">
@@ -145,8 +189,9 @@ function After({ channel, saidAlready }: { channel: ChannelStatus; saidAlready: 
           <Icon of={Info} size={14} />
         </span>
         <p>
-          The channel is the same for everybody connected to this Firetower, and changing it is an
-          administrator's. Your own copy of the app has its own channel, below.
+          {shown
+            ? "The channel is the same for everybody connected to this Firetower, and changing it is an administrator's. Your own copy of the app has its own channel, below."
+            : "Upgrading this Firetower is an administrator's, and it moves it for everybody connected to it. Your own copy of the app updates itself, below."}
         </p>
       </div>
     );
