@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.36.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.35.0...desktop-v0.36.0) (2026-11-27)
+
+
+### Features
+
+* **profile:** get the mobile app, from the profile menu ([554ec79](https://github.com/firetower-cloud/firetower/commit/554ec7986c581ac85c17b895b172c2593f293c4c))
+
+
+### Bug Fixes
+
+* **desktop:** the plugin library's rules sit in a sub-layer and lose the cascade ([482385b](https://github.com/firetower-cloud/firetower/commit/482385b6d0b4cc738da68bf4dfc6f47046a4a074))
+* **desktop:** the replace-a-password button opens the form, not the door in front of it ([07b0327](https://github.com/firetower-cloud/firetower/commit/07b0327742bb456e66b068bcd59dfa597ab14120))
+
 ## [0.35.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.34.0...desktop-v0.35.0) (2026-11-27)
 
 
