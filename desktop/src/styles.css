@@ -8309,3 +8309,193 @@ html:not([data-platform="macos"]) {
     box-shadow: var(--shadow-raise);
   }
 }
+
+@layer components {
+  /* ── Get the mobile app ─────────────────────────────────────────
+     The profile-menu row's dialog: two codes, two links and this
+     Firetower's address. Four classes, and each one earns itself below.
+
+     Here rather than in `globals.css` because the web client has no such
+     dialog and `just check-style` diffs the two copies of that file byte
+     for byte — anything the desk alone needs belongs in this sheet. */
+
+  /* **No width.** `.dlg` is 27rem and this dialog is wider, but *how much*
+     wider is arithmetic on the encoded URLs — two code boxes, the gap, and
+     the dialog's own padding — so `GetTheMobileApp.tsx` computes it from
+     `codeWidth()` and sets it inline. Writing 28rem here would be a literal
+     that does not break loudly: the day a release tag grows eight characters
+     the APK URL tips from QR version 6 to 7, the box goes from 188px to
+     204px, and the codes would quietly shrink inside a dialog that still
+     looked right. `.dlg`'s `max-width: 100%` still applies, which is what
+     keeps the inline width honest in a narrow window. */
+  .dlg.codes .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 20px;
+  }
+  /* A phone browser. The renderer is served at the control plane's root, so
+     this dialog opens in Safari on a phone — where nobody can scan the screen
+     they are holding, the links beside the codes are the control, and two
+     columns would put both codes under the module floor. One column instead. */
+  @media (max-width: 520px) {
+    .dlg.codes .pair {
+      grid-template-columns: 1fr;
+    }
+  }
+  .dlg.codes .col {
+    min-width: 0;
+  }
+  .dlg.codes .cap {
+    margin-top: 12px;
+  }
+  .dlg.codes .cap .nm {
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+  .dlg.codes .cap .ln {
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    color: var(--color-mute);
+  }
+  /* A sentence under a column that could not be filled. `--color-dim`, never
+     brick: GitHub being out of reach from a private network is normal rather
+     than a failure, which is `STYLE.md`'s reachability rule. */
+  .dlg.codes .why {
+    margin-top: 8px;
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    color: var(--color-dim);
+  }
+  .dlg.codes .rule {
+    margin-top: 20px;
+    height: 1px;
+    background: var(--color-line);
+  }
+  .dlg.codes .addr {
+    margin-top: 14px;
+  }
+  .dlg.codes .addr .ln {
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .dlg.codes .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .dlg.codes .foot .where {
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .dlg.codes .foot .where a {
+    color: var(--color-dim);
+    text-decoration: underline;
+    text-decoration-color: var(--color-line);
+    text-underline-offset: 2px;
+  }
+
+  /* ── The code's two colours, which the theme does not get a say in ──
+     A camera reads dark-on-light, and the standard says so: an inverted code
+     is outside ISO/IEC 18004. The web client's copy of this component fills
+     the plate with `--color-bone` and the modules with `--color-ground`,
+     which is right in dark and **reversed in light** — bone is #161617 there
+     and ground is #f2f2f3 — so it draws near-white modules on a near-black
+     plate. An iPhone decodes one anyway; a good many Android scanners do not.
+
+     So the pair is bound to whichever two tokens are light and dark *in each
+     theme* rather than to one token whose role flips. 14.0:1 in dark and
+     18.1:1 in light; a scanner wants about 40% reflectance difference and
+     both are past 85%.
+
+     **The plate is `--color-bone` in dark rather than white, on purpose.** A
+     188px #ffffff square in a dark window is a glare source, and #eaeaeb is
+     the softer white the rest of the dark theme is built on. */
+  .qr {
+    --qr-plate: var(--color-bone);
+    --qr-ink: var(--color-ground);
+    display: block;
+    border-radius: var(--radius-md);
+  }
+  [data-theme="light"] .qr {
+    --qr-plate: var(--color-panel);
+    --qr-ink: var(--color-bone);
+  }
+  .qr .plate {
+    fill: var(--qr-plate);
+  }
+  .qr .ink {
+    fill: var(--qr-ink);
+  }
+  .qr .ink-s {
+    fill: none;
+    stroke: var(--qr-ink);
+  }
+
+  /* The same footprint as a code while the release is still being looked up,
+     so the dialog does not jump when the answer lands. A class rather than
+     utilities because the footprint has to agree with the code's derived
+     width, and this is one place to keep them in step — the caller sets the
+     box on both from the same number. */
+  .qrwait {
+    display: grid;
+    place-items: center;
+    padding: 0 22px;
+    border-radius: var(--radius-md);
+    background: var(--color-ground);
+    color: var(--color-mute);
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    text-align: center;
+  }
+
+  /* ── A line of machine text with a way to take it ────────────────
+     Recessed on `--color-ground`, which is what `Confirm.tsx`'s own field
+     already sits on, so it reads as a well in both themes rather than as a
+     card inside a card — `STYLE.md`'s third habit. Three call sites in this
+     one dialog, which is what earns it a class.
+
+     **`.well`, and not `.chip`, which the design contract asked for.** There
+     is already a `.chip` in this sheet at l.836 — the composer's pill, 30px
+     and `border-radius: 99px`, worn eleven times across `StartComposer.tsx`
+     and `NewSchedule.tsx`. A second block under the same name would have won
+     on source order and quietly restyled every one of them: an 8px radius, a
+     different padding, `flex` instead of `inline-flex` and a background where
+     they have none. The contract lists `.chip` as a new class; in the source
+     it is not, and the name it is given here is the only part of that section
+     that changes. */
+  .well {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    height: 30px;
+    padding: 0 3px 0 8px;
+    border-radius: var(--radius-md);
+    background: var(--color-ground);
+  }
+  /* `--text-micro`, not `--text-meta`: a twenty-character file name plus a
+     copy button has 155px to live in inside a 188px column, and this is
+     reference text with a button beside it rather than text anybody
+     transcribes. `firetower-0.35.0.apk` measures 155 — at the limit today,
+     and a longer name truncates, which is the right degradation: the copy
+     button still carries the whole URL and the caption still names the
+     version. */
+  .well .tx {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    color: var(--color-dim);
+  }
+  /* Nothing to take yet — the lookup is still out and the chip is holding its
+     place so the column does not move when it lands. */
+  .well[data-dead="1"] .tx {
+    color: var(--color-mute);
+  }
+}

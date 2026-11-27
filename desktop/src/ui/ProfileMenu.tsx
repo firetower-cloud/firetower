@@ -66,6 +66,7 @@ import {
   Moon,
   Plus,
   Settings2,
+  Smartphone,
   Sun,
   BookOpen,
 } from "lucide-react";
@@ -81,6 +82,7 @@ import { navigate } from "~/shims/next-navigation";
 import { useTheme, type Theme } from "~/theme";
 import { SETTINGS_HOME } from "~/ui/config/panes";
 import { useConfirm } from "~/ui/Confirm";
+import { GetTheMobileApp } from "~/ui/GetTheMobileApp";
 import { Pop } from "~/ui/Pop";
 
 type Page = "profile" | "switch";
@@ -100,6 +102,10 @@ export function ProfileMenu({
 }) {
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const [page, setPage] = useState<Page>("profile");
+  /* Here rather than in `Profile`, because the popover unmounts when the
+     dialog takes the pointer and the avatar does not. The same reason `page`
+     is held here: what the menu opens outlives the menu. */
+  const [gettingTheApp, setGettingTheApp] = useState(false);
   const me = useMe();
   const who = me.data?.user?.username ?? backend.user;
   /* Read here rather than in the rail, which asked for it only while it drew
@@ -146,12 +152,30 @@ export function ProfileMenu({
       {anchor && (
         <Pop anchor={anchor} onClose={() => setAnchor(null)} beside width={page === "switch" ? 296 : 252}>
           {page === "profile" ? (
-            <Profile backend={backend} who={who} elsewhere={elsewhere} updates={updates} onSwitch={() => setPage("switch")} onClose={() => setAnchor(null)} onForgot={onForgot} />
+            <Profile
+              backend={backend}
+              who={who}
+              elsewhere={elsewhere}
+              updates={updates}
+              onSwitch={() => setPage("switch")}
+              onGetTheApp={() => {
+                setAnchor(null);
+                setGettingTheApp(true);
+              }}
+              onClose={() => setAnchor(null)}
+              onForgot={onForgot}
+            />
           ) : (
             <FiretowerSwitcher backend={backend} onSwitch={onSwitch} onBack={() => setPage("profile")} onClose={() => setAnchor(null)} />
           )}
         </Pop>
       )}
+
+      {/* `backend.url` rather than `window.location.origin`: in a browser
+          `probe.ts` has already resolved the two to the same thing, and in the
+          installed app this is the Firetower the window is on. One read is
+          correct in both clients. */}
+      {gettingTheApp && <GetTheMobileApp address={backend.url} onClose={() => setGettingTheApp(false)} />}
     </>
   );
 }
@@ -185,6 +209,7 @@ export function Profile({
   elsewhere,
   updates,
   onSwitch,
+  onGetTheApp,
   onClose,
   onForgot,
 }: {
@@ -194,6 +219,9 @@ export function Profile({
   /** What the avatar's `.news` mark is about, in words. */
   updates: { label: string; dot: boolean };
   onSwitch: () => void;
+  /** The dialog is `ProfileMenu`'s, not this page's — the popover goes when
+   *  it opens. Threaded exactly as `onSwitch` is. */
+  onGetTheApp: () => void;
   onClose: () => void;
   onForgot: () => void;
 }) {
@@ -261,6 +289,41 @@ export function Profile({
           one. Neither is enough alone — a number nobody can see until they
           open a menu is not a signal, and a dot you cannot act on is noise. */}
       <Item icon={CircleFadingArrowUp} label={updates.label} onPick={() => go("/updates")} />
+      {/* **Last in this group, and under Updates rather than above it.**
+          *Updates* is not *where you go*; it is *which version of this
+          software is running, and how to get a newer one* — which is why it
+          carries a version in its own label and why the avatar above it draws
+          `.news`. Account is *your standing here*, Settings is *how this
+          deployment is set up*. So the three under the first rule are already
+          one thing — the software, and your standing in it — and this is that
+          same question asked about a different device. No new rule: a fifth
+          hairline in a 252px popover would be furniture arguing with the thing
+          it separates.
+
+          Under rather than above, because Updates has to stay adjacent to the
+          mark that explains it, and because the two rows about obtaining
+          software then end up together.
+
+          **In both clients, ungated, and with no keycap.** Everything
+          `installedApp()` hides falls out of one of its two sentences — the
+          window, or there being several Firetowers. This falls out of
+          neither: it is a fact about a third device, and a browser can do it
+          exactly as well as a window can. Better, arguably — the person
+          reading a served page is the one who has not got the apps yet. So
+          there is no `advertisedKey` here and nothing for a browser to take
+          away.
+
+          **And it never takes a mark**, in any state, for any reason. This
+          file's rule is that exactly two things may dot the avatar; a new APK
+          is not one of them and must not become one. */}
+      <Item
+        icon={Smartphone}
+        label="Get the mobile app"
+        testid="profile-get-the-mobile-app"
+        onPick={onGetTheApp}
+      />
+      {/* A product row before a development one, so a dev build and a shipped
+          build have the same menu down to the last product row. */}
       {import.meta.env.DEV && <Item icon={BookOpen} label="Style guide" onPick={() => go("/style")} />}
 
       <Rule />
@@ -416,16 +479,19 @@ function Item({
   label,
   hint,
   tone,
+  testid,
   onPick,
 }: {
   icon: typeof KeyRound;
   label: string;
   hint?: string;
   tone?: "danger";
+  /** For a row a design contract names by id. */
+  testid?: string;
   onPick: () => void;
 }) {
   return (
-    <button onClick={onPick} className={`mrow ${tone === "danger" ? "text-brick" : ""}`}>
+    <button onClick={onPick} data-testid={testid} className={`mrow ${tone === "danger" ? "text-brick" : ""}`}>
       <span className={`shrink-0 ${tone === "danger" ? "text-brick" : "text-mute"}`}>
         <Icon of={icon} size={16} />
       </span>

@@ -298,6 +298,7 @@ const profile = (elsewhere = false) =>
       elsewhere={elsewhere}
       updates={{ label: "Updates", dot: false }}
       onSwitch={() => {}}
+      onGetTheApp={() => {}}
       onClose={() => {}}
       onForgot={() => {}}
     />
