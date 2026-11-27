@@ -1079,10 +1079,27 @@ async fn spawn(state: &AppState, request: &AgentRequest) -> Result<String> {
                 .iter()
                 .filter_map(|c| c.repo_id.clone())
                 .collect();
-            Some(
+            let mut set =
                 crate::roles::skills_at_spawn(&state.skills, r, lead.owner.as_str(), &repos)
-                    .await?,
-            )
+                    .await?;
+            // **What the position adds, on top of what the profile is.** The
+            // third of the three levels: an ad-hoc session opens with
+            // everything its owner has, a profile *replaces* that with a
+            // closed set, and a position *adds* to whatever its profile
+            // carries — for this team only, so a Sheets expert stays the
+            // Sheets expert everywhere and the position that also wants Figma
+            // says so without forking the profile.
+            //
+            // Bounded by what the person starting the team can reach, exactly
+            // as the profile's own list is: a team must not hand an agent
+            // something its owner could not have chosen themselves.
+            if let Some(p) = position.as_ref().filter(|p| !p.extra_skills.is_empty()) {
+                let reachable = crate::roles::reachable_ids(&state.skills, lead.owner.as_str())
+                    .await
+                    .unwrap_or_default();
+                set = crate::roles::with_position_extras(set, &p.extra_skills, &reachable);
+            }
+            Some(set)
         }
         None => None,
     };
@@ -2693,6 +2710,8 @@ struct Member {
     /// Whose handle it sits under. `None` is directly under the lead.
     under: Option<String>,
     extra_instructions: String,
+    /// Skills and servers this position adds, by name, in this team only.
+    extra_skills: Vec<String>,
 }
 
 /// Read the members out of a tool call, with the keys an agent may leave out
@@ -2711,21 +2730,38 @@ fn members_of(input: &Value) -> Result<Vec<Member>> {
     if items.is_null() {
         return Ok(Vec::new());
     }
-    let items = items
-        .as_array()
-        .context("`members` is a list of {profile, under, key, extra_instructions}")?;
+    let items = items.as_array().context(
+        "`members` is a list of {profile, under, key, extra_instructions, extra_skills}",
+    )?;
     let mut out: Vec<Member> = Vec::new();
     for (at, item) in items.iter().enumerate() {
         // A bare string is a profile under the lead, which is what a team of
         // one level is and what an agent writes first.
-        let (profile, key, under, extra) = match item {
-            Value::String(name) => (name.trim().to_string(), None, None, String::new()),
+        let (profile, key, under, extra, skills) = match item {
+            Value::String(name) => (
+                name.trim().to_string(),
+                None,
+                None,
+                String::new(),
+                Vec::new(),
+            ),
             Value::Object(_) => (
                 text(item, "profile")
                     .with_context(|| format!("member {} needs a `profile`", at + 1))?,
                 text(item, "key"),
                 text(item, "under"),
                 text(item, "extra_instructions").unwrap_or_default(),
+                item.get("extra_skills")
+                    .and_then(Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             ),
             _ => bail!(
                 "member {} is neither a profile name nor an object with a `profile` on it",
@@ -2745,6 +2781,7 @@ fn members_of(input: &Value) -> Result<Vec<Member>> {
             profile,
             under,
             extra_instructions: extra,
+            extra_skills: skills,
         });
     }
     Ok(out)
@@ -2788,6 +2825,9 @@ async fn team_from(
         parent: None,
         profile: resolve(lead)?,
         extra_instructions: String::new(),
+        // The lead is named by profile alone, so its set is its profile's.
+        // A position's extras are for telling two *members* apart.
+        extra_skills: Vec::new(),
     }];
     for member in members {
         let parent = match &member.under {
@@ -2812,6 +2852,11 @@ async fn team_from(
             parent: Some(parent),
             profile: resolve(&member.profile)?,
             extra_instructions: member.extra_instructions.clone(),
+            // Resolved against what *this owner* can reach, and a name that
+            // does not is refused rather than dropped — the same rule a
+            // profile's own list follows, for the sharper reason: a position
+            // grants a skill to something that runs on its own.
+            extra_skills: skill_scope_from(state, owner, &member.extra_skills).await?,
         });
     }
     Ok(crate::agent_teams::NewAgentTeam {

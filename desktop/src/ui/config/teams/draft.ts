@@ -72,6 +72,7 @@ export function add(draft: Draft, parent: string, profile: string, name: string,
         agent,
         redacted: false,
         extraInstructions: "",
+        extraSkills: [],
         ordinal: siblings.length,
       },
     ],
@@ -82,6 +83,20 @@ export function add(draft: Draft, parent: string, profile: string, name: string,
 export function remove(draft: Draft, id: string): Draft {
   const going = new Set([id, ...descendants(draft.positions, id).map((p) => p.id)]);
   return { ...draft, positions: draft.positions.filter((p) => !going.has(p.id)) };
+}
+
+/**
+ * Change what a position *adds*, here and nowhere else.
+ *
+ * **Empty means nothing extra, not everything.** A profile's own scope reads
+ * an empty list as "all the owner can reach"; a position's extras are the
+ * opposite — the profile already said what the agent is, and this adds to it.
+ */
+export function grant(draft: Draft, id: string, extraSkills: string[]): Draft {
+  return {
+    ...draft,
+    positions: draft.positions.map((p) => (p.id === id ? { ...p, extraSkills } : p)),
+  };
 }
 
 /** Change what a position is told, here and nowhere else. */
@@ -118,6 +133,7 @@ export function toWrite(draft: Draft): { name: string; positions: DraftPosition[
       parent: p.parent ?? null,
       profile: p.profile,
       extraInstructions: p.extraInstructions,
+      extraSkills: p.extraSkills ?? [],
     })),
   };
 }

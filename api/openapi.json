@@ -12795,6 +12795,13 @@
           "extraInstructions": {
             "type": "string"
           },
+          "extraSkills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Skills this position adds on top of its profile's, by skill id."
+          },
           "key": {
             "type": "string",
             "description": "The caller's own key for this position, which its children name as\ntheir `parent`. An existing position's id keeps that row — and keeps\nthe sessions standing on it; anything else mints a new one."
@@ -16652,6 +16659,13 @@
           "extraInstructions": {
             "type": "string",
             "description": "Markdown that applies here and nowhere else. It never replaces a\nprofile field; it is composed after the profile's own instructions."
+          },
+          "extraSkills": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Skills and servers this position adds, by skill id, in this team only.\n\n**Adds; never replaces.** The same contract `extra_instructions` has,\nand the reason both are called extra: a profile is a closed set, and a\nposition that wants one more thing says so without forking the profile.\nBounded at spawn by what the person starting the team can reach."
           },
           "id": {
             "type": "string"

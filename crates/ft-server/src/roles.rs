@@ -508,6 +508,49 @@ pub async fn skills_at_spawn(
     Ok(skills_for(role, &always_on, &repo_defaults, &reachable))
 }
 
+/// What a position adds to what its profile already carries.
+///
+/// **The third of the three levels.** An ad-hoc session opens with everything
+/// its owner has; a profile *replaces* that with a closed set; a position
+/// *adds* to whatever its profile carries, for one team only — so a Sheets
+/// expert stays the Sheets expert everywhere, and the position that also wants
+/// Figma says so without forking the profile.
+///
+/// **Bounded by `reachable`.** A team must not hand a running agent something
+/// the person starting it could not have chosen themselves, so an id outside
+/// that set is dropped rather than granted. Order is the profile's first, then
+/// the extras as the position lists them, and nothing is added twice.
+pub fn with_position_extras(
+    mut set: Vec<String>,
+    extra: &[String],
+    reachable: &std::collections::HashSet<String>,
+) -> Vec<String> {
+    for id in extra {
+        if reachable.contains(id) && !set.iter().any(|s| s == id) {
+            set.push(id.clone());
+        }
+    }
+    set
+}
+
+/// The skills one person can reach, by id.
+///
+/// Split out because a position's extras are bounded by the same set a
+/// profile's own list is — a team may add to what an agent carries, and never
+/// beyond what the person starting it could have chosen themselves.
+pub async fn reachable_ids(
+    skills: &crate::skills::Skills,
+    person: &str,
+) -> Result<std::collections::HashSet<String>> {
+    Ok(skills
+        .visible(person, Level::Viewer)
+        .await
+        .context("reading the skills somebody can reach for a position")?
+        .into_iter()
+        .map(|s| s.id.as_str().to_string())
+        .collect())
+}
+
 /// `<name>_<tail>`, so two people's `reviewer` roles do not collide on the
 /// path's own uniqueness. The same shape a skill's slug has.
 fn slug_of(name: &str, id: &str) -> String {
@@ -1154,6 +1197,43 @@ mod tests {
     /// so two people beginning the same one got two different agents. A saved
     /// kind of agent that is not the same agent for everybody is not a saved
     /// kind of agent.
+    /// A position adds to its profile, and cannot add past what the person
+    /// starting it can reach.
+    ///
+    /// Asserted against `with_position_extras` itself — the function the
+    /// spawn path calls — rather than a copy of its rule written here, which
+    /// would pass for ever while the real one drifted.
+    #[test]
+    fn a_position_adds_to_its_profile_and_never_past_what_is_reachable() {
+        let reachable: std::collections::HashSet<String> = ["sheets", "figma", "drive"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let profile = || vec!["sheets".to_string()];
+        let want = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+        assert_eq!(
+            with_position_extras(profile(), &want(&["figma"]), &reachable),
+            want(&["sheets", "figma"]),
+            "the position adds to the profile, and the profile's own survives"
+        );
+        assert_eq!(
+            with_position_extras(profile(), &want(&["secrets"]), &reachable),
+            want(&["sheets"]),
+            "a team cannot hand an agent what its owner could not choose"
+        );
+        assert_eq!(
+            with_position_extras(profile(), &want(&["sheets"]), &reachable),
+            want(&["sheets"]),
+            "naming what the profile already has adds nothing twice"
+        );
+        assert_eq!(
+            with_position_extras(profile(), &[], &reachable),
+            profile(),
+            "a position with nothing to add leaves the profile exactly as it was"
+        );
+    }
+
     #[test]
     fn a_profile_loads_its_own_list_and_nothing_else() {
         let mut role = profile();

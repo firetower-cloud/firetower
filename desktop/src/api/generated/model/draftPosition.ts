@@ -11,6 +11,8 @@
  */
 export interface DraftPosition {
   extraInstructions?: string;
+  /** Skills this position adds on top of its profile's, by skill id. */
+  extraSkills?: string[];
   /**
      * The caller's own key for this position, which its children name as
      * their `parent`. An existing position's id keeps that row — and keeps
