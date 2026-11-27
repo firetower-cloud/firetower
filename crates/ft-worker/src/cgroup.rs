@@ -796,10 +796,30 @@ mod tests {
             .expect("the shell should have said the pid")
     }
 
-    /// Signal 0 is the kernel being asked whether a pid is there, which is the
-    /// only question these tests have about a process they did not start.
+    /// Whether a pid is still a process that is running.
+    ///
+    /// Signal 0 is the kernel being asked whether a pid is there, and on its
+    /// own it is not enough: a process that has been killed but not yet reaped
+    /// still answers it, and who reaps an orphan is whatever PID 1 happens to
+    /// be. In a container that is sometimes a shell blocked waiting on the
+    /// test run itself, which reaps nothing until it exits — found by running
+    /// these in Docker without `--init`, where every kill here looked like a
+    /// failure. So Linux is asked what state the process is in.
     fn alive(pid: i32) -> bool {
-        unsafe { libc::kill(pid, 0) == 0 }
+        // SAFETY: signal 0 asks whether a pid exists and sends nothing.
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return false;
+        }
+
+        #[cfg(target_os = "linux")]
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            // `pid (comm) state …`, and a comm may hold spaces and brackets of
+            // its own, so the state is the character after the last `)`.
+            if let Some((_, rest)) = stat.rsplit_once(')') {
+                return !rest.trim_start().starts_with('Z');
+            }
+        }
+        true
     }
 
     /// Dying takes a moment even when the signal does not. Orphans are reaped
