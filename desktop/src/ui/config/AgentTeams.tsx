@@ -1274,6 +1274,8 @@ function said(c: Change): string {
       return `${c.name} moved`;
     case "told":
       return `${c.name} told something new`;
+    case "granted":
+      return `${c.name} carries something new`;
     case "lead":
       return `${c.name} now leads`;
     case "renamed":

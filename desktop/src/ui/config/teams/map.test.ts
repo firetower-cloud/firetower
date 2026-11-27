@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import type { AgentTeam, Position } from "~/api/generated/model";
 import { BRIEF_H, CH, CW, IND, layout, leadOf, depthOf, subtreeOf, treeOf } from "./layout";
-import { add, descendants, draftOf, markOf, pending, remove, reparent, tell, toWrite } from "./draft";
+import { add, descendants, draftOf, grant, markOf, pending, remove, reparent, tell, toWrite } from "./draft";
 
 const at = (over: Partial<Position> & { id: string }): Position => ({
   parent: null,
@@ -203,6 +203,36 @@ describe("the draft", () => {
       team.positions.find((p) => p.id === "web")!.extraInstructions,
     );
     expect(pending(team, d)).toEqual([{ kind: "told", name: "Designer" }]);
+  });
+
+  /**
+   * Ticking a skill in a position's drawer has to light Save.
+   *
+   * It did not: `pending` compared the profile, the parent and the extra
+   * instructions, and not the extra skills — so the change was made, the
+   * drawer said "Written when you press Save", and Save was never offered.
+   * A field nothing can save is worse than no field.
+   */
+  it("notices a position being given a skill", () => {
+    const team = product();
+    const d = grant(draftOf(team), "designer", ["sk_figma"]);
+    expect(pending(team, d)).toEqual([{ kind: "granted", name: "Designer" }]);
+  });
+
+  it("does not call the same set in another order a change", () => {
+    const team = product();
+    const two = grant(draftOf(team), "designer", ["sk_figma", "sk_drive"]);
+    const base = { ...team, positions: team.positions.map((p) =>
+      p.id === "designer" ? { ...p, extraSkills: ["sk_drive", "sk_figma"] } : p) };
+    expect(pending(base, two)).toEqual([]);
+  });
+
+  it("notices a skill being taken away again", () => {
+    const team = product();
+    const base = { ...team, positions: team.positions.map((p) =>
+      p.id === "designer" ? { ...p, extraSkills: ["sk_figma"] } : p) };
+    const d = grant(draftOf(base), "designer", []);
+    expect(pending(base, d)).toEqual([{ kind: "granted", name: "Designer" }]);
   });
 
   it("reads a different profile on the lead row as a change of lead", () => {

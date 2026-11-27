@@ -144,6 +144,7 @@ export type Change =
   | { kind: "removed"; name: string }
   | { kind: "moved"; name: string }
   | { kind: "told"; name: string }
+  | { kind: "granted"; name: string }
   | { kind: "renamed"; name: string }
   | { kind: "lead"; name: string };
 
@@ -170,11 +171,25 @@ export function pending(team: AgentTeam, draft: Draft): Change[] {
     if (before.profile !== p.profile && !p.parent) out.push({ kind: "lead", name: p.name });
     if (before.parent !== p.parent) out.push({ kind: "moved", name: p.name });
     if (before.extraInstructions !== p.extraInstructions) out.push({ kind: "told", name: p.name });
+    // **Order does not count as a change.** The picker appends as things are
+    // ticked, so the same set chosen in another order is the same set — and a
+    // Save button lit by a list that reordered itself is a button nobody
+    // trusts.
+    if (!sameSet(before.extraSkills ?? [], p.extraSkills ?? [])) {
+      out.push({ kind: "granted", name: p.name });
+    }
   }
   for (const p of team.positions) {
     if (!now.has(p.id)) out.push({ kind: "removed", name: p.name });
   }
   return out;
+}
+
+/** Whether two id lists hold the same things, whatever order they are in. */
+function sameSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const held = new Set(a);
+  return b.every((id) => held.has(id));
 }
 
 /** The pending state of one card, for the ring the map draws on it. */
