@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.21.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.20.0...mobile-v0.21.0) (2026-11-27)
+
+
+### Features
+
+* **connectors:** Google Workspace, end to end ([5c39e4e](https://github.com/firetower-cloud/firetower/commit/5c39e4eb6600325bcd0e59cd3a8cf88d0019949e))
+* **connectors:** supply an OAuth application for a server that registers none ([4b55238](https://github.com/firetower-cloud/firetower/commit/4b552389f1a6f62ac958e71570ea6404e3083052))
+* **library:** a connected server says so and can be acted on, and the composer list is capped ([b42ce17](https://github.com/firetower-cloud/firetower/commit/b42ce17f02dd898f3cd4e31559984e3a01859f27))
+* **library:** a name for people, a page for browsing, and one button everywhere ([2bbb145](https://github.com/firetower-cloud/firetower/commit/2bbb14511d2268ef377c31e030d444adf8cea5fe))
+* **library:** list the things, not the folders they arrived in ([b11c2ab](https://github.com/firetower-cloud/firetower/commit/b11c2ab42c69b6ff874832c50cea4f3f830eb3fc))
+* **library:** the form opens where Connect was pressed ([889e659](https://github.com/firetower-cloud/firetower/commit/889e659a69f6bf8380ad0b4877bcc532c64d704e))
+* **marketplace:** read a repository of plugins, and take a pinned copy ([67dc4ba](https://github.com/firetower-cloud/firetower/commit/67dc4baaa804816a5dbaabb2f5926638bc8ca405))
+* **plugins:** open one and read what is in it, and quieten the row ([d0f562b](https://github.com/firetower-cloud/firetower/commit/d0f562b7070bf3b338e1458085ea4e5d995d00d8))
+* Skills & MCP — a marketplace of 79 servers, and the three levels that scope them ([ce20123](https://github.com/firetower-cloud/firetower/commit/ce20123a0322b694474d4c6bd941e617c7eba459))
+* **skills:** a contract is not a capability, and has no switch ([eb353b2](https://github.com/firetower-cloud/firetower/commit/eb353b26f56813259ad5b9e66e394b69e2d5dec1))
+* **skills:** skill-creator is a contract too, and each one says why ([a1eae76](https://github.com/firetower-cloud/firetower/commit/a1eae76b8975db7999fc45af2daee5ee9b8c7319))
+* **teams:** a position adds skills and servers, for one team only ([7400773](https://github.com/firetower-cloud/firetower/commit/7400773743a708411ca9b900db3b17dc6074dff2))
+* the switch moves to the composer, and a server that cannot connect says so ([1bc7a8e](https://github.com/firetower-cloud/firetower/commit/1bc7a8e114a2caf15cf2a6079fd336a933a0d76e))
+
+
+### Bug Fixes
+
+* **composer:** the one list people open every time was still showing slugs ([026766f](https://github.com/firetower-cloud/firetower/commit/026766f5c2c1b9f9d4828eeed29f0ab801744422))
+* **library:** one press, named for the point of it, reporting in place ([3cce66b](https://github.com/firetower-cloud/firetower/commit/3cce66b90664e805c14e92b346aa71707f28c0ac))
+* **library:** the dead click, the silent overwrite, and one credential per server ([1f45ace](https://github.com/firetower-cloud/firetower/commit/1f45ace4ee21e2ddc511e7ecd5354290ce6d8e4e))
+
+
+### Performance Improvements
+
+* **library:** the form goes up first, and the zipball is not fetched twice ([cf20976](https://github.com/firetower-cloud/firetower/commit/cf20976435eabe7ef3dada68fe4f8b651fd5a18e))
+
 ## [0.20.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.19.0...mobile-v0.20.0) (2026-11-24)
 
 

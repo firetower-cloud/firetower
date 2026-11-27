@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.59.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.58.0...firetower-v0.59.0) (2026-11-27)
+
+
+### Features
+
+* **connectors:** Google Workspace, end to end ([5c39e4e](https://github.com/firetower-cloud/firetower/commit/5c39e4eb6600325bcd0e59cd3a8cf88d0019949e))
+* **connectors:** supply an OAuth application for a server that registers none ([4b55238](https://github.com/firetower-cloud/firetower/commit/4b552389f1a6f62ac958e71570ea6404e3083052))
+* **connectors:** the eleven servers that need an application now say where ([d8ea885](https://github.com/firetower-cloud/firetower/commit/d8ea88573a6c6c9219362d52d194771bd849b4d1))
+* **library:** a connected server says so and can be acted on, and the composer list is capped ([b42ce17](https://github.com/firetower-cloud/firetower/commit/b42ce17f02dd898f3cd4e31559984e3a01859f27))
+* **library:** a name for people, a page for browsing, and one button everywhere ([2bbb145](https://github.com/firetower-cloud/firetower/commit/2bbb14511d2268ef377c31e030d444adf8cea5fe))
+* **library:** list the things, not the folders they arrived in ([b11c2ab](https://github.com/firetower-cloud/firetower/commit/b11c2ab42c69b6ff874832c50cea4f3f830eb3fc))
+* **library:** the form opens where Connect was pressed ([889e659](https://github.com/firetower-cloud/firetower/commit/889e659a69f6bf8380ad0b4877bcc532c64d704e))
+* **marketplace:** read a repository of plugins, and take a pinned copy ([67dc4ba](https://github.com/firetower-cloud/firetower/commit/67dc4baaa804816a5dbaabb2f5926638bc8ca405))
+* **marketplace:** the renamed repository, and a token to read it with ([b98655b](https://github.com/firetower-cloud/firetower/commit/b98655bcbc73493b63655a365310b8c382d35bd3))
+* **plugins:** a row can be taken back, and adding one asks to connect it ([83e0930](https://github.com/firetower-cloud/firetower/commit/83e0930f37b854eb3d9c0b45af778c0cfa79833a))
+* **plugins:** open one and read what is in it, and quieten the row ([d0f562b](https://github.com/firetower-cloud/firetower/commit/d0f562b7070bf3b338e1458085ea4e5d995d00d8))
+* Skills & MCP — a marketplace of 79 servers, and the three levels that scope them ([ce20123](https://github.com/firetower-cloud/firetower/commit/ce20123a0322b694474d4c6bd941e617c7eba459))
+* **skills:** a contract is not a capability, and has no switch ([eb353b2](https://github.com/firetower-cloud/firetower/commit/eb353b26f56813259ad5b9e66e394b69e2d5dec1))
+* **skills:** skill-creator is a contract too, and each one says why ([a1eae76](https://github.com/firetower-cloud/firetower/commit/a1eae76b8975db7999fc45af2daee5ee9b8c7319))
+* **teams:** a position adds skills and servers, for one team only ([7400773](https://github.com/firetower-cloud/firetower/commit/7400773743a708411ca9b900db3b17dc6074dff2))
+* the switch moves to the composer, and a server that cannot connect says so ([1bc7a8e](https://github.com/firetower-cloud/firetower/commit/1bc7a8e114a2caf15cf2a6079fd336a933a0d76e))
+
+
+### Bug Fixes
+
+* a dotted server name took Codex's whole config down, and Stripe read as dead ([1afe186](https://github.com/firetower-cloud/firetower/commit/1afe18606b7132b8ae8fe5e03605d7f860f89433))
+* **composer:** the one list people open every time was still showing slugs ([026766f](https://github.com/firetower-cloud/firetower/commit/026766f5c2c1b9f9d4828eeed29f0ab801744422))
+* **connectors:** a refused registration is not a dead end, and Google needs asking ([b55b653](https://github.com/firetower-cloud/firetower/commit/b55b6531950014fddd4223e055828b8393183b1b))
+* **connectors:** read the metadata pointer when the scheme is glued to it ([e2eebe4](https://github.com/firetower-cloud/firetower/commit/e2eebe4d3017311d51b0ea38c0f7d5339ee1a9c3))
+* **connectors:** the narrowing applied on the first press and no press after ([5f0d9c1](https://github.com/firetower-cloud/firetower/commit/5f0d9c1a2be239abaf6cdc28ed84a7eefcd43032))
+* **connectors:** the refusal said the product could not help, and it can ([81607a3](https://github.com/firetower-cloud/firetower/commit/81607a35bb65da5d474c7ca31487ef4e22a1602f))
+* **library:** one press, named for the point of it, reporting in place ([3cce66b](https://github.com/firetower-cloud/firetower/commit/3cce66b90664e805c14e92b346aa71707f28c0ac))
+* **library:** the dead click, the silent overwrite, and one credential per server ([1f45ace](https://github.com/firetower-cloud/firetower/commit/1f45ace4ee21e2ddc511e7ecd5354290ce6d8e4e))
+* **marketplace:** a source nobody has read is read when somebody looks ([5d4a18d](https://github.com/firetower-cloud/firetower/commit/5d4a18d43fc5bbb4ba9ec77b7f4c7b30b7334ddd))
+* **marketplace:** the comma that shipped, and the test that lets one ([da3bb19](https://github.com/firetower-cloud/firetower/commit/da3bb190b5121a1198e257e1f5dec4ef5cde7c32))
+* **migrations:** two migrations claimed the same version ([28a2b9e](https://github.com/firetower-cloud/firetower/commit/28a2b9ebd72005a5b84784e7399ce0979d5ed443))
+* **server:** a version kept through a stopped check is shown, not offered ([81fb08a](https://github.com/firetower-cloud/firetower/commit/81fb08a43e5159877f673c4b25d7515c37ba19e5))
+
+
+### Performance Improvements
+
+* **library:** the form goes up first, and the zipball is not fetched twice ([cf20976](https://github.com/firetower-cloud/firetower/commit/cf20976435eabe7ef3dada68fe4f8b651fd5a18e))
+
 ## [0.58.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.57.0...firetower-v0.58.0) (2026-11-24)
 
 
