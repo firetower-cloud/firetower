@@ -98,11 +98,17 @@ fn entries() -> Vec<Entry> {
         mcp.display()
     );
 
-    let catalogue: Value = serde_json::from_slice(
-        &std::fs::read(repo.join(".claude-plugin/marketplace.json"))
-            .expect("the repository has a marketplace.json"),
-    )
-    .expect("and it is JSON");
+    // Either path, because the control plane takes either: the catalogue sits
+    // at `.agents/plugins/marketplace.json`, and `.claude-plugin/` is the
+    // older spelling a third-party repository may still use.
+    let catalogue: Value = [
+        ".agents/plugins/marketplace.json",
+        ".claude-plugin/marketplace.json",
+    ]
+    .iter()
+    .find_map(|at| std::fs::read(repo.join(at)).ok())
+    .map(|raw| serde_json::from_slice(&raw).expect("the marketplace file is JSON"))
+    .expect("the repository has a marketplace.json at one of the two paths");
     let listed: BTreeMap<String, Value> = catalogue["plugins"]
         .as_array()
         .expect("marketplace.json lists plugins")
