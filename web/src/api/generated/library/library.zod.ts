@@ -12,6 +12,10 @@ export const ConnectorToolsParams = zod.object({
   "id": zod.string().describe('The connector')
 })
 
+export const ConnectorToolsQueryParams = zod.object({
+  "refresh": zod.boolean().optional().describe('Ask the server again rather than answering from the cache')
+})
+
 export const ConnectorToolsResponse = zod.object({
   "fetchedAt": zod.iso.datetime({"offset":true}).nullish().describe('When somebody last asked. `None` has never been asked.'),
   "names": zod.array(zod.string()).describe('Tool names, in the order the server listed them.'),

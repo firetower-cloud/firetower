@@ -13,11 +13,24 @@
  * came from, because an install here is a pinned copy and not a subscription.
  */
 import { useEffect } from "react";
-import { ArrowLeft, Link2, Loader2, TriangleAlert } from "lucide-react";
+import { ArrowLeft, Check, Link2, Loader2, MoreHorizontal, TriangleAlert } from "lucide-react";
 import { useConnectorTools } from "~/api/generated/library/library";
 import { useSkillInside } from "~/api/generated/skills/skills";
 import { connect, useConnectorState } from "~/api/generated/connectors/connectors";
 import { openExternal } from "~/open";
+import { IconButton, MenuItem } from "~/components/ui";
+import { Pop } from "~/ui/Pop";
+import { useConfirm } from "~/ui/Confirm";
+import { useQueryClient } from "@tanstack/react-query";
+import { deleteSkill } from "~/api/generated/skills/skills";
+import {
+  disconnect,
+  getConnectorStateQueryKey,
+} from "~/api/generated/connectors/connectors";
+import {
+  connectorTools,
+  getConnectorToolsQueryKey,
+} from "~/api/generated/library/library";
 import { SetUpClient } from "~/ui/config/SetUpClient";
 import { why } from "~/data";
 import type { Item } from "~/api/generated/model";
@@ -39,10 +52,13 @@ export function ServerInside({
     query: { refetchOnWindowFocus: true, refetchInterval: awaiting ? 2000 : false },
   }).data;
   const connected = !!state?.connected;
-  const tools = useConnectorTools(of.skillId, { query: { enabled: connected } }).data;
+  const tools = useConnectorTools(of.skillId, undefined, { query: { enabled: connected } }).data;
   const [busy, setBusy] = useState(false);
   const [bad, setBad] = useState<string | null>(null);
   const [supplying, setSupplying] = useState(false);
+  const [menu, setMenu] = useState<HTMLElement | null>(null);
+  const confirm = useConfirm();
+  const cache = useQueryClient();
 
   /* Connecting happens elsewhere, so the page watches rather than waits. */
   useEffect(() => {
@@ -114,7 +130,89 @@ export function ServerInside({
             )}
             Connect
           </button>
-        ) : null}
+        ) : (
+          /* **A connected server had nothing here at all.** The branch above
+             drew Connect, and once connected the header fell through to
+             `null` — so the one screen devoted to this server said neither
+             what it was nor what could be done to it, while the row in the
+             list behind it offered both. It says it, and carries the same
+             three actions the row's menu does. */
+          <span className="flex shrink-0 items-center gap-2">
+            <span className="act-said act-done">
+              <Check className="h-3.5 w-3.5" strokeWidth={2} />
+              Connected
+            </span>
+            <div>
+              <IconButton
+                of={MoreHorizontal}
+                onClick={(e) => setMenu(menu ? null : e.currentTarget)}
+                label={`More for ${of.displayName}`}
+              />
+              {menu && (
+                <Pop anchor={menu} onClose={() => setMenu(null)}>
+                  <div className="w-60 py-1">
+                    <MenuItem
+                      onClick={() => {
+                        setMenu(null);
+                        /* `refresh` on the request: invalidating alone would
+                           re-fetch a route that answers from its own cache. */
+                        void connectorTools(of.skillId, { refresh: true }).then(() =>
+                          cache.invalidateQueries({
+                            queryKey: getConnectorToolsQueryKey(of.skillId),
+                          }),
+                        );
+                      }}
+                    >
+                      Refresh tools list
+                    </MenuItem>
+                    <MenuItem
+                      onClick={() => {
+                        setMenu(null);
+                        void confirm({
+                          title: `Disconnect ${of.displayName}?`,
+                          body: "Your credential is forgotten. It stays in the library, and anybody else here keeps theirs. Sessions already running keep the token they were given.",
+                          action: "Disconnect",
+                          tone: "danger",
+                        }).then(async (ok) => {
+                          if (!ok) return;
+                          await disconnect(of.skillId);
+                          await cache.invalidateQueries({
+                            queryKey: getConnectorStateQueryKey(of.skillId),
+                          });
+                          await onGone();
+                        });
+                      }}
+                    >
+                      Disconnect
+                    </MenuItem>
+                    <MenuItem
+                      tone="danger"
+                      disabled={of.builtin}
+                      onClick={() => {
+                        setMenu(null);
+                        void confirm({
+                          title: `Remove ${of.displayName}?`,
+                          body: of.from
+                            ? `It arrived with ${of.from}, so everything else that came in with ${of.from} goes too. Sessions already running keep what they were given, and it can be added again.`
+                            : "It goes from the library. Sessions already running keep what they were given, and it can be added again.",
+                          action: "Remove",
+                          tone: "danger",
+                        }).then(async (ok) => {
+                          if (!ok) return;
+                          await deleteSkill(of.skillId);
+                          await onGone();
+                          onBack();
+                        });
+                      }}
+                    >
+                      {of.builtin ? "Ships with Firetower" : of.from ? `Remove ${of.from}` : "Remove"}
+                    </MenuItem>
+                  </div>
+                </Pop>
+              )}
+            </div>
+          </span>
+        )}
       </header>
 
       {/* **The other side of the wall.** A server that registers no clients

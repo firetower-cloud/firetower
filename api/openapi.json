@@ -1535,6 +1535,15 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "refresh",
+            "in": "query",
+            "description": "Ask the server again rather than answering from the cache",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
           }
         ],
         "responses": {

@@ -27,6 +27,7 @@ import type {
 
 import type {
   ApiError,
+  ConnectorToolsParams,
   Item,
   LibrarySwitch,
   Tools
@@ -54,17 +55,26 @@ const withQueryKey = <T extends object, K>(query: T, queryKey: K): T & { queryKe
   return result;
 };
 
-export const getConnectorToolsUrl = (id: string,) => {
+export const getConnectorToolsUrl = (id: string,
+    params?: ConnectorToolsParams,) => {
+  const normalizedParams = new URLSearchParams();
 
+  Object.entries(params || {}).forEach(([key, value]) => {
 
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
 
+  const stringifiedParams = normalizedParams.toString();
 
-  return `/api/v1/connectors/${id}/tools`
+  return stringifiedParams.length > 0 ? `/api/v1/connectors/${id}/tools?${stringifiedParams}` : `/api/v1/connectors/${id}/tools`
 }
 
-export const connectorTools = async (id: string, options?: Parameters<typeof http>[1]): Promise<Tools> => {
+export const connectorTools = async (id: string,
+    params?: ConnectorToolsParams, options?: Parameters<typeof http>[1]): Promise<Tools> => {
 
-  return http<Tools>(getConnectorToolsUrl(id),
+  return http<Tools>(getConnectorToolsUrl(id,params),
   {
     ...options,
     method: 'GET'
@@ -77,23 +87,25 @@ export const connectorTools = async (id: string, options?: Parameters<typeof htt
 
 
 
-export const getConnectorToolsQueryKey = (id: string,) => {
+export const getConnectorToolsQueryKey = (id: string,
+    params?: ConnectorToolsParams,) => {
     return [
-    `/api/v1/connectors/${id}/tools`
+    `/api/v1/connectors/${id}/tools`, ...(params ? [params] : [])
     ] as const;
     }
 
 
-export const getConnectorToolsQueryOptions = <TData = Awaited<ReturnType<typeof connectorTools>>, TError = unknown>(id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>>, request?: SecondParameter<typeof http>}
+export const getConnectorToolsQueryOptions = <TData = Awaited<ReturnType<typeof connectorTools>>, TError = unknown>(id: string,
+    params?: ConnectorToolsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>>, request?: SecondParameter<typeof http>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
 
-  const queryKey =  queryOptions?.queryKey ?? getConnectorToolsQueryKey(id);
+  const queryKey =  queryOptions?.queryKey ?? getConnectorToolsQueryKey(id,params);
 
 
 
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof connectorTools>>> = ({ signal }) => connectorTools(id, { signal, ...requestOptions });
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof connectorTools>>> = ({ signal }) => connectorTools(id,params, { signal, ...requestOptions });
 
 
 
@@ -107,7 +119,8 @@ export type ConnectorToolsQueryError = unknown
 
 
 export function useConnectorTools<TData = Awaited<ReturnType<typeof connectorTools>>, TError = unknown>(
- id: string, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>> & Pick<
+ id: string,
+    params: undefined |  ConnectorToolsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof connectorTools>>,
           TError,
@@ -117,7 +130,8 @@ export function useConnectorTools<TData = Awaited<ReturnType<typeof connectorToo
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useConnectorTools<TData = Awaited<ReturnType<typeof connectorTools>>, TError = unknown>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>> & Pick<
+ id: string,
+    params?: ConnectorToolsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof connectorTools>>,
           TError,
@@ -127,16 +141,18 @@ export function useConnectorTools<TData = Awaited<ReturnType<typeof connectorToo
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 export function useConnectorTools<TData = Awaited<ReturnType<typeof connectorTools>>, TError = unknown>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ id: string,
+    params?: ConnectorToolsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
 
 export function useConnectorTools<TData = Awaited<ReturnType<typeof connectorTools>>, TError = unknown>(
- id: string, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>>, request?: SecondParameter<typeof http>}
+ id: string,
+    params?: ConnectorToolsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof connectorTools>>, TError, TData>>, request?: SecondParameter<typeof http>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
 
-  const queryOptions = getConnectorToolsQueryOptions(id,options)
+  const queryOptions = getConnectorToolsQueryOptions(id,params,options)
 
   const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
 
@@ -147,15 +163,17 @@ export function useConnectorTools<TData = Awaited<ReturnType<typeof connectorToo
 
 export const useSetConnectorToolsQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,updater: Awaited<ReturnType<typeof connectorTools>> | undefined | ((old: Awaited<ReturnType<typeof connectorTools>> | undefined) => Awaited<ReturnType<typeof connectorTools>> | undefined), $exactMatch: boolean = true) => {
-    queryClient.setQueriesData<Awaited<ReturnType<typeof connectorTools>>>({ exact: $exactMatch, queryKey: getConnectorToolsQueryKey(id) }, updater);
+  return (id: string,
+    params: ConnectorToolsParams | undefined,updater: Awaited<ReturnType<typeof connectorTools>> | undefined | ((old: Awaited<ReturnType<typeof connectorTools>> | undefined) => Awaited<ReturnType<typeof connectorTools>> | undefined), $exactMatch: boolean = true) => {
+    queryClient.setQueriesData<Awaited<ReturnType<typeof connectorTools>>>({ exact: $exactMatch, queryKey: getConnectorToolsQueryKey(id,params) }, updater);
   };
 }
 
 export const useGetConnectorToolsQueryData = () => {
   const queryClient = useQueryClient();
-  return (id: string,) =>
-    queryClient.getQueryData<Awaited<ReturnType<typeof connectorTools>>>(getConnectorToolsQueryKey(id));
+  return (id: string,
+    params?: ConnectorToolsParams,) =>
+    queryClient.getQueryData<Awaited<ReturnType<typeof connectorTools>>>(getConnectorToolsQueryKey(id,params));
 }
 
 

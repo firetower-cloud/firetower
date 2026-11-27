@@ -1028,6 +1028,12 @@ export function StartComposer({
                 Nothing to change — everything you have loads every time.
               </p>
             )}
+            {/* **Capped, and the list scrolls inside the cap.** Everything a
+                person has went in one growing column, so a library of twenty
+                drew a menu taller than the window with the search at the top
+                of it scrolled off. The search and the way out stay put; only
+                the rows move. */}
+            <div className="max-h-[264px] overflow-y-auto">
             {choosable
               /* Both, because the readable name is what somebody sees and the
                  slug is what they may have read in a manifest. */
@@ -1055,8 +1061,8 @@ export function StartComposer({
                         className="grid h-4 w-4 shrink-0 place-items-center text-ember"
                         title={
                           needsHand.has(s.id)
-                            ? `${s.name} registers no OAuth clients, so it needs an application created by hand. Firetower cannot hold one yet.`
-                            : `${s.name} is not connected, so its tools will not answer. Connect it from Skills & MCP.`
+                            ? `${s.displayName || s.name} needs an OAuth application you create once — open it from Skills & MCP and use Set it up.`
+                            : `${s.displayName || s.name} is not connected, so its tools will not answer. Connect it from Skills & MCP.`
                         }
                       >
                         <TriangleAlert className="h-4 w-4" strokeWidth={1.75} />
@@ -1083,6 +1089,7 @@ export function StartComposer({
                   </div>
                 );
               })}
+            </div>
             <button
               type="button"
               className="prow tight mt-1 border-t border-line pt-2 text-dim"

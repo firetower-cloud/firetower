@@ -73,6 +73,7 @@ export * from './compute.ts';
 export * from './configureAgent.ts';
 export * from './connected.ts';
 export * from './connectorState.ts';
+export * from './connectorToolsParams.ts';
 export * from './consumption.ts';
 export * from './consumptionParams.ts';
 export * from './control.ts';

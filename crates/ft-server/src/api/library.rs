@@ -7,7 +7,7 @@
 //! So this is a thing that happens *after* connecting, and the screen before
 //! that says so rather than guessing.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use serde::Serialize;
@@ -63,33 +63,52 @@ pub struct Tools {
     pub why: Option<String>,
 }
 
+/// Whether to go back to the server rather than answer from the cache.
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct Again {
+    #[serde(default)]
+    pub refresh: Option<bool>,
+}
+
 #[utoipa::path(
     get, path = "/api/v1/connectors/{id}/tools", tag = "library",
-    params(("id" = String, Path, description = "The connector")),
+    params(
+        ("id" = String, Path, description = "The connector"),
+        ("refresh" = Option<bool>, Query, description = "Ask the server again rather than answering from the cache"),
+    ),
     responses((status = 200, body = Tools)),
 )]
 pub(super) async fn connector_tools(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(id): Path<String>,
+    Query(ask_again): Query<Again>,
 ) -> ApiResult<Json<Tools>> {
     let me = whoever(&principal)?;
     let pool = state.skills.pool();
 
     // Cached first. A detail screen must not wait on somebody else's server,
     // and the answer is stable between their releases.
-    if let Ok(Some(row)) = sqlx::query_as::<_, (serde_json::Value, chrono::DateTime<chrono::Utc>)>(
-        "SELECT tools, fetched_at FROM connector_tools WHERE skill_id = $1",
-    )
-    .bind(&id)
-    .fetch_optional(pool)
-    .await
-    {
-        return Ok(Json(Tools {
-            names: serde_json::from_value(row.0).unwrap_or_default(),
-            fetched_at: Some(row.1),
-            why: None,
-        }));
+    //
+    // **Unless somebody asked.** The cache is returned whenever it exists, so
+    // a "Refresh tools list" that only re-requested this route would get the
+    // same stored row back and change nothing on screen — a control that
+    // looks like it worked and did not.
+    if !ask_again.refresh.unwrap_or(false) {
+        if let Ok(Some(row)) =
+            sqlx::query_as::<_, (serde_json::Value, chrono::DateTime<chrono::Utc>)>(
+                "SELECT tools, fetched_at FROM connector_tools WHERE skill_id = $1",
+            )
+            .bind(&id)
+            .fetch_optional(pool)
+            .await
+        {
+            return Ok(Json(Tools {
+                names: serde_json::from_value(row.0).unwrap_or_default(),
+                fetched_at: Some(row.1),
+                why: None,
+            }));
+        }
     }
 
     let Some(found) = state

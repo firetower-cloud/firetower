@@ -73,6 +73,7 @@ export * from './compute';
 export * from './configureAgent';
 export * from './connected';
 export * from './connectorState';
+export * from './connectorToolsParams';
 export * from './consumption';
 export * from './consumptionParams';
 export * from './control';
