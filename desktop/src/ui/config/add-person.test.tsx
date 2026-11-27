@@ -103,6 +103,22 @@ describe("the note", () => {
    * with nothing after it is a line somebody pastes to a colleague who then
    * cannot find the thing.
    */
+  /**
+   * **It used to promise a download that is not there.** The note said *"Once
+   * you are signed in there, you can download the Mac or Windows app from the
+   * same page"* — and since the application took the control plane's root,
+   * that page is this one and carries no downloads. The colleague signed in,
+   * landed in the product, and went looking for something nobody had moved.
+   *
+   * Asserted on the word rather than the sentence: whatever a future author
+   * writes, a note that sends somebody to find a download is the defect.
+   */
+  it("promises no download, because there is none at that address", () => {
+    const html = draw();
+    expect(html).not.toMatch(/download/i);
+    expect(html).not.toMatch(/same page/i);
+  });
+
   it("drops the address line rather than leaving it dangling", () => {
     const html = draw({ publicUrl: "" });
     expect(html).not.toContain("Sign in at");

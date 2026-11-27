@@ -162,6 +162,27 @@ describe("the two levels have one writer", () => {
   });
 
   /**
+   * **The period is the reader's clock, not the render's.**
+   *
+   * `now` is read inside a `useMemo`. Keyed on the controls alone, a window
+   * left open overnight kept yesterday's fortnight — today's work simply
+   * never appeared — and then jumped a day the moment any unrelated control
+   * was touched, which reads as the sort having changed the data.
+   *
+   * Asserted at the source because the defect is in a dependency array: the
+   * rendered output of a pane opened once is identical either way, which is
+   * exactly why this went in unguarded.
+   */
+  it("keys the period on the clock, not only on the controls", () => {
+    const memo = PANE.slice(PANE.indexOf("const ask = useMemo"), PANE.indexOf("useConsumption("));
+    expect(memo).toContain("today]");
+    /* And the clock is a hook that re-renders, not a value read once — a
+       `today` in the list that never changes is the same bug with a longer
+       dependency array. */
+    expect(PANE).toMatch(/const today = useToday\(\)/);
+  });
+
+  /**
    * **And the two bare setters are gone.** They are what a reintroduced pair
    * of independent states would be called, and their absence is the shape of
    * the claim: a control can ask for a pair and cannot write one.

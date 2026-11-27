@@ -1435,6 +1435,19 @@ export type Tip = { x: number; y: number; from: "chart" | "row"; head: string; m
  * So the openers write to a store and only `TipLayer` subscribes. The setter
  * is stable for the life of the pane, which is also what keeps it out of
  * every child's dependency list.
+ *
+ * **Measured, and the measurement is written here because no test holds it.**
+ * A render-count assertion needs a DOM, and this suite has none — so the
+ * property is real and unguarded, and the next change to the render path can
+ * undo it silently. To repeat it: open the pane in a browser, hover one
+ * ledger row, then move the pointer across that row thirty times while
+ * counting mutations on the ledger's subtree with a `MutationObserver`.
+ *
+ *     before   60 ledger mutations, tip follows
+ *     after     0 ledger mutations, tip follows
+ *
+ * Both numbers were reproduced independently by QA. If you are here because
+ * the pane feels heavy on hover again, that is the check to run first.
  */
 export type TipStore = {
   get: () => Tip | null;

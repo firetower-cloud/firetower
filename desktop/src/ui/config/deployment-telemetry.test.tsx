@@ -111,6 +111,30 @@ describe("the telemetry pane", () => {
     // The expression that was the defect, in any of its spellings.
     expect(pane).not.toMatch(/enabled\s*\?\?\s*true/);
   });
+
+  /**
+   * **A rename moves one word and used to refetch the whole window.**
+   *
+   * `invalidateQueries()` with no key matches everything this server's cache
+   * holds — sessions, workspaces, repositories, machines, skills, profiles and
+   * the consumption ledger — a hundred requests and a visible stutter, to
+   * change a name. Only two reads carry it: `/auth/me`, which this field and
+   * the account screen read, and `/bootstrap`, which the sign-in and switcher
+   * screens read. Nothing else on the server knows it.
+   *
+   * At the source, and comments stripped first for the reason above: the
+   * pane renders identically either way, so there is no drawn difference to
+   * assert on. That is why it went in unguarded.
+   */
+  it("invalidates the two reads that carry the name, not the whole cache", () => {
+    const pane = readFileSync(new URL("./Deployment.tsx", import.meta.url), "utf8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(pane).toContain("getMeQueryKey()");
+    expect(pane).toContain("getBootstrapQueryKey()");
+    /* The defect in any spelling: a call with nothing to narrow it. */
+    expect(pane).not.toMatch(/invalidateQueries\(\s*\)/);
+  });
 });
 
 /**
