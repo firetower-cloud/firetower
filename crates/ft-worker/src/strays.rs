@@ -378,20 +378,34 @@ fn parse(block: &[u8]) -> Option<Described> {
     })
 }
 
-/// Whether a process has reached the state [`kill`] could find it in.
+/// Whether the process a test started is visible to a scan *as itself*.
 ///
 /// Test-only, and shared with the teardown test over in `lib.rs`, which starts
-/// the same kind of decoy and has to wait for the same moment. Both halves
-/// matter and neither implies the other: a pid the process list has not
-/// published yet is not scanned, and a process that has not finished `exec`ing
-/// has no environment to read the tag out of. See `tests::detached` for what
-/// waiting on anything earlier costs.
+/// the same kind of decoy and has to wait for the same moment. Three things,
+/// and none of them implies the others: the process list has to have published
+/// the pid, the environment has to be readable off it, and it has to have
+/// become the binary it was asked to be.
+///
+/// That last one is the trap, and it cost two CI runs to see. A test's decoy
+/// is started by a shell that was given the tag, so between the fork and the
+/// `exec` there is a process which carries the tag and is not the decoy — the
+/// inheritance this whole module relies on, arriving a moment too early. A
+/// wait that asked only for the tag could be let through on that shell, and
+/// the `exec` that follows has a window in which nothing about the process can
+/// be read at all, so the scan a few microseconds later found nothing and the
+/// assertion blamed the selector. Watched flapping `true`, `false`, `true` on
+/// a GitHub runner, where a debug binary takes long enough to start; on a
+/// laptop the whole sequence is over inside one poll.
 #[cfg(all(test, target_os = "macos"))]
 pub(crate) fn visible(pid: i32, tag: &str) -> bool {
+    // By file name, because `current_exe` resolves a path the kernel may hand
+    // back in another form, and the question here is only which program it is.
+    let own = std::env::current_exe().ok();
+    let expected = own.as_deref().and_then(Path::file_name);
+
     pids().contains(&pid)
         && describe(pid, &mut vec![0u8; argmax()])
-            .and_then(|it| it.session)
-            .is_some_and(|it| it == tag)
+            .is_some_and(|it| it.session.as_deref() == Some(tag) && it.exec.file_name() == expected)
 }
 
 /// The next NUL-terminated string, leaving the cursor after it.
@@ -457,19 +471,10 @@ mod tests {
 
         // Started is not the same as findable, and the gap is where a test
         // asks its question a moment too early and calls the answer a bug.
-        //
-        // A process reaches the state [`strays`] needs only once it has
-        // `exec`ed. Before that the kernel has no saved environment for it at
-        // all — a fork of the shell reads back with the shell's arguments and
-        // no environment, tag included — and during the `exec` itself there is
-        // a window where it cannot be read at all. Both were watched happening
-        // on a laptop, in microseconds; a loaded CI runner starting a debug
-        // binary stays in them for long enough to be scanned in the middle,
-        // which is what made this fail there and nowhere else.
-        //
-        // So the wait is for exactly what the scan reads — the process list
-        // and the environment on it — and not for some earlier state that
-        // merely implies them.
+        // The wait is for the state a scan actually reads, and for this
+        // process rather than the shell that is about to become it — see
+        // [`visible`], which is where that distinction is explained and which
+        // the teardown test in `lib.rs` waits on too.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         while std::time::Instant::now() < deadline {
             if visible(pid, tag) {
