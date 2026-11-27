@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.21.0...mobile-v0.22.0) (2026-11-27)
+
+
+### Features
+
+* **server:** the deployment screen can tell two builds apart ([bbcdb0d](https://github.com/firetower-cloud/firetower/commit/bbcdb0d2cb1d228723272e62ade2740863168b76))
+* **server:** the deployment screen can tell two builds apart ([d7a48ba](https://github.com/firetower-cloud/firetower/commit/d7a48ba60ed56e5a2fb02855d0cefd52b8e9ceae))
+
 ## [0.21.0](https://github.com/firetower-cloud/firetower/compare/mobile-v0.20.0...mobile-v0.21.0) (2026-11-27)
 
 
