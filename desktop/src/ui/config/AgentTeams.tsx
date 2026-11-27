@@ -1712,24 +1712,25 @@ function PositionSkills({
     );
   }
   return (
-    <span className="box">
-      <label className="srch w-full">
-        <Search className="h-4 w-4 text-mute" strokeWidth={1.5} />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          placeholder="Search your skills and MCP servers"
-          aria-label="Search your skills and MCP servers"
-        />
-      </label>
-      <div className="mt-1 max-h-60 overflow-y-auto">
+    <span className="box stack">
+      {/* A plain input, not a `.srch` pill: `.fld .box input` is already
+          styled for a field's box, and a pill inside a bordered box is two
+          borders for one control. */}
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search your skills and MCP"
+        aria-label="Search your skills and MCP servers"
+        disabled={disabled}
+      />
+      <div className="rows">
         {shown.map((s) => {
           const on = chosen.has(s.id);
           return (
             <button
               key={s.id}
               type="button"
-              className="prow tight w-full"
+              className="prow tight"
               disabled={disabled}
               aria-pressed={on}
               onClick={() =>
@@ -1743,7 +1744,7 @@ function PositionSkills({
           );
         })}
         {shown.length === 0 && (
-          <p className="py-2 text-meta text-dim">Nothing of yours matches that.</p>
+          <p className="px-2 py-2 text-meta text-dim">Nothing of yours matches that.</p>
         )}
       </div>
     </span>

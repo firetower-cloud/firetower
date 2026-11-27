@@ -3685,6 +3685,28 @@ html:not([data-platform="macos"]) {
     background: var(--color-ground);
     transition: border-color var(--dur-native) var(--ease-swift);
   }
+  /* **A box that stacks, for a control that is a list.**
+     `.fld .box` is a row — a label beside an input, centred — which is right
+     for every field that holds one control. A field whose control is a filter
+     over a list has two children, and as a row they sat side by side at half
+     the width each, with every name truncated to four characters. */
+  .fld .box.stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 9px;
+  }
+  /* `.fld .box input` is `flex: 1`, which in a row means "take the width
+     left over" and in a column means "grow tall". Unset along this axis, or
+     the filter stretches and the list it filters is squeezed under it. */
+  .fld .box.stack > input {
+    flex: none;
+  }
+  .fld .box.stack .rows {
+    max-height: 232px;
+    overflow-y: auto;
+    margin: 0 -3px;
+  }
   .fld .box:focus-within {
     border-color: var(--color-dim);
   }
