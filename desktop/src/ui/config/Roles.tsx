@@ -64,7 +64,6 @@ import { useAgentControls } from "~/api/generated/agents/agents";
 import { useAccounts, useAgentTeams, useAgents, useDirectories, useHosts, useSkills, teamsUsing, why } from "~/data";
 import { quota, usable, type Account } from "~/api/accounts";
 import { ScopePicker, type ScopeItem } from "~/ui/config/ScopePicker";
-import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
 import { machineLabel, machines, stateLabel } from "~/api/environments";
 import { canRun } from "~/components/WhereItRuns";
 import type {
@@ -854,21 +853,15 @@ function Reading({ role, onClose }: { role: Role; onClose: () => void }) {
 /**
  * What a profile loads, for somebody who cannot open it.
  *
- * The sources it is drawing from rather than a number, because the number is
- * per viewer — `skill_defaults` is keyed on `user_id`, so a profile shared
- * through a directory resolves against whoever starts it, and a count taken
- * from this reader's library would be a different person's answer. The editor,
- * which can resolve against a repository, is where the figure lives.
+ * A count, and it is the same count for everybody — which it could not be
+ * while two of a profile's three sources belonged to whoever started it. That
+ * is the whole of what the closed set bought: a number on this row that means
+ * something to the person reading it.
  */
 function loadsWhat(role: Role): string {
-  const parts: string[] = [];
-  if (role.includeAlwaysOn) parts.push("your always-on set");
-  if (role.includeRepoDefaults) parts.push("this repository's defaults");
   const named = role.skillScope.length;
-  if (named > 0) parts.push(`${named} named`);
-  if (parts.length === 0) return "nothing — both sources are off and nothing is named";
-  if (parts.length === 1) return parts[0]!;
-  return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+  if (named === 0) return "nothing of its own — only what the checkout commits";
+  return `${named} ${named === 1 ? "bundle" : "bundles"}, the same for everybody who starts it`;
 }
 
 /** One fact and its name, in the shape the rest of the pane reads in. */
@@ -1015,7 +1008,6 @@ function Editor({
      whoever starts it. The form reads this too; the foot reads it to say
      whether Save is about to create a profile with no skills at all. */
   const shared = existing ? !!state.path?.startsWith("d/") : !!draft.directory;
-  const skills = useSkillSources(draft, shared);
 
   // The default is its own action, saved the instant it is flipped rather than
   // on "Save changes" — it is a fact about this person, not a field of the
@@ -1136,24 +1128,18 @@ function Editor({
             a sage-tinted button here said "this went well", which is a
             verdict about something that has not happened yet. */}
         <div className="formfoot">
-          {/* The Skills section has first claim on this line: an over-budget
-              profile starts with *no* skills at all on Codex, and one with
-              both sources off and nothing named is a child that cannot even
-              publish an artifact. Both are worth more than the standing note. */}
-          <span className={`msg${skills.ownOver ? " bad" : skills.over || skills.loads.length === 0 || skills.skipped.length || skills.clashes.length ? " warn" : ""}`}>
-            {skills.ownOver
-              ? `Over ${skills.agentLabel}'s limit before this repository's defaults are counted — ${skills.ownSpend.toLocaleString("en-US")} of ${skills.budget.toLocaleString("en-US")}.`
-              : skills.over
-                ? `Over budget in ${skills.at?.split("/").pop() ?? "this repository"} — ${skills.spend.toLocaleString("en-US")} of ${skills.budget.toLocaleString("en-US")}. Another repository may fit.`
-                : skills.loads.length === 0
-                  ? "This child will have no Firetower skills at all."
-                  : skills.clashes.length
-                    ? `${skills.clashes.length === 1 ? "Two skills share the name" : "Skills share the names"} ${skills.clashes.map((g) => g[0].name).join(", ")} — ${skills.clashes.length === 1 ? "neither is sent" : "none is sent"}.`
-                    : skills.skipped.length
-                      ? `${skills.skipped.length} skill${skills.skipped.length === 1 ? "" : "s"} ${skills.skipped.length === 1 ? "has" : "have"} no approved version and will be skipped.`
-                      : existing
-                        ? "Saved when you press it. Running workspaces keep the profile they started with."
-                        : "Nothing is created until you press this."}
+          {/* **The empty profile has first claim on this line.** One that
+              names nothing is a child reading only what its checkout commits
+              — which is a real choice and a common mistake, and the only one
+              worth interrupting Save for. The budget line that used to live
+              here went with the three-source model: a closed set is counted
+              where it is chosen, not argued about on the way out. */}
+          <span className={`msg${(draft.skillScope ?? []).length === 0 ? " warn" : ""}`}>
+            {(draft.skillScope ?? []).length === 0
+              ? "This profile has no plugins or skills of its own."
+              : existing
+                ? "Saved when you press it. Running workspaces keep the profile they started with."
+                : "Nothing is created until you press this."}
           </span>
           {existing && (
             <button onClick={remove} disabled={busy} className="btn danger">
@@ -1164,20 +1150,18 @@ function Editor({
           <button onClick={onClose} className="btn quiet">
             Cancel
           </button>
-          {/* Over budget on always-on and the named list *alone* is broken
-              under every checkout, so there is nothing to save. Where only a
-              repository's defaults tip it over, that depends on a checkout
-              nobody has made, so it warns and allows. */}
-          <button onClick={save} disabled={!valid || busy || skills.ownOver} className="btn primary">
-            {skills.ownOver
-              ? "Can't save"
-              : skills.loads.length === 0
-                ? existing
-                  ? "Save with no skills"
-                  : "Create with no skills"
-                : existing
-                  ? "Save changes"
-                  : "Create profile"}
+          {/* An empty profile saves, and says so on the button rather than
+              being refused: reading only what a checkout commits is a real
+              choice, and the one place it is *not* obvious is the moment it
+              is made. */}
+          <button onClick={save} disabled={!valid || busy} className="btn primary">
+            {(draft.skillScope ?? []).length === 0
+              ? existing
+                ? "Save with none"
+                : "Create with none"
+              : existing
+                ? "Save changes"
+                : "Create profile"}
           </button>
         </div>
       </div>

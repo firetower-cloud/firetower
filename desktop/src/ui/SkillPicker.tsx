@@ -81,7 +81,7 @@ export function SkillPicker({ session, onClose }: { session: Session; onClose: (
   const empty = !all.loading && all.data.length === 0;
   const openLibrary = () => {
     onClose();
-    navigate("/configuration/skills");
+    navigate("/configuration/plugins");
   };
   /* The floor, not Claude Code's 3,000: an agent this table does not know is
      one whose real limit we cannot name, and overstating it is what hides the

@@ -27,16 +27,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
+  ArrowUpRight,
+  Check,
   ChevronDown,
   CircleAlert,
   ExternalLink,
   FolderGit2,
   GitBranch,
+  Network,
   Paperclip,
   Plus,
+  Puzzle,
   Server,
   ServerOff,
-  Network,
+  TriangleAlert,
   UserRound,
   X,
 } from "lucide-react";
@@ -65,34 +69,37 @@ import { base64, chipFor, Chips, Dropping, sift, type Chip } from "~/ui/attach";
 import { folderRefusals, useFileDrop } from "~/ui/drop";
 import { openExternal } from "~/open";
 import { isMac } from "~/platform";
+import { useListLibrary } from "~/api/generated/library/library";
+import { Mark } from "~/ui/config/Library";
 import { dropSeed, seedWaiting, type Seed } from "~/start";
 import type { Agent, AgentTeam, Control, ControlKind, Role } from "~/api/generated/model";
 
 type Checkout = { id: string; slug: string };
 
 /**
- * The skills a new workspace starts with: the always-on ones, plus the ones
- * this person has set as a default in a repository it checks out.
+ * What a new workspace opens with: this person's always-on bundles.
  *
- * **`defaultIn` is slugs.** The server builds it as `array_agg(r.slug)` over
- * `skill_defaults` joined to `repos` — a row stores `repo_id` and the read
- * translates it — so what arrives is `acme/web` and never `r_web`. Both
- * callers matched it against `checkout.id`, which can never be equal to a
- * slug, so a skill marked "use by default in this repository" was dropped
- * from every workspace started here and nothing said so.
+ * **A default, not a resolution.** It is the value the picker beside the
+ * composer opens with, and anybody may untick a row before they send — so
+ * there is no union to predict and no switch to explain. A session started
+ * from a profile takes that profile's closed set instead, which the server
+ * decides, because a profile is the same agent whoever starts it.
+ *
+ * **A repository's defaults are no longer part of this.** Per-repository
+ * assignment is deleted: what a repository needs, a repository commits —
+ * reviewed in a pull request and working in plain Claude Code. `checkouts` is
+ * still taken because both callers have it and the shape of the call is worth
+ * keeping while the route that wrote those rows is still on the wire.
  *
  * Exported for its own test, and shared with the schedule sheet rather than
- * written twice: the two copies of this line were wrong in the same way. It
- * hands back the skills and leaves the caller to take the ids, which is what
- * both of them already did.
+ * written twice: the two copies of this line were once wrong in the same way.
  */
 export function defaultSkills<S extends { alwaysOn: boolean; defaultIn: string[] }>(
   skills: S[],
   checkouts: { slug: string }[],
 ): S[] {
-  return skills.filter(
-    (s) => s.alwaysOn || s.defaultIn.some((r) => checkouts.some((c) => c.slug === r)),
-  );
+  void checkouts;
+  return skills.filter((s) => s.alwaysOn);
 }
 
 /* The engine and account last started with, kept on this machine so the New
@@ -388,17 +395,60 @@ export function StartComposer({
         .map((s) => s.id),
     [allSkills, checkouts],
   );
-  /* What the start payload carries. There is no picker here and the comment
-     beside the composer's controls says why — so this is the resolution and
-     nothing overrides it. It used to be `skillIds ?? defaultSkillIds` behind
-     a `useState` whose only setter lived in a popover nothing could open. */
-  const selectedSkills = defaultSkillIds;
-
+  /* **Unticked here, for this conversation only.** The prefill is a default
+     and not a decision: nothing in it is edited, nothing persists, and the
+     next session opens the same way. Held as what is *off* rather than as
+     the set, so a plugin turned on in the library while this page is open
+     still arrives — the alternative is a snapshot that silently goes stale
+     between opening the page and sending. */
+  const library = useListLibrary({ query: { select: (r) => r ?? [] } });
+  const [muted, setMuted] = useState<Set<string>>(new Set());
+  const [look, setLook] = useState("");
   const team = teams.find((t) => t.id === teamId);
   const lead = team?.positions.find((p) => !p.parent);
   // A team is started as its lead, so everything downstream — the engine it
   // pins, the settings it carries — reads the lead's profile.
   const profile = profiles.find((p) => p.id === (lead?.profile ?? profileId));
+
+  /* **Shown whatever is picked, which it was not.** A profile replaces the
+     selection rather than narrowing it, and the chip used to be hidden on
+     exactly that case — so at the one moment the question matters, somebody
+     starting a profile was told nothing about what their agent would have.
+     The answer differs; the question does not. */
+  /* **Everything you have, not a saved subset.** There used to be a switch
+     in the library writing `skill_defaults`, and this read that — so with the
+     switch gone nothing wrote it and a thing installed a minute ago never
+     reached the composer at all. Having something *is* the decision; which
+     run uses it is the question asked here. */
+  const prefilled = !profileId && !teamId
+    ? allSkills.filter((s) => (library.data ?? []).some((i) => i.skillId === s.id))
+    : allSkills.filter((s) => (profile?.skillScope ?? []).includes(s.id));
+  /* What a profile decided, named, so nobody wonders what chose it. */
+  const decidedBy = teamId ? team?.name : profileId ? profile?.name : null;
+  /* The only thing that can actually block a start: tools the agent would be
+     handed and cannot call, because nobody has authorized them. Read from the
+     library, which already answers "have *you* connected it" per person. */
+  const required = new Set(
+    (library.data ?? []).filter((i) => i.required).map((i) => i.skillId),
+  );
+  const needsHand = new Set(
+    (library.data ?? []).filter((i) => i.needsClientId).map((i) => i.skillId),
+  );
+  const unconnected = new Set(
+    (library.data ?? [])
+      .filter((i) => i.kind === "server" && i.connected === false)
+      .map((i) => i.skillId),
+  );
+  const needing = prefilled.filter((s) => unconnected.has(s.id));
+  /* **Counted from what is shown, not from the person's own defaults.** The
+     chip read `8 — Engineer` for a profile holding two, because the number
+     came from one source and the list beside it from another. One source. */
+  /* What somebody may actually turn off. A required built-in is not one. */
+  const choosable = prefilled.filter((s) => !required.has(s.id));
+  const selectedSkills = prefilled
+    .map((s) => s.id)
+    .filter((id) => required.has(id) || (!muted.has(id) && !unconnected.has(id)));
+
   const pinned = (profile?.agent ?? undefined) as Agent | undefined;
   // A saved engine is used only while it still exists and is supported — one
   // that was uninstalled falls back rather than leaving a dead selection.
@@ -799,11 +849,55 @@ export function StartComposer({
                 <input type="file" multiple className="hidden" onChange={(e) => void take(e.target.files)} />
               </label>
 
-              {/* **No skills chip here.** The drawing has one in a workspace
-                  and not on the Dashboard, and the reason holds: starting
-                  something, the profile decides what it reads, and a count of
-                  skills is a number about a decision you have not made yet.
-                  Replying, you can see what it read and change it. */}
+              {/* **The prefill, where it can still be changed for nothing.**
+                  There used to be no chip here, on the reasoning that a
+                  count before you have chosen a profile is a number about a
+                  decision you have not made. That was right about a *count*
+                  and wrong about the field: this is what the session will
+                  open with, and before the first message changing it costs
+                  nothing — there is no prompt cache yet to invalidate. A
+                  profile decides instead, so the chip is absent when one is
+                  picked rather than showing a set it would override. */}
+              {prefilled.length > 0 && (
+                <button
+                  onClick={(e) => toggle("prefill", e.currentTarget)}
+                  data-set
+                  className="chip"
+                  title={
+                    decidedBy
+                      ? `What ${decidedBy} always has. Untick for this conversation only.`
+                      : "What this session opens with. Untick for this conversation only."
+                  }
+                >
+                  <span className="grid place-items-center text-mute">
+                    <Puzzle className="h-[15px] w-[15px]" strokeWidth={1.8} />
+                  </span>
+                  <span className="lbl">
+                    {selectedSkills.length}
+                    {decidedBy ? ` — ${decidedBy}` : ""}
+                  </span>
+                  {/* **The only thing that can actually stop you.** A server
+                      nobody authorized is a tool the agent is handed and
+                      cannot call, which fails on the first turn rather than
+                      here. Ember, because it is the one loud thing. */}
+                  {/* **A mark and a count, not a sentence.** Every phrasing
+                      tried here promised something: "to connect" is a button
+                      that does not exist for a server registering no clients,
+                      and "not ready" is three words on a bar where everything
+                      else is one. The triangle is the whole message and the
+                      row inside says which of the two problems it is.
+
+                      Quiet, too. Ember is for the thing that is going wrong
+                      now; this is a thing that will not work when it is
+                      reached, which is worth saying and not worth shouting. */}
+                  {needing.length > 0 && (
+                    <span className="need" title={`${needing.length} will not answer yet`}>
+                      <TriangleAlert className="h-[13px] w-[13px]" strokeWidth={1.75} />
+                      {needing.length}
+                    </span>
+                  )}
+                </button>
+              )}
               <button
                 onClick={(e) => toggle("profile", e.currentTarget)}
                 data-set={!!profile || !!team}
@@ -891,7 +985,7 @@ export function StartComposer({
 
       {/* ---------- the pill menus ---------- */}
       {open?.which === "profile" && (
-        <Pop anchor={open.at} onClose={close} width={320}>
+        <Pop anchor={open.at} onClose={close} width={248}>
           <ProfileMenu
             profiles={profiles}
             teams={teams}
@@ -903,6 +997,114 @@ export function StartComposer({
               close();
             }}
           />
+        </Pop>
+      )}
+
+      {open?.which === "prefill" && (
+        <Pop anchor={open.at} onClose={close} width={248}>
+          {/* **No paragraph.** A list of switches explains itself, and the
+              sentence that used to sit above it said three things nobody had
+              asked: what the list was, that unticking is temporary, and what
+              it is not. The one thing worth saying — that a profile chose
+              this — is already on the chip that opened it. */}
+          <div className="py-1">
+            {choosable.length > 5 && (
+              <input
+                autoFocus
+                value={look}
+                onChange={(e) => setLook(e.target.value)}
+                placeholder="Search"
+                aria-label="Search what this agent gets"
+                className="mb-1 w-full border-b border-line bg-transparent px-3 pb-2 pt-1 text-ui text-bone outline-none placeholder:text-mute"
+              />
+            )}
+            {/* **The always-on ones are not here.** They were drawn with no
+                switch and nothing to the right of them, which is a row that
+                costs height to say "you cannot change this". The chip still
+                counts them, because it answers what the agent will have
+                rather than what you may alter. */}
+            {choosable.length === 0 && (
+              <p className="px-3 py-2 text-meta text-dim">
+                Nothing to change — everything you have loads every time.
+              </p>
+            )}
+            {/* **Capped, and the list scrolls inside the cap.** Everything a
+                person has went in one growing column, so a library of twenty
+                drew a menu taller than the window with the search at the top
+                of it scrolled off. The search and the way out stay put; only
+                the rows move. */}
+            <div className="max-h-[264px] overflow-y-auto">
+            {choosable
+              /* Both, because the readable name is what somebody sees and the
+                 slug is what they may have read in a manifest. */
+              .filter((s) => {
+                const t = look.trim().toLowerCase();
+                return !t || `${s.displayName ?? ""} ${s.name}`.toLowerCase().includes(t);
+              })
+              .map((s) => {
+                const on = !muted.has(s.id);
+                const short = unconnected.has(s.id);
+                return (
+                  <div key={s.id} className="prow tight">
+                    <Mark logo={s.logo} name={s.displayName || s.name} />
+                    {/* **The name for people, which this screen was still
+                        missing.** The library and the detail screens were
+                        given `displayName` and the composer was not — so the
+                        one list somebody opens every time they start an agent
+                        was the one still saying `google-sheets`. */}
+                    <span className="lbl flex-1 truncate">{s.displayName || s.name}</span>
+                    {/* The one thing that stops it working gets the only
+                        colour, and takes the switch's place: a server nobody
+                        authorized has nothing to turn on. */}
+                    {short ? (
+                      <span
+                        className="grid h-4 w-4 shrink-0 place-items-center text-ember"
+                        title={
+                          needsHand.has(s.id)
+                            ? `${s.displayName || s.name} needs an OAuth application you create once — open it from Skills & MCP and use Set it up.`
+                            : `${s.displayName || s.name} is not connected, so its tools will not answer. Connect it from Skills & MCP.`
+                        }
+                      >
+                        <TriangleAlert className="h-4 w-4" strokeWidth={1.75} />
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={on}
+                        aria-label={s.name}
+                        className="tog shrink-0"
+                        onClick={() =>
+                          setMuted((m) => {
+                            const next = new Set(m);
+                            if (on) next.add(s.id);
+                            else next.delete(s.id);
+                            return next;
+                          })
+                        }
+                      >
+                        <i />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              className="prow tight mt-1 border-t border-line pt-2 text-dim"
+              onClick={() => {
+                close();
+                navigate("/configuration/plugins");
+              }}
+            >
+              <span className="grid h-5 w-5 shrink-0 place-items-center">
+                <Puzzle className="h-4 w-4" strokeWidth={1.6} />
+              </span>
+              <span className="lbl flex-1">Manage skills &amp; MCP</span>
+              <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-mute" strokeWidth={1.6} />
+            </button>
+          </div>
         </Pop>
       )}
 

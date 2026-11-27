@@ -140,6 +140,14 @@ pub struct Position {
     /// Markdown that applies here and nowhere else. It never replaces a
     /// profile field; it is composed after the profile's own instructions.
     pub extra_instructions: String,
+    /// Skills and servers this position adds, by skill id, in this team only.
+    ///
+    /// **Adds; never replaces.** The same contract `extra_instructions` has,
+    /// and the reason both are called extra: a profile is a closed set, and a
+    /// position that wants one more thing says so without forking the profile.
+    /// Bounded at spawn by what the person starting the team can reach.
+    #[serde(default)]
+    pub extra_skills: Vec<String>,
     /// Authoritative sibling order. The map draws in it and export writes it.
     pub ordinal: i32,
 }
@@ -179,6 +187,9 @@ pub struct DraftPosition {
     pub profile: String,
     #[serde(default)]
     pub extra_instructions: String,
+    /// Skills this position adds on top of its profile's, by skill id.
+    #[serde(default)]
+    pub extra_skills: Vec<String>,
 }
 
 /// Why a write was refused, in a sentence somebody can act on.
@@ -323,7 +334,8 @@ impl AgentTeams {
             return Ok(out);
         }
         let sql = format!(
-            "SELECT p.id, p.team_id, p.parent_id, p.role_id, p.extra_instructions, p.ordinal, \
+            "SELECT p.id, p.team_id, p.parent_id, p.role_id, p.extra_instructions, \
+             p.extra_skills, p.ordinal, \
                     r.name, r.does, r.agent, ({visible}) AS readable \
                FROM team_positions p JOIN roles r ON r.id = p.role_id \
               WHERE p.team_id = ANY($2) \
@@ -355,6 +367,7 @@ impl AgentTeams {
                 agent: if readable { r.get("agent") } else { None },
                 redacted: !readable,
                 extra_instructions: r.get("extra_instructions"),
+                extra_skills: r.get("extra_skills"),
                 ordinal: r.get("ordinal"),
             };
             out.entry(r.get::<String, _>("team_id"))
@@ -457,7 +470,8 @@ impl AgentTeams {
         .context("reading an agent team")?;
         let Some(row) = row else { return Ok(None) };
         let rows = sqlx::query(
-            "SELECT p.id, p.parent_id, p.role_id, p.extra_instructions, p.ordinal, \
+            "SELECT p.id, p.parent_id, p.role_id, p.extra_instructions, p.extra_skills, \
+             p.ordinal, \
                     r.name, r.does, r.agent \
                FROM team_positions p JOIN roles r ON r.id = p.role_id \
               WHERE p.team_id = $1 ORDER BY p.parent_id NULLS FIRST, p.ordinal, p.id",
@@ -481,6 +495,7 @@ impl AgentTeams {
                     agent: r.get("agent"),
                     redacted: false,
                     extra_instructions: r.get("extra_instructions"),
+                    extra_skills: r.get("extra_skills"),
                     ordinal: r.get("ordinal"),
                 })
                 .collect(),
@@ -532,14 +547,16 @@ impl AgentTeams {
             let parent = draft.parent.as_deref().map(|k| minted[k].clone());
             sqlx::query(
                 "INSERT INTO team_positions \
-                   (id, team_id, parent_id, role_id, extra_instructions, ordinal) \
-                 VALUES ($1, $2, $3, $4, $5, $6)",
+                   (id, team_id, parent_id, role_id, extra_instructions, \
+                    extra_skills, ordinal) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
             )
             .bind(&pid)
             .bind(id.as_str())
             .bind(&parent)
             .bind(&draft.profile)
             .bind(draft.extra_instructions.trim())
+            .bind(&draft.extra_skills)
             .bind(ordinal_of(&tree, key))
             .execute(&mut *tx)
             .await
@@ -625,11 +642,12 @@ impl AgentTeams {
             if here.iter().any(|h| h == row) {
                 sqlx::query(
                     "UPDATE team_positions SET role_id = $2, extra_instructions = $3, \
-                            ordinal = $4 WHERE id = $1",
+                            extra_skills = $4, ordinal = $5 WHERE id = $1",
                 )
                 .bind(row)
                 .bind(&draft.profile)
                 .bind(draft.extra_instructions.trim())
+                .bind(&draft.extra_skills)
                 .bind(ordinal)
                 .execute(&mut *tx)
                 .await
@@ -637,14 +655,16 @@ impl AgentTeams {
             } else {
                 sqlx::query(
                     "INSERT INTO team_positions \
-                       (id, team_id, parent_id, role_id, extra_instructions, ordinal) \
-                     VALUES ($1, $2, $3, $4, $5, $6)",
+                       (id, team_id, parent_id, role_id, extra_instructions, \
+                        extra_skills, ordinal) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7)",
                 )
                 .bind(row)
                 .bind(id)
                 .bind(&root)
                 .bind(&draft.profile)
                 .bind(draft.extra_instructions.trim())
+                .bind(&draft.extra_skills)
                 .bind(ordinal)
                 .execute(&mut *tx)
                 .await

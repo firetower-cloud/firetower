@@ -105,11 +105,17 @@ export const ListSkillsResponseItem = zod.object({
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
+  "displayName": zod.string().describe('The name for people, already resolved — the bundle\'s own, or a\ntitle-cased `name`. **The composer draws this**, and it was the one\nscreen still saying `google-sheets` after the library and the detail\nscreens were given it.'),
   "files": zod.int(),
+  "hasConnector": zod.boolean(),
   "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "kind": zod.string().describe('What this bundle is: `skill` or `plugin`. Decides which home it lands\nin on a worker, and which list it appears in on a screen.'),
+  "logo": zod.string().nullish().describe('The mark this bundle ships, as a data URI.\n\n**Inline, and from the bundle\'s own bytes.** A plugin carries its logo\nin its own assets, so this is read from the version rather than held\nin a table of somebody else\'s brands — and a row draws without\nreaching the network, which is what makes the library work on a\nmachine that has none. Absent is a monogram, which is the fallback the\ndesign has always had.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
+  "nCommands": zod.int(),
+  "nSkills": zod.int().describe('How many skills, commands and connectors are inside it.\n\nDerived from the paths in the version rather than stored beside them,\nso a count cannot drift from the bytes it is counting. A lone skill\nreports zero of each: its own `SKILL.md` is the bundle, not a component\nwithin one.'),
   "name": zod.string(),
   "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
   "risk": zod.array(zod.string()).describe('What this skill does to a session, read from the bundle rather than\nfrom what its author said about it. See [`risk_of`].'),
@@ -124,12 +130,14 @@ export const ListSkillsResponse = zod.array(ListSkillsResponseItem)
 export const CreateSkillBody = zod.object({
   "body": zod.string(),
   "description": zod.string(),
+  "displayName": zod.string().nullish().describe('What a person reads. `name` is what an agent sees and what somebody\ntypes, so it cannot hold a capital or a dot; absent means the library\ntitle-cases `name` instead.'),
   "files": zod.array(zod.object({
   "contents": zod.string().describe('base64, because a bundle may hold a font.'),
   "executable": zod.boolean().optional(),
   "path": zod.string().describe('Relative, inside the bundle. Never absolute and never climbing out.')
 }).describe('A file arriving from a drop.')),
   "frontmatter": zod.unknown().describe('Parsed, for the library to read. The bytes are kept as they arrived in\n`files`, so nothing here is what gets written onto a worker.'),
+  "kind": zod.string().nullish().describe('`skill` or `plugin`. Absent means `skill`, which is what every client\nwritten before plugins sends and what every bundle imported before them\nwas.\n\n**The source declares this, never the person importing.** A folder with\n`.claude-plugin/plugin.json` is a plugin and a folder with `SKILL.md` is\na skill; asking somebody to choose at the moment they drop something is\nasking them when they know least, and a wrong answer is a bundle that\nloads nowhere.'),
   "name": zod.string(),
   "notes": zod.string().nullish()
 }).describe('A whole bundle somebody dropped.')
@@ -141,11 +149,17 @@ export const CreateSkillResponse = zod.object({
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
+  "displayName": zod.string().describe('The name for people, already resolved — the bundle\'s own, or a\ntitle-cased `name`. **The composer draws this**, and it was the one\nscreen still saying `google-sheets` after the library and the detail\nscreens were given it.'),
   "files": zod.int(),
+  "hasConnector": zod.boolean(),
   "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "kind": zod.string().describe('What this bundle is: `skill` or `plugin`. Decides which home it lands\nin on a worker, and which list it appears in on a screen.'),
+  "logo": zod.string().nullish().describe('The mark this bundle ships, as a data URI.\n\n**Inline, and from the bundle\'s own bytes.** A plugin carries its logo\nin its own assets, so this is read from the version rather than held\nin a table of somebody else\'s brands — and a row draws without\nreaching the network, which is what makes the library work on a\nmachine that has none. Absent is a monogram, which is the fallback the\ndesign has always had.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
+  "nCommands": zod.int(),
+  "nSkills": zod.int().describe('How many skills, commands and connectors are inside it.\n\nDerived from the paths in the version rather than stored beside them,\nso a count cannot drift from the bytes it is counting. A lone skill\nreports zero of each: its own `SKILL.md` is the bundle, not a component\nwithin one.'),
   "name": zod.string(),
   "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
   "risk": zod.array(zod.string()).describe('What this skill does to a session, read from the bundle rather than\nfrom what its author said about it. See [`risk_of`].'),
@@ -212,11 +226,17 @@ export const RenameSkillResponse = zod.object({
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
+  "displayName": zod.string().describe('The name for people, already resolved — the bundle\'s own, or a\ntitle-cased `name`. **The composer draws this**, and it was the one\nscreen still saying `google-sheets` after the library and the detail\nscreens were given it.'),
   "files": zod.int(),
+  "hasConnector": zod.boolean(),
   "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "kind": zod.string().describe('What this bundle is: `skill` or `plugin`. Decides which home it lands\nin on a worker, and which list it appears in on a screen.'),
+  "logo": zod.string().nullish().describe('The mark this bundle ships, as a data URI.\n\n**Inline, and from the bundle\'s own bytes.** A plugin carries its logo\nin its own assets, so this is read from the version rather than held\nin a table of somebody else\'s brands — and a row draws without\nreaching the network, which is what makes the library work on a\nmachine that has none. Absent is a monogram, which is the fallback the\ndesign has always had.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
+  "nCommands": zod.int(),
+  "nSkills": zod.int().describe('How many skills, commands and connectors are inside it.\n\nDerived from the paths in the version rather than stored beside them,\nso a count cannot drift from the bytes it is counting. A lone skill\nreports zero of each: its own `SKILL.md` is the bundle, not a component\nwithin one.'),
   "name": zod.string(),
   "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
   "risk": zod.array(zod.string()).describe('What this skill does to a session, read from the bundle rather than\nfrom what its author said about it. See [`risk_of`].'),
@@ -238,11 +258,17 @@ export const ApproveSkillResponse = zod.object({
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
+  "displayName": zod.string().describe('The name for people, already resolved — the bundle\'s own, or a\ntitle-cased `name`. **The composer draws this**, and it was the one\nscreen still saying `google-sheets` after the library and the detail\nscreens were given it.'),
   "files": zod.int(),
+  "hasConnector": zod.boolean(),
   "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "kind": zod.string().describe('What this bundle is: `skill` or `plugin`. Decides which home it lands\nin on a worker, and which list it appears in on a screen.'),
+  "logo": zod.string().nullish().describe('The mark this bundle ships, as a data URI.\n\n**Inline, and from the bundle\'s own bytes.** A plugin carries its logo\nin its own assets, so this is read from the version rather than held\nin a table of somebody else\'s brands — and a row draws without\nreaching the network, which is what makes the library work on a\nmachine that has none. Absent is a monogram, which is the fallback the\ndesign has always had.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
+  "nCommands": zod.int(),
+  "nSkills": zod.int().describe('How many skills, commands and connectors are inside it.\n\nDerived from the paths in the version rather than stored beside them,\nso a count cannot drift from the bytes it is counting. A lone skill\nreports zero of each: its own `SKILL.md` is the bundle, not a component\nwithin one.'),
   "name": zod.string(),
   "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
   "risk": zod.array(zod.string()).describe('What this skill does to a session, read from the bundle rather than\nfrom what its author said about it. See [`risk_of`].'),
@@ -285,6 +311,51 @@ export const DiscardSkillParams = zod.object({
 
 export const DiscardSkillResponse = zod.void()
 
+/**
+ * @summary What is in a bundle, in its author's own words.
+ */
+export const SkillInsideParams = zod.object({
+  "id": zod.string().describe('The plugin or skill')
+})
+
+export const SkillInsideResponse = zod.object({
+  "agents": zod.array(zod.object({
+  "body": zod.string().describe('What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte.'),
+  "description": zod.string(),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
+}).describe('One component a plugin carries, as a row of its detail.')),
+  "auth": zod.string().nullish(),
+  "came": zod.union([zod.null(),zod.object({
+  "commit": zod.string(),
+  "marketplace": zod.string(),
+  "slug": zod.string(),
+  "url": zod.string()
+}).describe('Where an installed bundle came from.')]).optional(),
+  "commands": zod.array(zod.object({
+  "body": zod.string().describe('What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte.'),
+  "description": zod.string(),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
+}).describe('One component a plugin carries, as a row of its detail.')),
+  "files": zod.array(zod.object({
+  "executable": zod.boolean(),
+  "path": zod.string(),
+  "shared": zod.boolean().describe('Whether these bytes were already here under the same hash.'),
+  "size": zod.int()
+}).describe('One file of a bundle, without its bytes.')),
+  "hasHooks": zod.boolean().describe('Whether it ships hooks, which run commands and deserve saying out loud.'),
+  "manifest": zod.unknown().optional().describe('The manifest, as the author wrote it. Absent for a lone skill.'),
+  "server": zod.string().nullish().describe('The MCP server it declares, if any, with the address it will call.'),
+  "skills": zod.array(zod.object({
+  "body": zod.string().describe('What it actually tells the agent, below the frontmatter.\n\n**Carried, not fetched separately.** A `SKILL.md` is a page of prose;\na second round trip per component to show the one thing somebody\nopened the screen to read would be a worse trade than the kilobyte.'),
+  "description": zod.string(),
+  "name": zod.string(),
+  "path": zod.string().describe('Where it sits in the bundle, so somebody can find it in a repository.')
+}).describe('One component a plugin carries, as a row of its detail.')),
+  "url": zod.string().nullish()
+}).describe('What is actually in a plugin.\n\n**The thing a marketplace owes you.** Installing from a repository means\ntaking somebody else\'s instructions and somebody else\'s MCP server into\nyour agent\'s context. Being unable to read either, before or after, is\nasking for trust that has not been earned — so this opens the bundle and\nsays what is in it in the words its own author wrote.')
+
 export const ReviewSkillParams = zod.object({
   "id": zod.string().describe('The skill')
 })
@@ -325,12 +396,14 @@ export const AddVersionParams = zod.object({
 export const AddVersionBody = zod.object({
   "body": zod.string(),
   "description": zod.string(),
+  "displayName": zod.string().nullish().describe('What a person reads. `name` is what an agent sees and what somebody\ntypes, so it cannot hold a capital or a dot; absent means the library\ntitle-cases `name` instead.'),
   "files": zod.array(zod.object({
   "contents": zod.string().describe('base64, because a bundle may hold a font.'),
   "executable": zod.boolean().optional(),
   "path": zod.string().describe('Relative, inside the bundle. Never absolute and never climbing out.')
 }).describe('A file arriving from a drop.')),
   "frontmatter": zod.unknown().describe('Parsed, for the library to read. The bytes are kept as they arrived in\n`files`, so nothing here is what gets written onto a worker.'),
+  "kind": zod.string().nullish().describe('`skill` or `plugin`. Absent means `skill`, which is what every client\nwritten before plugins sends and what every bundle imported before them\nwas.\n\n**The source declares this, never the person importing.** A folder with\n`.claude-plugin/plugin.json` is a plugin and a folder with `SKILL.md` is\na skill; asking somebody to choose at the moment they drop something is\nasking them when they know least, and a wrong answer is a bundle that\nloads nowhere.'),
   "name": zod.string(),
   "notes": zod.string().nullish()
 }).describe('A whole bundle somebody dropped.')
@@ -342,11 +415,17 @@ export const AddVersionResponse = zod.object({
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
+  "displayName": zod.string().describe('The name for people, already resolved — the bundle\'s own, or a\ntitle-cased `name`. **The composer draws this**, and it was the one\nscreen still saying `google-sheets` after the library and the detail\nscreens were given it.'),
   "files": zod.int(),
+  "hasConnector": zod.boolean(),
   "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),
   "id": zod.string().describe('Identifies a skill — a folder of instructions an agent loads when it needs one.'),
+  "kind": zod.string().describe('What this bundle is: `skill` or `plugin`. Decides which home it lands\nin on a worker, and which list it appears in on a screen.'),
+  "logo": zod.string().nullish().describe('The mark this bundle ships, as a data URI.\n\n**Inline, and from the bundle\'s own bytes.** A plugin carries its logo\nin its own assets, so this is read from the version rather than held\nin a table of somebody else\'s brands — and a row draws without\nreaching the network, which is what makes the library work on a\nmachine that has none. Absent is a monogram, which is the fallback the\ndesign has always had.'),
   "mayShare": zod.boolean().describe('Whether this person may move it to another directory or delete it.\nThe same rule as `api::access::may_share`, answered per row so a list\ncan say up front which skills it can act on.'),
   "mayWrite": zod.boolean().describe('Whether this person may make a version of it or rename it.'),
+  "nCommands": zod.int(),
+  "nSkills": zod.int().describe('How many skills, commands and connectors are inside it.\n\nDerived from the paths in the version rather than stored beside them,\nso a count cannot drift from the bytes it is counting. A lone skill\nreports zero of each: its own `SKILL.md` is the bundle, not a component\nwithin one.'),
   "name": zod.string(),
   "path": zod.string().describe('`u/kevin/rust_review` — slashes on the wire, dots in the database.'),
   "risk": zod.array(zod.string()).describe('What this skill does to a session, read from the bundle rather than\nfrom what its author said about it. See [`risk_of`].'),

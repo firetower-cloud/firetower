@@ -16,12 +16,15 @@ pub mod agent_teams;
 pub mod api;
 pub mod artifact;
 pub mod auth;
+pub mod connectors;
 pub mod db;
 pub mod delegate;
 pub mod diagnose;
 pub mod fleet;
 pub mod forward;
 pub mod install;
+pub mod library;
+pub mod marketplace;
 pub mod notify;
 pub mod oauth;
 pub mod preview;
@@ -101,6 +104,15 @@ pub struct AppState {
     pub names: preview::Names,
     /// Public UI address used to connect annotations from directly opened previews.
     pub public_url: Arc<str>,
+    /// Where **this process** answers, which is not always where a person
+    /// opens Firetower.
+    ///
+    /// `public_url` is the interface's address, and in development the
+    /// interface is a separate dev server on another port — so a redirect
+    /// built from it lands on something that does not serve the API. An OAuth
+    /// callback has to come back to the route that handles it, and that route
+    /// is here. In production the two are one origin and these agree.
+    pub api_url: Arc<str>,
     /// Ports this machine is holding open on behalf of a session.
     ///
     /// In memory on purpose, like `pending`: a forwarded port is a view
@@ -246,6 +258,7 @@ pub async fn run(config: Config) -> Result<()> {
         previews: Default::default(),
         names,
         public_url: public_url(&config).into(),
+        api_url: api_url(&config).into(),
         updates: updates::Updates::new(db_pool),
     };
     // In the background: it fetches a few hundred megabytes, and nothing else
@@ -341,6 +354,15 @@ async fn seed_builtin_skills(state: AppState) {
     if let Err(e) = state.skills.offer_builtins_once(&state.accounts).await {
         tracing::warn!("offering built-in skills: {e:#}");
     }
+
+    // **The source is added; the catalogue is not read here.** Booting must
+    // not depend on reaching GitHub — an installation behind a firewall comes
+    // up with an empty shelf that says why, rather than not coming up.
+    match crate::marketplace::ensure_default(state.skills.pool()).await {
+        Ok(0) => {}
+        Ok(n) => tracing::info!("added the Firetower marketplace to {n} organisation(s)"),
+        Err(e) => tracing::warn!("adding the default marketplace: {e:#}"),
+    }
 }
 
 /// Where to open a browser, as far as this process can tell.
@@ -364,6 +386,21 @@ fn public_url(config: &Config) -> String {
     // is the dev server's rather than this one's.
     let port = if config.dev { 3000 } else { config.port };
     format!("http://localhost:{port}")
+}
+
+/// Where this process answers, for a URL somebody else has to call back on.
+///
+/// The same configured address as [`public_url`] when there is one, because
+/// behind a proxy the API and the interface are one origin — and this port
+/// otherwise, never the interface's.
+fn api_url(config: &Config) -> String {
+    if let Ok(url) = std::env::var(PUBLIC_URL_ENV) {
+        let url = url.trim().trim_end_matches('/');
+        if !url.is_empty() {
+            return url.to_string();
+        }
+    }
+    format!("http://localhost:{}", config.port)
 }
 
 /// The variables that seed the first administrator.

@@ -16,7 +16,7 @@ describe("whose panel state a path uses", () => {
      outside that is the panel refusing to stay shut. */
   test("every destination shares one answer, so collapsed stays collapsed", () => {
     const one = panelKeyOf("/");
-    for (const path of ["/tasks", "/artifacts", "/configuration/skills", "/updates", "/account"]) {
+    for (const path of ["/tasks", "/artifacts", "/configuration/plugins", "/updates", "/account"]) {
       expect(panelKeyOf(path)).toBe(one);
     }
   });

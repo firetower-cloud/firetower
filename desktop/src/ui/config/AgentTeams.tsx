@@ -30,21 +30,7 @@
  * `PUT`, so a team is never half-written.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import {
-  ChevronDown,
-  ChevronLeft,
-  ChevronRight,
-  CircleDashed,
-  Minus,
-  Network,
-  PanelRightClose,
-  Plus,
-  Search,
-  Sparkles,
-  Trash2,
-  TriangleAlert,
-  X,
-} from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, CircleDashed, Minus, Network, PanelRightClose, Plus, Search, Sparkles, Trash2, TriangleAlert, X } from "lucide-react";
 import { Blank, Group as Rowset, Note, Rows, Section, Typed, WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 import { CreateMenu } from "~/ui/config/CreateMenu";
@@ -83,17 +69,9 @@ import {
   type Card as Laid,
   type Laid as Plan,
 } from "~/ui/config/teams/layout";
-import {
-  add,
-  draftOf,
-  markOf,
-  pending,
-  remove,
-  tell,
-  toWrite,
-  type Change,
-  type Draft,
-} from "~/ui/config/teams/draft";
+import { add, draftOf, grant, markOf, pending, remove, tell, toWrite, type Change, type Draft } from "~/ui/config/teams/draft";
+import { useSkills } from "~/data";
+import { Mark } from "~/ui/config/Library";
 
 export function AgentTeams({ open: asked = null }: { open?: string | null }) {
   const feed = useAgentTeams();
@@ -1254,6 +1232,7 @@ function Map({ team }: { team: AgentTeam }) {
             position={chosen}
             writable={team.mayWrite}
             onTell={(text) => setDraft((d) => tell(d, chosen.id, text))}
+            onGrant={(ids) => setDraft((d) => grant(d, chosen.id, ids))}
             onClose={shut}
           />
         </>
@@ -1295,6 +1274,8 @@ function said(c: Change): string {
       return `${c.name} moved`;
     case "told":
       return `${c.name} told something new`;
+    case "granted":
+      return `${c.name} carries something new`;
     case "lead":
       return `${c.name} now leads`;
     case "renamed":
@@ -1462,12 +1443,15 @@ function Drawer({
   position,
   writable,
   onTell,
+  onGrant,
   onClose,
 }: {
   team: AgentTeam;
   position: Position;
   writable: boolean;
   onTell: (text: string) => void;
+  /** What this position adds to its profile's set, in this team only. */
+  onGrant: (ids: string[]) => void;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<"here" | "profile">("here");
@@ -1534,6 +1518,24 @@ function Drawer({
                     placeholder={"Owns the web client.\nFollow the design system in docs/."}
                   />
                 </span>
+              </label>
+
+              {/* **Adds; never replaces.** The same contract as the field
+                  above, and the reason both are called extra — the profile
+                  already said what this agent *is*, and a position that wants
+                  one more thing says so without forking it. Empty means
+                  nothing extra, which is why this is not the `ScopePicker` a
+                  profile's own scope uses: there, empty means everything. */}
+              <label className="fld">
+                <span>Extra skills &amp; MCP</span>
+                <span className="hint">
+                  Added to what {position.name} already carries, in this team only.
+                </span>
+                <PositionSkills
+                  selected={position.extraSkills ?? []}
+                  onChange={onGrant}
+                  disabled={!writable}
+                />
               </label>
             </div>
           </div>
@@ -1674,5 +1676,79 @@ function ProfileTab({
         )}
       </div>
     </>
+  );
+}
+
+/**
+ * The skills and servers a position adds, ticked from what the owner has.
+ *
+ * **Not the `ScopePicker` a profile's own scope uses.** That one reads an
+ * empty selection as "everything the owner can reach" and says so on its
+ * summary line; here empty means nothing extra, and a control that said "all"
+ * for a position that adds nothing would be exactly backwards.
+ */
+function PositionSkills({
+  selected,
+  onChange,
+  disabled,
+}: {
+  selected: string[];
+  onChange: (ids: string[]) => void;
+  disabled?: boolean;
+}) {
+  const all = useSkills().data;
+  const [open, setOpen] = useState(selected.length > 0);
+  const [q, setQ] = useState("");
+  const chosen = new Set(selected);
+  const shown = all.filter((s) => {
+    const t = q.trim().toLowerCase();
+    return !t || `${s.displayName ?? ""} ${s.name} ${s.description}`.toLowerCase().includes(t);
+  });
+
+  if (!open) {
+    return (
+      <button type="button" className="out" disabled={disabled} onClick={() => setOpen(true)}>
+        <Plus className="h-4 w-4" strokeWidth={1.5} />
+        {selected.length > 0 ? `${selected.length} added` : "Add something"}
+      </button>
+    );
+  }
+  return (
+    <span className="box stack">
+      {/* A plain input, not a `.srch` pill: `.fld .box input` is already
+          styled for a field's box, and a pill inside a bordered box is two
+          borders for one control. */}
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search your skills and MCP"
+        aria-label="Search your skills and MCP servers"
+        disabled={disabled}
+      />
+      <div className="rows">
+        {shown.map((s) => {
+          const on = chosen.has(s.id);
+          return (
+            <button
+              key={s.id}
+              type="button"
+              className="prow tight"
+              disabled={disabled}
+              aria-pressed={on}
+              onClick={() =>
+                onChange(on ? selected.filter((id) => id !== s.id) : [...selected, s.id])
+              }
+            >
+              <Mark logo={s.logo} name={s.displayName || s.name} />
+              <span className="lbl flex-1 truncate">{s.displayName || s.name}</span>
+              {on && <Check className="h-4 w-4 shrink-0 text-sage" strokeWidth={2} />}
+            </button>
+          );
+        })}
+        {shown.length === 0 && (
+          <p className="px-2 py-2 text-meta text-dim">Nothing of yours matches that.</p>
+        )}
+      </div>
+    </span>
   );
 }

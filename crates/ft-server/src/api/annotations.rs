@@ -426,6 +426,7 @@ mod database_tests {
                 forwards: Default::default(),
                 previews: Default::default(),
                 public_url: "http://localhost:3000".into(),
+                api_url: "http://localhost:4400".into(),
             },
             principal,
             id.to_string(),

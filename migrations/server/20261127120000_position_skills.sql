@@ -1,0 +1,17 @@
+-- Skills a position adds, in this team and nowhere else.
+--
+-- The third of the three levels the library was designed around. An ad-hoc
+-- session opens with everything the person has; a profile *replaces* that with
+-- its own closed set; and a position *adds* to whatever its profile carries,
+-- for this team only.
+--
+-- **It adds and never replaces**, which is the same contract
+-- `extra_instructions` already has and the reason that field is called extra:
+-- there is no resolution order to define and no override semantics to explain.
+-- A Sheets expert is the Sheets expert everywhere; the position that also
+-- wants Figma says so without forking the profile.
+--
+-- Bounded at spawn by what the person starting the team can actually reach,
+-- exactly as a profile's own list is — a team cannot hand somebody a skill
+-- they could not have chosen themselves.
+alter table team_positions add column extra_skills text[] not null default '{}';

@@ -2,6 +2,7 @@ export { Icon } from "./Icon";
 export { GithubMark, GitLabMark, GiteaMark, HostMark, LinearMark } from "./Brand";
 export { Button } from "./Button";
 export { IconButton } from "./IconButton";
+export { MenuItem } from "./MenuItem";
 export { Badge } from "./Badge";
 export { Segmented } from "./Segmented";
 export { Input, Select } from "./Field";

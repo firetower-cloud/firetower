@@ -27,9 +27,9 @@ pub mod turn;
 
 pub use grants::{Level, SubjectKind};
 pub use ids::{
-    AgentTeamId, ArtifactId, ArtifactVersionId, DeliveryId, DirectoryId, HostId, OrgId, PositionId,
-    RepoId, RoleId, ScheduleId, ScheduleRunId, SessionId, SkillId, SkillVersionId, TeamId,
-    TriggerId, UserId, WorkspaceId,
+    AgentTeamId, ArtifactId, ArtifactVersionId, DeliveryId, DirectoryId, HostId, MarketId, OrgId,
+    PositionId, RepoId, RoleId, ScheduleId, ScheduleRunId, SessionId, SkillId, SkillVersionId,
+    TeamId, TriggerId, UserId, WorkspaceId,
 };
 pub use path::{slug, ResourcePath};
 pub use session::{
@@ -1038,6 +1038,36 @@ pub enum SkillsHome {
     AddedDirectory,
 }
 
+/// Where an agent reads a **plugin** from, which is not where it reads a skill.
+///
+/// A plugin is a folder carrying any of skills, connectors, commands,
+/// subagents and hooks, with a manifest at `.claude-plugin/plugin.json`.
+/// Measured: a folder *without* that manifest loads nothing through
+/// `--plugin-dir`, so the two homes are genuinely different places and not one
+/// expressed as the other.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum PluginsHome {
+    /// A directory of plugins, handed over on the command line.
+    ///
+    /// Claude Code's `--plugin-dir`: *a folder of plugins loads each child*.
+    /// Measured against 2.1.273 — the `init` frame came back listing the
+    /// plugin, its skills, its commands, and with the `.mcp.json` inside it
+    /// already dialled. The whole envelope for one flag.
+    AddedDirectory,
+    /// No plugin concept this worker drives yet, so the bundle is taken apart:
+    /// its skills go where that agent reads skills from, its connectors into
+    /// that agent's own MCP configuration, and anything left over is named in
+    /// the interface rather than dropped quietly.
+    ///
+    /// **Codex is here by sequencing, not by incapacity.** It has a real
+    /// plugin system — `codex plugin marketplace add` against a local path and
+    /// `codex plugin add` both work, measured — and moving it onto that is its
+    /// own slice. Decomposing gets its skills and its connectors there today
+    /// through two mechanisms that are documented and stable, which is the
+    /// cheaper half of the same promise.
+    Decomposed,
+}
+
 /// The model a session runs unless somebody changes it.
 ///
 /// The flagship, with the long context window. Sessions here are unattended and
@@ -1453,6 +1483,18 @@ impl Agent {
             Agent::ClaudeCode => Some(SkillsHome::AddedDirectory),
             Agent::Codex | Agent::KimiCode => Some(SkillsHome::AgentHome("skills")),
             Agent::CursorAgent => Some(SkillsHome::AgentHome(".cursor/skills")),
+            Agent::Shell => None,
+        }
+    }
+
+    /// Where a plugin goes for this agent. See [`PluginsHome`].
+    ///
+    /// `None` is the shell, which reads nothing — the same answer
+    /// [`Agent::skills_home`] gives it, and for the same reason.
+    pub fn plugins_home(&self) -> Option<PluginsHome> {
+        match self {
+            Agent::ClaudeCode => Some(PluginsHome::AddedDirectory),
+            Agent::Codex | Agent::KimiCode | Agent::CursorAgent => Some(PluginsHome::Decomposed),
             Agent::Shell => None,
         }
     }

@@ -61,7 +61,7 @@ import { Icon, IconButton } from "~/components/ui";
 import { Pop } from "~/ui/Pop";
 import { WhereTo } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
-import { SkillSources, useSkillSources } from "~/ui/config/SkillSources";
+import { ProfilePlugins } from "~/ui/config/profile/ProfilePlugins";
 import { BigText } from "~/ui/config/profile/BigText";
 import { navigate } from "~/shims/next-navigation";
 import { useAccounts, useAgents, useDirectories, useHosts } from "~/data";
@@ -450,11 +450,6 @@ export function ProfileForm({
       })),
   ];
 
-  /* Where this profile is filed decides whether the Skills section's count is
-     "yours" or everybody's: a profile in a directory is used by colleagues, and
-     the first two of its three sources resolve against whoever starts it. */
-  const shared = existing ? !!state.path?.startsWith("d/") : !!draft.directory;
-  const skills = useSkillSources(draft, shared);
 
   const set = <K extends keyof NewRole>(k: K, v: NewRole[K]) => setDraft((d) => ({ ...d, [k]: v }));
   // Pin one run control, or clear it back to the engine's default (null).
@@ -825,7 +820,10 @@ export function ProfileForm({
           />
         </Group>
 
-        <SkillSources r={skills} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} />
+        <ProfilePlugins
+          scope={draft.skillScope ?? []}
+          onChange={(skillScope) => setDraft((d) => ({ ...d, skillScope }))}
+        />
 
         {/* **The one field somebody writes a document in**, so it carries a
             door to a room big enough for one. The box stays live and stays

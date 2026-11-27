@@ -26,6 +26,7 @@ export const ErrorCode = {
   RepoUnreachable: 'RepoUnreachable',
   RepoUnusable: 'RepoUnusable',
   RepoInUse: 'RepoInUse',
+  ConnectorNeedsClient: 'ConnectorNeedsClient',
   ActionFailed: 'ActionFailed',
   Unauthorized: 'Unauthorized',
   PasswordChangeRequired: 'PasswordChangeRequired',

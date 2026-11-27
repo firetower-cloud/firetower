@@ -91,7 +91,14 @@ use serde::{Deserialize, Serialize};
 ///      answers before a checkout starts on Linux and never at all on macOS.
 ///      One number for both because they landed hours apart in one branch and
 ///      nothing was ever released between them.
-pub const PROTOCOL_VERSION: u32 = 23;
+/// 24 — a bundle says what it is (`SkillBundle.kind`), so a plugin can be
+///      written where that agent reads a *plugin* from rather than where it
+///      reads a skill from. An older worker defaults the field to `Skill` and
+///      would write a plugin's folder into the skills directory, where the
+///      manifest is not read and the connector inside it is never dialled —
+///      a plugin that silently delivers nothing, which is the failure mode
+///      worth a version rather than a shrug.
+pub const PROTOCOL_VERSION: u32 = 24;
 
 mod codec;
 pub use codec::{Codec, CodecError, FrameReader, FrameWriter};
@@ -734,12 +741,47 @@ impl std::fmt::Debug for SkillFile {
     }
 }
 
-/// One skill, as a folder the worker writes out.
+/// What a bundle is, which decides where on a worker it is written.
+///
+/// One frame carries both because they are the same thing to everything in
+/// between: a named folder of files, pinned to a session, content-addressed,
+/// cached by hash. Only the last hop differs, and only on some agents — so the
+/// difference is a field here rather than a second frame, a second pin table
+/// and a second cache.
+#[derive(Clone, Copy, Serialize, Deserialize, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BundleKind {
+    /// A lone skill, written where that agent reads skills from. Every row
+    /// that existed before plugins, and the default so an older control plane
+    /// talking to a newer worker still means what it used to.
+    #[default]
+    Skill,
+    /// A folder carrying any of skills, connectors, commands, subagents and
+    /// hooks, with a manifest at `.claude-plugin/plugin.json`.
+    ///
+    /// **Measured: a folder without that manifest loads nothing**, and a lone
+    /// skill wrapped in a same-named plugin registers as `name:name`. So the
+    /// two are kept apart rather than one being expressed as the other.
+    Plugin,
+}
+
+/// One bundle, as a folder the worker writes out.
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct SkillBundle {
     /// The folder's name, which is also the name the agent answers to.
     pub name: String,
     pub files: Vec<SkillFile>,
+    /// Where this one goes. Absent on the wire means [`BundleKind::Skill`],
+    /// which is what every frame written before this field meant.
+    #[serde(default)]
+    pub kind: BundleKind,
+}
+
+impl SkillBundle {
+    /// A file inside this bundle, by its path.
+    pub fn file(&self, path: &str) -> Option<&SkillFile> {
+        self.files.iter().find(|f| f.path == path)
+    }
 }
 
 /// Another agent, in a workspace that already exists.

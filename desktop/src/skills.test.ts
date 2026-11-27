@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { skillsIn, split } from "./skills";
+import { bundlesIn, skillsIn, split } from "./skills";
 
 /** A SKILL.md with `body` for frontmatter, since that is all these ask about. */
 const fm = (frontmatter: string) => `---\n${frontmatter}\n---\nInstructions.\n`;
@@ -355,5 +355,94 @@ describe("harness framing in a bundle", () => {
       "helper/SKILL.md": `---\nname: helper\ndescription: ${"x".repeat(1068)}\n---\nBody.\n`,
     });
     expect(fine!.errors).toEqual([]);
+  });
+});
+
+/* ── What a dropped folder turns out to be ──────────────────────────────
+   The rule under all of these: **the source declares it.** Asking somebody
+   at the moment they drop something asks them when they know least, and a
+   wrong answer is a bundle that loads nowhere. */
+describe("reading a drop", () => {
+  const enc = new TextEncoder();
+  const drop = (files: Record<string, string>) =>
+    bundlesIn(Object.entries(files).map(([path, text]) => ({ path, bytes: enc.encode(text) })));
+  const manifest = (name: string, description = "What it is for, at length enough to pass.") =>
+    JSON.stringify({ name, description, version: "1.0.0" });
+  const skill = (name: string) =>
+    `---\nname: ${name}\ndescription: Use when something specific happens here.\n---\nBody.\n`;
+
+  test("a folder with a manifest is a plugin, and its skills are not also loose", async () => {
+    const found = await drop({
+      "security-review/.claude-plugin/plugin.json": manifest("security-review"),
+      "security-review/skills/review-the-diff/SKILL.md": skill("review-the-diff"),
+      "security-review/skills/patch-verifier/SKILL.md": skill("patch-verifier"),
+    });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.kind).toBe("plugin");
+    expect(found[0]!.name).toBe("security-review");
+    expect(found[0]!.errors).toEqual([]);
+    /* Its own skills travel inside it — listing them again would put the same
+       bytes in the library twice under rows nobody can tell apart. */
+    expect(found[0]!.files.map((f) => f.path)).toContain("skills/review-the-diff/SKILL.md");
+  });
+
+  test("a folder with a SKILL.md is still a skill", async () => {
+    const found = await drop({ "code-review/SKILL.md": skill("code-review") });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.kind).toBe("skill");
+    expect(found[0]!.name).toBe("code-review");
+  });
+
+  test("a folder of folders is however many of whichever", async () => {
+    const found = await drop({
+      "lib/security-review/.claude-plugin/plugin.json": manifest("security-review"),
+      "lib/security-review/skills/one/SKILL.md": skill("one"),
+      "lib/house-prose/SKILL.md": skill("house-prose"),
+      "lib/brand-voice/SKILL.md": skill("brand-voice"),
+    });
+    expect(found).toHaveLength(3);
+    expect(found.filter((f) => f.kind === "plugin").map((f) => f.name)).toEqual(["security-review"]);
+    expect(found.filter((f) => f.kind === "skill").map((f) => f.name).sort()).toEqual([
+      "brand-voice",
+      "house-prose",
+    ]);
+  });
+
+  test("a manifest that declares no name is refused, not guessed at", async () => {
+    const found = await drop({
+      "thing/.claude-plugin/plugin.json": JSON.stringify({ description: "Something." }),
+    });
+    expect(found[0]!.kind).toBe("plugin");
+    expect(found[0]!.errors.join(" ")).toContain("declares no name");
+  });
+
+  test("a manifest that is not JSON says so rather than importing nothing", async () => {
+    const found = await drop({ "thing/.claude-plugin/plugin.json": "{ not json" });
+    expect(found[0]!.errors.join(" ")).toContain("not JSON");
+  });
+
+  test("a plugin with nothing an engine reads is a warning, never a refusal", async () => {
+    const found = await drop({ "empty/.claude-plugin/plugin.json": manifest("empty") });
+    expect(found[0]!.errors).toEqual([]);
+    expect(found[0]!.warnings.join(" ")).toContain("Nothing in it");
+  });
+
+  test("hooks and subagents are named as Claude Code's alone, where somebody chooses", async () => {
+    const found = await drop({
+      "sec/.claude-plugin/plugin.json": manifest("sec"),
+      "sec/skills/a/SKILL.md": skill("a"),
+      "sec/hooks.json": "{}",
+      "sec/agents/explore.md": "---\nname: explore\n---\n",
+    });
+    const said = found[0]!.warnings.join(" ");
+    expect(said).toContain("hooks reach Claude Code only");
+    expect(said).toContain("subagents reach Claude Code only");
+    expect(found[0]!.errors).toEqual([]);
+  });
+
+  test("a drop with neither is still one row saying what is missing", async () => {
+    const found = await drop({ "thing/readme.md": "nothing here" });
+    expect(found).toHaveLength(1);
+    expect(found[0]!.errors.join(" ")).toContain("No SKILL.md");
   });
 });
