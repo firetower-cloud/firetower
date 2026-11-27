@@ -61,6 +61,24 @@ import {
   type SortKey,
 } from "./usage-rules";
 
+/**
+ * The clock this file was handed, read before anything touches it.
+ *
+ * Both halves matter: the variable, because restoring it wrongly is the bug;
+ * and the *offset*, because a restore that puts the variable back and leaves
+ * V8 on another zone would be the same failure wearing a tidier face.
+ */
+const WHENEVER = Date.UTC(2026, 5, 15, 12);
+const BEFORE = {
+  had: "TZ" in process.env,
+  tz: process.env.TZ,
+  offset: new Date(WHENEVER).getTimezoneOffset(),
+  hours: new Date(WHENEVER).getHours(),
+};
+
+/** What the clock was *inside* the suite that moves it. See below. */
+const DURING: { offset: number | null } = { offset: null };
+
 /* ── the containment rule, as it is declared ────────────────────────── */
 
 describe("where a series hue may appear", () => {
@@ -206,12 +224,25 @@ describe("a column of the chart", () => {
    * in Los Angeles and hands the clock back afterwards.
    */
   describe("read eight hours west of UTC", () => {
-    const was = process.env.TZ;
     beforeAll(() => {
       process.env.TZ = "America/Los_Angeles";
+      DURING.offset = new Date(WHENEVER).getTimezoneOffset();
     });
+    /**
+     * **`process.env.TZ = undefined` writes the string `"undefined"`**, which
+     * is not a zone V8 knows, so it silently falls back to **UTC** — and
+     * every test after this block then runs at the one offset where a
+     * timezone bug is invisible, on any machine that does not export `TZ`.
+     * That is what CI is.
+     *
+     * The key is deleted where it was absent, and `the clock is handed back`
+     * below asserts it rather than trusting it. Third time something in this
+     * area has been kinder than the server: the loose assertion, the
+     * local-midnight mock, and this.
+     */
     afterAll(() => {
-      process.env.TZ = was;
+      if (BEFORE.had) process.env.TZ = BEFORE.tz as string;
+      else delete process.env.TZ;
     });
 
     /** The harness itself, or the three below pass by not having moved. */
@@ -253,6 +284,53 @@ describe("a column of the chart", () => {
     const { from, to } = periodOf("m12", new Date(2026, 10, 26, 12));
     const days = (new Date(to).getTime() - new Date(from).getTime()) / 86_400_000;
     expect(Math.round(days)).toBe(RANGES.m12.days);
+  });
+});
+
+/**
+ * The clock is handed back, and that is asserted rather than trusted.
+ *
+ * Declared after the suite that moves it, because Vitest runs suites in the
+ * order they are written — so this is the first thing that runs once the
+ * `afterAll` above has had its say, and everything below it is covered by
+ * the same restore.
+ *
+ * **Two assertions, because one of them is blind on the machine the bug
+ * matters most on.** The bug only exists where `TZ` is *absent* — exporting
+ * it makes the broken restore write back a real string — and absent is what
+ * a CI runner is.
+ *
+ * On such a machine at any offset but zero, the offset check fails outright:
+ * that is the *would fail at UTC and pass at the real offset* test, and it is
+ * the one that fails here, at +3. On such a machine already at UTC the
+ * offset is zero either way and that check goes quiet — so the environment
+ * check is what catches it there, because the broken restore leaves `TZ`
+ * **present**, holding the five letters `undefined`, where it was absent
+ * before. Verified both ways by reverting the restore.
+ */
+describe("the clock is handed back", () => {
+  it("restores the variable exactly, including its absence", () => {
+    expect("TZ" in process.env).toBe(BEFORE.had);
+    expect(process.env.TZ).toBe(BEFORE.tz);
+    /* The specific wrong value: `process.env.TZ = undefined` stringifies. */
+    expect(process.env.TZ).not.toBe("undefined");
+  });
+
+  it("restores the offset, not merely the variable", () => {
+    expect(new Date(WHENEVER).getTimezoneOffset()).toBe(BEFORE.offset);
+    expect(new Date(WHENEVER).getHours()).toBe(BEFORE.hours);
+  });
+
+  /**
+   * **And the clock really was moved**, or the two above pass by nothing
+   * having happened at all.
+   *
+   * Asserted against Los Angeles' own June offset rather than against "it
+   * differs from this machine's", which would itself only pass outside Los
+   * Angeles — the same shape of defect one level up.
+   */
+  it("ran after a suite that really moved the clock", () => {
+    expect(DURING.offset).toBe(420);
   });
 });
 

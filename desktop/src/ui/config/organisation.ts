@@ -480,26 +480,41 @@ export function howMany(n: number): string {
  * !me.error)` holding `settling` true with nothing left that could ever
  * change it. ⌘8 drew the unresolvable spinner again.
  *
- * So this is written as the three states it has rather than as a list of the
- * ways it can go wrong: **there is a feed, or the role has not arrived yet, or
- * the role did not arrive.** No fourth branch exists, which is what makes a
- * fourth way of failing arrive at the right screen without anybody having
- * anticipated it — and *did it arrive* is asked of `roleRead` rather than
- * inferred here, so the pane that routes on the same question cannot drift
- * from the pane that draws on it.
+ * So this is written as the states it has rather than as a list of the ways it
+ * can go wrong: there is a feed, or there is one of `roleRead`'s three
+ * answers. The `switch` is exhaustive — a fourth answer stops this compiling
+ * rather than falling quietly into whichever arm happens to be last.
+ *
+ * **Every branch either settles or says something.** Never neither, which is
+ * the unresolvable spinner, and never both, which is a spinner over an error.
+ * That property is asserted over every answer `roleRead` can give, and the
+ * table it is asserted from is derived from the type rather than written out
+ * — the previous one listed five *inputs* that collapsed to two of the three
+ * answers, and ended an argument it had not had.
  */
 export function feedState(
-  role: ReturnType<typeof roleRead>,
+  role: RoleRead,
   feed: { pending: boolean; error: unknown } | null,
 ): { settling: boolean; error: unknown } {
   /* Once a list exists the role has already been read, so the list is the
      only thing that can put this pane in either state — a background refetch
      of `/auth/me` blipping must not blank a list somebody is using. */
   if (feed) return { settling: feed.pending, error: feed.error ?? null };
-  if (role.reading) return { settling: true, error: null };
-  /* Resolved, and still nothing to feed the pane: the role is what did not
-     arrive, and `roleRead` guarantees there is something to say about it. */
-  return { settling: false, error: role.error };
+  switch (role.kind) {
+    case "reading":
+      return { settling: true, error: null };
+    /* The role is what did not arrive, and the answer carries why. */
+    case "unreadable":
+      return { settling: false, error: role.error };
+    /* **The role arrived and there is still no list.** Unreachable today —
+       `readsFor` turns every non-empty role into one of the two reads — so
+       this arm exists because the rule has to be right on its own rather
+       than because a caller happens to save it. It is the first thing a
+       third branch in `readsFor` would land on, and *nothing, silently* is
+       the one answer that must not be waiting there. */
+    case "read":
+      return { settling: false, error: ROLE_UNKNOWN };
+  }
 }
 
 /**
@@ -517,8 +532,43 @@ export const ROLE_UNREADABLE = {
 } as const;
 
 /**
- * Whether the role has arrived, and what to say when it has not.
+ * The role arrived and this build has nothing to show somebody holding it.
  *
+ * A different fact from `ROLE_UNREADABLE`, and it points at a different
+ * thing: the server said something perfectly clear and this client is the one
+ * that does not know what it means — a client older than the server it is
+ * talking to. Saying *we could not read your role* there would send somebody
+ * to look at the wrong end.
+ */
+export const ROLE_UNKNOWN = {
+  status: 200,
+  message: "This Firetower reported a role this version does not know.",
+} as const;
+
+/**
+ * Something to say. **Never `null`**, in the type rather than in a promise,
+ * so a caller can use it without a fallback of its own — and so a branch that
+ * forgot to fill it in does not compile.
+ */
+type Said = NonNullable<unknown>;
+
+/**
+ * Whether the role has arrived — **three answers, each with a name**.
+ *
+ * Named rather than two booleans because everything downstream has to be
+ * exhaustive over them, and `{ reading: boolean; error: unknown }` cannot be
+ * enumerated: it has four corners, one of which (*not reading, nothing to
+ * say*) is a state this used to produce and `feedState` had no arm for. A
+ * `switch` over these does not compile with a case missing, and a test table
+ * keyed `Record<RoleRead["kind"], …>` cannot be written without one sample
+ * per answer.
+ */
+export type RoleRead =
+  | { kind: "reading" }
+  | { kind: "read" }
+  | { kind: "unreadable"; error: Said };
+
+/**
  * **One question, asked by everything that depends on the answer.** Two
  * screens route on it — People picks which list to read, and `Configuration`
  * picks which pane `/configuration/server` draws — and each of them had its
@@ -528,21 +578,21 @@ export const ROLE_UNREADABLE = {
  * `Configuration` read a role still in flight as *not an administrator* and
  * mounted People over the address somebody had typed.
  *
- * **Pending is not refusal, and a 200 is not an answer.** The three states
+ * **Pending is not refusal, and a 200 is not an answer.** The three answers
  * are *still reading*, *read*, and *could not be read* — and the third is the
  * one neither screen had, so neither could tell a member apart from a
  * `/auth/me` that failed.
- *
- * `error` is never null while there is no role, which is what lets a caller
- * trust it without a fallback of its own.
  */
-export function roleRead(me: { pending: boolean; error: unknown; user: Signed }): {
-  reading: boolean;
-  error: unknown;
-} {
-  if (me.pending) return { reading: true, error: null };
-  if (me.user?.role) return { reading: false, error: null };
-  return { reading: false, error: me.error ?? ROLE_UNREADABLE };
+export function roleRead(me: { pending: boolean; error: unknown; user: Signed }): RoleRead {
+  if (me.pending) return { kind: "reading" };
+  if (me.user?.role) return { kind: "read" };
+  /* **Truthiness, not `??`.** A read can fail with something falsy that is
+     not nullish — a thrown `""` is the one that turned up — and `??` lets it
+     through, so the answer carried an "error" every caller then treated as
+     no error at all. That is the *neither settling nor saying anything*
+     corner arriving by another door. `{}` in the type is what makes a branch
+     that forgets this fail to compile rather than fail on screen. */
+  return { kind: "unreadable", error: (me.error as Said) || ROLE_UNREADABLE };
 }
 
 /**

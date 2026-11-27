@@ -104,14 +104,14 @@ function Pane({ at, open }: { at: string; open: string | null }) {
   const role = roleRead({ pending: me.isPending, error: me.error, user: me.data?.user });
   const deployment = at === "server";
 
-  if (deployment && role.reading) {
+  if (deployment && role.kind === "reading") {
     return (
       <div className="pg">
         <Settling />
       </div>
     );
   }
-  if (deployment && role.error) {
+  if (deployment && role.kind === "unreadable") {
     return (
       <div className="pg">
         <Trouble kind={trouble(role.error) ?? "error"} error={why(role.error)} onRetry={() => void me.refetch()} />

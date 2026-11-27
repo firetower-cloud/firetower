@@ -34,6 +34,7 @@ import {
   panesFor,
   readsFor,
   roleRead,
+  ROLE_UNKNOWN,
   ROLE_UNREADABLE,
   saidRole,
   tagsFor,
@@ -41,6 +42,7 @@ import {
   telemetryState,
   type Account,
   type DeploymentMode,
+  type RoleRead,
 } from "./organisation";
 
 const admin = { id: "u_kevin", role: "admin" } as const;
@@ -487,67 +489,101 @@ describe("saying how many people", () => {
  * and neither could tell either of those from a 200 with nothing usable in
  * it, which is the case that had no name at all.
  */
+/**
+ * **One sample per answer, and the table is the union.**
+ *
+ * `Record<RoleRead["kind"], …>` is derived from the type rather than written
+ * out, so a fourth answer does not compile until a sample for it exists. That
+ * is the whole mechanism: the previous table listed five *inputs* that
+ * collapsed to two of the three answers, claimed to walk every one, and ended
+ * an argument it had not had.
+ */
+const ANSWERS: Record<RoleRead["kind"], { why: string; me: Parameters<typeof roleRead>[0] }> = {
+  reading: { why: "the request is in flight", me: { pending: true, error: null, user: undefined } },
+  read: { why: "a role came back", me: { pending: false, error: null, user: admin } },
+  unreadable: {
+    why: "the read failed",
+    me: { pending: false, error: new Error("no me"), user: undefined },
+  },
+};
+
+const KINDS = Object.keys(ANSWERS) as RoleRead["kind"][];
+
 describe("whether the role arrived", () => {
-  it("is still reading while the request is in flight", () => {
-    expect(roleRead({ pending: true, error: null, user: undefined })).toEqual({
-      reading: true,
-      error: null,
-    });
+  /**
+   * **The table's samples are the answers they claim to be.** Without this
+   * the `Record` is exhaustive over the *keys* and says nothing about what
+   * the values produce — three entries could all exercise one answer, which
+   * is exactly what the list of five inputs did.
+   */
+  it.each(KINDS)("has a sample that really produces %s", (kind) => {
+    expect(roleRead(ANSWERS[kind].me).kind).toBe(kind);
   });
 
-  it("has read it once a role is there", () => {
-    expect(roleRead({ pending: false, error: null, user: admin })).toEqual({
-      reading: false,
-      error: null,
-    });
+  /** And between them the samples reach all three, not one three times. */
+  it("reaches every answer exactly once", () => {
+    expect(KINDS.map((k) => roleRead(ANSWERS[k].me).kind).sort()).toEqual(
+      ["read", "reading", "unreadable"],
+    );
   });
 
   it("hands back the read's own error when the read failed", () => {
     const boom = new Error("no me");
-    expect(roleRead({ pending: false, error: boom, user: undefined }).error).toBe(boom);
+    const read = roleRead({ pending: false, error: boom, user: undefined });
+    expect(read.kind).toBe("unreadable");
+    expect(read.kind === "unreadable" && read.error).toBe(boom);
   });
 
   /**
-   * **The third way, which had no name.** A 200 with no `role` in it — a body
-   * one version out, a proxy answering the wrong JSON — is not pending, is
-   * not an error, and is not a role. Every caller treated it as whichever of
-   * those its own two-state shape happened to fall into.
+   * **The way that had no name.** A 200 with no `role` in it — a body one
+   * version out, a proxy answering the wrong JSON — is not pending, is not an
+   * error, and is not a role. Every caller treated it as whichever of those
+   * its own two-state shape happened to fall into.
    */
   it("says the role could not be read when the server answered with no role", () => {
     for (const user of [undefined, null, {}, { id: "u_1" }, { id: "u_1", role: "" }]) {
       const read = roleRead({ pending: false, error: null, user: user as never });
-      expect(read.reading).toBe(false);
-      expect(read.error).toBe(ROLE_UNREADABLE);
+      expect(read.kind).toBe("unreadable");
+      expect(read.kind === "unreadable" && read.error).toBe(ROLE_UNREADABLE);
     }
   });
 
   /**
-   * The server answered, so this is *refused* rather than *dark*: there is
+   * The server answered, so these are *refused* rather than *dark*: there is
    * something there and a retry is worth offering. `data.ts`' `trouble` reads
-   * the status, which is why it carries one.
+   * the status, which is why they carry one.
    */
-  it("is shaped like something a pane can draw", () => {
-    expect(typeof ROLE_UNREADABLE.status).toBe("number");
-    expect(ROLE_UNREADABLE.status).not.toBe(401);
-    expect(ROLE_UNREADABLE.status).not.toBe(403);
-    expect(ROLE_UNREADABLE.message.length).toBeGreaterThan(0);
+  it.each([
+    ["the role could not be read", ROLE_UNREADABLE],
+    ["the role means nothing here", ROLE_UNKNOWN],
+  ])("is shaped like something a pane can draw — %s", (_why, said) => {
+    expect(typeof said.status).toBe("number");
+    expect(said.status).not.toBe(401);
+    expect(said.status).not.toBe(403);
+    expect(said.message.length).toBeGreaterThan(0);
   });
 
-  /** **Never nothing.** A caller that has no role has something to say about
-   *  why, without needing a fallback of its own. */
+  /** They are different facts and point at different ends of the wire. */
+  it("does not say the same thing about the client and about the server", () => {
+    expect(ROLE_UNKNOWN.message).not.toBe(ROLE_UNREADABLE.message);
+  });
+
+  /** **Never nothing.** An unreadable answer always carries something to
+   *  say, whatever the read failed with. */
   it("always has something to say while there is no role", () => {
-    for (const error of [null, undefined, new Error("x")]) {
-      expect(roleRead({ pending: false, error, user: undefined }).error).toBeTruthy();
+    for (const error of [null, undefined, new Error("x"), ""]) {
+      const read = roleRead({ pending: false, error, user: undefined });
+      expect(read.kind === "unreadable" && read.error).toBeTruthy();
     }
   });
 });
 
 describe("what the People pane is doing", () => {
   const ok = { pending: false, error: null };
-  const read = { reading: false, error: null };
+  const read: RoleRead = { kind: "read" };
 
   it("settles while the role is still being read", () => {
-    expect(feedState({ reading: true, error: null }, null).settling).toBe(true);
+    expect(feedState({ kind: "reading" }, null).settling).toBe(true);
   });
 
   /**
@@ -557,7 +593,7 @@ describe("what the People pane is doing", () => {
    * spinner behind ⌘8 with no way out.
    */
   it("stops settling and shows the role's own error when the role could not be read", () => {
-    const state = feedState({ reading: false, error: new Error("no me") }, null);
+    const state = feedState({ kind: "unreadable", error: new Error("no me") }, null);
     expect(state.settling).toBe(false);
     expect(state.error).toBeInstanceOf(Error);
   });
@@ -577,29 +613,40 @@ describe("what the People pane is doing", () => {
   });
 
   /**
-   * **The property all three variants broke, asserted over the pair rather
-   * than over either half.**
+   * **The property all four variants broke, asserted over every answer.**
    *
    * Each fix named a way the role could fail to arrive, and the next variant
-   * was a way nobody had named. What has to hold is composed: for *every*
-   * answer `roleRead` can give, a pane with no feed either settles with
-   * something still in flight or has something to say. There is no fourth
-   * answer to miss, because this walks all of them rather than a list
-   * somebody wrote down.
+   * was a way nobody had named. The fourth was named right here, in a table
+   * that said it walked every answer and walked two of three: five *inputs*
+   * that all collapsed to *reading* or *unreadable*, with *read* — the one
+   * that broke the property — never fed in. Nothing kept it off the screen
+   * but `readsFor` turning every role into a list, which is a coupling in a
+   * different function and not something this asserted.
+   *
+   * So the cases come from `RoleRead` itself. A fourth answer does not
+   * compile until `ANSWERS` has a sample for it, and the samples are checked
+   * to be the answers they claim to be.
    */
-  it.each([
-    ["in flight", { pending: true, error: null, user: undefined }],
-    ["the read failed", { pending: false, error: new Error("boom"), user: undefined }],
-    ["a 200 with no role", { pending: false, error: null, user: { id: "u_1" } }],
-    ["a 200 with an empty role", { pending: false, error: null, user: { id: "u_1", role: "" } }],
-    ["no user at all", { pending: false, error: null, user: null }],
-  ])("never settles forever — %s", (_why, me) => {
-    const state = feedState(roleRead(me as never), null);
+  it.each(KINDS)("never settles forever — %s", (kind) => {
+    const state = feedState(roleRead(ANSWERS[kind].me), null);
     /* Still waiting on something, or saying why it is not. Never neither,
        which is the spinner behind ⌘8 that cannot resolve. */
     expect(state.settling || !!state.error).toBe(true);
     /* And never both, which would be a spinner over an error. */
     expect(state.settling && !!state.error).toBe(false);
+  });
+
+  /**
+   * **A role that arrived with no list behind it.** Unreachable through
+   * `readsFor`, which turns every non-empty role into one of the two reads —
+   * which is exactly why the rule has to answer it on its own rather than
+   * leaning on that. It is the first thing a third branch there would land
+   * on, and *nothing, silently* must not be what is waiting.
+   */
+  it("says so when the role is known and there is no list for it", () => {
+    const state = feedState({ kind: "read" }, null);
+    expect(state.settling).toBe(false);
+    expect(state.error).toBe(ROLE_UNKNOWN);
   });
 
   it("shows the list's error once a list is the thing that failed", () => {
@@ -621,7 +668,7 @@ describe("what the People pane is doing", () => {
    * has already been read; `me` only matters while there is nothing to show.
    */
   it("keeps a healthy list when a later check of the role fails", () => {
-    const state = feedState({ reading: false, error: new Error("me blipped") }, ok);
+    const state = feedState({ kind: "unreadable", error: new Error("me blipped") }, ok);
     expect(state.error).toBeNull();
     expect(state.settling).toBe(false);
   });
@@ -636,7 +683,7 @@ describe("what the People pane is doing", () => {
    *  one about the thing the reader is looking at. */
   it("prefers the list's error when both failed", () => {
     const boom = new Error("list");
-    const state = feedState({ reading: false, error: new Error("me") }, { pending: false, error: boom });
+    const state = feedState({ kind: "unreadable", error: new Error("me") }, { pending: false, error: boom });
     expect(state.error).toBe(boom);
   });
 });
