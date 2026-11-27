@@ -64,6 +64,16 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
       { at: "directories", label: "Directories" },
     ],
   },
+  /* **Usage, and it is called Usage rather than Spend.** *Spend* is the
+     specification's feature name; the interface has said Usage since the
+     screen was written, the route it came from is `/organization/usage`, and
+     the figure on it is tokens rather than money — a pane called Spend with no
+     currency on it raises a question the screen cannot answer.
+
+     Its own group because it is the only pane here that is about what
+     happened rather than about who may do what: *What it cost* is the sketch's
+     own label, and it is what the Organisation panel writes over the row. */
+  { group: "What it cost", items: [{ at: "usage", label: "Usage" }] },
   { group: "Credentials", items: [{ at: "vault", label: "Vault" }] },
   { group: "Server", items: [{ at: "server", label: "This Firetower" }] },
 ];

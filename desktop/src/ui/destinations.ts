@@ -165,6 +165,11 @@ const PANE_HOME: Record<string, DestinationId> = {
   people: "organisation",
   teams: "organisation",
   directories: "organisation",
+  /* What the organisation's agents spent. It is the organisation's ledger
+     rather than anybody's work surface, and it is everybody's — consumption
+     has no role gate on the server, so `panesFor` lists it for every member
+     and this table has no condition on it either. */
+  usage: "organisation",
   /* **The deployment pane, which was Settings' until it had somewhere better
      to be.** It is the organisation's installation — what it is called,
      whether it reports telemetry, what is running and how it lets people in —

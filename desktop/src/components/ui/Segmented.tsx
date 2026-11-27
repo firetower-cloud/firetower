@@ -28,6 +28,7 @@ export function Segmented<T extends string>({
   onChange,
   className = "",
   label,
+  testId,
 }: {
   /** `[id, what it says, what it says on hover]`. */
   options: readonly (readonly [T, ReactNode, string?])[];
@@ -36,9 +37,21 @@ export function Segmented<T extends string>({
   className?: string;
   /** What the group is for, when the labels alone do not say. */
   label?: string;
+  /**
+   * The name a contract knows this control by — the group's own id, and each
+   * segment's as `{testId}-{option}`.
+   *
+   * **Widened rather than copied.** Usage's period control is named in the
+   * design contract as `usage-period` with three segments under it, and the
+   * alternative to this prop was a fourth hand-rolled `.seg` — which is the
+   * exact thing `reuse.test.ts` pins this file against, and which is how the
+   * profile menu's copy drifted far enough for somebody to notice. One
+   * optional attribute is cheaper than a fifth drawing of the same control.
+   */
+  testId?: string;
 }) {
   return (
-    <div className={`seg shrink-0 ${className}`} role="group" aria-label={label}>
+    <div className={`seg shrink-0 ${className}`} role="group" aria-label={label} data-testid={testId}>
       {options.map(([id, says, hint]) => (
         <button
           key={id}
@@ -47,6 +60,7 @@ export function Segmented<T extends string>({
           title={hint}
           onClick={() => onChange(id)}
           className="max-md:min-h-[44px]"
+          data-testid={testId && `${testId}-${id}`}
         >
           {says}
         </button>

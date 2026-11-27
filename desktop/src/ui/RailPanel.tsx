@@ -19,6 +19,7 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   Blocks,
+  ChartNoAxesColumn,
   CircleSlash2,
   Clock,
   FileClock,
@@ -528,7 +529,7 @@ function Customize() {
 }
 
 /**
- * Organisation's three panes.
+ * Organisation's panes.
  *
  * **An index and nothing under it**, which is the one place this panel differs
  * from Customize's: there is no *your people* run of rows beneath, because the
@@ -560,6 +561,7 @@ function Organisation({ path }: { path: string }) {
     people: UserRound,
     teams: UsersRound,
     directories: FolderOpen,
+    usage: ChartNoAxesColumn,
     server: Settings2,
   };
   const panes = panesFor(deploymentMode(), me.data?.user);
@@ -568,6 +570,11 @@ function Organisation({ path }: { path: string }) {
     <>
       {panes.map((p) => (
         <Fragment key={p.at}>
+          {/* The one pane that is about what happened rather than about who
+              may do what. The sketch's own label, and it is a label rather
+              than a divider because *what it cost* is a different question
+              from *who can reach what* and not a quieter version of it. */}
+          {p.at === "usage" && <Label>What it cost</Label>}
           {/* A sentence over the one that is not about people, because that is
               what the group was called while it lived in Settings and it is
               the only thing on this panel that is about the installation

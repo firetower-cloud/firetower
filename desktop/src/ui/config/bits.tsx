@@ -396,11 +396,21 @@ export function Blank({
   children,
   action,
   shape = "row",
+  testId,
 }: {
   icon: LucideIcon;
   title: string;
   children?: React.ReactNode;
   action?: React.ReactNode;
+  /**
+   * The name a contract knows this object by.
+   *
+   * Usage's design contract names the blank itself — `usage-empty` is *the
+   * row-shaped object*, `usage-error` is *`Blank shape="plate"`* — rather
+   * than a wrapper around it, and an id is worth more on the element it
+   * describes than on a `<div>` added to hold it.
+   */
+  testId?: string;
   /**
    * What the object above the title is.
    *
@@ -420,7 +430,7 @@ export function Blank({
   shape?: "row" | "card" | "plate";
 }) {
   return (
-    <div className="blank">
+    <div className="blank" data-testid={testId}>
       <div className="in">
         <span className={`obj ${shape}`} aria-hidden>
           {shape === "card" ? (
@@ -476,9 +486,12 @@ export function Note({
   icon,
   children,
   control,
+  testId,
 }: {
   icon: LucideIcon;
   children: React.ReactNode;
+  /** The name a contract knows this note by. See `Blank`. */
+  testId?: string;
   /**
    * The one way to undo it, and **only where a typed string caused it**. A
    * pressed pill shows its own state a few inches away and `All` is beside
@@ -487,7 +500,7 @@ export function Note({
   control?: React.ReactNode;
 }) {
   return (
-    <div className="note2">
+    <div className="note2" data-testid={testId}>
       <span className="g" aria-hidden>
         <Icon of={icon} size={16} />
       </span>
@@ -516,8 +529,11 @@ export function WhereTo({
   children,
   icon,
   className,
+  testId,
 }: {
   children: React.ReactNode;
+  /** The name a contract knows this line by. See `Blank`. */
+  testId?: string;
   /* The drawing varies the glyph by what it is pointing at — people for the
      administration site, a key for the control plane. Info is the default
      because most of these are just "it lives over there". */
@@ -525,7 +541,7 @@ export function WhereTo({
   className?: string;
 }) {
   return (
-    <div className={className ? `whereto ${className}` : "whereto"}>
+    <div className={className ? `whereto ${className}` : "whereto"} data-testid={testId}>
       <span className="g">{icon ?? <Icon of={Info} size={16} />}</span>
       <p>{children}</p>
     </div>

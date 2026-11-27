@@ -7633,4 +7633,549 @@ html:not([data-platform="macos"]) {
       padding: 14px 16px;
     }
   }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     Usage — Organisation's ledger of what the agents spent
+     ═══════════════════════════════════════════════════════════════════
+
+     Transcribed from the published prototype, `usage-in-the-renderer`, the
+     way the rest of this layer is transcribed from the artifact. Three names
+     are the drawing's with a letter on the front, because the desk already
+     owns the bare word and two rules claiming one class would be a bug
+     nobody could see:
+
+       `.lmeter`  — the drawing's `.meter`. `.meter` here is the composer's
+                    context gauge: a 30px inline-flex pill with its own
+                    padding, and `.r .meter` would have inherited every one of
+                    those properties while overriding three.
+       `.lkids`   — the drawing's `.kids`. `.kids` here is the team rail's
+                    nesting, which indents against a left rule; the ledger's
+                    child block is a recessed slab the full width of the row.
+
+     Nothing below is a type size of its own: the sizes are the scale's
+     tokens, so when the two `@theme` blocks are reconciled this moves with
+     everything else. */
+
+  /* ── A control whose label is the current answer ──────────────────
+     The chevron that says a menu is behind it, and the square form of the
+     same pill for the one control that is a glyph. */
+  .btn .cv {
+    color: var(--color-mute);
+  }
+  .btn.icon {
+    width: 33px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  /* `Choose`'s rows, and the scope picker's search. `.mi` already carries the
+     row; these are the two shapes a *value* menu adds to it — a tick column
+     so the chosen one is marked in place rather than by colour alone, and a
+     label that takes the rest of the width. */
+  .mi .tick {
+    width: 14px;
+    flex: none;
+    color: var(--color-bone);
+  }
+  .mi .sp {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mi .note {
+    flex: none;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .mi[aria-checked="true"] {
+    color: var(--color-bone);
+  }
+  .pop .scr {
+    /* The list gives way to `Pop`'s height cap and the search above it does
+       not, which is the flexbox rule `Pop` is a column for. */
+    flex: 1;
+  }
+  .pop .mfind {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 11px;
+    margin-bottom: 3px;
+    border-radius: 10px;
+    background: var(--color-overlay);
+    color: var(--color-mute);
+  }
+  [data-theme="light"] .pop .mfind {
+    background: var(--color-raise);
+  }
+  .pop .mfind input {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+  .pop .mlabel {
+    padding: 8px 10px 3px;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .pop .empty {
+    padding: 11px 10px;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+
+  /* ── A section heading with its controls on the same line ─────────
+     The heading and its note on the left, what operates on the list on the
+     right, both sitting on the same baseline. */
+  .lsec .headrow {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px 22px;
+    flex-wrap: wrap;
+  }
+  .lsec .headrow > div:first-child {
+    flex: 1 1 360px;
+    min-width: 0;
+  }
+  .lsec .headrow .ctl {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  /* ── A ledger row: a name, a length, a figure ─────────────────────── */
+  .r .chev {
+    flex: none;
+    color: var(--color-mute);
+    transition: transform var(--dur-native) var(--ease-swift);
+  }
+  .r[aria-expanded="true"] .chev {
+    transform: rotate(90deg);
+  }
+  .r .amt {
+    flex: none;
+    width: 86px;
+    text-align: right;
+    font-family: var(--font-narrow);
+    font-weight: 500;
+    /* `.r .tx b`'s size, which is what puts the figure on the name's line. */
+    font-size: 0.96875rem;
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+  }
+  .r.sub .amt {
+    font-size: var(--text-ui);
+  }
+  /* A row the data could not name: italic, and quieter than one it could. */
+  .r .tx .unnamed {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--color-dim);
+  }
+  /* The remainder is not a row, so it does not read as one. */
+  .r .tx .rest {
+    font-weight: 400;
+    color: var(--color-dim);
+  }
+
+  /* **One length, not a stack.** The containment rule's one change to this
+     screen: the hues live in the chart's frame and the key under it, and a
+     mapping a reader has to carry as far as the twenty-fifth row has stopped
+     being the chart's and become the page's. */
+  .r .lmeter {
+    flex: none;
+    width: 168px;
+    overflow: hidden;
+  }
+  .r.sub .lmeter {
+    width: 134px;
+  }
+  .r .lmeter .fill {
+    display: flex;
+    height: 7px;
+  }
+  .r.sub .lmeter .fill {
+    height: 5px;
+  }
+  .r .lmeter .fill i {
+    display: block;
+    flex: 1;
+    height: 100%;
+    border-radius: 2px;
+  }
+
+  /* The open child block. A recessed slab the full width of the row rather
+     than an indented rail: these are six rows of one row's own breakdown, not
+     a tree. */
+  .lkids {
+    background: var(--color-ground);
+    border-radius: 12px;
+    margin: 2px -14px;
+    padding: 0 14px;
+  }
+  .lkids .r {
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+  .lkids .nothing {
+    padding: 12px 14px 12px 48px;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+
+  /* A read that is only refetching: nothing replaced, nothing moved. */
+  .dimmed {
+    opacity: 0.5;
+    transition: opacity 200ms var(--ease-swift);
+  }
+
+  /* ── The reading: a figure, a chart, a key, four counts ───────────── */
+  .reading {
+    margin-top: 30px;
+  }
+  .headline {
+    display: inline-block;
+    border-radius: var(--radius-md);
+  }
+  .headline .fig {
+    font-family: var(--font-narrow);
+    /* 40px — the desk's own "the one thing on this screen" size. The web
+       draws 64px here, which over a 32px `.pg-head h1` makes the pane's own
+       title read as the subtitle. */
+    font-size: var(--text-hero);
+    line-height: var(--text-hero--line-height);
+    letter-spacing: var(--text-hero--letter-spacing);
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+    font-variant-numeric: tabular-nums;
+  }
+  .headline .cap {
+    margin-top: 5px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+  }
+  /* The dashed rule is there to say something is behind it — a number that
+     rewards hovering with no sign that it does is a secret. */
+  .headline .cap span {
+    padding-bottom: 1px;
+    border-bottom: 1px dashed var(--color-line);
+    transition:
+      border-color var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .headline:hover .cap span,
+  .headline:focus-visible .cap span {
+    border-bottom-color: var(--color-dim);
+    color: var(--color-text);
+  }
+  .chartwrap {
+    position: relative;
+    margin-top: 18px;
+  }
+  .chart {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+  .chart text {
+    font-family: var(--font-sans);
+    font-size: var(--text-meta);
+    font-variant-numeric: tabular-nums;
+  }
+  .chart .axis {
+    fill: var(--color-mute);
+  }
+  .chart .axis.on {
+    fill: var(--color-text);
+  }
+  .chart .col {
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  .chart .hit {
+    fill: transparent;
+  }
+
+  /* **Directly under the chart**, which is half of the containment rule: a
+     legend belongs beside what it reads. The web floats this above the
+     ledger, where the mapping has travelled far enough to become the page's. */
+  .key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    margin-top: 14px;
+  }
+  .key .it {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  /* Flat and unfilled, 8px, and never a dot on a glyph — those three shapes
+     stay ember's. */
+  .key .it i {
+    align-self: center;
+    display: block;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 99px;
+  }
+  .key .it .pc {
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .figures {
+    display: flex;
+    flex-wrap: wrap;
+    margin-top: 26px;
+    border-top: 1px solid var(--color-line);
+  }
+  .figures .f {
+    min-width: 0;
+    flex: 1 1 170px;
+    padding: 14px 20px 2px;
+  }
+  .figures .f:first-child {
+    padding-left: 0;
+  }
+  .figures .f + .f {
+    border-left: 1px solid var(--color-line);
+  }
+  .figures .f .k {
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .figures .f .v {
+    margin-top: 2px;
+    font-family: var(--font-narrow);
+    font-size: var(--text-display);
+    line-height: var(--text-display--line-height);
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+    font-variant-numeric: tabular-nums;
+  }
+  .figures .f .n {
+    margin-top: 4px;
+    max-width: 30ch;
+    font-size: var(--text-meta);
+    line-height: 1.45;
+    color: var(--color-mute);
+  }
+  .unreported {
+    margin-top: 20px;
+    max-width: 68ch;
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-mute);
+  }
+  .unreported b {
+    font-weight: 400;
+    color: var(--color-dim);
+  }
+
+  /* ── The two floating layers ──────────────────────────────────────
+     Both on `body` and `fixed`, for the reason `Pop` gives: anchored from
+     inside a scrolling sheet they are drawn in the wrong place the moment
+     anything above them moves. */
+  .tip {
+    position: fixed;
+    z-index: 70;
+    min-width: 200px;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    background: var(--color-overlay);
+    box-shadow: var(--shadow-float);
+    pointer-events: none;
+    transform: translate(-50%, -100%);
+  }
+  [data-theme="light"] .tip {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.055);
+  }
+  .tip h3 {
+    margin-bottom: 7px;
+    font-size: var(--text-meta);
+    font-weight: 530;
+    color: var(--color-bone);
+  }
+  .tip .ln {
+    display: grid;
+    grid-template-columns: 13px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .tip .ln i {
+    display: block;
+    height: 3px;
+    border-radius: 2px;
+  }
+  .tip .ln .m {
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tip .ln .v {
+    font-size: var(--text-meta);
+    font-weight: 530;
+    color: var(--color-bone);
+    font-variant-numeric: tabular-nums;
+  }
+  .tip .tot {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px solid var(--color-line);
+    font-size: var(--text-meta);
+  }
+  .tip .tot .a {
+    color: var(--color-mute);
+  }
+  .tip .tot .b {
+    color: var(--color-text);
+    font-weight: 530;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .comp {
+    position: fixed;
+    z-index: 70;
+    padding: 13px 15px;
+    border-radius: var(--radius-md);
+    background: var(--color-overlay);
+    box-shadow: var(--shadow-float);
+    pointer-events: none;
+  }
+  [data-theme="light"] .comp {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.055);
+  }
+  .comp dl {
+    display: grid;
+    grid-template-columns: auto auto auto;
+    align-items: baseline;
+    gap: 9px 14px;
+  }
+  /* In full, never abbreviated: the point of these four is that 4 and 29,176
+     are not the same kind of thing, which `29.2K` beside `4` hides exactly. */
+  .comp dd.num {
+    justify-self: end;
+    font-family: var(--font-narrow);
+    font-size: var(--text-title);
+    line-height: 1;
+    font-weight: 530;
+    color: var(--color-bone);
+    font-variant-numeric: tabular-nums;
+  }
+  .comp dt {
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+  }
+  .comp dt .also {
+    color: var(--color-mute);
+  }
+  .comp dd.pc {
+    justify-self: end;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Limits, last on the pane ─────────────────────────────────────
+     Signal-coloured gauges, a whole ledger away from the series-coloured
+     chart. That is a benefit of the ordering rather than the reason for it —
+     the reason is that this is the one section that ignores the controls. */
+  .limits {
+    display: grid;
+    gap: 26px 40px;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    margin-top: 12px;
+  }
+  .lim {
+    min-width: 0;
+    max-width: 430px;
+  }
+  /* Said once, however many ways the provider meters it. */
+  .lim .who {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .lim .who .nm {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+  .lim .who .pv {
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .lim .who .fd {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .gauge {
+    margin-top: 12px;
+  }
+  .gauge .ln {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .gauge .ln .w {
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .gauge .ln .when {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .gauge .ln .sp {
+    flex: 1;
+  }
+  .gauge .ln .pc {
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    font-variant-numeric: tabular-nums;
+  }
+  /* A window that reported no percentage gets no track at all. The empty
+     space is the finding, not a gap to fill with a word-shaped box. */
+  .gauge .track {
+    margin-top: 6px;
+    height: 3px;
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .gauge .track i {
+    display: block;
+    height: 100%;
+    border-radius: 99px;
+  }
 }

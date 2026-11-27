@@ -626,6 +626,7 @@ describe("which panes the Organisation destination lists", () => {
       "people",
       "teams",
       "directories",
+      "usage",
       "server",
     ]);
   });
@@ -638,6 +639,7 @@ describe("which panes the Organisation destination lists", () => {
       "people",
       "teams",
       "directories",
+      "usage",
     ]);
   });
 
@@ -647,7 +649,12 @@ describe("which panes the Organisation destination lists", () => {
    * whoever runs it — so a hosted tenant is not shown it whatever their role.
    */
   it.each(WHO)("does not give %s the deployment pane in a hosted installation", (_who, me) => {
-    expect(panesFor("hosted", me).map((p) => p.at)).toEqual(["people", "teams", "directories"]);
+    expect(panesFor("hosted", me).map((p) => p.at)).toEqual([
+      "people",
+      "teams",
+      "directories",
+      "usage",
+    ]);
   });
 
   /** Not until the server has said who you are, either — the same rule the
@@ -672,6 +679,24 @@ describe("which panes the Organisation destination lists", () => {
       const panes = panesFor(mode, me);
       expect(panes.length).toBeGreaterThan(0);
       expect(panes.map((p) => p.at)).toContain(opensOn());
+    },
+  );
+
+  /**
+   * **Usage is everybody's, in every combination, and that is the server's
+   * answer rather than a kindness.**
+   *
+   * `/consumption` has no role check at all — it narrows every read by
+   * `filed_within`, with no administrator bypass — so a gate here would be a
+   * defect rather than caution. Written as its own assertion rather than
+   * left to the two `toEqual`s above, because what it protects is the
+   * absence of a condition: a later change that gated it on `mayAdminister`
+   * would still satisfy an administrator's list.
+   */
+  it.each(MODES.flatMap((mode) => WHO.map(([who, me]) => [mode, who, me] as const)))(
+    "lists Usage for everybody — %s, %s",
+    (mode, _who, me) => {
+      expect(panesFor(mode, me).map((p) => p.at)).toContain("usage");
     },
   );
 

@@ -580,16 +580,26 @@ export function deploymentMode(): DeploymentMode {
 export type OrganisationPane = { at: string; label: string };
 
 /**
- * The three panes that are everybody's, in the order the panel draws them.
+ * The four panes that are everybody's, in the order the panel draws them.
  *
  * People first because it is where the destination opens and the only one of
- * the three somebody has a daily reason to be on; Directories last because it
- * is set up once.
+ * the three about *who* somebody has a daily reason to be on; Directories last
+ * of those three because it is set up once.
+ *
+ * **Usage is here rather than behind a role, and that is the server's
+ * answer rather than a generosity.** `/consumption` has no role check at all:
+ * it narrows every read by `filed_within`, the same predicate as workspaces
+ * and secrets, with no administrator bypass — so a member opening it sees
+ * their own work and an administrator sees whatever they were granted, from
+ * one pane with one shape. Adding a gate the handler does not have would be a
+ * defect rather than caution, and it would make the surface a member lands on
+ * smaller for no reason anybody could point at.
  */
 const EVERYBODYS: OrganisationPane[] = [
   { at: "people", label: "People" },
   { at: "teams", label: "Teams" },
   { at: "directories", label: "Directories" },
+  { at: "usage", label: "Usage" },
 ];
 
 /** The deployment pane, which only an operator of the deployment is shown. */

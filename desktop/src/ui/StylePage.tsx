@@ -197,7 +197,13 @@ export function StylePage() {
           </div>
         </Section>
 
-        <Section name="Chart series" note="One hue per model, and the only place data wears colour. Ember is absent on purpose. Tritanopic separation of adjacent members is weak in both themes, so a series is directly labelled and never keyed by colour alone.">
+        {/* **The catalogue has to carry the containment rule, or it implies
+            these are free to use.** A swatch page is where somebody comes
+            looking for a colour, and four hues sitting beside the signals
+            with no condition on them is how this namespace got drawn on
+            twenty-five ledger rows in the first place. `STYLE.md` carries the
+            four rules; this carries the one a reader of this page needs. */}
+        <Section name="Chart series" note="One hue per model, and the only place data wears colour. Ember is absent on purpose. Tritanopic separation of adjacent members is weak in both themes, so a series is directly labelled and never keyed by colour alone. **Contained**: these may appear inside one chart's plotted frame and the key directly under it, and nowhere else — not on a row's meter, not in a figure, not on a chip. See `STYLE.md`, *A chart is the second exception*.">
           <div className="flex gap-3 rounded-md border border-line bg-panel p-4">
             {SERIES.map(([name, fill]) => (
               <div key={name} className="flex-1">

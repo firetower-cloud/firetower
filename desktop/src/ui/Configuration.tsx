@@ -36,6 +36,7 @@ import { Deployment } from "~/ui/config/Deployment";
 import { People } from "~/ui/config/People";
 import { Teams } from "~/ui/config/Teams";
 import { Directories } from "~/ui/config/Directories";
+import { Usage } from "~/ui/config/Usage";
 import { useMe } from "~/api/generated/auth/auth";
 import { deploymentMode, mayOperateDeployment, opensOn } from "~/ui/config/organisation";
 
@@ -102,6 +103,8 @@ function Pane({ at, open }: { at: string; open: string | null }) {
       return <Teams />;
     case "directories":
       return <Directories />;
+    case "usage":
+      return <Usage />;
     case "vault":
       return <Secrets />;
     case "server":

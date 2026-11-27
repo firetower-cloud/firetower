@@ -324,10 +324,138 @@ function poster(look) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400"><rect width="640" height="400" fill="#fff"/>${body}</svg>`;
 }
 
+/**
+ * The connected subscriptions.
+ *
+ * **They carry a `path` and real `limits` now**, which they did not: the
+ * account sheet never read either, and Usage's Limits section reads both —
+ * so with `limits: []` on every account the whole section was correctly
+ * drawn as nothing and could not be looked at. The three windows below are
+ * the three shapes the section has to handle: a percentage with a reset, a
+ * percentage over ninety, and an agent that reports no percentage at all.
+ */
 const ACCOUNTS = [
-  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
-  { id: "a_2", kind: "Codex", name: "Acme · Plus", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
+  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", path: "u/kevin/perso_01m4anp7",
+    limits: [
+      { observedAt: "2026-11-26T09:12:00Z", scope: "five_hour", status: "allowed", usedPercent: 68, resetsAt: Math.floor(Date.now() / 1000) + 4320 },
+      { observedAt: "2026-11-26T09:12:00Z", scope: "seven_day", status: "allowed", usedPercent: 41, resetsAt: Math.floor(Date.now() / 1000) + 273_600 },
+    ] },
+  { id: "a_2", kind: "Codex", name: "Acme · Plus", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", path: "d/platform/acct_01m4anp8",
+    limits: [{ observedAt: "2026-11-26T09:12:00Z", scope: "month", status: "allowed", usedPercent: 91, resetsAt: Math.floor(Date.now() / 1000) + 367_200 }] },
+  /* Claude Code reports no percentage on this one. The empty space where a
+     meter would be is the finding, not a gap to fill. */
+  { id: "a_3", kind: "ClaudeCode", name: "Acme · Ops", mode: "subscription", isDefault: false, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "ops@acme.com", path: "d/ops/acct_01m4anp9",
+    limits: [{ observedAt: "2026-11-25T18:04:00Z", scope: "account", status: "allowed" }] },
 ];
+
+/* ── What the fleet spent ─────────────────────────────────────────────
+   `/api/v1/consumption` answers the Organisation → Usage pane, and nothing
+   in this file answered it before — so the screen could only ever be driven
+   into its empty state. Invented, deterministic, and cut the way the real
+   handler cuts it: the search narrows the groups and leaves the totals and
+   the series alone, which is what makes "nothing matches" keep its chart. */
+
+const USAGE_MODELS = ["claude-sonnet-4-5", "gpt-5.1-codex", "claude-opus-4-1", "kimi-k2-0905", "glm-4.6"];
+const USAGE_WEIGHTS = [0.44, 0.24, 0.18, 0.11, 0.03];
+const byModel = (tokens) =>
+  USAGE_MODELS.map((model, i) => ({ model, tokens: Math.round(tokens * USAGE_WEIGHTS[i]) }));
+
+/** A deterministic wobble, so a reload draws the same chart. */
+const wobble = (n) => 0.78 + ((Math.sin(n * 12.9898) * 43758.5453) % 1 + 1) % 1 * 0.5;
+
+const USAGE_TASKS = [
+  ["FIRE-412", "Bring the administration screens into the renderer", 9, 31],
+  ["FIRE-418", "Serve the renderer from the control plane’s root", 6, 22],
+  ["FIRE-407", "Password policy is enforced at the next sign-in", 4, 14],
+  ["FIRE-431", "Delete the desktop release pipeline", 5, 17],
+  ["FIRE-388", "A workspace names itself from its first turn", 3, 11],
+  ["FIRE-396", "A skill bundle can be read a file at a time", 4, 12],
+  ["FIRE-414", "Work out what somebody is the last administrator of", 3, 9],
+  ["FIRE-409", "Trusted proxy configuration, and the header it trusts", 2, 8],
+  /* Work filed against no task at all, and a task whose title did not come
+     back — the two unnamed rows the pane has different words for. */
+  [null, null, 7, 19],
+  ["FIRE-377", null, 2, 6],
+  ["FIRE-402", "Offboarding moves a person’s filing before it removes them", 3, 10],
+  ["FIRE-425", "Asset caching is re-derived from the embed’s own manifest", 2, 7],
+];
+
+const USAGE_PEOPLE = ["kevin", "dana", "priya", "tomas", "marie", "jun", "aleks"];
+
+function usageRows(dimension) {
+  if (dimension === "model")
+    return USAGE_MODELS.map((m, i) => ({ key: m, name: m, tokens: Math.round(620_000 * USAGE_WEIGHTS[i]) }));
+  if (dimension === "person")
+    return USAGE_PEOPLE.map((p, i) => ({ key: p, name: p, tokens: Math.round(380_000 * 0.78 ** i) }));
+  if (dimension === "subscription")
+    return ACCOUNTS.map((a, i) => ({ key: a.id, name: a.name, tokens: Math.round(540_000 * 0.6 ** i) }));
+  return USAGE_TASKS.map(([key, name], i) => ({ key, name, tokens: Math.round(214_000 * 0.855 ** i) }));
+}
+
+function consumption(params) {
+  const dimension = params.get("group") ?? "task";
+  const bucket = params.get("bucket") ?? "day";
+  const then = params.get("then");
+  const find = (params.get("find") ?? "").trim().toLowerCase();
+  const limit = Number(params.get("limit") ?? 25);
+  const columns = bucket === "day" ? 14 : bucket === "week" ? 13 : 12;
+
+  const end = new Date();
+  const series = [];
+  for (let i = columns - 1; i >= 0; i--) {
+    const at = new Date(end);
+    if (bucket === "day") at.setDate(at.getDate() - i);
+    else if (bucket === "week") at.setDate(at.getDate() - i * 7);
+    else at.setMonth(at.getMonth() - i);
+    at.setHours(0, 0, 0, 0);
+    const weekend = bucket === "day" && (at.getDay() === 0 || at.getDay() === 6);
+    const trend = 0.55 + 0.75 * ((columns - i) / columns);
+    series.push({ start: at.toISOString(), models: byModel(Math.round((weekend ? 0.26 : 1) * trend * wobble(i) * 290_000)) });
+  }
+
+  const tokens = series.reduce((a, c) => a + c.models.reduce((x, m) => x + m.tokens, 0), 0);
+  const totals = {
+    inputTokens: Math.round(tokens * 0.14), outputTokens: Math.round(tokens * 0.03),
+    cacheReadTokens: Math.round(tokens * 0.77), cacheWriteTokens: Math.round(tokens * 0.06),
+    cacheWrite1hTokens: Math.round(tokens * 0.04), cacheWrite5mTokens: Math.round(tokens * 0.02),
+    tokens, costUsd: null, pricedRows: 300, rows: 1420, unreportedTurns: 38,
+    turns: 1284, conversations: 173, workspaces: 96, people: 9, tasks: 41,
+  };
+
+  /* The search narrows the groups and nothing else, exactly as the handler
+     does — `consumption_where()` carries the period and the scope and the
+     find clause is added by the groups query alone. */
+  let rows = usageRows(dimension);
+  if (find) rows = rows.filter((r) => `${r.name ?? ""} ${r.key ?? ""}`.toLowerCase().includes(find));
+
+  const groups = rows.slice(0, limit).map((r, i) => {
+    const [, , workspaces = 2, conversations = 6] = USAGE_TASKS[i] ?? [];
+    const group = {
+      key: r.key, name: r.name, tokens: r.tokens, models: byModel(r.tokens),
+      costUsd: null, pricedRows: 0, rows: 20, turns: conversations * 7, conversations,
+      workspaces, people: 1 + (i % 5), tasks: workspaces,
+      firstAt: series[0].start, lastAt: series[series.length - 1].start,
+    };
+    if (then && then !== dimension) {
+      /* `FIRE-377` has nothing under it, so the "nothing to break this down
+         by" line is reachable rather than theoretical. */
+      const kids = r.key === "FIRE-377" ? [] : then === "model"
+        ? USAGE_MODELS.map((m, n) => ({ key: m, name: m, tokens: Math.round(r.tokens * USAGE_WEIGHTS[n]) }))
+        : USAGE_PEOPLE.slice(0, workspaces >= 5 ? 7 : 4).map((p, n) => ({ key: p, name: p, tokens: Math.round(r.tokens * 0.42 / (n + 1)) }));
+      group.children = kids.map((k) => ({
+        ...k, models: byModel(k.tokens), costUsd: null, pricedRows: 0, rows: 4,
+        turns: 0, conversations: 0, workspaces: 0, people: 0, tasks: 0,
+      }));
+    }
+    return group;
+  });
+
+  const over = rows.length - groups.length;
+  return {
+    totals, series, groups, groupCount: rows.length,
+    rest: over > 0 ? { key: null, name: null, tokens: Math.round(tokens * 0.31), models: [], costUsd: null, pricedRows: 0, rows: 0, turns: 0, conversations: 0, workspaces: 0, people: 0, tasks: 0 } : null,
+  };
+}
 
 const say = (item, text) => [
   { lineNo: 0, type: "ItemStarted", item, kind: "AssistantMessage", title: null, task: null },
@@ -1333,6 +1461,16 @@ const server = createServer(async (req, res) => {
       res.writeHead(204, { "access-control-allow-origin": "*" });
       return res.end();
     }
+  }
+  /* Before the static table, because this one reads its query. A period with
+     nothing in it is a scene rather than a special case. */
+  if (path === "/api/v1/consumption") {
+    if (scene === "no-usage")
+      return json(res, {
+        totals: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cacheWrite1hTokens: 0, cacheWrite5mTokens: 0, tokens: 0, costUsd: null, pricedRows: 0, rows: 0, unreportedTurns: 0, turns: 0, conversations: 0, workspaces: 0, people: 0, tasks: 0 },
+        series: [], groups: [], groupCount: 0, rest: null,
+      });
+    return json(res, consumption(url.searchParams));
   }
   if (path in routes) return json(res, routes[path]);
   /* The file itself. `useFileText` reads the body as bytes and decides for
