@@ -106,6 +106,7 @@ pub mod readiness;
 pub mod runtime;
 pub mod skills;
 pub mod store;
+pub mod strays;
 pub mod structured;
 pub mod tmux;
 pub mod tunnel;
@@ -892,6 +893,38 @@ impl Worker {
                     None
                 };
                 if let Some(workspace) = workspace.as_deref().map(std::path::Path::new) {
+                    // Whatever the workspace still has running, before the
+                    // directory it is running in goes.
+                    //
+                    // The two `kill-session` calls above reached the panes and
+                    // the foreground of them. They do not reach a dev server
+                    // the agent left in the background, or the `workerd` a
+                    // `wrangler dev` spawned: those are in process groups of
+                    // their own, they outlive the pane, and they hold their
+                    // memory until somebody finds them by hand. What is left
+                    // that can name them is the cgroup on Linux and the
+                    // session tag in their environment on macOS — see
+                    // `strays::kill` for both.
+                    //
+                    // Every session that ever worked here, not only the one
+                    // ending: the tag a process carries is the session that
+                    // started it, and a sibling that ended last week may have
+                    // left a dev server of its own. The cgroup covers that for
+                    // free, and this is what makes the two the same job.
+                    //
+                    // Before the worktree for the same reason the Docker sweep
+                    // is before it: something still writing into a checkout
+                    // that `remove_dir_all` is taking apart is the next bug
+                    // along. And inside this branch because `alone` is what
+                    // put us in it — both handles belong to the workspace, so
+                    // a sibling agent would be killed by this too.
+                    let sessions = self
+                        .store
+                        .sessions_in_workspace(&session_id)
+                        .await
+                        .unwrap_or_else(|_| vec![session_id.clone()]);
+                    crate::strays::kill(workspace, &sessions, &session_id).await;
+
                     // The accounting goes with the workspace it accounted for.
                     //
                     // Here rather than beside the Docker sweep because this is
@@ -5826,6 +5859,105 @@ mod tests {
         let _ = tmux::Tmux::for_session(id.as_str()).kill().await;
     }
 
+    /// A detached process in a workspace, of the kind teardown has to find
+    /// again with no parent left to ask.
+    ///
+    /// `None` where the platform hands teardown no handle at all — a Linux
+    /// host with no cgroup v2 — and there is nothing for the caller to assert.
+    ///
+    /// What gets started differs because the handles do. On Linux the shell
+    /// joins the workspace's cgroup before forking, the way a pane does, and
+    /// anything at all will do after that. On macOS the handle is the session
+    /// tag the process inherits, so it has to be a binary whose environment
+    /// can be read — and `/bin/sleep`, the obvious choice, is not one. See
+    /// the "What the tag cannot see" section of the `strays` module header
+    /// for whose environments are hidden and why it is silent about it. This
+    /// test binary is not one of them, so it is what gets started, sitting
+    /// still in `strays::tests::the_sleeper`.
+    fn detached_in(workspace: &std::path::Path, session: &SessionId) -> Option<i32> {
+        if !cgroup::available() && !cfg!(target_os = "macos") {
+            return None;
+        }
+
+        let join = match cgroup::available() {
+            true => format!(
+                "echo $$ > {};",
+                cgroup::agents_dir(workspace).join("cgroup.procs").display()
+            ),
+            false => String::new(),
+        };
+        let command = match cfg!(target_os = "macos") {
+            true => format!(
+                "'{}' --exact strays::tests::the_sleeper --ignored",
+                std::env::current_exe().ok()?.display()
+            ),
+            false => "sleep 60".to_string(),
+        };
+
+        let started = std::process::Command::new("sh")
+            .env(ft_core::SESSION_ENV, session.as_str())
+            .env("FT_STRAY_SLEEPER", "1")
+            .args([
+                "-c",
+                &format!("{join} {command} >/dev/null 2>&1 </dev/null & echo $!"),
+            ])
+            .output()
+            .expect("the shell should run");
+
+        let pid: i32 = String::from_utf8_lossy(&started.stdout)
+            .trim()
+            .parse()
+            .expect("the shell should have said the pid");
+
+        // Started is not the same as findable, and teardown is about to go
+        // looking. On Linux the shell joined the cgroup before it forked, so
+        // the child is in it from birth and running is the whole of it. On
+        // macOS the handle is the environment, and a process has none to read
+        // until it has finished `exec`ing — see `strays::visible`, which is
+        // the same wait the tests over there do, for the same reason.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < deadline {
+            #[cfg(target_os = "macos")]
+            let ready = crate::strays::visible(pid, session.as_str());
+            #[cfg(not(target_os = "macos"))]
+            let ready = running(pid);
+
+            if ready {
+                return Some(pid);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        // Rather than handing back a decoy nothing can see, which would make
+        // the assertions below pass for the wrong reason.
+        panic!("the decoy {pid} never became something teardown could find")
+    }
+
+    /// Whether a pid is still a process that is running.
+    ///
+    /// Not merely `kill(pid, 0)`. A process that has been killed but not yet
+    /// reaped still answers that, and who reaps an orphan is whatever PID 1
+    /// happens to be — in a container that is sometimes a shell blocked
+    /// waiting on the test run itself, which reaps nothing until it exits.
+    /// Linux can be asked what state a process is in; macOS reparents orphans
+    /// onto launchd, which takes them as they go.
+    fn running(pid: i32) -> bool {
+        // SAFETY: signal 0 asks whether a pid exists and sends nothing.
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return false;
+        }
+
+        #[cfg(target_os = "linux")]
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            // `pid (comm) state …`, and a comm may hold spaces and brackets of
+            // its own, so the state is the character after the last `)`.
+            if let Some((_, rest)) = stat.rsplit_once(')') {
+                return !rest.trim_start().starts_with('Z');
+            }
+        }
+        true
+    }
+
     fn hello() -> ToWorker {
         ToWorker::Hello {
             protocol: PROTOCOL_VERSION,
@@ -6385,6 +6517,25 @@ mod tests {
         )
         .await;
 
+        // One process in the shape of the leak per agent: detached from the
+        // shell that started it, orphaned, and reachable afterwards only by
+        // the handle the platform hands teardown. This is the dev server an
+        // agent leaves running — no `kill-session` goes anywhere near it, and
+        // teardown used to leave it holding its memory for as long as the
+        // machine was up.
+        //
+        // Two of them, because one would not test what this workspace is for.
+        // The tag a process carries names the *session* that started it while
+        // the thing being reclaimed is the *workspace*, so the agent that ends
+        // first leaves strays that no later teardown would recognise unless it
+        // asks which sessions ever worked here. With only a stray of the last
+        // agent's, matching the destroying session's own id would pass, and
+        // the store lookup that makes macOS cover what the cgroup covers could
+        // be deleted without a test noticing.
+        let workspace = std::path::Path::new(&path);
+        let from_first = detached_in(workspace, &first);
+        let from_second = detached_in(workspace, &second);
+
         // End the second one, the way closing its tab does.
         exchange(
             &worker,
@@ -6415,6 +6566,20 @@ mod tests {
             tmux::Tmux::for_session(first.as_str()).exists().await,
             "the agent nobody ended should still be running"
         );
+        for pid in [from_first, from_second].into_iter().flatten() {
+            // And so should everything either of them started, including the
+            // ended agent's own. Both handles are the workspace's rather than
+            // the session's — the cgroup holds every pane in the place, and
+            // every process here carries a tag from the same workspace — so a
+            // teardown that swept now would take out the agent nobody ended
+            // along with whatever it had running. Which is why the sweep is on
+            // the last one out and not on every one, and why what the agent
+            // that ended first left behind waits for the workspace to go.
+            assert!(
+                running(pid),
+                "nothing in a workspace is swept while an agent is still working in it"
+            );
+        }
 
         // And when the last one goes, the worktree is reclaimed.
         exchange(
@@ -6433,6 +6598,35 @@ mod tests {
             !std::path::Path::new(&path).exists(),
             "the last agent out should reclaim the worktree, not leak it"
         );
+        if let Some(pid) = from_first {
+            assert!(
+                !running(pid),
+                "the last agent out should take the workspace's processes with it"
+            );
+        }
+        if let Some(pid) = from_second {
+            // The one that proves the workspace is the unit. This process
+            // carries the tag of the agent that ended first, so reaching it
+            // means teardown asked which sessions had ever worked here rather
+            // than only which one it was told to destroy — `alone` says the
+            // workspace is finished, and finished means all of it.
+            assert!(
+                !running(pid),
+                "and what the agent that ended first left behind, which only \
+                 asking for every session of this workspace will find"
+            );
+        }
+        if cgroup::available() {
+            // And on Linux the cgroup goes too, which is a second proof of the
+            // first: the kernel refuses `rmdir` on a cgroup that still holds a
+            // live process, so an absent directory says both that the dev
+            // server was killed and that the accounting it was in went with
+            // it.
+            assert!(
+                !cgroup::dir(workspace).exists(),
+                "the last agent out should take the workspace's cgroup with it"
+            );
+        }
 
         cleanup(&first).await;
         cleanup(&second).await;

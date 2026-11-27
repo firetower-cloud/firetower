@@ -51,6 +51,7 @@
 //! question worth asking first, and the answer is allowed to be no.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use ft_core::{SessionId, Share, WorkspaceSize};
 
@@ -159,9 +160,49 @@ pub fn available() -> bool {
     // Writable is asked by trying, because the mount can be read-only in ways
     // that permissions do not show — a worker created without `--privileged` is
     // exactly that case.
-    std::fs::create_dir_all(root.join("ft-probe"))
-        .and_then(|()| std::fs::remove_dir(root.join("ft-probe")))
-        .is_ok()
+    //
+    // `create_dir` and not `create_dir_all`: what is being asked is whether we
+    // can make a cgroup, and finding one already there is not an answer to
+    // that. See [`probe`] for what that distinction used to cost.
+    let probe = probe();
+    if let Err(e) = std::fs::create_dir(&probe) {
+        tracing::debug!(probe = %probe.display(), "cgroups are not ours to write: {e}");
+        return false;
+    }
+
+    // Ours alone, so taking it away can take nobody else's answer with it.
+    match std::fs::remove_dir(&probe) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::debug!(probe = %probe.display(), "the probe cgroup would not go away again: {e}");
+            false
+        }
+    }
+}
+
+/// A probe directory no other call is using.
+///
+/// It used to be one fixed `ft-probe` for the whole machine, which turned a
+/// question into a race. `create_dir_all` is content to find the directory
+/// already there, so two sessions starting at once both believed they had made
+/// it, the first removed it, and the second's `rmdir` failed with `ENOENT` —
+/// which read as a host with no usable cgroups. Measured at 51 wrong answers
+/// in 80 concurrent calls.
+///
+/// The cost of a wrong `false` is not a workspace that goes unaccounted. It is
+/// [`create`] returning early, so the workspace has no cgroup at all, so
+/// [`kill`] finds nothing to kill and teardown leaves every process that
+/// workspace started running — the exact leak this module was changed to close,
+/// reinstated by nothing more than two sessions starting at the same moment.
+///
+/// A name of our own makes it a local question again. The pid is not enough on
+/// its own: `available` is asked once per session and twice per start, and two
+/// of those overlap inside one worker as readily as between two.
+fn probe() -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Path::new(ROOT).join(format!("ft-probe-{}-{n}", std::process::id()))
 }
 
 /// The cgroup a workspace's directory name makes.
@@ -337,12 +378,201 @@ pub async fn usage(workspace: &Path) -> Option<Usage> {
     })
 }
 
+/// Kill everything the workspace still has running.
+///
+/// Teardown's other handles do not reach far enough. `tmux kill-session` ends
+/// the pane and signals its foreground process group, which is the agent and
+/// whatever the agent was waiting on. It is not the dev server the agent left
+/// running in the background, or the `workerd` that a `wrangler dev` spawned,
+/// or a file watcher, or anything else started detached: those are in process
+/// groups of their own, they outlive the pane, they reparent to init, and they
+/// go on holding their memory with their working directory already deleted.
+/// Someone running a worker on their own VPS found several of them that way —
+/// deleting the workspace gave the disk back and not the RAM.
+///
+/// The cgroup is the handle that does reach them. A pane puts itself in
+/// `agents/` as its first instruction, before it is the agent — see
+/// [`join_command`] — and the kernel hands that membership to everything it
+/// forks, through `setsid`, through daemonising, through reparenting. So the
+/// tree under `ft-w_…` is this workspace's processes and nothing else, which
+/// is both why it can be killed wholesale and why it must only be killed when
+/// the workspace is finished with.
+///
+/// **Only for the last agent out.** The cgroup belongs to the workspace rather
+/// than to the session, so a sibling agent still working is in here too and
+/// this would end it mid-run — a worse thing by far than the leak. The `alone`
+/// check in teardown is what establishes that, and it stays at the call site:
+/// see [`remove`] for why nothing here decides it for itself.
+///
+/// Best effort like everything else in this module. A machine with no cgroups
+/// has no handle to kill by and says nothing about it, which is the whole of
+/// what happens on a macOS worker.
+pub async fn kill(workspace: &Path, session: &SessionId) {
+    let dir = dir(workspace);
+    if !dir.exists() {
+        return;
+    }
+
+    // Nothing left is both the ordinary case and the one worth no words: an
+    // agent that started no daemon of its own has already gone with its pane.
+    let found = members(&dir).await.len();
+    if found == 0 {
+        return;
+    }
+
+    let left = clear(&dir).await;
+    if left.is_empty() {
+        tracing::info!(
+            session = %session,
+            cgroup = %dir.display(),
+            "killed {found} processes the workspace had left running"
+        );
+    } else {
+        // A warning because this is the leak, still leaking, and the memory it
+        // holds will not come back until somebody finds it by hand. The pids
+        // are what they would need.
+        tracing::warn!(
+            session = %session,
+            cgroup = %dir.display(),
+            pids = ?left,
+            "{} of {found} processes in the workspace would not die",
+            left.len()
+        );
+    }
+}
+
+/// How many times to ask, and how long to wait between asking.
+///
+/// SIGKILL is immediate; exiting is not. A process with a lot of memory mapped
+/// takes a moment for the kernel to take apart and stays in `cgroup.procs`
+/// until it has, so a teardown that does not wait hands `remove` a cgroup that
+/// is still busy and leaves it standing. A second of patience costs nothing
+/// against a teardown that is already deleting a directory tree.
+const ROUNDS: u32 = 20;
+const PAUSE: Duration = Duration::from_millis(50);
+
+/// Kill a cgroup's processes, and wait for them to actually be gone.
+///
+/// Rounds rather than one pass, because what is in here may fork while it is
+/// being killed — a supervisor restarting the dev server it just lost is the
+/// ordinary example, and a child born between the read and the signal is in
+/// the cgroup but not in the list. `cgroup.kill` has no such gap, so on a
+/// kernel that has it the second round is only ever the wait.
+///
+/// Returns whatever is still listed when patience runs out, which is empty on
+/// every path that worked.
+async fn clear(dir: &Path) -> Vec<i32> {
+    let mut left = members(dir).await;
+    for _ in 0..ROUNDS {
+        if left.is_empty() {
+            break;
+        }
+        sigkill(dir, &left).await;
+        tokio::time::sleep(PAUSE).await;
+        left = members(dir).await;
+    }
+    left
+}
+
+/// Every process in a cgroup and in the cgroups beneath it.
+///
+/// The walk is the point. `cgroup.procs` lists only what sits in that exact
+/// cgroup, and the workspace's own is empty by design: the panes are in
+/// `agents/` and a container the session started is in whatever the daemon
+/// made for it under here. Reading the workspace alone would conclude there
+/// was nothing to kill, every time.
+///
+/// Taking the directory rather than the workspace is also the test seam. This
+/// and [`sigkill`] can be pointed at a temporary directory shaped like a
+/// cgroup, which is the only way to exercise them off a Linux host, because
+/// [`ROOT`] is a const and [`kill`] derives everything from it.
+async fn members(dir: &Path) -> Vec<i32> {
+    let mut pids: Vec<i32> = Vec::new();
+    let mut pending = vec![dir.to_path_buf()];
+
+    while let Some(cgroup) = pending.pop() {
+        if let Ok(procs) = tokio::fs::read_to_string(cgroup.join("cgroup.procs")).await {
+            pids.extend(
+                procs
+                    .lines()
+                    .filter_map(|line| line.trim().parse::<i32>().ok()),
+            );
+        }
+
+        let Ok(mut entries) = tokio::fs::read_dir(&cgroup).await else {
+            continue;
+        };
+        // A cgroup filesystem holds directories and regular files and nothing
+        // else — no symlinks, no mount points — so a directory here is a child
+        // cgroup and there is no cycle to guard against.
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            if entry.file_type().await.is_ok_and(|kind| kind.is_dir()) {
+                pending.push(entry.path());
+            }
+        }
+    }
+
+    pids
+}
+
+/// SIGKILL a cgroup's processes, by the kernel's own handle where there is one.
+///
+/// `cgroup.kill` is a single write that takes the whole subtree down at once
+/// and cannot be outrun: the kernel kills under a lock, so nothing escapes by
+/// forking while a list is being worked through. It arrived in Linux 5.14, and
+/// a worker on an older kernel — Debian 11 is still on 5.10 — has to be sent
+/// the signals one at a time instead, which is what the list is read for.
+///
+/// Whether the file is there is the version question, asked the only way a
+/// filesystem interface can be asked. The write is allowed to fail even when
+/// it is — `/sys/fs/cgroup` is read-only on some hosts — and a pid is a handle
+/// that outlives that, so the hard way is worth trying rather than giving up.
+async fn sigkill(dir: &Path, pids: &[i32]) {
+    let killer = dir.join("cgroup.kill");
+    if killer.exists() && tokio::fs::write(&killer, "1").await.is_ok() {
+        return;
+    }
+
+    for pid in pids {
+        // Strictly positive, because `kill` reads everything else as a
+        // broadcast rather than as a pid. Zero is every process in *our* own
+        // process group, which is the worker: a teardown that killed itself
+        // would take every other session on the machine with it. `-1` is every
+        // process this user may signal at all, and any other negative number
+        // is a whole process group.
+        //
+        // Not a worry about malformed files. `cgroup.procs` is written by the
+        // kernel, but by the kernel's view of the pid namespace it was read
+        // from — a process belonging to another namespace has no pid in ours
+        // and reads here as `0`. One comparison against a worker that kills
+        // itself is a trade worth making whatever the odds.
+        if *pid <= 0 {
+            tracing::debug!(pid, "not a pid in this namespace; left alone");
+            continue;
+        }
+
+        // Nothing to do with the answer. `ESRCH` means it went while we were
+        // reading, which is the point of the exercise, and anything else is a
+        // process the next round will find still here.
+        unsafe { libc::kill(*pid, libc::SIGKILL) };
+    }
+}
+
 /// Take a workspace's cgroup away, once nothing is left in it.
 ///
-/// Called from teardown, where the session that ended may not have been the
-/// last one in its workspace. `rmdir` on a cgroup with processes still in it
-/// fails with `EBUSY`, which is exactly the answer we want and why this does
-/// not check first: the last session out is the one that succeeds.
+/// Teardown calls this only for the last agent out of a workspace — `alone` at
+/// the call site — but it is written as though that might be wrong, because
+/// `rmdir` on a cgroup that still holds processes fails with `EBUSY` and that
+/// is a guard worth keeping: a caller mistaken about being last leaves a
+/// cgroup standing rather than taking the accounting out from under a live
+/// agent.
+///
+/// Which is also why nothing here kills, though [`kill`] runs immediately
+/// before it from the same place. Removing a directory that something is still
+/// using is a failed `rmdir`; killing what is in it on the same mistaken
+/// belief is somebody's agent gone mid-run. The dangerous half is a separate
+/// call so that it is a decision somebody makes, in the one place that knows
+/// the workspace is finished.
 ///
 /// The `agents` child goes first, because a cgroup with children will not go
 /// either.
@@ -544,5 +774,284 @@ mod tests {
                 "{shell} should have gone on to start the agent"
             );
         }
+    }
+
+    /// The shape of the thing being killed.
+    ///
+    /// Started by a shell that then exits, so it is nobody's child, in nobody's
+    /// foreground process group, and reparented to init the moment it exists —
+    /// which is what a `wrangler dev` or a backgrounded `npm run dev` looks
+    /// like a second after the agent started it. Its own output goes nowhere,
+    /// because a process holding the pipe `output()` is reading would hang this
+    /// test rather than outlive it.
+    fn detached() -> i32 {
+        let started = std::process::Command::new("sh")
+            .args(["-c", "sleep 60 >/dev/null 2>&1 </dev/null & echo $!"])
+            .output()
+            .expect("the shell should run");
+
+        String::from_utf8_lossy(&started.stdout)
+            .trim()
+            .parse()
+            .expect("the shell should have said the pid")
+    }
+
+    /// Whether a pid is still a process that is running.
+    ///
+    /// Signal 0 is the kernel being asked whether a pid is there, and on its
+    /// own it is not enough: a process that has been killed but not yet reaped
+    /// still answers it, and who reaps an orphan is whatever PID 1 happens to
+    /// be. In a container that is sometimes a shell blocked waiting on the
+    /// test run itself, which reaps nothing until it exits — found by running
+    /// these in Docker without `--init`, where every kill here looked like a
+    /// failure. So Linux is asked what state the process is in.
+    fn alive(pid: i32) -> bool {
+        // SAFETY: signal 0 asks whether a pid exists and sends nothing.
+        if unsafe { libc::kill(pid, 0) } != 0 {
+            return false;
+        }
+
+        #[cfg(target_os = "linux")]
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            // `pid (comm) state …`, and a comm may hold spaces and brackets of
+            // its own, so the state is the character after the last `)`.
+            if let Some((_, rest)) = stat.rsplit_once(')') {
+                return !rest.trim_start().starts_with('Z');
+            }
+        }
+        true
+    }
+
+    /// Dying takes a moment even when the signal does not. Orphans are reaped
+    /// by init as they go, so this settles in milliseconds or not at all.
+    async fn gone(pid: i32) -> bool {
+        for _ in 0..40 {
+            if !alive(pid) {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        false
+    }
+
+    /// Asking the workspace cgroup alone would find nothing to kill, every
+    /// time: the panes are a level down in `agents/` and a container is a
+    /// level down in whatever the daemon named it. The walk is what makes the
+    /// cgroup a handle on the whole workspace.
+    #[tokio::test]
+    async fn processes_are_found_in_the_cgroups_under_a_workspace_as_well() {
+        let dir = tempfile::tempdir().unwrap();
+        tokio::fs::write(dir.path().join("cgroup.procs"), "")
+            .await
+            .unwrap();
+        tokio::fs::create_dir(dir.path().join("agents"))
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("agents/cgroup.procs"), "111\n222\n")
+            .await
+            .unwrap();
+        tokio::fs::create_dir(dir.path().join("docker-abc.scope"))
+            .await
+            .unwrap();
+        tokio::fs::write(dir.path().join("docker-abc.scope/cgroup.procs"), "333\n")
+            .await
+            .unwrap();
+
+        let mut found = members(dir.path()).await;
+        found.sort_unstable();
+        assert_eq!(found, vec![111, 222, 333]);
+    }
+
+    /// On a kernel that has `cgroup.kill`, that is the whole of it: one write,
+    /// the subtree goes, and nothing is signalled by pid — which is what makes
+    /// it proof against something forking while a list is worked through.
+    ///
+    /// Shown by what does *not* die. An ordinary directory is not a cgroup, so
+    /// writing to the file here kills nothing, and a process that is still
+    /// running afterwards is the evidence that no pid was signalled by hand.
+    #[tokio::test]
+    async fn a_kernel_that_can_kill_a_subtree_is_asked_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid = detached();
+        tokio::fs::write(dir.path().join("cgroup.procs"), format!("{pid}\n"))
+            .await
+            .unwrap();
+        // Present is the only thing this file says about a kernel from here.
+        tokio::fs::write(dir.path().join("cgroup.kill"), "")
+            .await
+            .unwrap();
+
+        sigkill(dir.path(), &members(dir.path()).await).await;
+
+        assert_eq!(
+            tokio::fs::read_to_string(dir.path().join("cgroup.kill"))
+                .await
+                .unwrap(),
+            "1"
+        );
+        assert!(
+            alive(pid),
+            "the pids should not have been signalled as well"
+        );
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+
+    /// And on one that does not, the processes are signalled one at a time.
+    /// A directory with no `cgroup.kill` in it is what a 5.10 kernel looks
+    /// like from here, and the process is a real one so that the fallback has
+    /// to actually work rather than merely be reached.
+    #[tokio::test]
+    async fn an_older_kernel_has_its_processes_killed_one_at_a_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid = detached();
+        tokio::fs::write(dir.path().join("cgroup.procs"), format!("{pid}\n"))
+            .await
+            .unwrap();
+
+        sigkill(dir.path(), &members(dir.path()).await).await;
+
+        assert!(
+            gone(pid).await,
+            "a detached process should not survive its workspace"
+        );
+    }
+
+    /// Two sessions starting at once must not take each other's answer away.
+    ///
+    /// The probe used to be one directory for the whole machine, and this is
+    /// the shape of what that cost: 80 callers at once, 51 of which were told
+    /// the host had no cgroups because somebody else had just removed the
+    /// directory they were both using. What makes it worth a test rather than
+    /// a comment is where that `false` lands — `create` bails, the workspace
+    /// gets no cgroup, and teardown has nothing to kill.
+    ///
+    /// Consistency is the assertion, because the right answer differs by
+    /// machine: `true` on a worker, `false` on a laptop, and the same both
+    /// ways however many ask at once.
+    #[test]
+    fn two_sessions_asking_at_once_get_the_same_answer() {
+        let alone = available();
+
+        let answers: Vec<bool> = std::thread::scope(|scope| {
+            let asking: Vec<_> = (0..80).map(|_| scope.spawn(available)).collect();
+            asking
+                .into_iter()
+                .map(|ask| ask.join().expect("the thread should not panic"))
+                .collect()
+        });
+
+        let wrong = answers.iter().filter(|answer| **answer != alone).count();
+        assert_eq!(
+            wrong, 0,
+            "{wrong} of 80 concurrent calls disagreed with {alone}"
+        );
+
+        // And nothing of ours left in the hierarchy on the way through.
+        let ours = format!("ft-probe-{}-", std::process::id());
+        let left: Vec<String> = std::fs::read_dir(ROOT)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(&ours))
+            .collect();
+        assert!(left.is_empty(), "probes left behind: {left:?}");
+    }
+
+    /// A number out of `cgroup.procs` is not necessarily a pid, and `kill` is
+    /// not forgiving about the difference: `0` is every process in the
+    /// worker's own process group, and a negative number is a process group of
+    /// its own. A process in another pid namespace reads as `0` from here.
+    ///
+    /// What this asserts is that the test survived at all, with a process of
+    /// ours alongside it: without the guard, `kill(0, SIGKILL)` would take the
+    /// test runner and everything beside it, which is exactly what it would do
+    /// to a worker.
+    #[tokio::test]
+    async fn a_number_that_is_not_a_pid_is_never_signalled() {
+        let dir = tempfile::tempdir().unwrap();
+        let bystander = detached();
+
+        // No `cgroup.kill` in this directory, so this is the path where a
+        // number from the file becomes an argument to `kill`. `-12345` stands
+        // for the negatives; `-1`, which means every process this user owns,
+        // is not a thing to write into a test on somebody's laptop.
+        tokio::fs::write(dir.path().join("cgroup.procs"), "0\n-12345\n")
+            .await
+            .unwrap();
+
+        sigkill(dir.path(), &members(dir.path()).await).await;
+
+        assert!(
+            alive(bystander),
+            "a process in the worker's own group must not be swept up"
+        );
+        unsafe { libc::kill(bystander, libc::SIGKILL) };
+    }
+
+    /// The leak, against the kernel: a process that outlived the shell that
+    /// started it, a teardown that used to leave it running, and the same
+    /// teardown with the kill in it.
+    ///
+    /// Skipped where there are no cgroups to make — a macOS worker, a
+    /// container without the delegation — which is the same question `create`
+    /// asks before it does anything. The three tests above are what runs
+    /// there, against a directory shaped like a cgroup.
+    #[tokio::test]
+    async fn a_real_cgroup_gives_up_its_processes_and_then_itself() {
+        if !available() {
+            eprintln!("no cgroup v2 to write to here; skipping");
+            return;
+        }
+
+        let session = SessionId::new();
+        // A workspace that was never on disk. What names the cgroup is the
+        // last component of the path and nothing here reads the directory, so
+        // the pid keeps two of these from colliding on a busy machine.
+        let workspace = std::env::temp_dir().join(format!("ft-killtest-{}", std::process::id()));
+        assert!(create(&workspace, Limits::default()).await);
+
+        // Put in the cgroup the way a pane puts itself in one, and then
+        // orphaned: the shell that joined is gone, and nothing but the
+        // membership connects what it left behind to the workspace.
+        let procs = agents_dir(&workspace).join("cgroup.procs");
+        let started = std::process::Command::new("sh")
+            .args([
+                "-c",
+                &format!(
+                    "echo $$ > {}; sleep 60 >/dev/null 2>&1 </dev/null & echo $!",
+                    procs.display()
+                ),
+            ])
+            .output()
+            .expect("the shell should run");
+        let pid: i32 = String::from_utf8_lossy(&started.stdout)
+            .trim()
+            .parse()
+            .expect("the shell should have said the pid");
+
+        assert!(
+            members(&dir(&workspace)).await.contains(&pid),
+            "the cgroup should hold what the shell left behind"
+        );
+
+        // Teardown as it was: `rmdir` on a cgroup with processes in it fails
+        // with EBUSY, so the directory stays and so does everything in it.
+        // This is the whole bug in three lines.
+        remove(&workspace, &session).await;
+        assert!(alive(pid), "removing a cgroup does not kill what is in it");
+        assert!(dir(&workspace).exists(), "and cannot remove it either");
+
+        kill(&workspace, &session).await;
+        assert!(
+            gone(pid).await,
+            "the workspace should take its processes with it"
+        );
+
+        remove(&workspace, &session).await;
+        assert!(
+            !dir(&workspace).exists(),
+            "and an empty cgroup should go rather than be left behind"
+        );
     }
 }
