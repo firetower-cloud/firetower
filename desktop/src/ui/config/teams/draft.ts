@@ -72,6 +72,7 @@ export function add(draft: Draft, parent: string, profile: string, name: string,
         agent,
         redacted: false,
         extraInstructions: "",
+        extraSkills: [],
         ordinal: siblings.length,
       },
     ],
@@ -82,6 +83,20 @@ export function add(draft: Draft, parent: string, profile: string, name: string,
 export function remove(draft: Draft, id: string): Draft {
   const going = new Set([id, ...descendants(draft.positions, id).map((p) => p.id)]);
   return { ...draft, positions: draft.positions.filter((p) => !going.has(p.id)) };
+}
+
+/**
+ * Change what a position *adds*, here and nowhere else.
+ *
+ * **Empty means nothing extra, not everything.** A profile's own scope reads
+ * an empty list as "all the owner can reach"; a position's extras are the
+ * opposite — the profile already said what the agent is, and this adds to it.
+ */
+export function grant(draft: Draft, id: string, extraSkills: string[]): Draft {
+  return {
+    ...draft,
+    positions: draft.positions.map((p) => (p.id === id ? { ...p, extraSkills } : p)),
+  };
 }
 
 /** Change what a position is told, here and nowhere else. */
@@ -118,6 +133,7 @@ export function toWrite(draft: Draft): { name: string; positions: DraftPosition[
       parent: p.parent ?? null,
       profile: p.profile,
       extraInstructions: p.extraInstructions,
+      extraSkills: p.extraSkills ?? [],
     })),
   };
 }
@@ -128,6 +144,7 @@ export type Change =
   | { kind: "removed"; name: string }
   | { kind: "moved"; name: string }
   | { kind: "told"; name: string }
+  | { kind: "granted"; name: string }
   | { kind: "renamed"; name: string }
   | { kind: "lead"; name: string };
 
@@ -154,11 +171,25 @@ export function pending(team: AgentTeam, draft: Draft): Change[] {
     if (before.profile !== p.profile && !p.parent) out.push({ kind: "lead", name: p.name });
     if (before.parent !== p.parent) out.push({ kind: "moved", name: p.name });
     if (before.extraInstructions !== p.extraInstructions) out.push({ kind: "told", name: p.name });
+    // **Order does not count as a change.** The picker appends as things are
+    // ticked, so the same set chosen in another order is the same set — and a
+    // Save button lit by a list that reordered itself is a button nobody
+    // trusts.
+    if (!sameSet(before.extraSkills ?? [], p.extraSkills ?? [])) {
+      out.push({ kind: "granted", name: p.name });
+    }
   }
   for (const p of team.positions) {
     if (!now.has(p.id)) out.push({ kind: "removed", name: p.name });
   }
   return out;
+}
+
+/** Whether two id lists hold the same things, whatever order they are in. */
+function sameSet(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const held = new Set(a);
+  return b.every((id) => held.has(id));
 }
 
 /** The pending state of one card, for the ring the map draws on it. */

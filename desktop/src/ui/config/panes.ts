@@ -53,7 +53,12 @@ export const PANES: { group: string; items: { at: string; label: string }[] }[] 
       // who is under it. `agent-teams`, never `teams` — that one is teams of
       // *people* and is in the Access group below.
       { at: "agent-teams", label: "Agent teams" },
-      { at: "skills", label: "Skills" },
+      // **One entry, both words.** Somebody scanning for "Skills" and
+      // somebody scanning for "MCP" want the same page: one library listing
+      // the real things — each skill, each server — with the marketplace
+      // underneath. There were two panes and the older one still answered
+      // `/configuration/skills`, which is where Customize landed.
+      { at: "plugins", label: "Skills & MCP" },
     ],
   },
   {
@@ -164,7 +169,13 @@ export function inSettings(path: string): boolean {
  * a link in a message, should land somewhere sensible rather than falling back
  * to the first pane — and the git hosts are what that word mostly meant.
  */
-const MOVED: Record<string, string> = { integrations: "git-hosts" };
+const MOVED: Record<string, string> = {
+  integrations: "git-hosts",
+  /* Two panes became one. Without this, a remembered address — which is what
+     Customize opens on — fell through to Repositories, so pressing Customize
+     landed somewhere nobody asked for. */
+  skills: "plugins",
+};
 
 export const FIRST = "repositories";
 

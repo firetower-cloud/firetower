@@ -76,8 +76,38 @@ pub async fn apply(
     // `ft_proto::CreateWorkspace::skills_required`.
     required: bool,
 ) -> Result<()> {
+    // **One selection, two homes.** A plugin is not a skill with extra files:
+    // measured, a folder without `.claude-plugin/plugin.json` loads nothing
+    // through `--plugin-dir`, and a lone skill wrapped in a same-named plugin
+    // registers as `name:name`. So the set is split here rather than the
+    // difference being expressed as a path convention somewhere downstream.
+    let (plugins, skills): (Vec<SkillBundle>, Vec<SkillBundle>) = skills
+        .iter()
+        .cloned()
+        .partition(|b| b.kind == ft_proto::BundleKind::Plugin);
+    let skills = &skills[..];
+
+    // **What a plugin will put in the skills root, computed before the pass
+    // that cleans it.** An engine with no plugin concept gets a plugin taken
+    // apart, and its skills land here under their own names — so the removal
+    // pass below has to know about them or it sweeps out, on every launch,
+    // exactly what `plugins::apply` is about to write.
+    let from_plugins: Vec<String> = plugins
+        .iter()
+        .flat_map(|b| {
+            b.files.iter().filter_map(|f| {
+                f.path
+                    .strip_prefix("skills/")
+                    .and_then(|rest| rest.split_once('/'))
+                    .map(|(name, _)| name.to_string())
+            })
+        })
+        .collect();
+
     let Some(root) = root(workspace, id, agent) else {
-        return Ok(());
+        // No skills root — the shell. Plugins have nowhere to go either, and
+        // `plugins::apply` says so itself.
+        return crate::plugins::apply(workspace, id, agent, &plugins).await;
     };
     tokio::fs::create_dir_all(&root)
         .await
@@ -142,6 +172,7 @@ pub async fn apply(
     for gone in present
         .iter()
         .filter(|p| !skills.iter().any(|s| &&s.name == p))
+        .filter(|p| !from_plugins.iter().any(|n| &n == p))
     {
         let at = root.join(gone);
         if let Err(e) = tokio::fs::remove_dir_all(&at).await {
@@ -181,11 +212,21 @@ pub async fn apply(
         count = skills.len(),
         "this session's skills are in place"
     );
+
+    // Last, for the reason above. Not fatal on its own for the same reason one
+    // bundle is not: the set a session asked for is worth more than the one
+    // part of it nobody can write.
+    if let Err(e) = crate::plugins::apply(workspace, id, agent, &plugins).await {
+        if required {
+            return Err(e).context("writing the plugins this run was approved to read");
+        }
+        tracing::warn!("could not put this session's plugins in place: {e:#}");
+    }
     Ok(())
 }
 
 /// One label: what a directory name may be, and nothing that climbs out of it.
-fn usable(name: &str) -> bool {
+pub(crate) fn usable(name: &str) -> bool {
     !name.is_empty()
         && name.len() <= 64
         && name
@@ -199,7 +240,7 @@ fn usable(name: &str) -> bool {
 /// never sees a skill with half its files. Every agent here reacts to a
 /// directory appearing, and a `SKILL.md` that arrives before its
 /// `references/` is a skill that fails the first time it is used.
-async fn write_bundle(at: &Path, bundle: &SkillBundle) -> Result<()> {
+pub(crate) async fn write_bundle(at: &Path, bundle: &SkillBundle) -> Result<()> {
     let staging = at.with_file_name(format!(".{}.writing", bundle.name));
     let out = fill(&staging, at, bundle).await;
     if out.is_err() {
@@ -263,6 +304,7 @@ mod tests {
 
     fn bundle(name: &str, files: &[(&str, &str, bool)]) -> SkillBundle {
         SkillBundle {
+            kind: ft_proto::BundleKind::Skill,
             name: name.into(),
             files: files
                 .iter()

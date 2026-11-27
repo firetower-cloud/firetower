@@ -32,7 +32,15 @@ export interface Skill {
   /** The repositories this person has it on by default. Empty for most. */
   defaultIn: string[];
   description: string;
+  /**
+     * The name for people, already resolved — the bundle's own, or a
+     * title-cased `name`. **The composer draws this**, and it was the one
+     * screen still saying `google-sheets` after the library and the detail
+     * screens were given it.
+     */
+  displayName: string;
   files: number;
+  hasConnector: boolean;
   /**
      * An agent wrote a version of this that ships an executable, and it is
      * waiting for the owner to approve it. Held content is never the current
@@ -42,6 +50,23 @@ export interface Skill {
   held: boolean;
   id: SkillId;
   /**
+     * What this bundle is: `skill` or `plugin`. Decides which home it lands
+     * in on a worker, and which list it appears in on a screen.
+     */
+  kind: string;
+  /**
+     * The mark this bundle ships, as a data URI.
+     *
+     * **Inline, and from the bundle's own bytes.** A plugin carries its logo
+     * in its own assets, so this is read from the version rather than held
+     * in a table of somebody else's brands — and a row draws without
+     * reaching the network, which is what makes the library work on a
+     * machine that has none. Absent is a monogram, which is the fallback the
+     * design has always had.
+     * @nullable
+     */
+  logo?: string | null;
+  /**
      * Whether this person may move it to another directory or delete it.
      * The same rule as `api::access::may_share`, answered per row so a list
      * can say up front which skills it can act on.
@@ -49,6 +74,16 @@ export interface Skill {
   mayShare: boolean;
   /** Whether this person may make a version of it or rename it. */
   mayWrite: boolean;
+  nCommands: number;
+  /**
+     * How many skills, commands and connectors are inside it.
+     *
+     * Derived from the paths in the version rather than stored beside them,
+     * so a count cannot drift from the bytes it is counting. A lone skill
+     * reports zero of each: its own `SKILL.md` is the bundle, not a component
+     * within one.
+     */
+  nSkills: number;
   name: string;
   /** `u/kevin/rust_review` — slashes on the wire, dots in the database. */
   path: string;

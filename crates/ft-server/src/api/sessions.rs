@@ -1247,7 +1247,12 @@ pub(crate) async fn create_session_as(
     }
 
     // The bundles themselves, each from the version its pin names.
-    let loaded = state.skills.bundles_for_session(id.as_str()).await;
+    let loaded = match state.skills.bundles_for_session(id.as_str()).await {
+        // Every plugin's connector gets this person's own credential, written
+        // into a `.mcp.json` that is made here and stored nowhere.
+        Ok(bundles) => Ok(crate::api::with_connectors(&state, id.as_str(), &owner, bundles).await),
+        Err(e) => Err(e),
+    };
     let skills = match &approved_versions {
         // **Counted against what was approved, not against what was found.**
         // A pin that was never written, a version whose blob has gone, two
@@ -1944,6 +1949,10 @@ pub(crate) async fn relaunch(
         .bundles_for_session(session.id.as_str())
         .await
         .unwrap_or_default();
+    // A relaunch mints a fresh token rather than reusing whatever the last
+    // launch wrote: an access token has an hour on it and a session that is
+    // being started again has very likely outlived one.
+    let skills = crate::api::with_connectors(state, session.id.as_str(), owner, skills).await;
 
     state
         .fleet
@@ -2270,6 +2279,7 @@ async fn start_another_agent(
         .bundles_for_session(id.as_str())
         .await
         .unwrap_or_default();
+    let skills = crate::api::with_connectors(&state, id.as_str(), &owner, skills).await;
 
     state
         .fleet

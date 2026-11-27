@@ -101,6 +101,7 @@ pub mod history;
 pub mod hooks;
 pub mod kimi;
 pub mod path;
+pub mod plugins;
 pub mod readiness;
 pub mod runtime;
 pub mod skills;

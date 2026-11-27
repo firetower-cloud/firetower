@@ -98,6 +98,11 @@ id_type!(
     "Identifies a skill — a folder of instructions an agent loads when it needs one."
 );
 id_type!(
+    MarketId,
+    "mkt",
+    "Identifies a marketplace — a repository of plugins somebody added."
+);
+id_type!(
     SkillVersionId,
     "skv",
     "Identifies one version of a skill. Append-only: a session pins one."

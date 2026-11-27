@@ -129,6 +129,22 @@ async fn supervise(session: &str, workspace: PathBuf, agent: &str) -> Result<()>
                         .into_owned(),
                 );
             }
+            // And its plugins, which are a different directory read a
+            // different way: `--plugin-dir` takes a folder and loads *each
+            // child* of it as a plugin — manifest, skills, commands, hooks
+            // and the `.mcp.json` that makes a connector a connector.
+            // Measured against 2.1.273; `--add-dir` carries none of it, which
+            // is why this is a second flag and not a second path under the
+            // first one.
+            if kind.plugins_home() == Some(ft_core::PluginsHome::AddedDirectory) {
+                let id = ft_core::SessionId::from_stored(session);
+                argv.push("--plugin-dir".into());
+                argv.push(
+                    crate::plugins::root(&workspace, &id)
+                        .to_string_lossy()
+                        .into_owned(),
+                );
+            }
             argv
         })
         .map(|argv| crate::agentd::Launch {

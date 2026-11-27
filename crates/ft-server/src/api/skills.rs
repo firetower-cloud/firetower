@@ -918,3 +918,26 @@ pub(super) async fn share_skills(
     }
     Ok(StatusCode::NO_CONTENT)
 }
+
+/// What is in a bundle, in its author's own words.
+#[utoipa::path(
+    get, path = "/api/v1/skills/{id}/inside", tag = "skills",
+    params(("id" = String, Path, description = "The plugin or skill")),
+    responses(
+        (status = 200, body = crate::skills::Inside),
+        (status = 404, body = ApiError),
+    ),
+)]
+pub(super) async fn skill_inside(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<crate::skills::Inside>> {
+    let me = whoever(&principal)?;
+    state
+        .skills
+        .inside(me.id.as_str(), &id)
+        .await?
+        .map(Json)
+        .ok_or_else(|| ApiError::not_found("plugin"))
+}

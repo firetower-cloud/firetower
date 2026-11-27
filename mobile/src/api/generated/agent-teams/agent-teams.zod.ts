@@ -19,6 +19,7 @@ export const ListAgentTeamsResponseItem = zod.object({
   "agent": zod.string().nullish().describe('The engine the profile pins, for the mark on the card. Absent when the\nprofile leaves it open, and when `redacted`.'),
   "does": zod.string().describe('The profile\'s one-liner, for the card\'s tooltip. Empty when `redacted`.'),
   "extraInstructions": zod.string().describe('Markdown that applies here and nowhere else. It never replaces a\nprofile field; it is composed after the profile\'s own instructions.'),
+  "extraSkills": zod.array(zod.string()).optional().describe('Skills and servers this position adds, by skill id, in this team only.\n\n**Adds; never replaces.** The same contract `extra_instructions` has,\nand the reason both are called extra: a profile is a closed set, and a\nposition that wants one more thing says so without forking the profile.\nBounded at spawn by what the person starting the team can reach.'),
   "id": zod.string(),
   "name": zod.string().describe('The profile\'s name, so the map draws a card without a request per card.\nEmpty when `redacted`.'),
   "ordinal": zod.int().describe('Authoritative sibling order. The map draws in it and export writes it.'),
@@ -36,6 +37,7 @@ export const CreateAgentTeamBody = zod.object({
   "name": zod.string(),
   "positions": zod.array(zod.object({
   "extraInstructions": zod.string().optional(),
+  "extraSkills": zod.array(zod.string()).optional().describe('Skills this position adds on top of its profile\'s, by skill id.'),
   "key": zod.string().describe('The caller\'s own key for this position, which its children name as\ntheir `parent`. An existing position\'s id keeps that row — and keeps\nthe sessions standing on it; anything else mints a new one.'),
   "parent": zod.string().nullish().describe('The key of the position above it. Null for the lead, and exactly one\nentry may say so.'),
   "profile": zod.string().describe('The profile it references, by id.')
@@ -53,6 +55,7 @@ export const CreateAgentTeamResponse = zod.object({
   "agent": zod.string().nullish().describe('The engine the profile pins, for the mark on the card. Absent when the\nprofile leaves it open, and when `redacted`.'),
   "does": zod.string().describe('The profile\'s one-liner, for the card\'s tooltip. Empty when `redacted`.'),
   "extraInstructions": zod.string().describe('Markdown that applies here and nowhere else. It never replaces a\nprofile field; it is composed after the profile\'s own instructions.'),
+  "extraSkills": zod.array(zod.string()).optional().describe('Skills and servers this position adds, by skill id, in this team only.\n\n**Adds; never replaces.** The same contract `extra_instructions` has,\nand the reason both are called extra: a profile is a closed set, and a\nposition that wants one more thing says so without forking the profile.\nBounded at spawn by what the person starting the team can reach.'),
   "id": zod.string(),
   "name": zod.string().describe('The profile\'s name, so the map draws a card without a request per card.\nEmpty when `redacted`.'),
   "ordinal": zod.int().describe('Authoritative sibling order. The map draws in it and export writes it.'),
@@ -79,6 +82,7 @@ export const OneAgentTeamResponse = zod.object({
   "agent": zod.string().nullish().describe('The engine the profile pins, for the mark on the card. Absent when the\nprofile leaves it open, and when `redacted`.'),
   "does": zod.string().describe('The profile\'s one-liner, for the card\'s tooltip. Empty when `redacted`.'),
   "extraInstructions": zod.string().describe('Markdown that applies here and nowhere else. It never replaces a\nprofile field; it is composed after the profile\'s own instructions.'),
+  "extraSkills": zod.array(zod.string()).optional().describe('Skills and servers this position adds, by skill id, in this team only.\n\n**Adds; never replaces.** The same contract `extra_instructions` has,\nand the reason both are called extra: a profile is a closed set, and a\nposition that wants one more thing says so without forking the profile.\nBounded at spawn by what the person starting the team can reach.'),
   "id": zod.string(),
   "name": zod.string().describe('The profile\'s name, so the map draws a card without a request per card.\nEmpty when `redacted`.'),
   "ordinal": zod.int().describe('Authoritative sibling order. The map draws in it and export writes it.'),
@@ -99,6 +103,7 @@ export const UpdateAgentTeamBody = zod.object({
   "name": zod.string(),
   "positions": zod.array(zod.object({
   "extraInstructions": zod.string().optional(),
+  "extraSkills": zod.array(zod.string()).optional().describe('Skills this position adds on top of its profile\'s, by skill id.'),
   "key": zod.string().describe('The caller\'s own key for this position, which its children name as\ntheir `parent`. An existing position\'s id keeps that row — and keeps\nthe sessions standing on it; anything else mints a new one.'),
   "parent": zod.string().nullish().describe('The key of the position above it. Null for the lead, and exactly one\nentry may say so.'),
   "profile": zod.string().describe('The profile it references, by id.')
@@ -116,6 +121,7 @@ export const UpdateAgentTeamResponse = zod.object({
   "agent": zod.string().nullish().describe('The engine the profile pins, for the mark on the card. Absent when the\nprofile leaves it open, and when `redacted`.'),
   "does": zod.string().describe('The profile\'s one-liner, for the card\'s tooltip. Empty when `redacted`.'),
   "extraInstructions": zod.string().describe('Markdown that applies here and nowhere else. It never replaces a\nprofile field; it is composed after the profile\'s own instructions.'),
+  "extraSkills": zod.array(zod.string()).optional().describe('Skills and servers this position adds, by skill id, in this team only.\n\n**Adds; never replaces.** The same contract `extra_instructions` has,\nand the reason both are called extra: a profile is a closed set, and a\nposition that wants one more thing says so without forking the profile.\nBounded at spawn by what the person starting the team can reach.'),
   "id": zod.string(),
   "name": zod.string().describe('The profile\'s name, so the map draws a card without a request per card.\nEmpty when `redacted`.'),
   "ordinal": zod.int().describe('Authoritative sibling order. The map draws in it and export writes it.'),

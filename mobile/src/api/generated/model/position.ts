@@ -23,6 +23,15 @@ export interface Position {
      * profile field; it is composed after the profile's own instructions.
      */
   extraInstructions: string;
+  /**
+     * Skills and servers this position adds, by skill id, in this team only.
+     *
+     * **Adds; never replaces.** The same contract `extra_instructions` has,
+     * and the reason both are called extra: a profile is a closed set, and a
+     * position that wants one more thing says so without forking the profile.
+     * Bounded at spawn by what the person starting the team can reach.
+     */
+  extraSkills?: string[];
   id: string;
   /**
      * The profile's name, so the map draws a card without a request per card.

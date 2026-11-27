@@ -155,6 +155,7 @@ export const DESTINATIONS: Destination[] = [
  */
 const PANE_HOME: Record<string, DestinationId> = {
   skills: "customize",
+  plugins: "customize",
   roles: "customize",
   "agent-teams": "customize",
   agents: "customize",

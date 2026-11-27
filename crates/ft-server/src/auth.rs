@@ -220,7 +220,7 @@ pub async fn require(State(gate): State<Gate>, mut request: Request, next: Next)
         .map(|ConnectInfo(a)| a.ip())
         .unwrap_or(IpAddr::from([0, 0, 0, 0]));
 
-    // Two holes in the gate, both exact paths, both deliberate.
+    // Three holes in the gate, all exact paths, all deliberate.
     //
     // `login` because signing in cannot require being signed in, and what is
     // behind it checks a password.
@@ -233,9 +233,18 @@ pub async fn require(State(gate): State<Gate>, mut request: Request, next: Next)
     // and which of three ways to sign in — to somebody who can already reach a
     // port that is never on the public internet. That is a real disclosure and
     // it is the price of being able to check whose server this is first.
+    // `connectors/callback` because the browser arriving on it is coming back
+    // from somebody else's authorization server and carries no credential of
+    // ours — it was opened outside the app, so there is no header and no
+    // session to present. **It is not unauthenticated.** What authorizes it is
+    // the `state` handle: 24 random bytes, minted when the flow started,
+    // stored against the person who started it, and deleted on first use. A
+    // caller without one gets a page saying so and nothing else happens; a
+    // replayed one finds the row already gone. Narrower than a session, and
+    // bound to one authorization rather than to everything that person can do.
     if matches!(
         request.uri().path(),
-        "/api/v1/auth/login" | "/api/v1/bootstrap"
+        "/api/v1/auth/login" | "/api/v1/bootstrap" | "/api/v1/connectors/callback"
     ) {
         return next.run(request).await;
     }

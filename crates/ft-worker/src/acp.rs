@@ -357,6 +357,38 @@ where
     // RPC starts a browser login; that belongs only to AgentLoginStart.
     let can_load = init["agentCapabilities"]["loadSession"] == true;
     let cwd = workspace.canonicalize()?.to_string_lossy().into_owned();
+    // The connectors this session's plugins declare. Kimi and Cursor have no
+    // plugin concept and no `mcp` subcommand, so `session/new` is the only
+    // way a server reaches them — this field was `[]` here from the day it
+    // was written, which is exactly as far as a connector got on either.
+    //
+    // Read off the disk rather than carried, so the one place a server is
+    // written down is the file an agent that *could* read it would have read.
+    //
+    // **Asked, not assumed.** ACP negotiates this: the agent answers
+    // `initialize` with `agentCapabilities.mcpCapabilities`, and a client that
+    // sends an HTTP server to one which did not claim `http` is sending
+    // something the other end has no contract to read. Measured against Kimi
+    // Code 2.1.1, which answers `mcpCapabilities: {http: true, sse: true}` —
+    // so the capability is real, and so is the case where it is absent.
+    //
+    // A server this agent cannot take is **named**, never dropped quietly.
+    // That is the same rule the interface follows for a component an engine
+    // cannot receive, and the log line is where it lands until the session
+    // panel carries it.
+    let http_ok = init["agentCapabilities"]["mcpCapabilities"]["http"] == true;
+    let all =
+        crate::plugins::acp_mcp_servers(workspace, &ft_core::SessionId::from_stored(session)).await;
+    let (servers, refused) = crate::plugins::deliverable_mcp(all, http_ok);
+    for one in &refused {
+        tracing::warn!(
+            server = %one["name"].as_str().unwrap_or("?"),
+            "this agent does not take an HTTP MCP server, so its connector is not delivered"
+        );
+    }
+    if !servers.is_empty() {
+        tracing::info!(count = servers.len(), "handing ACP its MCP servers");
+    }
     let mut loaded = false;
     if let Some(saved) = &previous {
         if can_load {
@@ -367,7 +399,7 @@ where
                 rpc(
                     2,
                     "session/load",
-                    json!({"sessionId":saved.session, "cwd":cwd, "mcpServers":[]}),
+                    json!({"sessionId":saved.session, "cwd":cwd, "mcpServers":servers}),
                 ),
                 true,
             )
@@ -400,7 +432,7 @@ where
             stdin,
             stdout,
             out,
-            rpc(3, "session/new", json!({"cwd":cwd, "mcpServers":[]})),
+            rpc(3, "session/new", json!({"cwd":cwd, "mcpServers":servers})),
             false,
         )
         .await?;

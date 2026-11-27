@@ -16,11 +16,14 @@ pub(crate) mod agents;
 mod annotations;
 pub(crate) mod artifacts;
 mod auth;
+mod connectors;
 mod consumption;
 mod conversation;
 mod events;
 mod forwards;
 pub(crate) mod hosts;
+mod library;
+mod marketplaces;
 mod providers;
 mod repos;
 mod roles;
@@ -97,6 +100,16 @@ pub enum ErrorCode {
     RepoUnusable,
     /// Disconnecting would orphan running work.
     RepoInUse,
+    /// This server will not hand out an OAuth client, so one has to be made
+    /// by hand and pasted in.
+    ///
+    /// **Its own code because the screen answers it with a form.** The row
+    /// used to tell the difference by reading the sentence, which works until
+    /// somebody rewords the sentence and the form silently stops opening.
+    /// Nothing is misconfigured and there is nothing to retry: there is a
+    /// thing to supply, and the interface should put it in front of the
+    /// person rather than describe where it lives.
+    ConnectorNeedsClient,
     /// The host tried and it didn't work — nothing to commit, push rejected.
     ActionFailed,
     /// Nobody is signed in, or the session has ended. The interface shows the
@@ -118,6 +131,10 @@ impl ErrorCode {
     pub(crate) fn status(self) -> StatusCode {
         match self {
             Self::InvalidRequest => StatusCode::BAD_REQUEST,
+            // Nothing is malformed and nothing is forbidden: the request
+            // cannot be answered until somebody supplies an application, so
+            // it is the same shape of "not yet" as the hosts below.
+            Self::ConnectorNeedsClient => StatusCode::CONFLICT,
             Self::NotFound | Self::RepoNotConnected => StatusCode::NOT_FOUND,
             Self::ProviderNotConfigured => StatusCode::NOT_IMPLEMENTED,
             // The only thing that means "we do not know who you are". Anything
@@ -401,6 +418,188 @@ pub(crate) async fn git_token(
     }
 }
 
+/// Give every plugin bundle the `.mcp.json` its connector needs, filled in
+/// with **this person's** credential.
+///
+/// Synthesised here rather than stored, and that is the whole of the design:
+/// no byte in `blobs` ever holds a secret, a bundle on a worker cannot outlive
+/// the authorization it was written with, and the connector travels through a
+/// directory or a profile while the token never does.
+///
+/// **A credential granted for git is not a credential for an MCP server.**
+/// There used to be a third path here that handed the token Firetower holds
+/// for a git host to a server that named the same authorization server — true
+/// of GitHub's — and it was convenient and wrong: somebody who connected
+/// GitHub so Firetower could do git had not agreed to an agent calling
+/// GitHub's whole tool surface. Every connector authorizes for itself now.
+///
+/// **A connector with no credential is not an error.** The plugin loads
+/// without it, its skills work, and the interface is where somebody is asked
+/// to connect — refusing the whole session here would make one unauthorized
+/// connector cost every other plugin in the set.
+pub(crate) async fn with_connectors(
+    state: &AppState,
+    session: &str,
+    owner: &str,
+    mut bundles: Vec<ft_proto::SkillBundle>,
+) -> Vec<ft_proto::SkillBundle> {
+    let connectors = match state.skills.connectors_for_session(session).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("reading this session's connectors: {e:#}");
+            return bundles;
+        }
+    };
+    if connectors.is_empty() {
+        return bundles;
+    }
+
+    for c in connectors {
+        let Some(bundle) = bundles.iter_mut().find(|b| b.name == c.plugin) else {
+            continue;
+        };
+        let token = match c.auth.as_str() {
+            // Brokered: this person's own grant, renewed on the way out if it
+            // has gone stale. An access token has an hour on it and a session
+            // may be starting long after the browser closed, so the renewal
+            // happens here rather than being hoped for.
+            "oauth" => connector_token(state, &c.skill_id, owner).await,
+            _ => None,
+        };
+        let Some(token) = token else {
+            tracing::info!(
+                plugin = %c.plugin,
+                "nobody has authorized this connector yet; the plugin loads without it"
+            );
+            continue;
+        };
+
+        let doc = serde_json::json!({
+            "mcpServers": {
+                c.server.clone(): {
+                    "type": "http",
+                    "url": c.url,
+                    "headers": { "Authorization": format!("Bearer {}", token.as_str()) },
+                }
+            }
+        });
+        let Ok(text) = serde_json::to_string_pretty(&doc) else {
+            continue;
+        };
+        // Replaced, never appended to: a bundle that already carried one is
+        // holding a token from an earlier session.
+        bundle.files.retain(|f| f.path != ".mcp.json");
+        bundle.files.push(ft_proto::SkillFile {
+            path: ".mcp.json".to_string(),
+            contents: ft_proto::encode(text.as_bytes()),
+            executable: false,
+        });
+        tracing::info!(plugin = %c.plugin, server = %c.server, "this session's connector is authorized");
+    }
+    bundles
+}
+
+/// This person's access token for one brokered connector, renewed if stale.
+///
+/// `None` is "nobody has authorized this yet", which is not an error: the
+/// plugin loads with its skills and without its tools, and the interface is
+/// where somebody is asked to connect. Refusing a whole session because one
+/// connector is unauthorized would make it cost every other plugin in the set.
+pub(crate) async fn connector_token(
+    state: &AppState,
+    skill_id: &str,
+    owner: &str,
+) -> Option<zeroize::Zeroizing<String>> {
+    // Resolved to the server's own key rather than this bundle's, so two
+    // bundles naming one address share the authorization they both need.
+    let shared = crate::connectors::credential_key(state.skills.pool(), skill_id).await;
+    let key = || crate::vault::Key::of(crate::vault::CONNECTOR, &shared, owner);
+    let held = crate::oauth::Grant::parse(
+        &state
+            .vault
+            .get(key(), "a plugin's connector asked for it")
+            .await
+            .ok()
+            .flatten()?,
+    );
+    if !held.stale(chrono::Utc::now()) {
+        return Some(zeroize::Zeroizing::new(held.access));
+    }
+
+    // Past here a single-use refresh token is being spent, so one task per
+    // person per connector — the same gate `git_token` takes, for the same
+    // reason: whoever waited has to look again rather than renew the grant
+    // they arrived with.
+    let _queued = state
+        .renewals
+        .at(&format!("connector:{skill_id}:{owner}"))
+        .await;
+    let held = crate::oauth::Grant::parse(
+        &state
+            .vault
+            .get(key(), "renewing a connector's authorization")
+            .await
+            .ok()
+            .flatten()?,
+    );
+    if !held.stale(chrono::Utc::now()) {
+        return Some(zeroize::Zeroizing::new(held.access));
+    }
+
+    let (found, client_id) = connector_client(state, skill_id).await?;
+    let refresh = held.refresh.as_deref()?;
+    match crate::connectors::refresh(&found, &client_id, None, refresh).await {
+        Ok(fresh) => {
+            if let Err(e) = state
+                .vault
+                .put(
+                    key(),
+                    &fresh.to_stored(),
+                    "renewed a connector's authorization",
+                )
+                .await
+            {
+                // The server has already rotated the refresh token, so the one
+                // in the vault is spent and this person will have to connect
+                // again. The only failure here that loses a credential.
+                tracing::error!("storing a renewed connector token: {e:#}");
+            }
+            Some(zeroize::Zeroizing::new(fresh.access))
+        }
+        Err(e) => {
+            tracing::warn!(skill = %skill_id, "renewing a connector: {e:#}");
+            None
+        }
+    }
+}
+
+/// What was discovered for this connector, if it has ever been connected.
+async fn connector_client(
+    state: &AppState,
+    skill_id: &str,
+) -> Option<(crate::connectors::Discovered, String)> {
+    use sqlx::Row as _;
+    let r = sqlx::query(
+        "SELECT resource, authorize_url, token_url, register_url, client_id, scopes \
+           FROM connector_clients WHERE skill_id = $1",
+    )
+    .bind(skill_id)
+    .fetch_optional(state.skills.pool())
+    .await
+    .ok()??;
+    Some((
+        crate::connectors::Discovered {
+            name: None,
+            resource: r.get("resource"),
+            authorize_url: r.get("authorize_url"),
+            token_url: r.get("token_url"),
+            register_url: r.get("register_url"),
+            scopes: r.get("scopes"),
+        },
+        r.get::<Option<String>, _>("client_id")?,
+    ))
+}
+
 /// This person's token for one host, as git wants it.
 async fn credential_on(
     state: &AppState,
@@ -637,10 +836,29 @@ pub fn router() -> OpenApiRouter<AppState> {
             artifacts::rename_artifact,
             artifacts::delete_artifact
         ))
+        .routes(routes!(connectors::connector_state, connectors::disconnect))
+        .routes(routes!(connectors::connect))
+        .routes(routes!(connectors::probe_url))
+        .routes(routes!(connectors::add_from_url))
+        .routes(routes!(connectors::connector_callback))
+        .routes(routes!(connectors::set_client))
+        .routes(routes!(
+            marketplaces::list_marketplaces,
+            marketplaces::add_marketplace
+        ))
+        .routes(routes!(marketplaces::remove_marketplace))
+        .routes(routes!(marketplaces::refresh_marketplace))
+        .routes(routes!(marketplaces::list_entries))
+        .routes(routes!(marketplaces::install_entry))
+        .routes(routes!(marketplaces::preview_entry))
+        .routes(routes!(library::list_library))
+        .routes(routes!(library::switch_item))
+        .routes(routes!(library::connector_tools))
         .routes(routes!(skills::list_skills, skills::create_skill))
         .routes(routes!(skills::match_skills))
         .routes(routes!(skills::rename_skill, skills::delete_skill))
         .routes(routes!(skills::skill_detail))
+        .routes(routes!(skills::skill_inside))
         .routes(routes!(skills::list_versions, skills::add_version))
         .routes(routes!(skills::review_skill))
         .routes(routes!(skills::approve_skill))

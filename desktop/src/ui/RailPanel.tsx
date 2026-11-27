@@ -500,30 +500,33 @@ function Place({ place, places, every, on }: { place: Workspace; places: Workspa
 function Customize() {
   const path = usePathname();
   const skills = useSkills();
+  /* The quick list under Skills is skills. A plugin lands under Plugins, and
+     a name appearing in both columns is the thing that makes somebody think
+     there are two of it. */
+  const lone = skills.data.filter((s) => s.kind !== "plugin");
   return (
     <>
-      <Row label="Skills" icon={Puzzle} on={pane(path) === "skills"} to="/configuration/skills" />
+      {/* **One entry, both words.** Somebody scanning for "Skills" and
+          somebody scanning for "MCP" are looking for the same page, and two
+          rows into one list meant a highlight that was wrong as soon as you
+          changed the filter. The skill editor still answers at
+          the library; there is no second pane and no editor to reach. */}
+      <Row
+        label="Skills & MCP"
+        icon={Puzzle}
+        on={pane(path) === "plugins"}
+        to="/configuration/plugins"
+      />
       <Row label="Agent profiles" icon={UsersRound} on={pane(path) === "roles"} to="/configuration/roles" />
       {/* Directly after Agent profiles: a profile is what an agent is, and a
           team is where it sits and who is under it. */}
       <Row label="Agent teams" icon={Network} on={pane(path) === "agent-teams"} to="/configuration/agent-teams" />
       <Row label="Agents" icon={Blocks} on={pane(path) === "agents"} to="/configuration/agents" />
-      {skills.data.length > 0 && (
-        <>
-          <Label>Your skills</Label>
-          {/* **Not monospace, and no monogram tile.** A skill's name is read
-              as a word, never character by character — which is the test the
-              handoff now gives for the mono voice. The six tiles that used to
-              sit here decoded to nothing (`it` for incident-timeline); a 17px
-              spacer keeps the column aligned with the rows above. */}
-          {skills.data.slice(0, 8).map((s) => (
-            <button key={s.id} onClick={() => navigate(`/configuration/skills/${s.id}`)} className="prow">
-              <span className="w-[17px] shrink-0" />
-              <span className="lbl">{s.name}</span>
-            </button>
-          ))}
-        </>
-      )}
+      {/* **No shortcut list here any more.** It navigated to
+          `/configuration/skills/<id>`, a pane that no longer exists, and it
+          listed only lone skills — half the library, chosen by a storage
+          detail nobody outside this file knows about. The library itself is
+          one press away and lists everything. */}
     </>
   );
 }

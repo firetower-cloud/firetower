@@ -8178,4 +8178,134 @@ html:not([data-platform="macos"]) {
     height: 100%;
     border-radius: 99px;
   }
+
+@layer components {
+  /* ── The plugin library ─────────────────────────────────────────
+     Two shapes on one screen, and the shift between them is the signal
+     that you have crossed from what you manage into what you are
+     browsing. `Yours` reuses `.r` above; this is the shelf.
+
+     **Neither draws a box.** A cell fills on hover and its control
+     lifts, which is this system's way of expressing elevation — a
+     rounded card around every object flattens the hierarchy it was
+     supposed to express. */
+  .pgrid {
+    margin: 10px -14px 0;
+    width: calc(100% + 28px);
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+    gap: 8px 16px;
+  }
+  /* Something already taken sits quieter than something on offer rather than
+     being hidden: a Discover search returning nothing for a thing you own
+     reads as "it does not exist". */
+  /* Held at a fixed height whether or not there is a second line, so every
+     description in a row still starts on the same baseline. */
+  /* `<s>` is this file's sub-line, as it is on every row — the element is
+     borrowed for its brevity and never for its meaning, so the rule that
+     takes the line off it has to follow it everywhere it is used. */
+  /* Two lines, clamped, with the box holding its height — a one-line
+     description must not raise the footer above its neighbour's. */
+  /* Present at rest so a shelf never reads as inert, and filled only once
+     the pointer is on the cell it belongs to — twenty filled pills is a
+     toolbar, not a library. */
+  /* A plugin's mark. A monogram is the fallback where a bundle ships no
+     logo of its own, which until a marketplace lands is all of them. */
+  .plg {
+    width: 30px;
+    height: 30px;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    flex: none;
+    background: var(--color-raise);
+    color: var(--color-dim);
+    font-family: var(--font-narrow);
+    font-size: var(--text-meta);
+    font-weight: 530;
+    letter-spacing: 0.02em;
+  }
+  .r:hover .plg {
+    background: var(--color-overlay);
+  }
+
+  /* On, and off, in the same box — so the column does not move when one
+     row is on and the next is not. */
+  .on {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    padding: 0 11px 0 9px;
+    border-radius: 99px;
+    font-size: var(--text-ui);
+    color: var(--color-text);
+    flex: none;
+    white-space: nowrap;
+    background: var(--color-raise);
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .r:hover .on {
+    background: var(--color-overlay);
+  }
+  .on[disabled] {
+    opacity: 0.5;
+  }
+  .on.off {
+    background: transparent;
+    color: var(--color-mute);
+  }
+
+  /* The search field on a library's header. */
+  .srch {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: var(--control);
+    padding: 0 13px;
+    border-radius: 99px;
+    background: var(--color-raise);
+    min-width: 230px;
+  }
+  .srch input {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-ui);
+    background: transparent;
+    border: 0;
+    outline: none;
+    color: var(--color-text);
+  }
+}
+
+  /* Two segmented controls on one line — what it is, and whether you have
+     it. The pair reads as one bar because they share a track height and a
+     divider, and they compose: "Skills" plus "Discover" is a question
+     somebody really has. */
+  .seg2 {
+    display: inline-flex;
+    gap: 2px;
+    flex: none;
+    padding: 3px;
+    border-radius: 99px;
+    background: var(--color-sunk);
+  }
+  .seg2 button {
+    font: inherit;
+    font-size: var(--text-meta);
+    padding: 4px 13px;
+    border: 0;
+    border-radius: 99px;
+    background: transparent;
+    color: var(--color-dim);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .seg2 button:hover { color: var(--color-bone); }
+  .seg2 button[aria-selected="true"] {
+    background: var(--color-panel);
+    color: var(--color-bone);
+    font-weight: var(--weight-mid);
+    box-shadow: var(--shadow-raise);
+  }
 }

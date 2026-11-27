@@ -29,7 +29,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, Check, FolderGit2, Link2, Loader2, MoreHorizontal, Plus, X } from "lucide-react";
-import { HostMark, Icon, IconButton } from "~/components/ui";
+import { HostMark, Icon, IconButton, MenuItem } from "~/components/ui";
 import type { AuthMode, KindInfo, ProbedProvider, ProviderStatus } from "~/api/generated/model";
 import {
   getListProvidersQueryKey,
@@ -343,30 +343,6 @@ function Chip({ children, tone }: { children: React.ReactNode; tone?: "good" | "
         ? "border-line text-kind-data"
         : "border-line text-mute";
   return <span className={`shrink-0 rounded-full border px-1.5 py-px text-micro ${look}`}>{children}</span>;
-}
-
-function MenuItem({
-  children,
-  onClick,
-  tone,
-  disabled,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  tone?: "danger";
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      disabled={disabled}
-      onClick={onClick}
-      className={`block w-full px-3 py-1.5 text-left text-ui hover:bg-raise/60 disabled:opacity-40 ${
-        tone === "danger" ? "text-dim hover:text-brick" : "text-text hover:text-bone"
-      }`}
-    >
-      {children}
-    </button>
-  );
 }
 
 /**

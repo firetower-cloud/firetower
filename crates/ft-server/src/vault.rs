@@ -39,6 +39,21 @@ pub const GIT: &str = "git";
 pub const AGENT: &str = "agent";
 /// Keys for a task tracker that is not a git host, keyed by tracker id.
 pub const TRACKER: &str = "tracker";
+/// A plugin connector's authorization, keyed by the plugin it belongs to.
+///
+/// The connector travels with a plugin through a directory or a profile; this
+/// does not. Per person, like every other key here, so a colleague reading the
+/// same plugin's row gets their own answer.
+pub const CONNECTOR: &str = "connector";
+
+/// The OAuth *application* behind a connector, rather than a person's grant.
+///
+/// **Owned by the installation, not by anybody.** Most MCP servers register a
+/// client for us on the spot; GitHub, Slack and Google do not, and want one
+/// created by hand in their own console. That client's secret belongs to this
+/// Firetower and is used for everybody who connects, which is exactly why it
+/// cannot sit under an owner.
+pub const CONNECTOR_CLIENT: &str = "connector-client";
 
 /// Which secret, and whose.
 ///
