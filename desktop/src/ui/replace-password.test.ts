@@ -20,6 +20,17 @@
  * a way out of the app and lands you back inside it. Fixing one of two and
  * testing the one you fixed is how a defect survives its own regression test,
  * so the sweep below is over every screen rather than over this one.
+ *
+ * **The target moved once more, and for the same reason the sweep exists.**
+ * It was `/login`, chosen by reasoning about the duress screen alone: signed
+ * out and holding a temporary password, `/login` routes to `/setup` and the
+ * password gets replaced. The other caller is the voluntary change, where
+ * nothing is owed — so `/login` signed those people in and returned them to
+ * the application, and the one form in the product that lets somebody change a
+ * password they still know was unreachable from the only control that offers
+ * it. `/account` is that form. Pinned below as the path, not merely as
+ * "not the root", because "not the root" was satisfied by the target that
+ * could not work.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { join, sep } from "node:path";
@@ -48,20 +59,29 @@ function sources(): { path: string; text: string }[] {
 }
 
 describe("where a password is replaced", () => {
-  it("is a page on the control plane that is not the application", () => {
-    expect(passwordPage("https://ft.westlabs.dev")).toBe("https://ft.westlabs.dev/login");
-    expect(passwordPage("http://127.0.0.1:4400")).toBe("http://127.0.0.1:4400/login");
+  it("is the form on the control plane, not a door in front of it", () => {
+    expect(passwordPage("https://ft.westlabs.dev")).toBe("https://ft.westlabs.dev/account");
+    expect(passwordPage("http://127.0.0.1:4400")).toBe("http://127.0.0.1:4400/account");
   });
 
-  /* The regression in its own words. `/` and `/index.html` are the
-     application's; `/login` is the administration site's and is the one route
-     of the three that answers whether or not there is a session. */
+  /* The second regression in its own words. `/login` is a sign-in screen and
+     sends you on by what the *server* says is outstanding, which for somebody
+     changing a password voluntarily is nothing — so it returns them to the
+     application. Only `/account` carries three password fields. */
+  it("is not the sign-in screen, which sends a voluntary change back to the app", () => {
+    const opened = passwordPage("https://ft.westlabs.dev");
+    expect(new URL(opened).pathname).not.toBe("/login");
+    expect(new URL(opened).pathname).not.toBe("/setup");
+  });
+
+  /* The first regression in its own words. `/` and `/index.html` are the
+     application's; `/account` is the administration site's. */
   it("is not the root, which is the application and would draw this screen again", () => {
     const opened = passwordPage("https://ft.westlabs.dev");
     expect(opened).not.toBe("https://ft.westlabs.dev");
     expect(opened).not.toBe("https://ft.westlabs.dev/");
     expect(opened).not.toBe("https://ft.westlabs.dev/index.html");
-    expect(new URL(opened).pathname).toBe("/login");
+    expect(new URL(opened).pathname).toBe("/account");
   });
 
   /* Asserted against the source, because reaching either button needs a

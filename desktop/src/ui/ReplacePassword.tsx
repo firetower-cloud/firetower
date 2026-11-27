@@ -37,25 +37,34 @@ import { openExternal } from "~/open";
  * closed loop, and in the shell as well as in a browser: there the button hands
  * the URL to the system browser, which lands on the same page.
  *
- * `/login` rather than `/account` or `/setup`, measured rather than assumed:
- * signed out — which is the likely state in both of the ways this screen is
- * reached — all three answer with `/login` anyway, because the other two
- * redirect to it. Signing in there routes on `setupState()`, so a password that
- * still has to be replaced lands on `/setup`, which `web/components/Setup.tsx`
- * calls "the only place in the product where a password is replaced under
- * duress. The desktop and phone apps do not offer it; they send people here."
- * This is the sending.
+ * **It then pointed at `/login`, which is a door rather than a form.** That was
+ * reasoned about the screen this function started on — the one below, reached
+ * holding a temporary password — where signing in routes on `setupState()` and
+ * a password still owed lands on `/setup`. True, and it covers exactly half of
+ * the callers. `Account.tsx` goes through the same rule and is the voluntary
+ * change: somebody signed in who simply wants a new password. `/login` sends
+ * them back into the application when they sign in, because nothing is owed, so
+ * that half never reached a form at all.
  *
- * Not `/account`: that is the voluntary change — current, new, again — and it
- * needs a session this person may not have in that browser. It is a different
- * screen for a different day.
+ * `/account` is the form — current, new, again — and the only one in the
+ * product: the renderer deliberately carries none, for the reason at the top of
+ * this file. Both callers go there now, and the screen below still works: it
+ * needs a session, and without one the administration site bounces to `/login`,
+ * where signing in with a temporary password routes to `/setup` exactly as
+ * before. One redirect longer, same destination.
  *
- * The design decision behind all of this is untouched. The app still carries no
- * password form of its own, for the reason at the top of this file. It has only
- * stopped pointing at a door that no longer opens.
+ * **The known gap, which is not this function's to close.** A browser with no
+ * administration-site session that asks for `/account` is sent to `/login`, and
+ * `/login` carries no way back — after signing in it goes to `/setup` if a
+ * password is owed and to the application otherwise. So a *voluntary* change
+ * started from a browser that has never signed in to the site still ends up in
+ * the application rather than at the form. That is a missing return path on the
+ * site, measured and reported rather than papered over here; `/account` is
+ * strictly the better target either way, because it is the only one that can
+ * ever be the form.
  */
 export function passwordPage(origin: string): string {
-  return `${origin}/login`;
+  return `${origin}/account`;
 }
 
 export function ReplacePassword({
