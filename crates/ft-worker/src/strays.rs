@@ -613,7 +613,15 @@ mod tests {
         );
 
         let decoy = detached(&tag);
+        let before = visible(decoy, &tag);
         let found = strays(&[&tag], None);
+        // Before the cleanup below, or it describes what the cleanup did
+        // rather than what the scan saw.
+        let report = format!(
+            "visible before={before} after={}, {}",
+            visible(decoy, &tag),
+            why(decoy)
+        );
         stop(decoy);
         let _ = tokio::process::Command::new("tmux")
             .args(["-L", &socket, "kill-server"])
@@ -627,8 +635,7 @@ mod tests {
         );
         assert!(
             pids.contains(&decoy),
-            "and the tag must still select, or this proves nothing: {pids:?}, {}",
-            why(decoy)
+            "and the tag must still select, or this proves nothing: {pids:?}, {report}"
         );
     }
 
@@ -640,14 +647,16 @@ mod tests {
         let tag = invented();
         let pretender = detached(&tag);
 
+        let before = visible(pretender, &tag);
         let without = strays(&[&tag], None);
+        let after = visible(pretender, &tag);
         let with = strays(&[&tag], Some(pretender));
+        let report = format!("visible before={before} after={after}, {}", why(pretender));
         stop(pretender);
 
         assert!(
             without.iter().any(|stray| stray.pid == pretender),
-            "the process is there to be found: {}",
-            why(pretender)
+            "the process is there to be found: {report}"
         );
         assert!(
             !with.iter().any(|stray| stray.pid == pretender),
