@@ -418,7 +418,16 @@ async fn claude_code_loads_every_entry_and_registers_its_server() {
 async fn claude_init(plugins: &Path) -> Value {
     use tokio::io::{AsyncBufReadExt, BufReader};
 
+    // **A config of its own, so the host's does not decide the result.**
+    // Claude Code merges the person's own MCP servers with a plugin's, and
+    // the name is the key: this laptop had a user-scoped `linear`, so the
+    // catalogue's `linear` loaded as a plugin and never registered its
+    // server — one entry failing out of seventy-nine, for a reason that was
+    // nothing to do with the entry. An empty config directory is the only
+    // way the answer is about what we delivered.
+    let settings = tempfile::tempdir().expect("a config directory of our own");
     let mut child = tokio::process::Command::new("claude")
+        .env("CLAUDE_CONFIG_DIR", settings.path())
         .arg("--plugin-dir")
         .arg(plugins)
         .args([
