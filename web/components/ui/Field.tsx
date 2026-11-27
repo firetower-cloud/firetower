@@ -35,32 +35,3 @@ export function Input({
     />
   );
 }
-
-export function Select<T extends string>({
-  value,
-  onChange,
-  options,
-  className = "",
-}: {
-  value: T;
-  onChange: (value: T) => void;
-  options: [T, string][];
-  className?: string;
-}) {
-  return (
-    <select
-      // Chrome restores form controls across a reload and fires change as it
-      // does, which quietly narrows a page to a scope nobody picked this time.
-      autoComplete="off"
-      value={value}
-      onChange={(e) => onChange(e.target.value as T)}
-      className={`${BASE} cursor-pointer pr-7 text-dim ${className}`}
-    >
-      {options.map(([id, label]) => (
-        <option key={id} value={id}>
-          {label}
-        </option>
-      ))}
-    </select>
-  );
-}

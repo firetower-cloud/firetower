@@ -51,39 +51,101 @@ function moduleAt(spec: string, from: string): string | null {
   return null;
 }
 
+/** `{ A, B as C }` → the names as the module being imported from spells them. */
+function names(clause: string): string[] {
+  return clause
+    .split(",")
+    .map((n) => n.trim().replace(/^type\s+/, "").split(/\s+as\s+/)[0].trim())
+    .filter(Boolean);
+}
+
+/**
+ * A barrel's `export { X } from "./M"` lines, as identifier → module.
+ *
+ * **A barrel is why a dead module can look alive.** `components/ui/index.ts`
+ * re-exports a dozen primitives, so a walk that follows every line in it marks
+ * all of them reached the moment one page imports `{ Icon }`. `Segmented.tsx`
+ * sat there unused through a deletion pass that way. Followed per identifier,
+ * the question is asked properly.
+ */
+function barrel(file: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const [, clause, spec] of readFileSync(file, "utf8").matchAll(
+    /export\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["']([^"']+)["']/g,
+  )) {
+    const target = moduleAt(spec, file);
+    if (target) for (const name of names(clause)) map.set(name, target);
+  }
+  return map;
+}
+
+/** Every page, and the layout that wraps all of them. */
+function seeds(): string[] {
+  const out = [join(root, "app/layout.tsx")];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name === "page.tsx") out.push(path);
+    }
+  };
+  walk(join(root, "app"));
+  return out;
+}
+
 /**
  * Every module a visitor actually loads, from the layout and each page down.
  *
  * Reachability rather than "everything under `components/`", because the two
- * are not the same here and the difference is the whole point: this site still
- * carries screens from when it was the whole application, and they link to
- * routes it has never exported. They are not rendered, so they cannot send
- * anybody anywhere.
+ * were not the same here and the difference is the whole point: this site
+ * carried most of a workbench — new workspace, machines, hosts, repositories —
+ * from when it was the whole product, none of it rendered by any of the three
+ * pages that are left.
  */
 function rendered(): { path: string; text: string }[] {
-  const seeds = [join(root, "app/layout.tsx")];
-  const pages = (dir: string) => {
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) pages(path);
-      else if (entry.name === "page.tsx") seeds.push(path);
-    }
-  };
-  pages(join(root, "app"));
-
   const seen = new Map<string, string>();
-  const queue = [...seeds];
+  const queue: string[] = seeds();
   while (queue.length) {
     const file = queue.shift()!;
     if (seen.has(file) || !/\.tsx?$/.test(file)) continue;
     const text = readFileSync(file, "utf8");
     seen.set(file, text);
-    for (const [, spec] of text.matchAll(/(?:from|import)\s+["']([^"']+)["']/g)) {
-      const next = moduleAt(spec, file);
-      if (next && !seen.has(next)) queue.push(next);
-    }
+
+    const ask = (spec: string, asked: string[] | null) => {
+      const target = moduleAt(spec, file);
+      if (!target) return;
+      const members = /\/index\.tsx?$/.test(target) ? barrel(target) : new Map<string, string>();
+      if (members.size === 0) return void queue.push(target);
+      seen.set(target, readFileSync(target, "utf8"));
+      // A default or namespace import asks for the lot; a named one does not.
+      for (const [name, module] of members) if (asked === null || asked.includes(name)) queue.push(module);
+    };
+
+    for (const [, clause, spec] of text.matchAll(/import\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["']([^"']+)["']/g))
+      ask(spec, names(clause));
+    for (const [, spec] of text.matchAll(/import\s+(?:type\s+)?(?:\w+|\*\s+as\s+\w+)(?:\s*,\s*\{[^}]*\})?\s+from\s+["']([^"']+)["']/g))
+      ask(spec, null);
+    for (const [, spec] of text.matchAll(/import\s+["']([^"']+)["']/g)) ask(spec, null);
+    for (const [, spec] of text.matchAll(/(?:import|require)\(\s*["']([^"']+)["']\s*\)/g)) ask(spec, null);
   }
-  return [...seen].map(([path, text]) => ({ path: `${relative(root, path).split(sep).join("/")}`, text }));
+  return [...seen].map(([path, text]) => ({ path: relative(root, path).split(sep).join("/"), text }));
+}
+
+/** Every module this site ships, generated clients and tests aside. */
+function carried(): string[] {
+  const out: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "generated") continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name) && !entry.name.endsWith(".d.ts"))
+        out.push(relative(root, path).split(sep).join("/"));
+    }
+  };
+  walk(join(root, "components"));
+  walk(join(root, "src"));
+  return out.sort();
 }
 
 /**
@@ -113,12 +175,101 @@ function destinations(text: string): string[] {
   ].map((m) => m[1]);
 }
 
+/** The suite. A name only a test asks for is still a name somebody asks for. */
+function tests(): { path: string; text: string }[] {
+  const out: { path: string; text: string }[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === "generated") continue;
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (/\.test\.tsx?$/.test(entry.name))
+        out.push({ path: relative(root, path).split(sep).join("/"), text: readFileSync(path, "utf8") });
+    }
+  };
+  walk(join(root, "components"));
+  walk(join(root, "src"));
+  return out;
+}
+
 describe("the site's own links", () => {
   it("exports the three routes that are reachable, and no others", () => {
     // Not a restatement of the directory listing: `/` and six organisation
     // routes were exported until the renderer took over their subjects, and
     // this is what says the deletion happened and stays happened.
     expect(exported()).toEqual(["/account", "/login", "/setup"]);
+  });
+
+  /**
+   * **The sibling of the test below, and the one nobody was running.**
+   *
+   * A link to a page that does not exist is caught there. This is the other
+   * direction: a page's worth of code that no page reaches. Neither errors,
+   * neither fails a build, and both are how a tree stops describing the
+   * product — `tsc` compiles an orphan happily and `next build` leaves it out
+   * of the bundle without mentioning it.
+   *
+   * It had accumulated two layers deep. Narrowing this site to administration
+   * left a workbench behind it — new workspace, compute, hosts, repositories,
+   * the GitHub authorization screen — and deleting the organisation pages left
+   * seven interface primitives and six API helpers behind that. Each layer was
+   * invisible until the one above it went.
+   *
+   * Reached from the layout and the pages, which is the only definition that
+   * means anything: a module nothing renders cannot be looked at, whatever it
+   * still compiles into.
+   */
+  it("renders everything it carries", () => {
+    const live = new Set(rendered().map((f) => f.path));
+    expect(carried().filter((f) => !live.has(f))).toEqual([]);
+  });
+
+  /**
+   * And the same question one level down, for a name rather than a file.
+   *
+   * A module can be rendered while half of what it exports is not — which is
+   * how a whole onboarding step, a status indicator and a layout hook outlived
+   * everything that called them. Asked of `components/` and `src/` only, never
+   * of `app/`: Next reads `metadata`, `viewport` and `generateMetadata` by
+   * convention rather than by import, and a check that cannot tell a framework
+   * hook from dead code is a check that fails somebody honestly adding one.
+   */
+  it("exports nothing nobody asks for", () => {
+    const all = rendered();
+    // Asked of what this site wrote; `src/api/generated/` is orval's and is
+    // written whole whether or not a screen has reached for a given operation.
+    const files = all.filter((f) => /^(components|src)\//.test(f.path) && !f.path.includes("/generated/"));
+    const asked = new Map<string, Set<string>>();
+    const want = (module: string, name: string) => {
+      if (!asked.has(module)) asked.set(module, new Set());
+      asked.get(module)!.add(name);
+    };
+    // Every rendered module is an asker, `app/` included — a page importing
+    // `{ Shell }` is what keeps `Shell` alive.
+    for (const f of [...all, ...tests()]) {
+      const from = join(root, f.path);
+      for (const [, clause, spec] of f.text.matchAll(
+        /(?:import|export)\s+(?:type\s+)?\{([^}]*)\}\s+from\s+["']([^"']+)["']/g,
+      )) {
+        const target = moduleAt(spec, from);
+        if (target) for (const name of names(clause)) want(relative(root, target).split(sep).join("/"), name);
+      }
+    }
+
+    const dead: string[] = [];
+    for (const f of files) {
+      const code = withoutComments(f.text);
+      const here = asked.get(f.path) ?? new Set<string>();
+      for (const [, name] of code.matchAll(/export\s+(?:async\s+)?(?:function|const|class|type|interface)\s+(\w+)/g)) {
+        if (here.has(name)) continue;
+        const declares = new RegExp(`export\\s+(?:async\\s+)?(?:function|const|class|type|interface)\\s+${name}\\b`);
+        const usedHere = code
+          .split("\n")
+          .some((line) => new RegExp(`\\b${name}\\b`).test(line) && !declares.test(line));
+        if (!usedHere) dead.push(`${f.path} → ${name}`);
+      }
+    }
+    expect(dead).toEqual([]);
   });
 
   it("never points at a route it does not export", () => {
