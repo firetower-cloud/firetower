@@ -1,17 +1,9 @@
 export { Icon } from "./Icon";
 export { GithubMark } from "./Brand";
 export { Button } from "./Button";
-export { IconButton } from "./IconButton";
 export { Badge } from "./Badge";
 export { Segmented } from "./Segmented";
 export { Input, Select } from "./Field";
-export { Checkbox } from "./Checkbox";
-export { RowMenu, Choose, MenuButton, useAnchor } from "./Menu";
-export type { Item, At } from "./Menu";
-export { Table, Head, HeadCell, Body, Row as TableRow, Cell, Bulk } from "./Table";
-export { List, Columns, Row, Empty } from "./List";
-export { Avatar } from "./Avatar";
-export { Panel, PageHead } from "./Panel";
 export { Card, CardHead } from "./Card";
 export { CopyButton, Copyable } from "./Copy";
 export { QrCode } from "./QrCode";

@@ -13,8 +13,12 @@
 //! exactly two things: its shell at `/`, and the files of its own bundle.
 //!
 //! **The administration site** is `web/out` — a `next build` static export, an
-//! HTML file per route plus hashed assets. It keeps every path it answers
-//! today except `/`.
+//! HTML file per route plus hashed assets. Three routes are left of it:
+//! `/login`, `/setup` and `/account`. It used to carry `/` and six
+//! `/organization/…` pages as well; the renderer carries those subjects now,
+//! nothing linked to them, and they were deleted rather than left to rot. `/`
+//! had already moved here — it is the renderer's shell — and the site no
+//! longer exports an `index.html` at all.
 //!
 //! **No single-page fallback, deliberately.** It would be the obvious thing to
 //! add and it is wrong here: a catch-all would swallow the administration
@@ -128,7 +132,7 @@ object-src 'none'";
 
 /// [`POLICY`] with one directive in front of it, for the administration site.
 ///
-/// **Its export cannot run without inline script.** Every one of the twelve
+/// **Its export cannot run without inline script.** Every one of the five
 /// exported pages carries two inline `<script>` blocks — `self.__next_f.push(…)`,
 /// the server-component payload the page hydrates from — and no usable nonce:
 /// the only `nonce` in the HTML is an escaped string inside that payload, and a
@@ -137,7 +141,7 @@ object-src 'none'";
 /// administration site renders an empty page. In production. Only.
 ///
 /// Hashing them instead was considered and is not worth it: the payload differs
-/// per page and changes on every build, so it would be twelve hashes to
+/// per page and changes on every build, so it would be a hash per page to
 /// regenerate whenever anybody edits a screen, and a stale one fails exactly
 /// the same silent way.
 ///
@@ -445,11 +449,12 @@ impl IntoResponse for Asset {
 ///
 /// **What keeps that from being "try one, then the other".** Order only
 /// decides anything where both bundles carry the same name, and
-/// `the_bundles_claim_one_name_in_common` asserts that `index.html` is the only
-/// one — the root, which is the single path this change deliberately takes off
-/// the administration site. Anything else colliding later fails that test by
-/// name, here, rather than becoming a page that quietly came from the wrong
-/// application.
+/// `the_bundles_claim_no_name_in_common` asserts that none do. It used to
+/// assert that `index.html` was the one — the root, contested because both
+/// bundles had a shell. The site no longer exports a root page, so the
+/// collision is gone rather than merely decided, and the test now says so.
+/// Anything colliding later fails it by name, here, rather than becoming a
+/// page that quietly came from the wrong application.
 fn resolve(uri: &Uri) -> Option<Asset> {
     let path = uri.path().trim_start_matches('/');
 
@@ -464,10 +469,11 @@ fn resolve(uri: &Uri) -> Option<Asset> {
     }
 
     // `/` is the one path that is empty after trimming, and it is the
-    // application's. This is the one thing that used to resolve and now
-    // resolves elsewhere: the administration site's `index.html` is its
-    // download page, which tells a new self-hoster to go and install something
-    // else, and not needing to is the point of the whole change.
+    // application's. Still spelled out rather than left to the lookups below:
+    // an empty name is in neither bundle, so without this the root would 404.
+    // The site's own `index.html` — a download page telling a new self-hoster
+    // to go and install something else — was deleted once this stopped
+    // reaching it.
     if path.is_empty() {
         return Bundle::Renderer.load("index.html");
     }
@@ -585,8 +591,14 @@ mod tests {
             assert!(!Bundle::Renderer.load("index.html").unwrap().immutable);
         }
         if Bundle::Site.built() {
-            assert!(!Bundle::Site.load("index.html").unwrap().immutable);
-            assert!(!Bundle::Site.load("organization.html").unwrap().immutable);
+            // The site's own shells, by the names it exports now. It had an
+            // `index.html` until `/` became the renderer's and the download
+            // page behind it was deleted; `login.html` is the one route that
+            // answers whether or not there is a session, so it is the one that
+            // always exists.
+            assert!(!Bundle::Site.load("login.html").unwrap().immutable);
+            assert!(!Bundle::Site.load("account.html").unwrap().immutable);
+            assert!(!Bundle::Site.load("404.html").unwrap().immutable);
         }
     }
 
@@ -639,8 +651,16 @@ mod tests {
     /// in there hijacked `/account` and the whole suite stayed green, including
     /// this test and including `an_administration_route_resolves_to_its_page`,
     /// which only enumerates four routes and does not enumerate that one.
+    ///
+    /// **The one contested name has gone rather than been decided.** This used
+    /// to assert `["index.html"]` — both bundles had a shell and `resolve`
+    /// hands the root to the renderer on purpose. The administration site no
+    /// longer exports a root page at all, so there is nothing left to contest,
+    /// and the list is empty. That is a stronger claim than the old one and is
+    /// asserted the same way: a name arriving in both bundles later fails
+    /// here, by name.
     #[test]
-    fn the_bundles_claim_one_name_in_common() {
+    fn the_bundles_claim_no_name_in_common() {
         if !Bundle::Renderer.built() || !Bundle::Site.built() {
             return;
         }
@@ -648,23 +668,78 @@ mod tests {
             .names()
             .filter(|name| site_answers(name))
             .collect();
+        let none: [std::borrow::Cow<'static, str>; 0] = [];
         assert_eq!(
-            shared,
-            ["index.html"],
-            "only the root is contested, and the application wins it on purpose; \
-             anything else here is an administration route quietly served out of \
+            shared, none,
+            "nothing is contested now that the site exports no root page; \
+             anything here is an administration route quietly served out of \
              the renderer's bundle"
         );
     }
 
+    /// And the reason it is empty, said directly, so that the deletion is what
+    /// a failure points at.
+    ///
+    /// Without this the test above would also pass if the renderer stopped
+    /// shipping an `index.html` — which is a different and much worse world.
+    #[test]
+    fn the_site_exports_no_root_page() {
+        if !Bundle::Site.built() {
+            return;
+        }
+        assert!(
+            Site::get("index.html").is_none(),
+            "the site's root was a download page, the renderer serves `/` now, \
+             and a page here again is a page nothing can reach"
+        );
+        if Bundle::Renderer.built() {
+            assert!(
+                Renderer::get("index.html").is_some(),
+                "and the root the application answers with is still there"
+            );
+        }
+    }
+
+    /// The routes the site still has, and the ones it stopped having.
+    ///
+    /// **Both halves, because the deletion is the change.** The first is the
+    /// property that was always here — the site answers its own paths out of
+    /// its own export — over the set that is left. `/account` is in it now and
+    /// was not before: it holds the only voluntary password form in the
+    /// product and is what the desktop app's *change password* opens.
+    ///
+    /// The second is what this commit did. A deleted route must come back as
+    /// nothing from `resolve`, which is a 404 — the alternative, had the
+    /// export kept half of itself, is a page served out of a bundle that no
+    /// longer has the component behind it.
     #[test]
     fn an_administration_route_resolves_to_its_page() {
         if !Bundle::Site.built() {
             return;
         }
-        for path in ["/organization", "/organization/people", "/login", "/setup"] {
+        for path in ["/login", "/setup", "/account"] {
             let asset = resolve_path(path).unwrap_or_else(|| panic!("{path} must still resolve"));
             assert!(asset.content_type.starts_with("text/html"), "{path}");
+        }
+    }
+
+    #[test]
+    fn a_deleted_administration_route_is_not_served() {
+        if !Bundle::Site.built() {
+            return;
+        }
+        for path in [
+            "/organization",
+            "/organization/people",
+            "/organization/teams",
+            "/organization/access",
+            "/organization/usage",
+            "/organization/settings",
+        ] {
+            assert!(
+                resolve_path(path).is_none(),
+                "{path} was deleted; the renderer carries its subject now"
+            );
         }
     }
 
@@ -744,11 +819,15 @@ mod tests {
             // the directory moves every build and the file inside keeps its
             // name, so a pin there outlives the bytes it was taken from.
             (Site, "_next/WRo8u728hRf0gc5ixbXTK/index.txt",   false),
-            // Shells, at the root and nested. A pinned one hides an upgrade.
-            (Site, "index.html",                              false),
+            // Shells. A pinned one hides an upgrade. The nested name is not a
+            // route the site exports today — it exports three and all of them
+            // are flat — but the rule is a prefix test over a filename and has
+            // to keep answering for the shape, or the first nested page added
+            // back is pinned forever.
             (Site, "404.html",                                false),
-            (Site, "organization.html",                       false),
-            (Site, "organization/people.html",                false),
+            (Site, "account.html",                            false),
+            (Site, "login.html",                              false),
+            (Site, "account/tokens.html",                     false),
             (Site, "fonts/archivo.woff2",                     false),
             (Site, "favicon.ico",                             false),
             // And Vite's prefix means nothing here either.
@@ -763,7 +842,7 @@ mod tests {
             // "Anything with a dot in it" is the rule the specification tells
             // us not to write, and these are what it would have got wrong.
             (Renderer, "index.html",                          false),
-            (Site, "organization/usage.txt",                  false),
+            (Site, "account.txt",                             false),
 
             // Nothing is not something.
             (Renderer, "",                                    false),
@@ -809,7 +888,7 @@ mod tests {
             "public, max-age=31536000, immutable"
         );
         assert_eq!(cache(Bundle::Renderer, "index.html"), "no-cache");
-        assert_eq!(cache(Bundle::Site, "organization.html"), "no-cache");
+        assert_eq!(cache(Bundle::Site, "account.html"), "no-cache");
 
         // The type comes off the name as well, which is what makes the shell a
         // page rather than a download.
@@ -827,19 +906,21 @@ mod tests {
             site_candidates("account"),
             ["account", "account.html", "account/index.html"]
         );
+        // Nested, which the site does not export today — `/login`, `/setup`
+        // and `/account` are all flat. Kept because `resolve` asks the same
+        // three questions of whatever it is given and `site_answers` has to
+        // agree with it for a name of any shape, not only for the three that
+        // exist this week.
         assert_eq!(
-            site_candidates("organization/people"),
+            site_candidates("account/tokens"),
             [
-                "organization/people",
-                "organization/people.html",
-                "organization/people/index.html"
+                "account/tokens",
+                "account/tokens.html",
+                "account/tokens/index.html"
             ]
         );
-        // A trailing slash must not produce `organization//index.html`.
-        assert_eq!(
-            site_candidates("organization/")[2],
-            "organization/index.html"
-        );
+        // A trailing slash must not produce `account//index.html`.
+        assert_eq!(site_candidates("account/")[2], "account/index.html");
     }
 
     /// The sources a directive names, or nothing if it has no directive.
@@ -1080,7 +1161,7 @@ mod tests {
     #[test]
     fn each_bundle_keeps_its_own_policy() {
         let site = Bundle::Site
-            .describe("organization.html", b"<!doctype html>".to_vec())
+            .describe("account.html", b"<!doctype html>".to_vec())
             .into_response();
         assert_eq!(site.headers()[header::CONTENT_SECURITY_POLICY], SITE_POLICY);
         let app = Bundle::Renderer

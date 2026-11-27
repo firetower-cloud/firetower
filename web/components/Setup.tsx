@@ -19,14 +19,13 @@
  * One screen to get right, on the one surface that is always reachable.
  */
 import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { Mark } from "./Signal";
 import { useSetupState, useCompleteSetup } from "@/src/api/generated/setup/setup";
 import { StepPassword, StepOrganization } from "./SetupAccount";
+import { toApplication } from "@/src/api/http";
 import { GetTheApp } from "./GetTheApp";
 
 export function Setup() {
-  const router = useRouter();
   const { data: state, isLoading, refetch } = useSetupState();
   const complete = useCompleteSetup();
   const outstanding = [
@@ -47,13 +46,13 @@ export function Setup() {
   const onboarding = params?.has("member") ? false : !state?.completed;
   const current = shown[0];
 
-  // Nothing left to ask. Mark setting up as finished, then go to the dashboard.
+  // Nothing left to ask. Mark setting up as finished, then go to the
+  // application.
   //
-  // This used to draw one more panel, saying where to get the app. But `/` *is*
-  // that page — it is the first thing in the rail — so the panel was the same
-  // words with the navigation taken away, on the one screen in the product that
-  // deliberately has none. People finished setting up and were left somewhere
-  // with no way onward and nothing to say they had arrived.
+  // This used to draw one more panel, saying where to get the app, and then
+  // send people to `/` — which was this site's own download page and the first
+  // thing in its rail. `/` is the renderer now, so the hop is to another
+  // bundle and `router.replace` could not make it: see `toApplication`.
   //
   // Decided in an effect because navigating while rendering is a state change
   // React refuses, and latched because this must happen once: the redirect
@@ -70,9 +69,9 @@ export function Setup() {
       if (onboarding && !state?.completed) {
         await complete.mutateAsync().catch(() => {});
       }
-      router.replace("/");
+      toApplication();
     })();
-  }, [settling, onboarding, state?.completed, complete, router]);
+  }, [settling, onboarding, state?.completed, complete]);
 
   if (isLoading) {
     return (
