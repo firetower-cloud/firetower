@@ -38,7 +38,9 @@ import { Teams } from "~/ui/config/Teams";
 import { Directories } from "~/ui/config/Directories";
 import { Usage } from "~/ui/config/Usage";
 import { useMe } from "~/api/generated/auth/auth";
-import { deploymentMode, mayOperateDeployment, opensOn } from "~/ui/config/organisation";
+import { deploymentMode, mayOperateDeployment, opensOn, roleRead } from "~/ui/config/organisation";
+import { Settling, Trouble } from "~/ui/config/bits";
+import { trouble, why } from "~/data";
 
 export function Configuration() {
   const path = usePathname();
@@ -77,8 +79,46 @@ function Pane({ at, open }: { at: string; open: string | null }) {
    * recognises — "falls back to a real pane rather than drawing an empty
    * screen" — and the rail agrees either way, because `destinationAt` says
    * Organisation for this path whoever is asking.
+   *
+   * ## Pending is not refusal, and a failed read is not a member
+   *
+   * This asked `mayOperateDeployment(mode, me.data?.user)` and nothing else,
+   * so a role still in flight answered **false** and People mounted over the
+   * address somebody had typed — fetched its list, painted its skeleton, and
+   * was replaced a beat later. And a `/auth/me` that *failed* answered false
+   * for good: an administrator opening their own bookmark landed on People
+   * with nothing on screen saying the pane they asked for exists.
+   *
+   * So the three states `roleRead` names are the three things drawn. While it
+   * is reading, the skeleton both candidates share — no title, because naming
+   * a pane is already an answer about whose it is. When it could not be read,
+   * the read's own trouble with a retry, because the question is answerable
+   * and nobody has answered it. Only a role that *arrived* and says no falls
+   * back, which is the case the paragraphs above are about.
+   *
+   * `RailPanel`'s Organisation list is the same question with a milder
+   * answer: `panesFor` cannot list a pane it has no role for, so the row
+   * arrives when the role does. That is a list filling in rather than a wrong
+   * screen, and it is left as it is.
    */
-  const refused = at === "server" && !mayOperateDeployment(deploymentMode(), me.data?.user);
+  const role = roleRead({ pending: me.isPending, error: me.error, user: me.data?.user });
+  const deployment = at === "server";
+
+  if (deployment && role.reading) {
+    return (
+      <div className="pg">
+        <Settling />
+      </div>
+    );
+  }
+  if (deployment && role.error) {
+    return (
+      <div className="pg">
+        <Trouble kind={trouble(role.error) ?? "error"} error={why(role.error)} onRetry={() => void me.refetch()} />
+      </div>
+    );
+  }
+  const refused = deployment && !mayOperateDeployment(deploymentMode(), me.data?.user);
 
   switch (refused ? opensOn() : at) {
     case "repositories":
@@ -109,6 +149,15 @@ function Pane({ at, open }: { at: string; open: string | null }) {
       return <Secrets />;
     case "server":
       return <Deployment />;
+    /* **The arm nothing reaches, kept because the type requires one.** `at`
+       is a `string` — `paneAt` cannot narrow it without `PANES` being a
+       literal — so the switch needs a fallback, and the honest fallback is
+       `paneAt`'s own: `FIRST`, which is Repositories.
+
+       It used to be unreachable by nobody having noticed. It is unreachable
+       by a check now: `configuration-panes.test.ts` asserts every pane in
+       `PANES` and `SETTINGS` is named above, so a pane added to the index
+       without a component fails there rather than quietly drawing this. */
     default:
       return <Repos live open={open} />;
   }

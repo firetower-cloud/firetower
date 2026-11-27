@@ -88,6 +88,7 @@ import {
   locksTheRoom,
   mayInvite,
   readsFor,
+  roleRead,
   ROLES,
   saidRole,
   tagsFor,
@@ -136,16 +137,18 @@ export function People() {
      that was made rather than by the one that was not. While `me` is still in
      flight neither has started, and the page is settling. */
   const feed = reads.users ? users : reads.colleagues ? colleagues : null;
-  /* **`me` failing is the one way both reads stay off with nothing in
-     flight**, and it used to settle forever: `feed` is null, so `!feed` held
-     `settling` true, while `error` read off a feed that was never created and
-     stayed null. ⌘8 drew a spinner that could not resolve and offered no way
-     out — on the destination this whole surface exists to make reachable.
+  /* **A role that could not be read is the one way both reads stay off with
+     nothing in flight**, and it used to settle forever: `feed` is null, so
+     `!feed` held `settling` true while `error` read off a feed that was never
+     created and stayed null. ⌘8 drew a spinner that could not resolve and
+     offered no way out — on the destination this whole surface exists to make
+     reachable.
 
-     So a role that could not be read is an error like any other, and it is
-     `me`'s own that is shown, because that is the request that failed. */
+     `roleRead` is the one place that question is answered, so this pane and
+     the one that *routes* on it cannot disagree about what a 200 with no role
+     means. */
   const { settling, error } = feedState(
-    { pending: me.isPending, error: me.error },
+    roleRead({ pending: me.isPending, error: me.error, user: mine }),
     feed ? { pending: feed.isPending, error: feed.error } : null,
   );
 

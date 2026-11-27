@@ -12,7 +12,7 @@
  * The rendered half — *are they actually only in those three places* — is in
  * `usage.test.tsx`, because that one can only be answered off markup.
  */
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Directory, Group, Limit, Totals } from "~/api/generated/model";
 import {
   BREADTH,
@@ -22,15 +22,18 @@ import {
   SEARCHABLE,
   SERIES_FRAMES,
   SORTS,
+  GROUPS_MANY,
   ceiling,
   columnFull,
   consumptionAsk,
+  dayKey,
   columnLabel,
   detail,
   folder,
   fuller,
   fullness,
   liveModels,
+  maySwap,
   meterWidth,
   modelsByWeight,
   peak,
@@ -47,6 +50,7 @@ import {
   share,
   sortSay,
   splitSort,
+  thenOptions,
   tokensText,
   tone,
   unnamed,
@@ -165,17 +169,73 @@ describe("the figures", () => {
 
 describe("a column of the chart", () => {
   const nov18 = "2026-11-18T00:00:00.000Z";
+  const nov1 = "2026-11-01T00:00:00.000Z";
 
+  /* **Exact, not `/^Nov \d\d$/`.** The loose pattern is what let the
+     timezone bug through: "Nov 17" matched it as happily as "Nov 18", so the
+     assertion passed in every timezone while the label was wrong in half of
+     them. A test that cannot tell the right answer from the neighbouring one
+     is not checking the thing it is named for. */
   it("says what the axis has room for", () => {
-    expect(columnLabel(nov18, "day")).toMatch(/^Nov \d\d$/);
+    expect(columnLabel(nov18, "day")).toBe("Nov 18");
     expect(columnLabel(nov18, "month")).toBe("Nov");
+    expect(columnLabel(nov1, "month")).toBe("Nov");
   });
 
   /** And the hover says what the axis could not: the year, and which week. */
   it("says what the axis could not", () => {
-    expect(columnFull(nov18, "day")).toMatch(/^Nov \d\d$/);
-    expect(columnFull(nov18, "week")).toMatch(/^Week of Nov \d\d$/);
+    expect(columnFull(nov18, "day")).toBe("Nov 18");
+    expect(columnFull(nov18, "week")).toBe("Week of Nov 18");
     expect(columnFull(nov18, "month")).toBe("Nov 2026");
+    expect(columnFull(nov1, "month")).toBe("Nov 2026");
+  });
+
+  /**
+   * **The timezone, which is the whole of this bug.**
+   *
+   * A column's `start` is where the database cut the bucket, handed over as
+   * an instant. Read with `getDate()` it answers *what wall clock did this
+   * reader have at that moment*, and west of UTC that is the day before — so
+   * every column on a Los Angeles screen was labelled with yesterday, and a
+   * month bucket with last month. Nothing about the data moved; only the
+   * question did.
+   *
+   * Run under a real negative offset rather than by faking one, because the
+   * bug is in a platform API and the fake would have to reimplement it.
+   * `process.env.TZ` is honoured by V8 at assignment, so the whole block runs
+   * in Los Angeles and hands the clock back afterwards.
+   */
+  describe("read eight hours west of UTC", () => {
+    const was = process.env.TZ;
+    beforeAll(() => {
+      process.env.TZ = "America/Los_Angeles";
+    });
+    afterAll(() => {
+      process.env.TZ = was;
+    });
+
+    /** The harness itself, or the three below pass by not having moved. */
+    it("is actually in another timezone", () => {
+      expect(new Date(nov18).getDate()).toBe(17);
+      expect(new Date(nov1).getMonth()).toBe(9);
+    });
+
+    it("still names the day the bucket started", () => {
+      expect(columnLabel(nov18, "day")).toBe("Nov 18");
+      expect(columnFull(nov18, "day")).toBe("Nov 18");
+      expect(columnFull(nov18, "week")).toBe("Week of Nov 18");
+    });
+
+    /** The month bucket is the louder half: it names the wrong *month*. */
+    it("still names the month the bucket started", () => {
+      expect(columnLabel(nov1, "month")).toBe("Nov");
+      expect(columnFull(nov1, "month")).toBe("Nov 2026");
+    });
+
+    /** And a bucket that crosses a year boundary does not lose the year. */
+    it("does not walk back over a new year", () => {
+      expect(columnFull("2027-01-01T00:00:00.000Z", "month")).toBe("Jan 2027");
+    });
   });
 
   /**
@@ -334,6 +394,88 @@ describe("the sort, as one sentence", () => {
   });
 });
 
+describe("saying more than one of a thing", () => {
+  /**
+   * **`repository` + `s` is `repositorys`.** The remainder row was the only
+   * place on the pane that pluralised a dimension, and it did it by adding a
+   * letter — so *12 more repositorys*, *7 more persons*, *4 more directorys*
+   * — one line away from `detail()`, which says *people* correctly.
+   */
+  it("has a real plural for every way of grouping", () => {
+    expect(GROUPS_MANY.repository).toBe("repositories");
+    expect(GROUPS_MANY.person).toBe("people");
+    expect(GROUPS_MANY.directory).toBe("directories");
+    for (const k of Object.keys(GROUPS) as (keyof typeof GROUPS)[]) {
+      expect(GROUPS_MANY[k]).toBeTruthy();
+      /* And none of them is the singular with a letter stuck on, which is
+         what the bug was: a map that agreed with `+ "s"` everywhere would
+         pass a weaker version of this while fixing nothing. */
+      expect(GROUPS_MANY[k]).not.toBe(`${GROUPS[k]}`);
+    }
+    expect(plural(12, `more ${GROUPS.repository}`, `more ${GROUPS_MANY.repository}`)).toBe(
+      "12 more repositories",
+    );
+    expect(plural(1, `more ${GROUPS.repository}`, `more ${GROUPS_MANY.repository}`)).toBe(
+      "1 more repository",
+    );
+  });
+});
+
+describe("the two levels", () => {
+  /** Directory is a place, not a thing that happens inside another row. */
+  it("never offers directory as a second level, or a level under itself", () => {
+    for (const k of Object.keys(GROUPS) as (keyof typeof GROUPS)[]) {
+      expect(thenOptions(k)).not.toContain("directory");
+      expect(thenOptions(k)).not.toContain(k);
+      expect(thenOptions(k).length).toBeGreaterThan(0);
+    }
+    expect(thenOptions("task")).toContain("model");
+  });
+
+  /**
+   * **The swap could reach a pair the menu refuses to build.** Group by
+   * directory, then by person, press swap: `then` became `directory`, the
+   * control drew the bare wire value, and there was no legal way back.
+   */
+  it("is not swappable into a pair the menu would not offer", () => {
+    expect(maySwap("directory", "person")).toBe(false);
+    expect(maySwap("directory", "task")).toBe(false);
+  });
+
+  it("is swappable wherever the swapped pair is one somebody could build", () => {
+    expect(maySwap("task", "model")).toBe(true);
+    expect(maySwap("person", "task")).toBe(true);
+  });
+
+  /** And there is nothing to swap without a second level. */
+  it("is not swappable with one level", () => {
+    expect(maySwap("task", "")).toBe(false);
+  });
+
+  /**
+   * The pair the swap makes is always one `thenOptions` would offer — asked
+   * over every combination rather than over the one that broke, because the
+   * next one to break will be a different pair.
+   */
+  it("agrees with the menu over every combination", () => {
+    for (const group of Object.keys(GROUPS) as (keyof typeof GROUPS)[]) {
+      for (const then of thenOptions(group)) {
+        const legal = thenOptions(then).includes(group);
+        expect(maySwap(group, then)).toBe(legal);
+      }
+    }
+  });
+});
+
+describe("which day it is", () => {
+  it("changes when the reader's day does, and not when the hour does", () => {
+    expect(dayKey(new Date(2026, 10, 26, 0, 0))).toBe(dayKey(new Date(2026, 10, 26, 23, 59)));
+    expect(dayKey(new Date(2026, 10, 26, 23, 59))).not.toBe(dayKey(new Date(2026, 10, 27, 0, 1)));
+    expect(dayKey(new Date(2026, 11, 26))).not.toBe(dayKey(new Date(2026, 10, 26)));
+    expect(dayKey(new Date(2027, 10, 26))).not.toBe(dayKey(new Date(2026, 10, 26)));
+  });
+});
+
 describe("the scope", () => {
   const dir = (level?: string | null): Directory =>
     ({ id: "d_1", name: "Shared", slug: "shared", level }) as Directory;
@@ -462,6 +604,22 @@ describe("what the controls ask the server for", () => {
     expect(consumptionAsk({ ...base, find: "  renderer " }).find).toBe("renderer");
   });
 
+  /**
+   * **And only where a search is offered.** Moving to a grouping with no
+   * field clears what was typed, and the debounced copy is 300ms behind it —
+   * so one request used to go out narrowing by something nobody could see,
+   * immediately replaced by a second without it. Two reads to answer one
+   * question. Asked here rather than raced in the handler, so it is true for
+   * every grouping rather than for the ones somebody remembered.
+   */
+  it("carries no search into a grouping that offers no field", () => {
+    for (const group of Object.keys(GROUPS) as (keyof typeof GROUPS)[]) {
+      const ask = consumptionAsk({ ...base, group, find: "renderer" });
+      if (SEARCHABLE.includes(group)) expect(ask.find).toBe("renderer");
+      else expect(ask).not.toHaveProperty("find");
+    }
+  });
+
   /** A second level equal to the first cuts nothing, so it is not sent. */
   it("sends a second level only where it is a different one", () => {
     expect(consumptionAsk({ ...base, then: "model" }).then).toBe("model");
@@ -564,6 +722,17 @@ describe("a quota window", () => {
     expect(windowSaid("seven_day_opus")).toBe("7-day window, opus");
     expect(windowSaid("five_hour_sonnet")).toBe("5-hour window, sonnet");
     expect(windowSaid("rolling_fortnight")).toBe("rolling fortnight");
+  });
+
+  /**
+   * **The longest prefix wins, not the first one declared.** `month` and
+   * `month_code` are both prefixes of `month_code_opus`, and taking the first
+   * match made it read *this month, code opus* — a wording that depended on
+   * which key happened to be written higher up an object literal.
+   */
+  it("takes the most specific window it knows, not the first", () => {
+    expect(windowSaid("month_code_opus")).toBe("this month, coding, opus");
+    expect(windowSaid("month_opus")).toBe("this month, opus");
   });
 
   /** A fortnight shown as `364 h 15 m` is a number nobody reads as two weeks. */

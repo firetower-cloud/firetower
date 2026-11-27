@@ -234,6 +234,8 @@ type Seed = {
   /** A request still in flight over the answer above. */
   fetching?: boolean;
   accounts?: Account[];
+  /** The subscription read failing, rather than answering with none. */
+  accountsFailed?: boolean;
   directories?: typeof DIRECTORIES;
 };
 
@@ -241,7 +243,18 @@ function draw(seed: Seed = {}): string {
   const cache = new QueryClient({
     defaultOptions: { queries: { retry: false, refetchOnMount: false, retryOnMount: false } },
   });
-  cache.setQueryData(getListAccountsQueryKey(), seed.accounts ?? ACCOUNTS);
+  if (seed.accountsFailed) {
+    const entry = cache.getQueryCache().build(cache, { queryKey: getListAccountsQueryKey() } as never);
+    entry.setState({
+      status: "error",
+      error: Object.assign(new Error("Something went wrong."), { status: 500 }),
+      fetchStatus: "idle",
+      errorUpdatedAt: Date.now(),
+      errorUpdateCount: 1,
+    } as never);
+  } else {
+    cache.setQueryData(getListAccountsQueryKey(), seed.accounts ?? ACCOUNTS);
+  }
   cache.setQueryData(getListTeamsQueryKey(), TEAMS);
   cache.setQueryData(getListColleaguesQueryKey(), COLLEAGUES);
   cache.setQueryData(getListDirectoriesQueryKey(), seed.directories ?? DIRECTORIES);
@@ -554,6 +567,51 @@ describe("the ledger", () => {
   it("stops offering more once the list is complete", () => {
     expect(draw({ answer: FULL })).not.toContain('data-testid="usage-more"');
   });
+
+  /**
+   * **`repository` + `s` is `repositorys`.** This row is the only place on
+   * the pane that pluralises a dimension, and it did it by adding a letter —
+   * one line away from `detail()`, which has said *people* correctly since
+   * the web wrote it.
+   */
+  it("says the plural of the thing it is counting", () => {
+    const rest = group({ key: null, name: null, tokens: 930_000 });
+    const over = (by: "repository" | "person" | "directory") =>
+      subtree(
+        renderToStaticMarkup(
+          <Ledger
+            settling={false}
+            groups={ROWS.slice(0, 1)}
+            rest={rest}
+            total={13}
+            periodTokens={TOTALS.tokens}
+            by={by}
+            then=""
+            sort="tokens:desc"
+            typed=""
+            noMatch={false}
+            searched=""
+            open={null}
+            limit={25}
+            onTip={() => {}}
+            onOpen={() => {}}
+            onTyped={() => {}}
+            onGroup={() => {}}
+            onThen={() => {}}
+            onSwap={() => {}}
+            onSort={() => {}}
+            onMore={() => {}}
+          />,
+        ),
+        "usage-rest",
+      );
+    expect(over("repository")).toContain("12 more repositories");
+    expect(over("person")).toContain("12 more people");
+    expect(over("directory")).toContain("12 more directories");
+    for (const wrong of ["repositorys", "persons", "directorys"]) {
+      expect(over("repository") + over("person") + over("directory")).not.toContain(wrong);
+    }
+  });
 });
 
 /* ══ the ledger's own controls, driven directly ════════════════════════
@@ -667,6 +725,21 @@ describe("the ledger under a second level", () => {
     const then = subtree(h, "usage-then-by");
     expect(then).toContain("then by nothing");
     expect(h).toContain("then by nothing");
+  });
+
+  /**
+   * **The swap could reach a pair the menu refuses to build.** Grouped by
+   * directory with a second level, pressing it made *then by directory* —
+   * which the menu above excludes, so the control drew the bare wire value
+   * and there was no legal way back. Absent rather than disabled, which is
+   * the same rule that keeps it absent with one level.
+   */
+  it("is not offered where swapping would make a pair the menu excludes", () => {
+    expect(ledger({ by: "directory", then: "person" })).not.toContain('data-testid="usage-swap-levels"');
+    expect(ledger({ by: "directory", then: "person" })).not.toContain("disabled");
+    // And it is still offered everywhere the swapped pair is legal.
+    expect(ledger({ by: "task", then: "person" })).toContain('data-testid="usage-swap-levels"');
+    expect(ledger({ by: "person", then: "task" })).toContain('data-testid="usage-swap-levels"');
   });
 });
 
@@ -961,6 +1034,30 @@ describe("Limits", () => {
     const h = html();
     expect(subtree(h, "usage-limit-acc_kevin-five_hour")).toContain("text-sage");
     expect(h).not.toContain("--color-ember");
+  });
+
+  /**
+   * **Nothing drawn is how this section says *no subscription reported a
+   * ceiling*** — a real answer somebody can act on. Drawing the same nothing
+   * over a request that never came back says it about a fact nobody has, with
+   * no line and no retry and no way to tell the two apart.
+   */
+  it("says so when the read failed, rather than drawing the empty answer", () => {
+    const h = draw({ answer: FULL, accountsFailed: true });
+    expect(h).toContain('data-testid="usage-limits"');
+    const said = subtree(h, "usage-limits-error");
+    expect(said).toContain("What each provider last said is on the server, not in this window.");
+    expect(subtree(h, "usage-limits-retry")).toContain("Try again");
+    // And none of the empty answer's furniture: no gauges, no order menu.
+    expect(h).not.toContain('data-testid="usage-limit-acc_kevin"');
+    expect(h).not.toContain('data-testid="usage-limits-order"');
+  });
+
+  /** The two are told apart, which is the whole of the fix. */
+  it("draws nothing at all when nothing reported a ceiling", () => {
+    const h = draw({ answer: FULL, accounts: [] });
+    expect(h).not.toContain('data-testid="usage-limits"');
+    expect(h).not.toContain('data-testid="usage-limits-error"');
   });
 
   it("offers an order only when there is more than one subscription", () => {

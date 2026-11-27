@@ -400,14 +400,20 @@ function consumption(params) {
   const limit = Number(params.get("limit") ?? 25);
   const columns = bucket === "day" ? 14 : bucket === "week" ? 13 : 12;
 
+  /* **UTC midnights, because that is what `date_trunc` hands back.** These
+     were local midnights, so on any machine west of UTC the mock emitted
+     `…T08:00:00Z` and the chart's labels came out right by accident — while a
+     real deployment, whose buckets start at `…T00:00:00Z`, labelled every
+     column with the day before. A fixture that is kinder than the server is a
+     fixture that hides the bug it was built to show. */
   const end = new Date();
   const series = [];
   for (let i = columns - 1; i >= 0; i--) {
     const at = new Date(end);
-    if (bucket === "day") at.setDate(at.getDate() - i);
-    else if (bucket === "week") at.setDate(at.getDate() - i * 7);
-    else at.setMonth(at.getMonth() - i);
-    at.setHours(0, 0, 0, 0);
+    if (bucket === "day") at.setUTCDate(at.getUTCDate() - i);
+    else if (bucket === "week") at.setUTCDate(at.getUTCDate() - i * 7);
+    else at.setUTCMonth(at.getUTCMonth() - i);
+    at.setUTCHours(0, 0, 0, 0);
     const weekend = bucket === "day" && (at.getDay() === 0 || at.getDay() === 6);
     const trend = 0.55 + 0.75 * ((columns - i) / columns);
     series.push({ start: at.toISOString(), models: byModel(Math.round((weekend ? 0.26 : 1) * trend * wobble(i) * 290_000)) });

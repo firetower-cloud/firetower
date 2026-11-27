@@ -54,8 +54,8 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Badge, Button } from "~/components/ui";
-import { useMe } from "~/api/generated/auth/auth";
-import { useBootstrap } from "~/api/generated/meta/meta";
+import { getMeQueryKey, useMe } from "~/api/generated/auth/auth";
+import { getBootstrapQueryKey, useBootstrap } from "~/api/generated/meta/meta";
 import { useRenameOrganization } from "~/api/generated/organization/organization";
 import { getPreviewQueryKey, usePreview, useSetTelemetrySettings } from "~/api/generated/telemetry/telemetry";
 import { useBackendKey } from "~/backend";
@@ -216,7 +216,19 @@ function Name() {
            reload, because a reload rehydrates from that row. `renamed` writes
            it and `fleet.ts` repaints on the registry changing. */
         renamed(key, org.name);
-        return cache.invalidateQueries();
+        /* **The two reads that carry the name, not every read in the
+           window.** A bare `invalidateQueries()` matches everything: renaming
+           the organisation re-fetched sessions, workspaces, repositories,
+           machines, skills, profiles and the consumption ledger — a hundred
+           requests and a visible stutter across the whole app, to move one
+           word. `/auth/me` carries `organization.name`, which this field and
+           the account screen read; `/bootstrap` carries `organization`, which
+           the sign-in and switcher screens read. Nothing else on the server
+           knows it. `Telemetry` below already names its one key. */
+        return Promise.all([
+          cache.invalidateQueries({ queryKey: getMeQueryKey() }),
+          cache.invalidateQueries({ queryKey: getBootstrapQueryKey() }),
+        ]);
       })
       .catch((e) => setSaid(why(e)));
   };

@@ -468,15 +468,81 @@ export function howMany(n: number): string {
  * data in hand is not `pending` in this client's query layer, so a `me` that
  * is re-checked behind a drawn list does not put a spinner over it. The guard
  * that matters is `!feed`, which is about there being nothing to show yet.
+ *
+ * ## It settled forever a third time, and the case is not the fix
+ *
+ * The first two fixes each named a *way* the role fails to arrive — the read
+ * errors; the read errors behind a healthy list — and the third way had no
+ * name: **`/auth/me` answering 200 with nothing usable in it.** A body with no
+ * `role`, a shape one version out, a proxy that returned the wrong JSON.
+ * `readsFor` then enables neither read, so there is no feed; `me.error` is
+ * null, because nothing failed; and the old expression had `(!feed &&
+ * !me.error)` holding `settling` true with nothing left that could ever
+ * change it. ⌘8 drew the unresolvable spinner again.
+ *
+ * So this is written as the three states it has rather than as a list of the
+ * ways it can go wrong: **there is a feed, or the role has not arrived yet, or
+ * the role did not arrive.** No fourth branch exists, which is what makes a
+ * fourth way of failing arrive at the right screen without anybody having
+ * anticipated it — and *did it arrive* is asked of `roleRead` rather than
+ * inferred here, so the pane that routes on the same question cannot drift
+ * from the pane that draws on it.
  */
 export function feedState(
-  me: { pending: boolean; error: unknown },
+  role: ReturnType<typeof roleRead>,
   feed: { pending: boolean; error: unknown } | null,
 ): { settling: boolean; error: unknown } {
-  return {
-    settling: me.pending || (!feed && !me.error) || !!feed?.pending,
-    error: (feed ? feed.error : me.error) ?? null,
-  };
+  /* Once a list exists the role has already been read, so the list is the
+     only thing that can put this pane in either state — a background refetch
+     of `/auth/me` blipping must not blank a list somebody is using. */
+  if (feed) return { settling: feed.pending, error: feed.error ?? null };
+  if (role.reading) return { settling: true, error: null };
+  /* Resolved, and still nothing to feed the pane: the role is what did not
+     arrive, and `roleRead` guarantees there is something to say about it. */
+  return { settling: false, error: role.error };
+}
+
+/**
+ * The server answered, and said nothing this client can use.
+ *
+ * Shaped like the errors the API layer throws, because `data.ts`' `trouble`
+ * and `why` are what a pane will read it with. **`status` is 200 because that
+ * is what happened** — the request was fine and the answer was not, which
+ * `trouble` lands on *refused* rather than on *dark*: the right drawing,
+ * since there is a server there and a retry is worth offering.
+ */
+export const ROLE_UNREADABLE = {
+  status: 200,
+  message: "This Firetower did not say who you are.",
+} as const;
+
+/**
+ * Whether the role has arrived, and what to say when it has not.
+ *
+ * **One question, asked by everything that depends on the answer.** Two
+ * screens route on it — People picks which list to read, and `Configuration`
+ * picks which pane `/configuration/server` draws — and each of them had its
+ * own two-state version: *pending or not*, with everything that was not
+ * pending treated as an answer. Both were wrong in the same place, and in
+ * opposite directions: People settled forever on a role it never got, and
+ * `Configuration` read a role still in flight as *not an administrator* and
+ * mounted People over the address somebody had typed.
+ *
+ * **Pending is not refusal, and a 200 is not an answer.** The three states
+ * are *still reading*, *read*, and *could not be read* — and the third is the
+ * one neither screen had, so neither could tell a member apart from a
+ * `/auth/me` that failed.
+ *
+ * `error` is never null while there is no role, which is what lets a caller
+ * trust it without a fallback of its own.
+ */
+export function roleRead(me: { pending: boolean; error: unknown; user: Signed }): {
+  reading: boolean;
+  error: unknown;
+} {
+  if (me.pending) return { reading: true, error: null };
+  if (me.user?.role) return { reading: false, error: null };
+  return { reading: false, error: me.error ?? ROLE_UNREADABLE };
 }
 
 /**

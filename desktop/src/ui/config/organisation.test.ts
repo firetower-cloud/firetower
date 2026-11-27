@@ -33,6 +33,8 @@ import {
   opensOn,
   panesFor,
   readsFor,
+  roleRead,
+  ROLE_UNREADABLE,
   saidRole,
   tagsFor,
   teamActionsFor,
@@ -475,32 +477,138 @@ describe("saying how many people", () => {
 });
 
 
-describe("what the People pane is doing", () => {
-  const ok = { pending: false, error: null };
+/**
+ * Whether the role arrived — **the question two screens route on**.
+ *
+ * People picks which list to read from it; `Configuration` picks which pane
+ * `/configuration/server` draws. Each had its own two-state version, and both
+ * were wrong in the same place: everything that was not *pending* counted as
+ * an answer, so neither could tell a member from a `/auth/me` that failed —
+ * and neither could tell either of those from a 200 with nothing usable in
+ * it, which is the case that had no name at all.
+ */
+describe("whether the role arrived", () => {
+  it("is still reading while the request is in flight", () => {
+    expect(roleRead({ pending: true, error: null, user: undefined })).toEqual({
+      reading: true,
+      error: null,
+    });
+  });
 
-  it("settles while the role is still being read", () => {
-    expect(feedState({ pending: true, error: null }, null).settling).toBe(true);
+  it("has read it once a role is there", () => {
+    expect(roleRead({ pending: false, error: null, user: admin })).toEqual({
+      reading: false,
+      error: null,
+    });
+  });
+
+  it("hands back the read's own error when the read failed", () => {
+    const boom = new Error("no me");
+    expect(roleRead({ pending: false, error: boom, user: undefined }).error).toBe(boom);
   });
 
   /**
-   * **The one that settled forever.** A failed `me` leaves no feed at all —
-   * both reads are off until the role arrives — so the pane read its error off
-   * a feed that was never created, found none, and kept drawing a spinner
-   * behind ⌘8 with no way out.
+   * **The third way, which had no name.** A 200 with no `role` in it — a body
+   * one version out, a proxy answering the wrong JSON — is not pending, is
+   * not an error, and is not a role. Every caller treated it as whichever of
+   * those its own two-state shape happened to fall into.
+   */
+  it("says the role could not be read when the server answered with no role", () => {
+    for (const user of [undefined, null, {}, { id: "u_1" }, { id: "u_1", role: "" }]) {
+      const read = roleRead({ pending: false, error: null, user: user as never });
+      expect(read.reading).toBe(false);
+      expect(read.error).toBe(ROLE_UNREADABLE);
+    }
+  });
+
+  /**
+   * The server answered, so this is *refused* rather than *dark*: there is
+   * something there and a retry is worth offering. `data.ts`' `trouble` reads
+   * the status, which is why it carries one.
+   */
+  it("is shaped like something a pane can draw", () => {
+    expect(typeof ROLE_UNREADABLE.status).toBe("number");
+    expect(ROLE_UNREADABLE.status).not.toBe(401);
+    expect(ROLE_UNREADABLE.status).not.toBe(403);
+    expect(ROLE_UNREADABLE.message.length).toBeGreaterThan(0);
+  });
+
+  /** **Never nothing.** A caller that has no role has something to say about
+   *  why, without needing a fallback of its own. */
+  it("always has something to say while there is no role", () => {
+    for (const error of [null, undefined, new Error("x")]) {
+      expect(roleRead({ pending: false, error, user: undefined }).error).toBeTruthy();
+    }
+  });
+});
+
+describe("what the People pane is doing", () => {
+  const ok = { pending: false, error: null };
+  const read = { reading: false, error: null };
+
+  it("settles while the role is still being read", () => {
+    expect(feedState({ reading: true, error: null }, null).settling).toBe(true);
+  });
+
+  /**
+   * **The one that settled forever.** A role that could not be read leaves no
+   * feed at all — both reads are off until it arrives — so the pane read its
+   * error off a feed that was never created, found none, and kept drawing a
+   * spinner behind ⌘8 with no way out.
    */
   it("stops settling and shows the role's own error when the role could not be read", () => {
-    const state = feedState({ pending: false, error: new Error("no me") }, null);
+    const state = feedState({ reading: false, error: new Error("no me") }, null);
     expect(state.settling).toBe(false);
     expect(state.error).toBeInstanceOf(Error);
   });
 
+  /**
+   * **And the third variant, end to end.** `/auth/me` answers 200 with
+   * nothing usable: `readsFor` enables neither list, so there is no feed, and
+   * there is no error either. The old expression had `(!feed && !me.error)`
+   * holding `settling` true with nothing left that could ever change it.
+   */
+  it("stops settling when the server answered with no role at all", () => {
+    const user = { id: "u_1" } as never;
+    expect(readsFor(user)).toEqual({ users: false, colleagues: false });
+    const state = feedState(roleRead({ pending: false, error: null, user }), null);
+    expect(state.settling).toBe(false);
+    expect(state.error).toBe(ROLE_UNREADABLE);
+  });
+
+  /**
+   * **The property all three variants broke, asserted over the pair rather
+   * than over either half.**
+   *
+   * Each fix named a way the role could fail to arrive, and the next variant
+   * was a way nobody had named. What has to hold is composed: for *every*
+   * answer `roleRead` can give, a pane with no feed either settles with
+   * something still in flight or has something to say. There is no fourth
+   * answer to miss, because this walks all of them rather than a list
+   * somebody wrote down.
+   */
+  it.each([
+    ["in flight", { pending: true, error: null, user: undefined }],
+    ["the read failed", { pending: false, error: new Error("boom"), user: undefined }],
+    ["a 200 with no role", { pending: false, error: null, user: { id: "u_1" } }],
+    ["a 200 with an empty role", { pending: false, error: null, user: { id: "u_1", role: "" } }],
+    ["no user at all", { pending: false, error: null, user: null }],
+  ])("never settles forever — %s", (_why, me) => {
+    const state = feedState(roleRead(me as never), null);
+    /* Still waiting on something, or saying why it is not. Never neither,
+       which is the spinner behind ⌘8 that cannot resolve. */
+    expect(state.settling || !!state.error).toBe(true);
+    /* And never both, which would be a spinner over an error. */
+    expect(state.settling && !!state.error).toBe(false);
+  });
+
   it("shows the list's error once a list is the thing that failed", () => {
     const boom = new Error("list");
-    expect(feedState(ok, { pending: false, error: boom }).error).toBe(boom);
+    expect(feedState(read, { pending: false, error: boom }).error).toBe(boom);
   });
 
   it("is neither settling nor in error when both came back", () => {
-    expect(feedState(ok, ok)).toEqual({ settling: false, error: null });
+    expect(feedState(read, ok)).toEqual({ settling: false, error: null });
   });
 
   /**
@@ -513,7 +621,7 @@ describe("what the People pane is doing", () => {
    * has already been read; `me` only matters while there is nothing to show.
    */
   it("keeps a healthy list when a later check of the role fails", () => {
-    const state = feedState({ pending: false, error: new Error("me blipped") }, ok);
+    const state = feedState({ reading: false, error: new Error("me blipped") }, ok);
     expect(state.error).toBeNull();
     expect(state.settling).toBe(false);
   });
@@ -521,14 +629,14 @@ describe("what the People pane is doing", () => {
   /** And a refetch of the role does not put a spinner over a drawn list —
    *  `pending` is false for a query that already has data in this client. */
   it("does not settle a list that is already on screen", () => {
-    expect(feedState({ pending: false, error: null }, ok).settling).toBe(false);
+    expect(feedState(read, ok).settling).toBe(false);
   });
 
   /** When both failed, it is the list's own error that is shown: it is the
    *  one about the thing the reader is looking at. */
   it("prefers the list's error when both failed", () => {
     const boom = new Error("list");
-    const state = feedState({ pending: false, error: new Error("me") }, { pending: false, error: boom });
+    const state = feedState({ reading: false, error: new Error("me") }, { pending: false, error: boom });
     expect(state.error).toBe(boom);
   });
 });

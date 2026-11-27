@@ -140,6 +140,24 @@ export const GROUPS = {
 
 export type GroupKey = keyof typeof GROUPS;
 
+/**
+ * What more than one of a thing is called.
+ *
+ * `repository` + `s` is `repositorys`, and `person` + `s` is `persons`.
+ * `detail()` already says *people* correctly, one line away, which is how the
+ * remainder row came to be the only place on the pane that got it wrong.
+ */
+export const GROUPS_MANY: Record<GroupKey, string> = {
+  task: "tasks",
+  agent: "agents",
+  model: "models",
+  person: "people",
+  repository: "repositories",
+  directory: "directories",
+  subscription: "subscriptions",
+  workspace: "workspaces",
+};
+
 /** What "breadth" counts, for each way of grouping. */
 export const BREADTH: Record<GroupKey, string> = {
   task: "workspaces",
@@ -154,6 +172,35 @@ export const BREADTH: Record<GroupKey, string> = {
 
 /** Where a list is long enough that finding beats ranking. */
 export const SEARCHABLE: GroupKey[] = ["task", "workspace"];
+
+/**
+ * Which second levels a first level may be cut by.
+ *
+ * **Directory is never one.** It is a place rather than a thing that happens
+ * inside another row: "this task, broken down by directory" is one directory
+ * every time. And a level cannot be cut by itself.
+ */
+export function thenOptions(group: GroupKey): GroupKey[] {
+  return (Object.keys(GROUPS) as GroupKey[]).filter((k) => k !== group && k !== "directory");
+}
+
+/**
+ * Whether the two levels may trade places.
+ *
+ * **The swap could reach a pair the menu refuses to build.** Group by
+ * directory, then by person, and pressing it made *then by directory* — which
+ * `thenOptions` excludes, so the control drew the bare wire value, there was
+ * no way back to a legal pair, and the request went out asking for a
+ * breakdown the options list calls meaningless.
+ *
+ * So the question is not "is there a second level" but "is the swapped pair
+ * one somebody could have built", asked of the same rule that builds it. The
+ * control is absent where the answer is no, rather than drawn and refusing —
+ * `config/Teams.tsx`' rule.
+ */
+export function maySwap(group: GroupKey, then: GroupKey | ""): boolean {
+  return !!then && thenOptions(then).includes(group);
+}
 
 /**
  * How to order the ledger: **one control saying one sentence**.
@@ -259,19 +306,46 @@ const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "
 
 export type Bucket = (typeof RANGES)[RangeKey]["bucket"];
 
-/** What the axis has room for under a column. */
+/**
+ * What the axis has room for under a column — **read in UTC, because that is
+ * the frame the bucket is in**.
+ *
+ * A column's `start` is where the database cut the bucket, handed over as an
+ * instant: `2026-11-18T00:00:00Z`. Reading it with `getDate()` asks what wall
+ * clock *this reader* had at that instant, which west of UTC is the day
+ * before — so every column on a Los Angeles screen was labelled with the
+ * previous day, and a month bucket with the previous month. The bucket did
+ * not move; only the question did.
+ *
+ * `periodOf` below deliberately works the other way round, in local time,
+ * because the fortnight somebody means is their own. The two frames are not
+ * in conflict: one is "which instants am I asking about" and this is "what
+ * did the server call the bucket it answered with".
+ */
 export function columnLabel(iso: string, bucket: Bucket): string {
   const d = new Date(iso);
-  if (bucket === "month") return MONTHS[d.getMonth()];
-  return `${MONTHS[d.getMonth()]} ${String(d.getDate()).padStart(2, "0")}`;
+  if (bucket === "month") return MONTHS[d.getUTCMonth()];
+  return `${MONTHS[d.getUTCMonth()]} ${String(d.getUTCDate()).padStart(2, "0")}`;
 }
 
 /** What the axis has no room to say: the year, and which week it is. */
 export function columnFull(iso: string, bucket: Bucket): string {
   const d = new Date(iso);
-  if (bucket === "month") return `${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  if (bucket === "month") return `${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
   if (bucket === "week") return `Week of ${columnLabel(iso, bucket)}`;
   return columnLabel(iso, bucket);
+}
+
+/**
+ * Which local day it is, as a string that changes when the day does.
+ *
+ * The period is *this reader's* fortnight, so it has to move when their
+ * midnight passes. A window left open overnight otherwise keeps yesterday's
+ * window until something unrelated re-renders it, and then jumps — which
+ * reads as the sort having changed the data.
+ */
+export function dayKey(now: Date): string {
+  return `${now.getFullYear()}-${now.getMonth()}-${now.getDate()}`;
 }
 
 /**
@@ -504,7 +578,13 @@ export function consumptionAsk(a: {
 }): ConsumptionParams {
   const { from, to } = periodOf(a.range, a.now);
   const order = splitSort(a.sort);
-  const narrowed = a.find.trim();
+  /* **The search goes only where a search is offered.** Changing to a
+     grouping with no field clears what was typed, and the debounced copy is
+     300ms behind it — so one request used to go out carrying a filter with no
+     visible field, immediately replaced by a second without it. Two reads to
+     answer one question, and the first of them narrowing by something nobody
+     could see. Asked here rather than raced in the handler. */
+  const narrowed = SEARCHABLE.includes(a.group) ? a.find.trim() : "";
   return {
     from,
     to,
@@ -605,9 +685,15 @@ const WINDOWS: Record<string, string> = {
 export function windowSaid(scope: string): string {
   const known = WINDOWS[scope];
   if (known) return known;
-  for (const [prefix, label] of Object.entries(WINDOWS)) {
+  /* **Longest first, not declaration order.** `month` and `month_code` are
+     both prefixes of `month_code_opus`, and taking the first match made that
+     read "this month, code opus" — a wording that depends on which key
+     happens to be written higher up an object literal. The longer prefix is
+     the more specific answer and is always the right one. */
+  const prefixes = Object.keys(WINDOWS).sort((a, b) => b.length - a.length);
+  for (const prefix of prefixes) {
     if (scope.startsWith(`${prefix}_`)) {
-      return `${label}, ${scope.slice(prefix.length + 1).replace(/_/g, " ")}`;
+      return `${WINDOWS[prefix]}, ${scope.slice(prefix.length + 1).replace(/_/g, " ")}`;
     }
   }
   return scope.replace(/_/g, " ");

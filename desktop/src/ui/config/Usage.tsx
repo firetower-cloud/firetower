@@ -47,7 +47,7 @@
  * one carrier and it is ember, which this screen may not use. Moving Limits up
  * to shout would be using position to do ember's job.
  */
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { keepPreviousData } from "@tanstack/react-query";
 import {
@@ -70,10 +70,11 @@ import { useListAccounts } from "~/api/generated/accounts/accounts";
 import { useListColleagues, useListTeams } from "~/api/generated/access/access";
 import type { Account, ByModel, Column, Group, Limit, Totals } from "~/api/generated/model";
 import { AGENT_SHORT, AGENT_LABEL } from "~/components/AgentMark";
-import { trouble as troubleOf, useDirectories } from "~/data";
+import { trouble as troubleOf, useDirectories, why } from "~/data";
 import type { Trouble } from "~/data";
 import {
   GROUPS,
+  GROUPS_MANY,
   METER_FILL,
   RANGES,
   SEARCHABLE,
@@ -86,7 +87,9 @@ import {
   detail,
   folder,
   fuller,
+  dayKey,
   liveModels,
+  maySwap,
   meterWidth,
   modelsByWeight,
   peak,
@@ -100,6 +103,7 @@ import {
   seriesIn,
   share,
   sortSay,
+  thenOptions,
   tokensText,
   tone,
   unnamed,
@@ -138,6 +142,37 @@ function useDebounced<T>(value: T, ms: number) {
   return settled;
 }
 
+/**
+ * Re-renders when the reader's day turns over.
+ *
+ * The period is *their* fortnight, so it has to move when their midnight
+ * passes. Two triggers, because the common case is not a tick: a minute timer
+ * for a window somebody is watching, and `visibilitychange` for the much more
+ * likely one — a laptop that slept through the boundary and is opened again,
+ * where no timer fired at all.
+ *
+ * State changes only when the day key actually changes, so the minute tick
+ * costs one comparison and nothing else.
+ */
+function useToday(): string {
+  const [day, setDay] = useState(() => dayKey(new Date()));
+  useEffect(() => {
+    const check = () => setDay((was) => {
+      const now = dayKey(new Date());
+      return now === was ? was : now;
+    });
+    const every = setInterval(check, 60_000);
+    document.addEventListener("visibilitychange", check);
+    window.addEventListener("focus", check);
+    return () => {
+      clearInterval(every);
+      document.removeEventListener("visibilitychange", check);
+      window.removeEventListener("focus", check);
+    };
+  }, []);
+  return day;
+}
+
 export function Usage() {
   const [range, setRange] = useState<RangeKey>("d14");
   const [group, setGroup] = useState<GroupKey>("task");
@@ -145,7 +180,9 @@ export function Usage() {
   const [scope, setScope] = useState<Scope>({ kind: "all" });
   const [picking, setPicking] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState<string | null>(null);
-  const [tip, setTip] = useState<Tip | null>(null);
+  /* Created once, and never a dependency: the setter it hands out is stable
+     for the life of the pane. */
+  const [tips] = useState(makeTipStore);
   const [sort, setSort] = useState<SortKey>("tokens:desc");
   // What is typed, and what has been asked for. Two states because they are
   // two things: the field has to answer every keystroke, and the server does
@@ -161,10 +198,17 @@ export function Usage() {
 
   /* The whole request, from one rule. `periodOf` rounds to the day inside it,
      so the key is stable across renders — otherwise every tick of the clock
-     is a new request for the same answer. */
+     is a new request for the same answer.
+
+     **`today` is in the dependencies because the period is the reader's.**
+     Keyed on the controls alone, a window left open overnight kept
+     yesterday's fortnight until something unrelated re-rendered it, and then
+     jumped — which reads as the sort having changed the data. */
+  const today = useToday();
   const ask = useMemo(
     () => consumptionAsk({ range, group, then, scope, sort, find, limit, now: new Date() }),
-    [range, group, then, scope, sort, find, limit],
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `today` is the clock, read inside.
+    [range, group, then, scope, sort, find, limit, today],
   );
 
   const { data, isPending, isFetching, isError, error, refetch } = useConsumption(
@@ -356,7 +400,7 @@ export function Usage() {
               series={data?.series ?? []}
               models={models}
               bucket={RANGES[range].bucket}
-              onTip={setTip}
+              onTip={tips.set}
             />
 
             {/* Said once: the reading's blank already says nothing ran. */}
@@ -379,15 +423,26 @@ export function Usage() {
                   searched={searched}
                   open={open}
                   limit={limit}
-                  onTip={setTip}
+                  onTip={tips.set}
                   onOpen={setOpen}
                   onTyped={(v) => {
                     setTyped(v);
                     reset();
                   }}
                   onGroup={(v) => {
+                    /* **No second level to clear.** The grouping menu does
+                       not offer the level that is already the second one, and
+                       the only other way the pair moves is the swap, which
+                       `maySwap` keeps to pairs this menu would build.
+
+                       What was typed goes only where the next grouping has no
+                       field to show it in — a filter nobody can see or clear
+                       is worse than losing a word, and between two groupings
+                       that both offer one it is usually the same word being
+                       hunted. The *request* needs no such care: the search
+                       goes nowhere a search is not offered, whatever the
+                       debounced copy is still holding. */
                     setGroup(v);
-                    if (v === then) setThen("");
                     if (!SEARCHABLE.includes(v)) setTyped("");
                     setOpen(null);
                     reset();
@@ -397,7 +452,7 @@ export function Usage() {
                     setOpen(null);
                   }}
                   onSwap={() => {
-                    if (!then) return;
+                    if (!then || !maySwap(group, then)) return;
                     const outer = group;
                     setGroup(then);
                     setThen(outer);
@@ -414,14 +469,24 @@ export function Usage() {
             )}
 
             {/* Last, and on nobody's period but the provider's. */}
+            {/* The read is handed over whole, rather than as rows and a
+                boolean, because this section has to tell *nothing reported a
+                ceiling* from *we could not ask* — see `Limits`. */}
             {state !== "settling" && (
-              <Limits accounts={accounts.data ?? []} pending={accounts.isPending} />
+              <Limits
+                feed={{
+                  data: accounts.data ?? [],
+                  loading: accounts.isPending,
+                  error: accounts.isError ? why(accounts.error) : null,
+                  onRetry: () => void accounts.refetch(),
+                }}
+              />
             )}
           </>
         )}
       </div>
 
-      <TipLayer tip={tip} models={models} />
+      <TipLayer store={tips} models={models} />
     </div>
   );
 }
@@ -1051,19 +1116,21 @@ export function Ledger({
             value={then}
             options={[
               { value: "" as GroupKey | "", label: "then by nothing" },
-              // Directory is a place, not a thing that happens inside another
-              // row: "this task, broken down by directory" is one directory
-              // every time.
-              ...(Object.keys(GROUPS) as GroupKey[])
-                .filter((k) => k !== by && k !== "directory")
-                .map((k) => ({ value: k as GroupKey | "", label: `then by ${GROUPS[k]}` })),
+              ...thenOptions(by).map((k) => ({
+                value: k as GroupKey | "",
+                label: `then by ${GROUPS[k]}`,
+              })),
             ]}
             onChange={onThen}
           />
-          {/* **Not drawn until there is a second level**, rather than drawn
-              and greyed: a disabled control is how an interface says you are
-              being withheld from, and nothing is. `config/Teams.tsx`' rule. */}
-          {then && (
+          {/* **Not drawn until the swap would make a pair somebody could have
+              built**, rather than drawn and greyed: a disabled control is how
+              an interface says you are being withheld from. Grouped by
+              directory, the swap would make *then by directory*, which the
+              menu above refuses to offer — so it is absent there too, and
+              `maySwap` is the one rule both ends ask. `config/Teams.tsx`'
+              rule. */}
+          {maySwap(by, then) && (
             <button
               type="button"
               className="btn plain icon"
@@ -1156,7 +1223,9 @@ export function Ledger({
             {rest && (
               <div className="r" data-testid="usage-rest">
                 <span className="tx">
-                  <b className="rest">{plural(total - groups.length, `more ${GROUPS[by]}`)}</b>
+                  <b className="rest">
+                    {plural(total - groups.length, `more ${GROUPS[by]}`, `more ${GROUPS_MANY[by]}`)}
+                  </b>
                   <s>
                     {periodTokens > 0
                       ? `${Math.round((rest.tokens / periodTokens) * 100)}% of the period`
@@ -1325,6 +1394,40 @@ function named(name: string) {
 export type Tip = { x: number; y: number; from: "chart" | "row"; head: string; models: ByModel[] };
 
 /**
+ * Where the hover layer's state lives — **outside the tree**.
+ *
+ * It was `useState` on the pane, and a pointer move is a coordinate change:
+ * dragging across one ledger row re-rendered the chart, twenty-five rows,
+ * their meters and the Limits section, sixty times a second, to move one card
+ * four pixels. Nothing above the layer depends on where the pointer is.
+ *
+ * So the openers write to a store and only `TipLayer` subscribes. The setter
+ * is stable for the life of the pane, which is also what keeps it out of
+ * every child's dependency list.
+ */
+export type TipStore = {
+  get: () => Tip | null;
+  set: (tip: Tip | null) => void;
+  subscribe: (listener: () => void) => () => void;
+};
+
+export function makeTipStore(): TipStore {
+  let tip: Tip | null = null;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => tip,
+    set: (next) => {
+      tip = next;
+      for (const listener of listeners) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
+}
+
+/**
  * What a column *or a row* is made of, without having to open anything.
  *
  * On `body` and `fixed`, for the reason `Pop` gives: a tooltip opened from
@@ -1339,7 +1442,11 @@ export type Tip = { x: number; y: number; from: "chart" | "row"; head: string; m
  * It enhances and never gates — every number in here is also reachable under
  * *then by model*, which needs no pointer at all.
  */
-export function TipLayer({ tip, models }: { tip: Tip | null; models: string[] }) {
+export function TipLayer({ store, models }: { store: TipStore; models: string[] }) {
+  /* The one subscriber. `getServerSnapshot` is the same reader because the
+     store is per-pane rather than global — there is nothing to hydrate from
+     and nothing shared across renders of it. */
+  const tip = useSyncExternalStore(store.subscribe, store.get, store.get);
   if (!tip || typeof document === "undefined") return null;
   return createPortal(<Tip tip={tip} models={models} />, document.body);
 }
@@ -1485,10 +1592,24 @@ function Option({
  *
  * Claude Code reports no percentage, so those rows get no meter. **The empty
  * space is the finding, not a gap to fill** with a word-shaped box.
+ *
+ * **And a read that failed is not that finding.** Nothing drawn at all is how
+ * this section says *no subscription has reported a ceiling*, which is a real
+ * answer somebody can act on; drawing the same nothing over a request that
+ * never came back says it about a fact nobody has. The two were folded
+ * together — no line, no retry, no way to tell — which is the defect this
+ * pane's own note warns about one paragraph up: *not knowing yet is a
+ * different thing*.
  */
-function Limits({ accounts, pending }: { accounts: Account[]; pending: boolean }) {
+function Limits({
+  feed,
+}: {
+  feed: { data: Account[]; loading: boolean; error: string | null; onRetry: () => void };
+}) {
   const [shown, setShown] = useState(10);
   const [order, setOrder] = useState<"asc" | "desc">("desc");
+  const accounts = feed.data;
+  const pending = feed.loading;
 
   // Grouped by subscription, because a provider meters one account several
   // ways at once — Kimi keeps a rolling five hours, a month, and coding inside
@@ -1512,9 +1633,17 @@ function Limits({ accounts, pending }: { accounts: Account[]; pending: boolean }
       return order === "desc" ? b - a : a - b;
     });
 
+  /* Said at the row's own left edge rather than as a plate down the middle:
+     this is one section of a pane that is otherwise fine, and a centred
+     refusal here would read as the whole screen having failed. `bits.tsx`'
+     two shapes, and this is the `Note` one. The heading stays, because a
+     section that cannot be filled is still a section. */
+  const unread = !pending && !!feed.error;
+
   // Nothing at all is a real answer — no subscription has reported a limit —
-  // and it is drawn as nothing. Not knowing yet is a different thing.
-  if (!pending && !groups.length) return null;
+  // and it is drawn as nothing. Not knowing yet is a different thing, and it
+  // is the line above this one.
+  if (!pending && !unread && !groups.length) return null;
 
   const page = groups.slice(0, shown);
   const now = Date.now();
@@ -1529,7 +1658,7 @@ function Limits({ accounts, pending }: { accounts: Account[]; pending: boolean }
             period above.
           </p>
         </div>
-        {!pending && groups.length > 1 && (
+        {!pending && !unread && groups.length > 1 && (
           <div className="ctl">
             <Choose
               testId="usage-limits-order"
@@ -1548,6 +1677,24 @@ function Limits({ accounts, pending }: { accounts: Account[]; pending: boolean }
         )}
       </div>
 
+      {unread ? (
+        <Note
+          icon={TriangleAlert}
+          testId="usage-limits-error"
+          control={
+            <button
+              type="button"
+              className="btn quiet mt-[7px] h-7 px-2.5"
+              data-testid="usage-limits-retry"
+              onClick={feed.onRetry}
+            >
+              Try again
+            </button>
+          }
+        >
+          {feed.error} What each provider last said is on the server, not in this window.
+        </Note>
+      ) : (
       <div className="limits">
         {pending
           ? [0, 1, 2, 3].map((i) => (
@@ -1582,8 +1729,9 @@ function Limits({ accounts, pending }: { accounts: Account[]; pending: boolean }
               </div>
             ))}
       </div>
+      )}
 
-      {!pending && groups.length > shown && (
+      {!pending && !unread && groups.length > shown && (
         <button
           type="button"
           className="btn plain mt-5"

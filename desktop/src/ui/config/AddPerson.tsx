@@ -180,12 +180,22 @@ export function HandOver({ handed, onClose }: { handed: Handed; onClose: () => v
      after it is a line somebody pastes to a colleague who then cannot find the
      thing. The username and the password are the part that cannot be guessed;
      an address they are about to be told anyway is the part that can wait. */
+  /* **It stopped promising a download.** The line used to end *"you can
+     download the Mac or Windows app from the same page"*, and since the
+     renderer took the control plane's root there is no such page: `/` is the
+     application itself and carries nothing to download. The sentence survived
+     the move because nothing reads an invite note, which is exactly how a
+     message somebody pastes to a colleague came to send them looking for a
+     button that is not there.
+
+     Deleted rather than re-aimed. There is a downloads page still exported at
+     `/index`, and nothing links to it on purpose — a product that no longer
+     asks anybody to download anything should not open by asking. */
   const note = (password: string) =>
     `Hi ${handed.username}, you have an account on Firetower.\n\n` +
     (where ? `Sign in at ${where}\n` : "") +
     `Username: ${handed.username}\n` +
-    `Password: ${password}  (you will be asked to change it)\n\n` +
-    `Once you are signed in there, you can download the Mac or Windows app from the same page.`;
+    `Password: ${password}  (you will be asked to change it)`;
 
   /* Through `write`, which the rest of the product already uses: it falls back
      to a selection when `navigator.clipboard` is missing or refuses — a

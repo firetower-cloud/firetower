@@ -131,8 +131,13 @@ export function Rows<T>({
  * rows at the height of a row, with a disc where the glyph goes and two bars
  * where the name and its sub-line go. The page stops moving when the answer
  * arrives rather than reflowing from a one-line "Reading it off the server…".
+ *
+ * Exported for the one caller that is not a `Section`: `Configuration` has to
+ * draw *something* while it works out **which pane** an address is, and the
+ * shape both candidates share is this one. A title there would be naming a
+ * pane nobody has established is theirs.
  */
-function Settling() {
+export function Settling() {
   return (
     <div className="lrows mt-5">
       {[70, 45, 60, 38, 55].map((w, i) => (
