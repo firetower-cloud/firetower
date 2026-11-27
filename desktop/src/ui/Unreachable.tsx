@@ -12,9 +12,14 @@ export function Unreachable({ org }: { org: string }) {
       <div className="max-w-[22rem] text-center">
         <CircleSlash2 className="mx-auto h-7 w-7 text-mute" strokeWidth={1.5} />
         <h2 className="mt-4 text-title text-bone">No route to {org}</h2>
+        {/* **The machine it named is not always a Mac and is sometimes not
+            running this at all** — a browser reaches the control plane from
+            wherever it is. What the sentence is for survives the change: the
+            work is fine, the route is what is missing, and that is something
+            the person can act on. */}
         <p className="mt-2 text-read text-dim">
-          The agents are still running on their machines. This Mac just can’t reach the control
-          plane — usually the VPN.
+          The agents are still running on their machines. What is missing is the route to the
+          control plane — usually the VPN.
         </p>
         <button className="control mt-5 border border-line bg-raise text-bone hover:bg-overlay">
           Open Tailscale

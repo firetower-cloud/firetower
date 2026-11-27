@@ -19,6 +19,7 @@ import { Icon } from "./Icon";
 export function CopyButton({
   text,
   label = "Copy",
+  testid,
   className = "",
 }: {
   /**
@@ -28,6 +29,8 @@ export function CopyButton({
   text: string | (() => string);
   /** Named for a screen reader and, as a title, for everyone else. */
   label?: string;
+  /** For a caller whose design contract names this button by id. */
+  testid?: string;
   className?: string;
 }) {
   const [said, setSaid] = useState<"idle" | "copied" | "failed">("idle");
@@ -56,6 +59,7 @@ export function CopyButton({
       onClick={copy}
       aria-label={says}
       title={says}
+      data-testid={testid}
       className={`grid shrink-0 place-items-center rounded-sm p-1 transition-colors ${
         said === "copied" ? "text-sage" : said === "failed" ? "text-brick" : "text-mute"
       } hover:bg-raise hover:text-bone ${className}`}

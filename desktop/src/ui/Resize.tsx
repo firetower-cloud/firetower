@@ -94,7 +94,7 @@
  */
 import { useEffect, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
-import { bridge } from "~/bridge";
+import { installedApp } from "~/installed-app";
 import { isMac } from "~/platform";
 import { tauriWindow } from "~/drag";
 
@@ -174,10 +174,12 @@ export function Resize() {
   const maxed = useMaximized();
 
   /* macOS draws its own frame and has its own resize margin outside ours;
-     two mechanisms at one edge is one too many. A browser tab has no window
-     to resize — `?platform=linux` in a `tauri dev` build is how this is
-     looked at from a Mac. */
-  if (isMac || !bridge.native || maxed) return null;
+     two mechanisms at one edge is one too many. A served page has no window
+     to resize either — the browser's frame is the browser's — which is
+     `~/installed-app`'s question rather than a second reading of the bridge.
+     `?platform=linux` in a `tauri dev` build is how this is looked at from a
+     Mac. */
+  if (isMac || !installedApp() || maxed) return null;
 
   const grab = (d: Direction) => (e: ReactMouseEvent<HTMLElement>) => {
     if (e.button !== 0) return;

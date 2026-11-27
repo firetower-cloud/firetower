@@ -37,9 +37,6 @@ import { useSyncExternalStore } from "react";
 /** Tailwind's own `md`. Below it, the rail is a drawer. */
 export const RAIL_AT = "(width >= 48rem)";
 
-/** Tailwind's own `xl`. Below it, the panel's views move into the pane. */
-export const PANEL_AT = "(width >= 80rem)";
-
 /**
  * Subscribe once per query, not once per component.
  *
@@ -80,9 +77,4 @@ function useMatches(query: string, whenUnknown: boolean): boolean {
 /** Room for the rail beside the work. False on a phone. */
 export function useHasRail(): boolean {
   return useMatches(RAIL_AT, true);
-}
-
-/** Room for the side panel as well. False on a phone and on most tablets. */
-export function useHasPanel(): boolean {
-  return useMatches(PANEL_AT, true);
 }

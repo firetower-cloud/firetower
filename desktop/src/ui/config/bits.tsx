@@ -12,7 +12,7 @@
  * second frame inside the sheet's own, and what makes a list read as a list is
  * the repeat — every border added is one more thing competing with it.
  */
-import { CircleSlash2, ExternalLink, FolderDown, Info, Loader2, Lock, RefreshCw, Shapes, TriangleAlert } from "lucide-react";
+import { CircleSlash2, FolderDown, Info, Loader2, Lock, RefreshCw, Shapes, TriangleAlert } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Icon } from "~/components/ui";
 import type { Trouble as TroubleKind } from "~/data";
@@ -131,8 +131,13 @@ export function Rows<T>({
  * rows at the height of a row, with a disc where the glyph goes and two bars
  * where the name and its sub-line go. The page stops moving when the answer
  * arrives rather than reflowing from a one-line "Reading it off the server…".
+ *
+ * Exported for the one caller that is not a `Section`: `Configuration` has to
+ * draw *something* while it works out **which pane** an address is, and the
+ * shape both candidates share is this one. A title there would be naming a
+ * pane nobody has established is theirs.
  */
-function Settling() {
+export function Settling() {
   return (
     <div className="lrows mt-5">
       {[70, 45, 60, 38, 55].map((w, i) => (
@@ -191,9 +196,10 @@ export function Section({
   return (
     <div className="pg">
       {/* **Above the head, and outside everything `trouble` swaps.** Settings
-          has no rail icon to leave a pane by, so the one way between its five
-          panes is in here — and a pane that cannot be read is the pane you
-          most need to leave. It draws nothing outside Settings. */}
+          has no rail icon to leave a pane by, so the one way between the panes
+          it owns is in here — and a pane that cannot be read is the pane you
+          most need to leave. It draws nothing outside Settings, which is now
+          everywhere but Vault and This Firetower. */}
       <SettingsIndex />
       <div className="pg-head">
         <div>
@@ -395,11 +401,21 @@ export function Blank({
   children,
   action,
   shape = "row",
+  testId,
 }: {
   icon: LucideIcon;
   title: string;
   children?: React.ReactNode;
   action?: React.ReactNode;
+  /**
+   * The name a contract knows this object by.
+   *
+   * Usage's design contract names the blank itself — `usage-empty` is *the
+   * row-shaped object*, `usage-error` is *`Blank shape="plate"`* — rather
+   * than a wrapper around it, and an id is worth more on the element it
+   * describes than on a `<div>` added to hold it.
+   */
+  testId?: string;
   /**
    * What the object above the title is.
    *
@@ -419,7 +435,7 @@ export function Blank({
   shape?: "row" | "card" | "plate";
 }) {
   return (
-    <div className="blank">
+    <div className="blank" data-testid={testId}>
       <div className="in">
         <span className={`obj ${shape}`} aria-hidden>
           {shape === "card" ? (
@@ -475,9 +491,12 @@ export function Note({
   icon,
   children,
   control,
+  testId,
 }: {
   icon: LucideIcon;
   children: React.ReactNode;
+  /** The name a contract knows this note by. See `Blank`. */
+  testId?: string;
   /**
    * The one way to undo it, and **only where a typed string caused it**. A
    * pressed pill shows its own state a few inches away and `All` is beside
@@ -486,7 +505,7 @@ export function Note({
   control?: React.ReactNode;
 }) {
   return (
-    <div className="note2">
+    <div className="note2" data-testid={testId}>
       <span className="g" aria-hidden>
         <Icon of={icon} size={16} />
       </span>
@@ -515,8 +534,11 @@ export function WhereTo({
   children,
   icon,
   className,
+  testId,
 }: {
   children: React.ReactNode;
+  /** The name a contract knows this line by. See `Blank`. */
+  testId?: string;
   /* The drawing varies the glyph by what it is pointing at — people for the
      administration site, a key for the control plane. Info is the default
      because most of these are just "it lives over there". */
@@ -524,7 +546,7 @@ export function WhereTo({
   className?: string;
 }) {
   return (
-    <div className={className ? `whereto ${className}` : "whereto"}>
+    <div className={className ? `whereto ${className}` : "whereto"} data-testid={testId}>
       <span className="g">{icon ?? <Icon of={Info} size={16} />}</span>
       <p>{children}</p>
     </div>
@@ -585,41 +607,20 @@ export const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
  */
 
 /**
- * The way out to the administration site, for the things this app does not do.
+ * **`ManageOnTheWeb` was here, and it has gone outright.**
  *
- * **The base address and nothing after it.** Linking at a page would make the
- * desktop depend on the web's route structure, and that is a contract nobody
- * agreed to keep — the admin site is free to move its own screens around.
+ * It opened the administration site's root, from the head of People and Teams,
+ * and it existed for one reason: those two screens could not do the thing
+ * somebody had come to them to do. That stopped being true when People and
+ * Teams became the only place accounts and teams exist — see
+ * `config/People.tsx` — so the control went with the reason for it, rather
+ * than being left behind pointing at a second application nobody should be
+ * sent to.
  *
- * `backend.url` is already a resolved origin: `probe.ts` tries the schemes,
- * keeps whichever answered, and only that is stored. So there is no guessing to
- * do here. It is still parsed before it is offered, because a URL written by an
- * older build, or edited by hand in `localStorage`, should not produce a button
- * that goes nowhere.
- *
- * Only to an administrator. Sending a member to a screen that will refuse them
- * is the same mistake as drawing a control the server will not honour.
+ * Deleted rather than emptied: a component that returns `null` everywhere is
+ * a thing the next reader has to work out, and `reuse.test.ts` is the record
+ * of what unused code costs here.
  */
-export function ManageOnTheWeb({ url, may }: { url: string; may: boolean }) {
-  if (!may) return null;
-  let origin: string;
-  try {
-    origin = new URL(url).origin;
-  } catch {
-    return null;
-  }
-  return (
-    <a
-      href={origin}
-      target="_blank"
-      rel="noreferrer"
-      className="out"
-    >
-      Manage on the web
-      <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
-    </a>
-  );
-}
 
 /**
  * `**like this**` → bold.

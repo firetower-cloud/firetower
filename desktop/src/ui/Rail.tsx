@@ -16,6 +16,13 @@
  * argument in full. What the rail keeps of Updates is the mark on the avatar,
  * which is `ProfileMenu`'s.
  *
+ * **In a browser the number keys are gone, and so are their keycaps.** Which
+ * is measured rather than assumed — `evidence/ticket-06/` has both browsers
+ * driven with real keystrokes — and is the user's call rather than this file's:
+ * Chrome delivers `⌘1`–`⌘8` and Safari never does, and a rail that promised a
+ * shortcut half the browsers swallow would be `STYLE.md`'s fifth rule
+ * inverted. The icons are unchanged and are the way in. `~/installed-app`.
+ *
  * ## Hover previews, and so does focus
  *
  * Pointing at a destination swaps the panel's contents without navigating.
@@ -29,7 +36,8 @@ import { useEffect, useRef, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useFleet, waitingIn, type Backend } from "~/fleet";
-import { isGlobalMod, key } from "~/platform";
+import { advertisedKey, installedApp } from "~/installed-app";
+import { isGlobalMod } from "~/platform";
 import { useStart } from "~/start";
 import { SETTINGS_HOME } from "~/ui/config/panes";
 import { DESTINATIONS, destinationAt, type DestinationId } from "~/ui/destinations";
@@ -37,6 +45,74 @@ import { usePanel } from "~/ui/panel";
 import { Palette } from "~/ui/Palette";
 import { ProfileMenu } from "~/ui/ProfileMenu";
 import { RailPanel } from "~/ui/RailPanel";
+
+/**
+ * What a keystroke means to the window, or nothing.
+ *
+ * **Pure and exported, because the gate it carries is otherwise inside a
+ * `useEffect`** — which `renderToStaticMarkup` cannot reach, so until this
+ * existed the rail's keyboard had no test at all, in either client.
+ * `Inspector.tsx`'s `tabsFor` and `shownTab` set the precedent for a
+ * component exporting the rule it is drawn from; `installed-only.test.tsx`
+ * asserts every key below on both sides of the shell question.
+ *
+ * It is a transcription of the handler it came from and nothing more. The
+ * caller does the `preventDefault`, once, for whatever this claims — which is
+ * exactly the branches that used to call it themselves, and for a keystroke
+ * this returns `null` for nothing is prevented, as before.
+ *
+ * **Nothing at all on a served page.** Chrome delivers `⌘1`–`⌘8` and Safari
+ * never does, so half of these would work in one browser and none in the
+ * other; the user's answer was to keep none of it but `⌘F`, which is not
+ * here. Every one of them is still a control — the icons, the panel's two
+ * glyphs, the New workspace row, the Settings row in the profile menu. See
+ * `~/installed-app` and `evidence/ticket-06/`.
+ *
+ * `inTerminal` is a function rather than a boolean, deliberately: it walks the
+ * focused element's ancestors, and this runs on every keystroke anywhere in
+ * the app. The cheap tests go first and that walk happens only for a chord
+ * this would otherwise claim — which is the order `Chat.tsx` and
+ * `ArtifactTab.tsx` already read it in.
+ */
+export type RailKey =
+  | { at: "go"; href: string }
+  | { at: "palette" }
+  | { at: "new" }
+  | { at: "panel" }
+  | null;
+
+export function railKey(
+  e: { key: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean },
+  where: { installed: boolean; inTerminal: () => boolean; path: string },
+): RailKey {
+  if (!where.installed) return null;
+  /* The *global* modifier only. ⌃ is the inspector's inside a workspace, and
+     `e.metaKey || e.ctrlKey` would take it here first. */
+  if (!isGlobalMod(e)) return null;
+  /* A focused terminal owns the keyboard, exactly as the workbench's own
+     handler has it. Everything here is a window-level gesture, so none of it
+     is the one exception. */
+  if (where.inTerminal()) return null;
+
+  const numbered = DESTINATIONS.find((d) => d.key === e.key);
+  if (numbered) return { at: "go", href: numbered.href };
+  /* **⌘, survives the door going.** It is the one thing the rail still owns
+     about Settings: a window-level gesture belongs to the window rather than
+     to the menu that happens to list it. The menu's row carries the same
+     hint, so the key is still advertised where Settings now lives. */
+  if (e.key === ",") return { at: "go", href: SETTINGS_HOME };
+  /* **Inside the terminal ⌘K clears the buffer**, which is shipped behaviour
+     and stays — the guard above has already returned by then, and `Shell.tsx`
+     stops the key reaching here at all. Everywhere else it opens the palette. */
+  const k = e.key.toLowerCase();
+  if (k === "k") return { at: "palette" };
+  if (k === "n") return { at: "new" };
+  /* The workbench owns the backslash inside a workspace — there it is the
+     inspector rail that collapses, which is the one the width is being argued
+     over. */
+  if (e.key === "\\" && !where.path.startsWith("/sessions")) return { at: "panel" };
+  return null;
+}
 
 export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwitch: (serverId: string) => void; onForgot: () => void }) {
   const path = usePathname();
@@ -124,49 +200,21 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
         setPalette(false);
         return;
       }
-      /* The *global* modifier only. ⌃ is the inspector's inside a workspace,
-         and `e.metaKey || e.ctrlKey` would take it here first. */
-      if (!isGlobalMod(e)) return;
-      /* A focused terminal owns the keyboard, exactly as the workbench's own
-         handler has it. Everything here is a window-level gesture, so none of
-         it is the one exception. */
-      if ((document.activeElement as HTMLElement | null)?.closest(".xterm")) return;
-
-      const numbered = DESTINATIONS.find((d) => d.key === e.key);
-      if (numbered) {
-        e.preventDefault();
-        go(numbered.href);
-        return;
-      }
-      /* **⌘, survives the door going.** It is the one thing the rail still
-         owns about Settings: a window-level gesture belongs to the window
-         rather than to the menu that happens to list it. The menu's row
-         carries the same hint, so the key is still advertised where Settings
-         now lives. */
-      if (e.key === ",") {
-        e.preventDefault();
-        go(SETTINGS_HOME);
-        return;
-      }
-      /* **Inside the terminal ⌘K clears the buffer**, which is shipped
-         behaviour and stays — the guard above has already returned by then,
-         and `Shell.tsx` stops the key reaching here at all. Everywhere else
-         it opens the palette. */
-      if (e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setPalette((o) => !o);
-        return;
-      }
-      if (e.key.toLowerCase() === "n") {
-        e.preventDefault();
-        start();
-        return;
-      }
-      /* The workbench owns the backslash inside a workspace — there it is the
-         inspector rail that collapses, which is the one the width is being
-         argued over. */
-      if (e.key === "\\" && !path.startsWith("/sessions")) {
-        e.preventDefault();
+      /* **Escape is above the rule, deliberately.** It is not a chord and it
+         is not the window's to withhold: the palette is still openable from
+         the panel's Search glyph on a served page, and a thing you can open
+         has to be closable. Everything else is `railKey`'s. */
+      const act = railKey(e, {
+        installed: installedApp(),
+        inTerminal: () => !!(document.activeElement as HTMLElement | null)?.closest(".xterm"),
+        path,
+      });
+      if (!act) return;
+      e.preventDefault();
+      if (act.at === "go") go(act.href);
+      else if (act.at === "palette") setPalette((o) => !o);
+      else if (act.at === "new") start();
+      else {
         setPeek(null);
         setPinned(!pinned);
       }
@@ -190,7 +238,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
             key={d.id}
             icon={d.icon}
             label={d.label}
-            hint={key(d.key)}
+            hint={advertisedKey(d.key)}
             on={d.id === here}
             peeked={peek === d.id && previews(d.id)}
             onPick={() => go(d.href)}

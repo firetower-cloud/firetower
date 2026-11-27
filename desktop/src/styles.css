@@ -294,6 +294,26 @@
 }
 
 @layer base {
+  /* **`hidden` has to win, and by default it does not.**
+     The UA sheet says `[hidden] { display: none }`, and any class that sets
+     `display` outranks it — which means `hidden={!spills}` on a button that
+     is `display: inline-flex` hides nothing, and `hidden={!term}` on a panel
+     that is `display: flex` leaves it on screen taking its height. Both are
+     in this app today: Home's "See all" and Workbench's terminal. It is the
+     same defect twice and it will be the same defect a third time, because
+     the markup reads as correct. One line, in the layer everything else
+     builds on.
+
+     Here rather than in `globals.css`: that sheet is byte-shared with the
+     web client, and a global `[hidden] !important` there would change how
+     the web application and Spend draw, which is not what this rule was
+     written to do. It landed in the desk's copy of the shared sheet, which
+     is the one place `STYLE.md` says nothing may be edited, and `just
+     check-style` had been red ever since. */
+  [hidden] {
+    display: none !important;
+  }
+
   /* The window is the app. Nothing scrolls but the panes inside it. */
   html,
   body,
@@ -476,148 +496,6 @@
     transition:
       background var(--dur-native) var(--ease-swift),
       color var(--dur-native) var(--ease-swift);
-  }
-  /* A denser row for a list somebody reads at a glance rather than works
-     through. Four of these used to stand as tall as the composer they hang
-     off, which made a short list look like a settings screen. */
-  /* A catalogue is scanned, not read. Two columns of hairline rows rather
-     than cards: the padding, the border and the separate footer each spent
-     height saying nothing, and six cards filled a screen that now holds
-     twelve rows. */
-  .offers {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    column-gap: 28px;
-  }
-  @media (max-width: 900px) {
-    .offers { grid-template-columns: 1fr; }
-  }
-  /* **No rules between them.** A hairline under every row drew a grid
-     nobody asked for and made a short list look like a table. This design
-     separates by fill: a row lifts when the pointer is on it, and the space
-     does the rest. */
-  .offer {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 9px 10px;
-    margin: 0 -10px;
-    border-radius: 10px;
-    min-width: 0;
-    transition: background var(--dur-native) var(--ease-swift);
-  }
-  .offer:hover {
-    background: var(--color-raise);
-  }
-  .offer .g {
-    flex: none;
-  }
-  .offer .tx {
-    flex: 1;
-    min-width: 0;
-    display: block;
-  }
-  .offer .tx b {
-    display: block;
-    font-size: var(--text-ui);
-    font-weight: var(--weight-mid);
-    color: var(--color-bone);
-  }
-  .offer .tx s,
-  .offer .tx u {
-    display: block;
-    text-decoration: none;
-    font-size: var(--text-meta);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .offer .tx s { color: var(--color-dim); }
-  .offer .tx u { color: var(--color-mute); margin-top: 1px; }
-  /* **One shape for the one action, wherever it is drawn.** A catalogue row,
-     an installed row and a detail header each had their own button for
-     taking something — different sizes, different words, a few pixels apart.
-     `.act` is that control; `Take` is the component that picks its words. */
-  .act {
-    flex: none;
-    height: 28px;
-    padding: 0 11px;
-    border-radius: 99px;
-    font-size: var(--text-ui);
-    color: var(--color-dim);
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    white-space: nowrap;
-    background: var(--color-panel);
-    box-shadow: var(--shadow-raise);
-    transition:
-      opacity var(--dur-native) var(--ease-swift),
-      background var(--dur-native) var(--ease-swift),
-      color var(--dur-native) var(--ease-swift);
-  }
-  .act:hover {
-    color: var(--color-bone);
-  }
-  .act[disabled] {
-    opacity: 0.5;
-  }
-  /* **Quiet until the row is under the pointer.** A list of thirty rows each
-     carrying a lit button is thirty things asking to be pressed; the row is
-     the thing being read, and the action belongs to the one being looked at.
-     Opacity rather than display, so it keeps its space — a row must not
-     reflow under the pointer — and `:focus-within` so the keyboard still
-     reaches it. */
-  .offer .act,
-  .r .act {
-    opacity: 0;
-  }
-  .offer:hover .act,
-  .offer:focus-within .act,
-  .r:hover .act,
-  .r:focus-within .act {
-    opacity: 1;
-  }
-  /* What is already true is not an action, so it is always legible. */
-  .act-said {
-    flex: none;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    white-space: nowrap;
-    font-size: var(--text-meta);
-    color: var(--color-dim);
-  }
-  .act-done {
-    color: var(--color-sage);
-  }
-  /* The detail screen has one subject and one action; nothing to reveal. */
-  .act-page {
-    height: 32px;
-    padding: 0 14px;
-    color: var(--color-bone);
-    background: var(--color-raise);
-    opacity: 1;
-  }
-  .offer > span:last-child {
-    flex: none;
-    white-space: nowrap;
-  }
-
-  .prow.tight {
-    min-height: 30px;
-    gap: 8px;
-    padding: 3px 9px;
-  }
-  .prow.tight .plg {
-    width: 20px;
-    height: 20px;
-    border-radius: 6px;
-    font-size: 9px;
-  }
-  .prow.tight .plg img {
-    width: 14px;
-    height: 14px;
   }
   .prow:hover,
   .mrow:hover {
@@ -977,25 +855,6 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-  /* A start that is going to be short of something. Ember and nowhere else:
-     a server nobody authorized is the one thing on this bar that stops the
-     agent doing what it was asked, and it fails on the first turn rather
-     than here if it is not said now. */
-  .chip .need {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    color: var(--color-dim);
-  }
-  .chip .need::before {
-    content: "";
-    display: inline-block;
-    width: 1px;
-    height: 11px;
-    margin-right: 7px;
-    vertical-align: -1px;
-    background: var(--color-line);
   }
   .chip:hover {
     background: var(--color-raise);
@@ -2155,15 +2014,15 @@ html:not([data-platform="macos"]) {
   }
 
   /* ── Settings' own index ──────────────────────────────────────────
-     Settings has no rail icon, so the five panes it owns are navigated from
-     inside the page. Plain text with an underline — `.itab`'s rule, for the
-     same job: the index of a page should not compete with the page.
+     Settings has no rail icon, so the panes it owns are navigated from inside
+     the page. Plain text with an underline — `.itab`'s rule, for the same job:
+     the index of a page should not compete with the page.
 
      Two lines, because the grouping is load-bearing. The group name sits over
-     its own cluster rather than beside it, so "Who can reach what" reads as a
-     heading for the three under it; a flat strip of five would have to drop
-     the names, and the names are the part that says why Teams is next to
-     Directories. `SettingsIndex.tsx` has the rest of the argument. */
+     its own cluster rather than beside it, so "This deployment" reads as a
+     heading for what is under it; a flat strip would have to drop the names,
+     and the names are the part that says what a group is *for*.
+     `SettingsIndex.tsx` has the rest of the argument. */
   .snav {
     display: flex;
     align-items: flex-start;
@@ -2272,7 +2131,25 @@ html:not([data-platform="macos"]) {
   .r:hover {
     background: var(--color-raise);
   }
-  .r:hover .hov {
+  /* **And on focus, or the keyboard is told less than the mouse.**
+     `bits.tsx` has said *"the actions, which arrive on hover **and on focus**"*
+     since the row was written, and the rule was never here: tab landed on a
+     control at `opacity: 0`, which still opens on Enter but is invisible to
+     whoever is pressing it. That was survivable while `.hov` carried a single
+     *forget the key* beside a visible primary; People put **three of its four
+     write controls** behind one `.hov` button, so a keyboard user had no
+     drawn way to reset a password, switch an account off or remove somebody.
+     Opacity rather than `display` is what made it silent — the button is in
+     the tab order either way.
+
+     Two selectors because focus arrives two ways. `:focus-visible` on the
+     control is the common one; `:focus-within` on the row catches the case
+     where `.hov` is a *wrapper* and the focus is on a button inside it, which
+     is what the vault's rows are. */
+  .r:hover .hov,
+  .r:focus-within .hov,
+  .r .hov:focus-visible,
+  .r .hov:focus-within {
     opacity: 1;
   }
   .r .hov {
@@ -3684,28 +3561,6 @@ html:not([data-platform="macos"]) {
     border-radius: 12px;
     background: var(--color-ground);
     transition: border-color var(--dur-native) var(--ease-swift);
-  }
-  /* **A box that stacks, for a control that is a list.**
-     `.fld .box` is a row — a label beside an input, centred — which is right
-     for every field that holds one control. A field whose control is a filter
-     over a list has two children, and as a row they sat side by side at half
-     the width each, with every name truncated to four characters. */
-  .fld .box.stack {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 8px;
-    padding: 9px;
-  }
-  /* `.fld .box input` is `flex: 1`, which in a row means "take the width
-     left over" and in a column means "grow tall". Unset along this axis, or
-     the filter stretches and the list it filters is squeezed under it. */
-  .fld .box.stack > input {
-    flex: none;
-  }
-  .fld .box.stack .rows {
-    max-height: 232px;
-    overflow-y: auto;
-    margin: 0 -3px;
   }
   .fld .box:focus-within {
     border-color: var(--color-dim);
@@ -7778,6 +7633,554 @@ html:not([data-platform="macos"]) {
       padding: 14px 16px;
     }
   }
+
+  /* ═══════════════════════════════════════════════════════════════════
+     Usage — Organisation's ledger of what the agents spent
+     ═══════════════════════════════════════════════════════════════════
+
+     Transcribed from the published prototype, `usage-in-the-renderer`, the
+     way the rest of this layer is transcribed from the artifact. Three names
+     are the drawing's with a letter on the front, because the desk already
+     owns the bare word and two rules claiming one class would be a bug
+     nobody could see:
+
+       `.lmeter`  — the drawing's `.meter`. `.meter` here is the composer's
+                    context gauge: a 30px inline-flex pill with its own
+                    padding, and `.r .meter` would have inherited every one of
+                    those properties while overriding three.
+       `.lkids`   — the drawing's `.kids`. `.kids` here is the team rail's
+                    nesting, which indents against a left rule; the ledger's
+                    child block is a recessed slab the full width of the row.
+
+     Nothing below is a type size of its own: the sizes are the scale's
+     tokens, so when the two `@theme` blocks are reconciled this moves with
+     everything else. */
+
+  /* ── A control whose label is the current answer ──────────────────
+     The chevron that says a menu is behind it, and the square form of the
+     same pill for the one control that is a glyph. */
+  .btn .cv {
+    color: var(--color-mute);
+  }
+  .btn.icon {
+    width: 33px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  /* `Choose`'s rows, and the scope picker's search. `.mi` already carries the
+     row; these are the two shapes a *value* menu adds to it — a tick column
+     so the chosen one is marked in place rather than by colour alone, and a
+     label that takes the rest of the width. */
+  .mi .tick {
+    width: 14px;
+    flex: none;
+    color: var(--color-bone);
+  }
+  .mi .sp {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .mi .note {
+    flex: none;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .mi[aria-checked="true"] {
+    color: var(--color-bone);
+  }
+  .pop .scr {
+    /* The list gives way to `Pop`'s height cap and the search above it does
+       not, which is the flexbox rule `Pop` is a column for. */
+    flex: 1;
+  }
+  .pop .mfind {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 36px;
+    padding: 0 11px;
+    margin-bottom: 3px;
+    border-radius: 10px;
+    background: var(--color-overlay);
+    color: var(--color-mute);
+  }
+  [data-theme="light"] .pop .mfind {
+    background: var(--color-raise);
+  }
+  .pop .mfind input {
+    flex: 1;
+    min-width: 0;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+  .pop .mlabel {
+    padding: 8px 10px 3px;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .pop .empty {
+    padding: 11px 10px;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+
+  /* ── A section heading with its controls on the same line ─────────
+     The heading and its note on the left, what operates on the list on the
+     right, both sitting on the same baseline. */
+  .lsec .headrow {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 18px 22px;
+    flex-wrap: wrap;
+  }
+  .lsec .headrow > div:first-child {
+    flex: 1 1 360px;
+    min-width: 0;
+  }
+  .lsec .headrow .ctl {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+
+  /* ── A ledger row: a name, a length, a figure ─────────────────────── */
+  .r .chev {
+    flex: none;
+    color: var(--color-mute);
+    transition: transform var(--dur-native) var(--ease-swift);
+  }
+  .r[aria-expanded="true"] .chev {
+    transform: rotate(90deg);
+  }
+  .r .amt {
+    flex: none;
+    width: 86px;
+    text-align: right;
+    font-family: var(--font-narrow);
+    font-weight: 500;
+    /* `.r .tx b`'s size, which is what puts the figure on the name's line. */
+    font-size: 0.96875rem;
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+  }
+  .r.sub .amt {
+    font-size: var(--text-ui);
+  }
+  /* A row the data could not name: italic, and quieter than one it could. */
+  .r .tx .unnamed {
+    font-style: italic;
+    font-weight: 400;
+    color: var(--color-dim);
+  }
+  /* The remainder is not a row, so it does not read as one. */
+  .r .tx .rest {
+    font-weight: 400;
+    color: var(--color-dim);
+  }
+
+  /* **One length, not a stack.** The containment rule's one change to this
+     screen: the hues live in the chart's frame and the key under it, and a
+     mapping a reader has to carry as far as the twenty-fifth row has stopped
+     being the chart's and become the page's. */
+  .r .lmeter {
+    flex: none;
+    width: 168px;
+    overflow: hidden;
+  }
+  .r.sub .lmeter {
+    width: 134px;
+  }
+  .r .lmeter .fill {
+    display: flex;
+    height: 7px;
+  }
+  .r.sub .lmeter .fill {
+    height: 5px;
+  }
+  .r .lmeter .fill i {
+    display: block;
+    flex: 1;
+    height: 100%;
+    border-radius: 2px;
+  }
+
+  /* The open child block. A recessed slab the full width of the row rather
+     than an indented rail: these are six rows of one row's own breakdown, not
+     a tree. */
+  .lkids {
+    background: var(--color-ground);
+    border-radius: 12px;
+    margin: 2px -14px;
+    padding: 0 14px;
+  }
+  .lkids .r {
+    width: 100%;
+    margin-left: 0;
+    margin-right: 0;
+  }
+  .lkids .nothing {
+    padding: 12px 14px 12px 48px;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+
+  /* A read that is only refetching: nothing replaced, nothing moved. */
+  .dimmed {
+    opacity: 0.5;
+    transition: opacity 200ms var(--ease-swift);
+  }
+
+  /* ── The reading: a figure, a chart, a key, four counts ───────────── */
+  .reading {
+    margin-top: 30px;
+  }
+  .headline {
+    display: inline-block;
+    border-radius: var(--radius-md);
+  }
+  .headline .fig {
+    font-family: var(--font-narrow);
+    /* 40px — the desk's own "the one thing on this screen" size. The web
+       draws 64px here, which over a 32px `.pg-head h1` makes the pane's own
+       title read as the subtitle. */
+    font-size: var(--text-hero);
+    line-height: var(--text-hero--line-height);
+    letter-spacing: var(--text-hero--letter-spacing);
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+    font-variant-numeric: tabular-nums;
+  }
+  .headline .cap {
+    margin-top: 5px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+  }
+  /* The dashed rule is there to say something is behind it — a number that
+     rewards hovering with no sign that it does is a secret. */
+  .headline .cap span {
+    padding-bottom: 1px;
+    border-bottom: 1px dashed var(--color-line);
+    transition:
+      border-color var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .headline:hover .cap span,
+  .headline:focus-visible .cap span {
+    border-bottom-color: var(--color-dim);
+    color: var(--color-text);
+  }
+  .chartwrap {
+    position: relative;
+    margin-top: 18px;
+  }
+  .chart {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+  .chart text {
+    font-family: var(--font-sans);
+    font-size: var(--text-meta);
+    font-variant-numeric: tabular-nums;
+  }
+  .chart .axis {
+    fill: var(--color-mute);
+  }
+  .chart .axis.on {
+    fill: var(--color-text);
+  }
+  .chart .col {
+    transition: opacity var(--dur-native) var(--ease-swift);
+  }
+  .chart .hit {
+    fill: transparent;
+  }
+
+  /* **Directly under the chart**, which is half of the containment rule: a
+     legend belongs beside what it reads. The web floats this above the
+     ledger, where the mapping has travelled far enough to become the page's. */
+  .key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    margin-top: 14px;
+  }
+  .key .it {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  /* Flat and unfilled, 8px, and never a dot on a glyph — those three shapes
+     stay ember's. */
+  .key .it i {
+    align-self: center;
+    display: block;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 99px;
+  }
+  .key .it .pc {
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .figures {
+    display: flex;
+    flex-wrap: wrap;
+    margin-top: 26px;
+    border-top: 1px solid var(--color-line);
+  }
+  .figures .f {
+    min-width: 0;
+    flex: 1 1 170px;
+    padding: 14px 20px 2px;
+  }
+  .figures .f:first-child {
+    padding-left: 0;
+  }
+  .figures .f + .f {
+    border-left: 1px solid var(--color-line);
+  }
+  .figures .f .k {
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .figures .f .v {
+    margin-top: 2px;
+    font-family: var(--font-narrow);
+    font-size: var(--text-display);
+    line-height: var(--text-display--line-height);
+    font-weight: var(--font-weight-mid);
+    color: var(--color-bone);
+    font-variant-numeric: tabular-nums;
+  }
+  .figures .f .n {
+    margin-top: 4px;
+    max-width: 30ch;
+    font-size: var(--text-meta);
+    line-height: 1.45;
+    color: var(--color-mute);
+  }
+  .unreported {
+    margin-top: 20px;
+    max-width: 68ch;
+    font-size: var(--text-ui);
+    line-height: 1.6;
+    color: var(--color-mute);
+  }
+  .unreported b {
+    font-weight: 400;
+    color: var(--color-dim);
+  }
+
+  /* ── The two floating layers ──────────────────────────────────────
+     Both on `body` and `fixed`, for the reason `Pop` gives: anchored from
+     inside a scrolling sheet they are drawn in the wrong place the moment
+     anything above them moves. */
+  .tip {
+    position: fixed;
+    z-index: 70;
+    min-width: 200px;
+    padding: 10px;
+    border-radius: var(--radius-md);
+    background: var(--color-overlay);
+    box-shadow: var(--shadow-float);
+    pointer-events: none;
+    transform: translate(-50%, -100%);
+  }
+  [data-theme="light"] .tip {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.055);
+  }
+  .tip h3 {
+    margin-bottom: 7px;
+    font-size: var(--text-meta);
+    font-weight: 530;
+    color: var(--color-bone);
+  }
+  .tip .ln {
+    display: grid;
+    grid-template-columns: 13px 1fr auto;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .tip .ln i {
+    display: block;
+    height: 3px;
+    border-radius: 2px;
+  }
+  .tip .ln .m {
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tip .ln .v {
+    font-size: var(--text-meta);
+    font-weight: 530;
+    color: var(--color-bone);
+    font-variant-numeric: tabular-nums;
+  }
+  .tip .tot {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px solid var(--color-line);
+    font-size: var(--text-meta);
+  }
+  .tip .tot .a {
+    color: var(--color-mute);
+  }
+  .tip .tot .b {
+    color: var(--color-text);
+    font-weight: 530;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .comp {
+    position: fixed;
+    z-index: 70;
+    padding: 13px 15px;
+    border-radius: var(--radius-md);
+    background: var(--color-overlay);
+    box-shadow: var(--shadow-float);
+    pointer-events: none;
+  }
+  [data-theme="light"] .comp {
+    background: var(--color-panel);
+    box-shadow: var(--shadow-float), 0 0 0 1px rgb(22 22 23 / 0.055);
+  }
+  .comp dl {
+    display: grid;
+    grid-template-columns: auto auto auto;
+    align-items: baseline;
+    gap: 9px 14px;
+  }
+  /* In full, never abbreviated: the point of these four is that 4 and 29,176
+     are not the same kind of thing, which `29.2K` beside `4` hides exactly. */
+  .comp dd.num {
+    justify-self: end;
+    font-family: var(--font-narrow);
+    font-size: var(--text-title);
+    line-height: 1;
+    font-weight: 530;
+    color: var(--color-bone);
+    font-variant-numeric: tabular-nums;
+  }
+  .comp dt {
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+  }
+  .comp dt .also {
+    color: var(--color-mute);
+  }
+  .comp dd.pc {
+    justify-self: end;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Limits, last on the pane ─────────────────────────────────────
+     Signal-coloured gauges, a whole ledger away from the series-coloured
+     chart. That is a benefit of the ordering rather than the reason for it —
+     the reason is that this is the one section that ignores the controls. */
+  .limits {
+    display: grid;
+    gap: 26px 40px;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    margin-top: 12px;
+  }
+  .lim {
+    min-width: 0;
+    max-width: 430px;
+  }
+  /* Said once, however many ways the provider meters it. */
+  .lim .who {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .lim .who .nm {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+  .lim .who .pv {
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .lim .who .fd {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .gauge {
+    margin-top: 12px;
+  }
+  .gauge .ln {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+  .gauge .ln .w {
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .gauge .ln .when {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .gauge .ln .sp {
+    flex: 1;
+  }
+  .gauge .ln .pc {
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    font-variant-numeric: tabular-nums;
+  }
+  /* A window that reported no percentage gets no track at all. The empty
+     space is the finding, not a gap to fill with a word-shaped box. */
+  .gauge .track {
+    margin-top: 6px;
+    height: 3px;
+    border-radius: 99px;
+    overflow: hidden;
+  }
+  .gauge .track i {
+    display: block;
+    height: 100%;
+    border-radius: 99px;
+  }
+
+}
+
 @layer components {
   /* ── The plugin library ─────────────────────────────────────────
      Two shapes on one screen, and the shift between them is the signal
@@ -7906,5 +8309,194 @@ html:not([data-platform="macos"]) {
     color: var(--color-bone);
     font-weight: var(--weight-mid);
     box-shadow: var(--shadow-raise);
+  }
+
+@layer components {
+  /* ── Get the mobile app ─────────────────────────────────────────
+     The profile-menu row's dialog: two codes, two links and this
+     Firetower's address. Four classes, and each one earns itself below.
+
+     Here rather than in `globals.css` because the web client has no such
+     dialog and `just check-style` diffs the two copies of that file byte
+     for byte — anything the desk alone needs belongs in this sheet. */
+
+  /* **No width.** `.dlg` is 27rem and this dialog is wider, but *how much*
+     wider is arithmetic on the encoded URLs — two code boxes, the gap, and
+     the dialog's own padding — so `GetTheMobileApp.tsx` computes it from
+     `codeWidth()` and sets it inline. Writing 28rem here would be a literal
+     that does not break loudly: the day a release tag grows eight characters
+     the APK URL tips from QR version 6 to 7, the box goes from 188px to
+     204px, and the codes would quietly shrink inside a dialog that still
+     looked right. `.dlg`'s `max-width: 100%` still applies, which is what
+     keeps the inline width honest in a narrow window. */
+  .dlg.codes .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+    margin-top: 20px;
+  }
+  /* A phone browser. The renderer is served at the control plane's root, so
+     this dialog opens in Safari on a phone — where nobody can scan the screen
+     they are holding, the links beside the codes are the control, and two
+     columns would put both codes under the module floor. One column instead. */
+  @media (max-width: 520px) {
+    .dlg.codes .pair {
+      grid-template-columns: 1fr;
+    }
+  }
+  .dlg.codes .col {
+    min-width: 0;
+  }
+  .dlg.codes .cap {
+    margin-top: 12px;
+  }
+  .dlg.codes .cap .nm {
+    font-size: var(--text-ui);
+    color: var(--color-bone);
+  }
+  .dlg.codes .cap .ln {
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    color: var(--color-mute);
+  }
+  /* A sentence under a column that could not be filled. `--color-dim`, never
+     brick: GitHub being out of reach from a private network is normal rather
+     than a failure, which is `STYLE.md`'s reachability rule. */
+  .dlg.codes .why {
+    margin-top: 8px;
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    color: var(--color-dim);
+  }
+  .dlg.codes .rule {
+    margin-top: 20px;
+    height: 1px;
+    background: var(--color-line);
+  }
+  .dlg.codes .addr {
+    margin-top: 14px;
+  }
+  .dlg.codes .addr .ln {
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .dlg.codes .foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 20px;
+  }
+  .dlg.codes .foot .where {
+    font-size: var(--text-meta);
+    color: var(--color-mute);
+  }
+  .dlg.codes .foot .where a {
+    color: var(--color-dim);
+    text-decoration: underline;
+    text-decoration-color: var(--color-line);
+    text-underline-offset: 2px;
+  }
+
+  /* ── The code's two colours, which the theme does not get a say in ──
+     A camera reads dark-on-light, and the standard says so: an inverted code
+     is outside ISO/IEC 18004. The web client's copy of this component fills
+     the plate with `--color-bone` and the modules with `--color-ground`,
+     which is right in dark and **reversed in light** — bone is #161617 there
+     and ground is #f2f2f3 — so it draws near-white modules on a near-black
+     plate. An iPhone decodes one anyway; a good many Android scanners do not.
+
+     So the pair is bound to whichever two tokens are light and dark *in each
+     theme* rather than to one token whose role flips. 14.0:1 in dark and
+     18.1:1 in light; a scanner wants about 40% reflectance difference and
+     both are past 85%.
+
+     **The plate is `--color-bone` in dark rather than white, on purpose.** A
+     188px #ffffff square in a dark window is a glare source, and #eaeaeb is
+     the softer white the rest of the dark theme is built on. */
+  .qr {
+    --qr-plate: var(--color-bone);
+    --qr-ink: var(--color-ground);
+    display: block;
+    border-radius: var(--radius-md);
+  }
+  [data-theme="light"] .qr {
+    --qr-plate: var(--color-panel);
+    --qr-ink: var(--color-bone);
+  }
+  .qr .plate {
+    fill: var(--qr-plate);
+  }
+  .qr .ink {
+    fill: var(--qr-ink);
+  }
+  .qr .ink-s {
+    fill: none;
+    stroke: var(--qr-ink);
+  }
+
+  /* The same footprint as a code while the release is still being looked up,
+     so the dialog does not jump when the answer lands. A class rather than
+     utilities because the footprint has to agree with the code's derived
+     width, and this is one place to keep them in step — the caller sets the
+     box on both from the same number. */
+  .qrwait {
+    display: grid;
+    place-items: center;
+    padding: 0 22px;
+    border-radius: var(--radius-md);
+    background: var(--color-ground);
+    color: var(--color-mute);
+    font-size: var(--text-meta);
+    line-height: var(--text-meta--line-height);
+    text-align: center;
+  }
+
+  /* ── A line of machine text with a way to take it ────────────────
+     Recessed on `--color-ground`, which is what `Confirm.tsx`'s own field
+     already sits on, so it reads as a well in both themes rather than as a
+     card inside a card — `STYLE.md`'s third habit. Three call sites in this
+     one dialog, which is what earns it a class.
+
+     **`.well`, and not `.chip`, which the design contract asked for.** There
+     is already a `.chip` in this sheet at l.836 — the composer's pill, 30px
+     and `border-radius: 99px`, worn eleven times across `StartComposer.tsx`
+     and `NewSchedule.tsx`. A second block under the same name would have won
+     on source order and quietly restyled every one of them: an 8px radius, a
+     different padding, `flex` instead of `inline-flex` and a background where
+     they have none. The contract lists `.chip` as a new class; in the source
+     it is not, and the name it is given here is the only part of that section
+     that changes. */
+  .well {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    height: 30px;
+    padding: 0 3px 0 8px;
+    border-radius: var(--radius-md);
+    background: var(--color-ground);
+  }
+  /* `--text-micro`, not `--text-meta`: a twenty-character file name plus a
+     copy button has 155px to live in inside a 188px column, and this is
+     reference text with a button beside it rather than text anybody
+     transcribes. `firetower-0.35.0.apk` measures 155 — at the limit today,
+     and a longer name truncates, which is the right degradation: the copy
+     button still carries the whole URL and the caption still names the
+     version. */
+  .well .tx {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: var(--text-micro);
+    color: var(--color-dim);
+  }
+  /* Nothing to take yet — the lookup is still out and the chip is holding its
+     place so the column does not move when it lands. */
+  .well[data-dead="1"] .tx {
+    color: var(--color-mute);
   }
 }

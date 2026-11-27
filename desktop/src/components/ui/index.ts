@@ -5,6 +5,7 @@ export { IconButton } from "./IconButton";
 export { MenuItem } from "./MenuItem";
 export { Badge } from "./Badge";
 export { Segmented } from "./Segmented";
+export { Choose, type Choice } from "./Choose";
 export { Input, Select } from "./Field";
 export { List, Columns, Row } from "./List";
 export { Avatar } from "./Avatar";

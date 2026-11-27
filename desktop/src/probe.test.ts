@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { atLeast, candidates, MIN_SERVER, packaged, PACKAGED_ORIGINS, reach, signIn } from "./probe";
+import { atLeast, candidates, MIN_SERVER, ownFiretowerFrom, packaged, PACKAGED_ORIGINS, reach, signIn } from "./probe";
 
 const fine = { version: MIN_SERVER, eventsPath: "/api/v1/events", serverId: "o_1", organization: "Kev", authModes: ["password"] };
 
@@ -72,6 +72,61 @@ describe("what a refusal means", () => {
     // on anybody's dev server call a real control plane.
     expect(packaged("http://localhost:5273")).toBe(false);
     expect(packaged("")).toBe(false);
+  });
+});
+
+/**
+ * A page served by a control plane knows which Firetower it is for.
+ *
+ * The reason this is worth a table rather than two assertions: the browser
+ * answer and the shell answer have to be *different*, and the shell's has to be
+ * the one it already gives. A regression here is either a self-hoster being
+ * asked for the address they just typed, or a shell window adopting itself as a
+ * control plane — and neither of those shows up as an error anywhere.
+ */
+describe("ownFiretower", () => {
+  const seen = (over: Partial<Parameters<typeof ownFiretowerFrom>[0]>) =>
+    ownFiretowerFrom({ protocol: "https:", origin: "https://ft.westlabs.dev", shell: false, dev: false, ...over });
+
+  it("takes the origin it was served from, over https", () => {
+    expect(seen({})).toEqual({ ask: false, url: "https://ft.westlabs.dev" });
+  });
+
+  it("takes it over http on a port too — a laptop install is not behind a certificate", () => {
+    expect(seen({ protocol: "http:", origin: "http://192.168.1.20:4400" })).toEqual({
+      ask: false,
+      url: "http://192.168.1.20:4400",
+    });
+  });
+
+  it("still asks inside the shell, which is loaded from a file and cannot know", () => {
+    expect(seen({ shell: true })).toEqual({ ask: true });
+    // Including when the shell's own origin looks like an ordinary web page,
+    // which on Windows and Linux it does.
+    expect(seen({ shell: true, protocol: "http:", origin: "http://tauri.localhost" })).toEqual({ ask: true });
+  });
+
+  it("still asks at an origin a shipped shell serves itself from, even with no shell to be seen", () => {
+    // Two of these pass the protocol test, so without `packaged()` a shell
+    // window whose native API was late would probe itself for a control plane.
+    for (const origin of PACKAGED_ORIGINS) {
+      expect(ownFiretowerFrom({ protocol: "http:", origin, shell: false, dev: false })).toEqual({ ask: true });
+    }
+  });
+
+  it("still asks from a file, and from any protocol with no server behind it", () => {
+    expect(seen({ protocol: "file:", origin: "null" })).toEqual({ ask: true });
+    expect(seen({ protocol: "tauri:", origin: "tauri://localhost" })).toEqual({ ask: true });
+    expect(seen({ protocol: "firetower:", origin: "firetower://open" })).toEqual({ ask: true });
+  });
+
+  it("still asks in a dev build, where the pages come from vite and the server is elsewhere", () => {
+    expect(seen({ dev: true, protocol: "http:", origin: "http://localhost:5273" })).toEqual({ ask: true });
+  });
+
+  it("still asks with no origin to adopt", () => {
+    expect(seen({ origin: "" })).toEqual({ ask: true });
+    expect(seen({ origin: "null" })).toEqual({ ask: true });
   });
 });
 

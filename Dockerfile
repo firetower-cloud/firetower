@@ -15,11 +15,39 @@
 # machine (transport.rs), `sh` through it, `ssh-keygen` for its own key pair
 # (sshkey.rs), and `curl` at build time for the worker tarballs below.
 
-# The interface first, because the Rust build embeds its output.
+# The interface first, because the Rust build embeds its output. There are two
+# bundles of it and the binary carries both: the application at the root address
+# and the administration site beside it. A binary built with only one serves
+# neither and says which is missing, so neither of these stages is optional —
+# see crates/ft-server/src/web.rs.
 #
-# Pinned to the machine doing the building: this stage produces JavaScript,
-# which is the same bytes whatever it was built on, and emulating it under QEMU
-# for a foreign architecture would cost minutes for nothing.
+# Both are pinned to the machine doing the building: they produce JavaScript,
+# which is the same bytes whatever it was built on, and emulating them under
+# QEMU for a foreign architecture would cost minutes for nothing.
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS renderer
+WORKDIR /desktop
+
+# Pinned explicitly, where the stage below reads a pin out of
+# `web/package.json`. `desktop/package.json` carries no `packageManager` field,
+# so corepack would otherwise activate whatever its own default happens to be on
+# this base image — a version number nothing else that touches this tree uses.
+# 11 is what .github/workflows/desktop.yml installs for the same lockfile.
+RUN corepack enable && corepack prepare pnpm@11.21.0 --activate
+
+# The lockfile alone first, so changing a component does not re-install
+# everything.
+COPY desktop/package.json desktop/pnpm-lock.yaml desktop/pnpm-workspace.yaml ./
+RUN --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
+    pnpm install --frozen-lockfile
+
+# Only what Vite reads. The Tauri shell is a sibling of these and is not built
+# here — this image has no native window to put it in, and its Rust crate would
+# pull a second toolchain into a stage that exists to produce JavaScript.
+COPY desktop/index.html desktop/vite.config.ts desktop/tsconfig*.json ./
+COPY desktop/src ./src
+COPY desktop/public ./public
+RUN pnpm build
+
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS web
 WORKDIR /web
 
@@ -71,8 +99,10 @@ COPY migrations ./migrations
 # Embedded in the control plane: the worker installer it runs over ssh.
 COPY install ./install
 
-# Where the previous stage left the interface. rust-embed reads this at compile
-# time, so it has to be in place before cargo runs rather than copied in after.
+# Where the two previous stages left the interface. rust-embed reads these at
+# compile time, so they have to be in place before cargo runs rather than copied
+# in after.
+COPY --from=renderer /desktop/dist ./desktop/dist
 COPY --from=web /web/out ./web/out
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \

@@ -80,6 +80,11 @@ setup:
     # it from — so from here it fetches its own newest pnpm and then refuses
     # to install `web/` with it.
     (cd web && pnpm install)
+    # The application, which `just build` now builds into the binary. It was
+    # missing from here for as long as nothing outside `desktop/` needed it —
+    # `just test` has always reached into it and a fresh clone has always had to
+    # work that out from a `vite: not found`.
+    (cd desktop && pnpm install)
     (cd mobile && pnpm install)
     cargo fetch
     # Never clobbers an existing one — this is the only place your client id lives.
@@ -207,10 +212,15 @@ gen-check: gen
     .github/scripts/same-orval.sh
     .github/scripts/unchanged.sh api/ web/src/api/generated desktop/src/api/generated mobile/src/api/generated mobile/src/design
 
-# The release artifact. Web first: the Rust build embeds its output.
+# The release artifact. Both front ends first: the Rust build embeds their
+# output, and it embeds *both* — the application at the root address and the
+# administration site beside it. A binary with only one of them serves neither
+# and says so, which is deliberate (`crates/ft-server/src/web.rs`) and is also
+# why this recipe cannot be half-run.
 #
 # `cd`, for the same reason `setup` and `_dev` do it.
 build:
+    cd desktop && pnpm build
     cd web && pnpm build
     cargo build --release
 

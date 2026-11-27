@@ -24,13 +24,16 @@ Every decision below is downstream of protecting that.
 
 ## Colour is fully spent
 
-Three namespaces already exist and there is no room for a fourth:
+Four namespaces exist and there is no room for a fifth. The fourth is an
+exception, and it is granted on the containment rules below rather than on
+anybody's good intentions:
 
 | namespace | what it means | where |
 |---|---|---|
 | signals | ember, sage, brick, slate | state, anywhere |
 | file kinds | seven categories, deliberately desaturated | the tree, and nowhere else |
 | ground | six surfaces, neutral by design | everything |
+| series | four hues and a folded tail — *which of these*, never *how it is going* | inside one chart's plotted frame and the key that reads it, and nowhere else |
 
 So anything new is identified by **shape, weight, or position** — never by a new hue.
 
@@ -51,6 +54,52 @@ rows stay visible at 45% with saturation pulled back (`.stale`).
 
 Rows from a dark server **do not disappear**. A list that empties itself when the
 network drops reads as work being lost.
+
+### A chart is the second exception, and it is contained differently
+
+`--color-series-1` to `-4` have been in `globals.css` since the consumption
+screen was written. They are in the table above because that screen came into
+the renderer and nobody had said what governed them.
+
+**Syntax earns its exception by where it is — never on the page level.** A
+chart cannot earn it that way. A chart *is* on the page level, at the top of
+a pane, in a window whose rail can carry an ember dot at the same moment. So
+it earns it by four rules instead, and each of them is checkable:
+
+1. **One frame.** The hues appear inside the plotted area of one chart and in
+   the key directly beneath it. Not on the rows of the table under it, not in
+   a figure, not on a chip, not in a row's meter. A mapping a reader has to
+   carry further than a glance has stopped being a chart's and become the
+   page's.
+
+2. **Category, never state.** A series hue means *which of these*. It never
+   means good, bad, waiting or failed, and it never shares an object with a
+   signal. One screen may hold both — Usage draws sage, amber and brick on
+   its quota meters and the series in its chart — and they are told apart by
+   position and shape, never by hue alone.
+
+3. **Below ember, measured.** The loudest series hue is **76% of ember's
+   chroma** in dark (`--color-series-4`, OKLCh C 0.149 against ember's 0.195)
+   and **72%** in light. Ember is absent from the set by construction. A
+   fifth hue is added only if it clears the same gate — and past four the
+   tail folds into `--color-mute`, because a fold is a shape decision and a
+   fifth hue would be a new hue.
+
+   They are *not* below the file kinds, and that is deliberate: the kinds top
+   out at C 0.099 and a 7px stacked segment cannot carry that little. Quieter
+   than ember, louder than the tree.
+
+4. **Flat, still, unfilled.** The series never pulse, never tint a surface
+   behind text, and never appear as a dot on a glyph. Those three shapes stay
+   ember's, and they are most of why an 8px ember dot still reads from across
+   the room with four hundred data points on screen.
+
+Rule 1 is the one that is asserted rather than remembered. `SERIES_FRAMES` in
+`ui/config/usage-rules.ts` names the three elements that may carry a hue —
+`usage-chart`, `usage-key` and `usage-tip` — and `usage.test.tsx` renders the
+pane and asserts the string `--color-series-` appears inside none of anything
+else. That check is why Usage's ledger meter is one neutral length where the
+web's is a four-hue stack on every one of twenty-five rows.
 
 ## Density
 
@@ -269,11 +318,16 @@ this client did all three:
 
 # Files
 
-## Syntax is the one allowed exception to "colour is spent"
+## Syntax is the first allowed exception to "colour is spent"
 
-A fourth namespace, `--color-syn-*`, and it earns the exception for one reason:
+A fifth namespace, `--color-syn-*`, and it earns the exception for one reason:
 **it never appears outside a file or a diff.** It cannot compete with the
 signals at the page level because it is never on the page level.
+
+That reason is its own, and it does not generalise. The series hues are the
+second exception and they are contained by four rules instead — see *A chart
+is the second exception, and it is contained differently* above, which exists
+because a chart cannot borrow this argument.
 
 | | | |
 |---|---|---|

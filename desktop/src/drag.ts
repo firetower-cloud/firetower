@@ -23,8 +23,18 @@
  *
  * Interactive children opt out by being interactive: the check walks up from
  * the event target and refuses if it finds a control.
+ *
+ * **None of it is ours in a browser.** The window belongs to Chrome or Safari
+ * and is moved by its own title bar, so both handlers answer nothing there.
+ * That is not merely tidiness: `onMouseDown` calls `preventDefault` before it
+ * asks for a window, which on a served page suppresses the text selection and
+ * the focus move a mousedown is otherwise for — a drag region with nothing
+ * behind it is still a region that eats the press. The class is left on,
+ * because `-webkit-app-region` is inert outside an application window and the
+ * note below says why it is kept at all.
  */
 import type { MouseEvent as ReactMouseEvent } from "react";
+import { installedApp } from "~/installed-app";
 
 const CONTROLS =
   "button, a, input, select, textarea, label, [role='button'], [contenteditable='true']";
@@ -70,6 +80,7 @@ export const drag = {
   className: "drag",
 
   onMouseDown: (e: ReactMouseEvent<HTMLElement>) => {
+    if (!installedApp()) return;
     if (e.button !== 0 || dragging) return;
     if ((e.target as HTMLElement).closest(CONTROLS)) return;
 
@@ -86,6 +97,7 @@ export const drag = {
   },
 
   onDoubleClick: (e: ReactMouseEvent<HTMLElement>) => {
+    if (!installedApp()) return;
     if ((e.target as HTMLElement).closest(CONTROLS)) return;
     void tauriWindow().then((w) => w?.toggleMaximize());
   },

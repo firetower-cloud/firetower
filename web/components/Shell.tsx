@@ -4,55 +4,30 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMe, useLogout } from "@/src/api/generated/auth/auth";
 import { forgetToken } from "@/src/api/http";
-import { useEffect, useState } from "react";
-import { BookOpen, CircleDashed, CircleFadingArrowUp, FolderOpen, Gauge, LayoutList, ListTodo, Menu, Plus, Settings2, Users, X, Building2, Download, UserRound } from "lucide-react";
+import { useEffect } from "react";
+import { BookOpen, Menu, X, UserRound } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { Mark, Signal } from "./Signal";
+import { Mark } from "./Signal";
 import { useHasRail } from "@/src/workspace/layout";
 import { useDrawer } from "@/src/workspace/drawer";
-import { NewWorkspaceModal } from "./NewWorkspace";
-import { AgentMark } from "./AgentMark";
-import { Button, GithubMark, Icon } from "./ui";
-import { useListSessions } from "@/src/api/generated/sessions/sessions";
-import { useGetUpdates } from "@/src/api/generated/updates/updates";
-import { showsDot } from "@/src/api/updates";
-import { doing, group, shortRepo, type Workspace } from "@/src/api/workspaces";
+import { Button, Icon } from "./ui";
 import { useDismissible } from "@/src/workspace/dismissible";
-import { elapsed, minutesSince, needsYou, unfinished } from "@/src/api/view";
 
 /**
- * The top of the rail: what you came here to do.
+ * Everywhere this site can take you, which is now one place.
  *
- * Repositories, agents, secrets and hosts used to sit here as four more rows of
- * the same weight, which made the rail read as a settings menu with some
- * sessions underneath. They are not the same kind of thing — you touch a
- * repository to start work, and you touch the other three once and then never
- * again until something breaks. The three live behind Configuration now.
+ * It was eight rows: *Get the app* at the root, and People, Teams, Access,
+ * Usage and Settings under an *Organisation* heading. The renderer carries all
+ * six now, so their pages are gone and these are the links that used to reach
+ * them — the only links that did, from the one page this rail is still drawn
+ * on. They went with the pages rather than being left pointing at six 404s.
+ *
+ * Account is what is left, and it is here rather than only in the strip at the
+ * bottom because it is a destination: the voluntary password change, which no
+ * other client in the product carries.
  */
 const NAV: { href: string; label: string; icon: LucideIcon; admin?: boolean }[] = [
-  { href: "/", label: "Get the app", icon: Download },
   { href: "/account", label: "Account", icon: UserRound },
-];
-
-/**
- * The organisation is several screens, not one destination.
- *
- * Drawn as a group with its rooms under it rather than a link that expands: it
- * is a handful of items, and a disclosure triangle over four rows is a control
- * that exists to hide almost nothing.
- *
- * `Access` and `Usage` have no `admin` flag on purpose — see the note in
- * `app/organization/layout.tsx`. A member sees the group with two rooms in it,
- * which is honest: they are the two that are theirs. Usage shows an
- * administrator the whole installation and a member only their own work, and
- * that is one page either way — the rows that come back are what differ.
- */
-const ORGANIZATION: { href: string; label: string; icon: LucideIcon; admin?: boolean }[] = [
-  { href: "/organization/people", label: "People", icon: Users, admin: true },
-  { href: "/organization/teams", label: "Teams", icon: Building2, admin: true },
-  { href: "/organization/access", label: "Access", icon: FolderOpen },
-  { href: "/organization/usage", label: "Usage", icon: Gauge },
-  { href: "/organization/settings", label: "Settings", icon: Settings2, admin: true },
 ];
 
 export function Shell({ children }: { children: React.ReactNode }) {
@@ -131,13 +106,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
           {NAV.filter((n) => !n.admin || me?.user.role === "admin").map((n) => (
             <NavLink key={n.href} {...n} on={path === n.href} />
           ))}
-
-          <div className="mt-4 mb-1 px-2.5">
-            <span className="eyebrow">Organisation</span>
-          </div>
-          {ORGANIZATION.filter((n) => !n.admin || me?.user.role === "admin").map((n) => (
-            <NavLink key={n.href} {...n} on={path.startsWith(n.href)} />
-          ))}
         </nav>
 
 
@@ -191,8 +159,12 @@ export function Shell({ children }: { children: React.ReactNode }) {
               >
                 <Icon of={Menu} size={16} />
               </button>
+              {/* The product name, not the page's. There used to be a map of
+                  path to title here and every key in it named a page this site
+                  no longer exports, so it only ever reached its own fallback —
+                  which is this. */}
               <span className="font-narrow text-ui font-semibold tracking-[0.22em] text-bone uppercase">
-                {TITLE[path] ?? "Firetower"}
+                Firetower
               </span>
             </div>
           </header>
@@ -210,26 +182,6 @@ export function Shell({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-
-/**
- * What the phone's bar is called, per page.
- *
- * Only the destinations the drawer offers. Anything else falls back to the
- * product name, which is honest for a page reached from a link — better than
- * deriving a title from the path and printing "Repos" in the middle of a
- * settings screen that calls itself Configuration.
- */
-const TITLE: Record<string, string> = {
-  "/": "Dashboard",
-  "/organization/people": "People",
-  "/organization/teams": "Teams",
-  "/organization/access": "Access",
-  "/organization/settings": "Settings",
-  "/tasks": "Tasks",
-  "/configuration": "Configuration",
-  "/updates": "Updates",
-  "/sessions": "Sessions",
-};
 
 /**
  * One destination.

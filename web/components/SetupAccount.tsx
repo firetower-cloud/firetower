@@ -3,23 +3,23 @@
 import { useState } from "react";
 import { useChangePassword } from "@/src/api/generated/auth/auth";
 import { useNameOrganization } from "@/src/api/generated/setup/setup";
-import { useSetClientId } from "@/src/api/generated/providers/providers";
 import { ApiError, rememberToken } from "@/src/api/http";
 
 /**
  * The parts of setting up that only a person can answer.
  *
- * Replacing a password that came from a file, naming the organisation, and —
- * optionally, and skippably — registering a GitHub application. Everything
- * after this is the tour, which asks for nothing.
+ * Replacing a password that came from a file, and naming the organisation.
+ * Everything after this is the tour, which asks for nothing.
  *
- * **The git-host step is GitHub's and stays GitHub's.** Firetower reaches
- * GitLab and Gitea too, and any number of each, but adding one means saying
- * where it is — and a host is the installation's, which puts it on the desktop
- * beside machines and the vault rather than in a first-boot wizard here. See
- * `docs/which-surface.md`. What is left here is the one host that exists before
- * anybody has added anything, and the only thing it needs before it can be
- * authorized.
+ * **There was a third step and it has gone to the app.** It registered a
+ * GitHub application — optional and skippable, because without one you paste a
+ * repository's URL and the machine's own git credentials are used. No wizard
+ * ever rendered it after the web app was narrowed to administration, and the
+ * capability is on the desk, in `config/SetUpClient.tsx` and `config/GitHosts.tsx`,
+ * against the same `providers` endpoints. That is also where GitLab and Gitea
+ * were always added, for the reason in `docs/which-surface.md`: a host is the
+ * installation's, which puts it beside machines and the vault rather than in a
+ * first-boot wizard here.
  */
 
 /* ── replacing the password ────────────────────────────────────────── */
@@ -197,141 +197,6 @@ export function StepOrganization({ onNext }: { onNext: () => void }) {
     </div>
   );
 }
-
-/* ── the optional one ──────────────────────────────────────────────── */
-
-export function StepGitHub({
-  onNext,
-  onSkip,
-}: {
-  onNext: () => void;
-  onSkip: () => void;
-}) {
-  return (
-    <div>
-      <h1 className="text-display font-semibold text-bone">
-        Connect GitHub — optional
-      </h1>
-      <p className="mt-2 max-w-[56ch] text-ui leading-[1.6] text-dim">
-        With an application registered, you can authorize GitHub once and pick
-        from a list of your repositories. Without one, you paste a repository&apos;s
-        URL and the machine&apos;s own git credentials are used — which works, and
-        is why this is skippable.
-      </p>
-      <p className="mt-2 max-w-[56ch] text-meta leading-[1.6] text-mute">
-        GitLab and Gitea — including ones you host yourself, and more than one of
-        any of them — are added in the app, under Configuration &rarr;
-        Integrations. They need an address rather than an application, so they
-        are not something this screen can ask for.
-      </p>
-
-      <div className="mt-6 max-w-[420px]">
-        <ClientIdForm onDone={onNext} />
-      </div>
-
-      {/* Not `onNext`: skipping saves nothing, so the server still reports this
-          step as outstanding and returning to it is all `onNext` could do. */}
-      <button
-        onClick={onSkip}
-        className="mt-6 text-ui text-mute hover:text-text"
-      >
-        Skip — do this later
-      </button>
-    </div>
-  );
-}
-
-/**
- * Asked here, and again on the connect screen at the moment it is missed.
- *
- * Both places use this, so the four steps and the warning about the checkbox
- * are written once.
- */
-export function ClientIdForm({ onDone }: { onDone: () => void }) {
-  const [value, setValue] = useState("");
-  const [failed, setFailed] = useState<string | null>(null);
-  const save = useSetClientId();
-
-  const submit = (event: React.FormEvent) => {
-    event.preventDefault();
-    setFailed(null);
-    save.mutate(
-      // The built-in host, whose id is the literal string `github` — which is
-      // what every key already written against it is under, and why the
-      // connections migration kept it rather than generating one.
-      { id: "github", data: { clientId: value } },
-      {
-        onSuccess: () => onDone(),
-        onError: (error) =>
-          setFailed(
-            error instanceof ApiError ? error.message : "That didn't work.",
-          ),
-      },
-    );
-  };
-
-  return (
-    <div>
-      <ol className="space-y-1.5 text-meta leading-[1.6] text-dim">
-        <li>
-          1. Open{" "}
-          <a
-            href="https://github.com/settings/applications/new"
-            target="_blank"
-            rel="noreferrer"
-            className="text-dim underline underline-offset-2 transition-colors hover:text-bone"
-          >
-            github.com/settings/applications/new
-          </a>
-        </li>
-        <li>
-          2. Name it <span className="text-slate">Firetower</span>. Both URLs
-          the form asks for are unused by this flow — device authorization never
-          redirects — so put{" "}
-          <span className="font-mono text-meta text-slate">
-            http://localhost:3000
-          </span>{" "}
-          in each and move on.
-        </li>
-        <li>
-          3. Register it, then tick{" "}
-          <span className="text-slate">Enable Device Flow</span> and update.
-          <span className="text-mute">
-            {" "}
-            Don&apos;t skip this — it is off by default, below the fold, and
-            without it every authorization fails with the same error as a wrong
-            identifier.
-          </span>
-        </li>
-        <li>4. Copy the Client ID from the top of that page.</li>
-      </ol>
-
-      <form onSubmit={submit} className="mt-4">
-        <Field
-          id="client-id"
-          label="Client ID"
-          hint="Looks like Ov23li… — public by design, with no paired secret."
-          value={value}
-          onChange={setValue}
-        />
-        {failed && (
-          <p className="mt-3 text-meta text-brick" role="alert">
-            {failed}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={save.isPending || !value.trim()}
-          className="mt-4 rounded-md bg-bone px-3.5 py-2 text-ui font-medium text-ground transition-colors hover:bg-white disabled:bg-line disabled:text-mute"
-        >
-          {save.isPending ? "Saving…" : "Save"}
-        </button>
-      </form>
-    </div>
-  );
-}
-
-/* ── one field, everywhere ─────────────────────────────────────────── */
 
 function Field({
   id,

@@ -16,6 +16,10 @@ import { readFileSync } from "node:fs";
 const PORT = Number(process.argv[2] ?? 4401);
 
 const ORG = { id: "o_1", name: "Acme" };
+/** On by default, as a fresh install is, and `__reset` puts it back. */
+let telemetry = true;
+/** Where a person reaches this Firetower in a browser, as `setup_state` says. */
+const PUBLIC_URL = "https://firetower.acme.co";
 /* `slug` is what every path is keyed on — `u/kevin/…` — and it was missing,
    so `isPersonal` answered false for every session this person owns and the
    panel filed a whole fleet under "Shared with you". */
@@ -320,10 +324,144 @@ function poster(look) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400"><rect width="640" height="400" fill="#fff"/>${body}</svg>`;
 }
 
+/**
+ * The connected subscriptions.
+ *
+ * **They carry a `path` and real `limits` now**, which they did not: the
+ * account sheet never read either, and Usage's Limits section reads both —
+ * so with `limits: []` on every account the whole section was correctly
+ * drawn as nothing and could not be looked at. The three windows below are
+ * the three shapes the section has to handle: a percentage with a reset, a
+ * percentage over ninety, and an agent that reports no percentage at all.
+ */
 const ACCOUNTS = [
-  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
-  { id: "a_2", kind: "Codex", name: "Acme · Plus", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", limits: [] },
+  { id: "a_1", kind: "ClaudeCode", name: "Acme · Max", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", path: "u/kevin/perso_01m4anp7",
+    limits: [
+      { observedAt: "2026-11-26T09:12:00Z", scope: "five_hour", status: "allowed", usedPercent: 68, resetsAt: Math.floor(Date.now() / 1000) + 4320 },
+      { observedAt: "2026-11-26T09:12:00Z", scope: "seven_day", status: "allowed", usedPercent: 41, resetsAt: Math.floor(Date.now() / 1000) + 273_600 },
+    ] },
+  { id: "a_2", kind: "Codex", name: "Acme · Plus", mode: "subscription", isDefault: true, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "kevin@acme.com", path: "d/platform/acct_01m4anp8",
+    limits: [{ observedAt: "2026-11-26T09:12:00Z", scope: "month", status: "allowed", usedPercent: 91, resetsAt: Math.floor(Date.now() / 1000) + 367_200 }] },
+  /* Claude Code reports no percentage on this one. The empty space where a
+     meter would be is the finding, not a gap to fill. */
+  { id: "a_3", kind: "ClaudeCode", name: "Acme · Ops", mode: "subscription", isDefault: false, enabled: true, state: "ready", revision: 1, credentialSet: true, identity: "ops@acme.com", path: "d/ops/acct_01m4anp9",
+    limits: [{ observedAt: "2026-11-25T18:04:00Z", scope: "account", status: "allowed" }] },
 ];
+
+/* ── What the fleet spent ─────────────────────────────────────────────
+   `/api/v1/consumption` answers the Organisation → Usage pane, and nothing
+   in this file answered it before — so the screen could only ever be driven
+   into its empty state. Invented, deterministic, and cut the way the real
+   handler cuts it: the search narrows the groups and leaves the totals and
+   the series alone, which is what makes "nothing matches" keep its chart. */
+
+const USAGE_MODELS = ["claude-sonnet-4-5", "gpt-5.1-codex", "claude-opus-4-1", "kimi-k2-0905", "glm-4.6"];
+const USAGE_WEIGHTS = [0.44, 0.24, 0.18, 0.11, 0.03];
+const byModel = (tokens) =>
+  USAGE_MODELS.map((model, i) => ({ model, tokens: Math.round(tokens * USAGE_WEIGHTS[i]) }));
+
+/** A deterministic wobble, so a reload draws the same chart. */
+const wobble = (n) => 0.78 + ((Math.sin(n * 12.9898) * 43758.5453) % 1 + 1) % 1 * 0.5;
+
+const USAGE_TASKS = [
+  ["FIRE-412", "Bring the administration screens into the renderer", 9, 31],
+  ["FIRE-418", "Serve the renderer from the control plane’s root", 6, 22],
+  ["FIRE-407", "Password policy is enforced at the next sign-in", 4, 14],
+  ["FIRE-431", "Delete the desktop release pipeline", 5, 17],
+  ["FIRE-388", "A workspace names itself from its first turn", 3, 11],
+  ["FIRE-396", "A skill bundle can be read a file at a time", 4, 12],
+  ["FIRE-414", "Work out what somebody is the last administrator of", 3, 9],
+  ["FIRE-409", "Trusted proxy configuration, and the header it trusts", 2, 8],
+  /* Work filed against no task at all, and a task whose title did not come
+     back — the two unnamed rows the pane has different words for. */
+  [null, null, 7, 19],
+  ["FIRE-377", null, 2, 6],
+  ["FIRE-402", "Offboarding moves a person’s filing before it removes them", 3, 10],
+  ["FIRE-425", "Asset caching is re-derived from the embed’s own manifest", 2, 7],
+];
+
+const USAGE_PEOPLE = ["kevin", "dana", "priya", "tomas", "marie", "jun", "aleks"];
+
+function usageRows(dimension) {
+  if (dimension === "model")
+    return USAGE_MODELS.map((m, i) => ({ key: m, name: m, tokens: Math.round(620_000 * USAGE_WEIGHTS[i]) }));
+  if (dimension === "person")
+    return USAGE_PEOPLE.map((p, i) => ({ key: p, name: p, tokens: Math.round(380_000 * 0.78 ** i) }));
+  if (dimension === "subscription")
+    return ACCOUNTS.map((a, i) => ({ key: a.id, name: a.name, tokens: Math.round(540_000 * 0.6 ** i) }));
+  return USAGE_TASKS.map(([key, name], i) => ({ key, name, tokens: Math.round(214_000 * 0.855 ** i) }));
+}
+
+function consumption(params) {
+  const dimension = params.get("group") ?? "task";
+  const bucket = params.get("bucket") ?? "day";
+  const then = params.get("then");
+  const find = (params.get("find") ?? "").trim().toLowerCase();
+  const limit = Number(params.get("limit") ?? 25);
+  const columns = bucket === "day" ? 14 : bucket === "week" ? 13 : 12;
+
+  /* **UTC midnights, because that is what `date_trunc` hands back.** These
+     were local midnights, so on any machine west of UTC the mock emitted
+     `…T08:00:00Z` and the chart's labels came out right by accident — while a
+     real deployment, whose buckets start at `…T00:00:00Z`, labelled every
+     column with the day before. A fixture that is kinder than the server is a
+     fixture that hides the bug it was built to show. */
+  const end = new Date();
+  const series = [];
+  for (let i = columns - 1; i >= 0; i--) {
+    const at = new Date(end);
+    if (bucket === "day") at.setUTCDate(at.getUTCDate() - i);
+    else if (bucket === "week") at.setUTCDate(at.getUTCDate() - i * 7);
+    else at.setUTCMonth(at.getUTCMonth() - i);
+    at.setUTCHours(0, 0, 0, 0);
+    const weekend = bucket === "day" && (at.getDay() === 0 || at.getDay() === 6);
+    const trend = 0.55 + 0.75 * ((columns - i) / columns);
+    series.push({ start: at.toISOString(), models: byModel(Math.round((weekend ? 0.26 : 1) * trend * wobble(i) * 290_000)) });
+  }
+
+  const tokens = series.reduce((a, c) => a + c.models.reduce((x, m) => x + m.tokens, 0), 0);
+  const totals = {
+    inputTokens: Math.round(tokens * 0.14), outputTokens: Math.round(tokens * 0.03),
+    cacheReadTokens: Math.round(tokens * 0.77), cacheWriteTokens: Math.round(tokens * 0.06),
+    cacheWrite1hTokens: Math.round(tokens * 0.04), cacheWrite5mTokens: Math.round(tokens * 0.02),
+    tokens, costUsd: null, pricedRows: 300, rows: 1420, unreportedTurns: 38,
+    turns: 1284, conversations: 173, workspaces: 96, people: 9, tasks: 41,
+  };
+
+  /* The search narrows the groups and nothing else, exactly as the handler
+     does — `consumption_where()` carries the period and the scope and the
+     find clause is added by the groups query alone. */
+  let rows = usageRows(dimension);
+  if (find) rows = rows.filter((r) => `${r.name ?? ""} ${r.key ?? ""}`.toLowerCase().includes(find));
+
+  const groups = rows.slice(0, limit).map((r, i) => {
+    const [, , workspaces = 2, conversations = 6] = USAGE_TASKS[i] ?? [];
+    const group = {
+      key: r.key, name: r.name, tokens: r.tokens, models: byModel(r.tokens),
+      costUsd: null, pricedRows: 0, rows: 20, turns: conversations * 7, conversations,
+      workspaces, people: 1 + (i % 5), tasks: workspaces,
+      firstAt: series[0].start, lastAt: series[series.length - 1].start,
+    };
+    if (then && then !== dimension) {
+      /* `FIRE-377` has nothing under it, so the "nothing to break this down
+         by" line is reachable rather than theoretical. */
+      const kids = r.key === "FIRE-377" ? [] : then === "model"
+        ? USAGE_MODELS.map((m, n) => ({ key: m, name: m, tokens: Math.round(r.tokens * USAGE_WEIGHTS[n]) }))
+        : USAGE_PEOPLE.slice(0, workspaces >= 5 ? 7 : 4).map((p, n) => ({ key: p, name: p, tokens: Math.round(r.tokens * 0.42 / (n + 1)) }));
+      group.children = kids.map((k) => ({
+        ...k, models: byModel(k.tokens), costUsd: null, pricedRows: 0, rows: 4,
+        turns: 0, conversations: 0, workspaces: 0, people: 0, tasks: 0,
+      }));
+    }
+    return group;
+  });
+
+  const over = rows.length - groups.length;
+  return {
+    totals, series, groups, groupCount: rows.length,
+    rest: over > 0 ? { key: null, name: null, tokens: Math.round(tokens * 0.31), models: [], costUsd: null, pricedRows: 0, rows: 0, turns: 0, conversations: 0, workspaces: 0, people: 0, tasks: 0 } : null,
+  };
+}
 
 const say = (item, text) => [
   { lineNo: 0, type: "ItemStarted", item, kind: "AssistantMessage", title: null, task: null },
@@ -613,6 +751,13 @@ const server = createServer(async (req, res) => {
   if (path === "/__reset") {
     scene = url.searchParams.get("scene") ?? "default";
     checkouts = START();
+    PEOPLE = PEOPLE_START();
+    COLLEAGUES = COLLEAGUES_START();
+    ORG.name = "Acme";
+    telemetry = true;
+    TEAMS = TEAMS_START();
+    TEAM_MEMBERS = TEAM_MEMBERS_START();
+    GRANTS = GRANTS_START();
     pinned = null;
     repoDefaults = {};
     return json(res, { detail: `back to three, playing ${scene}` });
@@ -656,6 +801,127 @@ const server = createServer(async (req, res) => {
   if (req.method === "POST" && (path === "/api/v1/setup/organization" || path === "/api/v1/setup/complete")) {
     if (path.endsWith("organization")) scene = "setup-done";
     return json(res, { detail: "done" });
+  }
+
+  /* ── Teams, written to ────────────────────────────────────────────────
+     Enough of `api/access.rs` to drive the demo without a Postgres, **with
+     its refusals**, because they are most of what the pane is for: the team
+     that is everybody cannot be renamed, removed or added to, and two teams
+     cannot share a name. A mock that says yes to all four would photograph a
+     screen nobody can check. Every one of the five is `org_admin` there, so
+     a member is refused before the route is reached. */
+  const team_write = /^\/api\/v1\/teams\/([^/]+)(\/members\/([^/]+))?$/.exec(path);
+  if (team_write && req.method !== "GET") {
+    if (scene === "member") {
+      return json(res, { code: "Forbidden", message: "only an administrator can do that" }, 403);
+    }
+    const team = TEAMS.find((t) => t.id === team_write[1]);
+    if (!team) return json(res, { code: "NotFound", message: "no team here" }, 404);
+    const person = team_write[3];
+
+    if (req.method === "PATCH") {
+      const body = await new Promise((done) => {
+        let raw = "";
+        req.on("data", (c) => (raw += c));
+        req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+      });
+      const wanted = (body.name ?? "").trim();
+      if (team.everyone) {
+        return json(res, { code: "InvalidRequest", message: "no team here to rename — the team that is everybody cannot be renamed" }, 400);
+      }
+      if (TEAMS.some((t) => t.id !== team.id && t.name === wanted)) {
+        return json(res, { code: "InvalidRequest", message: `there is already a team called ${wanted}` }, 400);
+      }
+      team.name = wanted;
+      res.writeHead(204, { "access-control-allow-origin": "*" });
+      return res.end();
+    }
+
+    if (req.method === "DELETE" && !person) {
+      if (team.everyone) {
+        return json(res, { code: "InvalidRequest", message: "no team here to remove — the team that is everybody cannot be removed" }, 400);
+      }
+      TEAMS.splice(TEAMS.indexOf(team), 1);
+      delete TEAM_MEMBERS[team.id];
+      /* The grants go by cascade, which is the whole reason a team is worth
+         having — and the whole reason the confirmation says so first. */
+      for (const id of Object.keys(GRANTS)) {
+        GRANTS[id] = GRANTS[id].filter((g) => !(g.subjectKind === "team" && g.subjectId === team.id));
+      }
+      res.writeHead(204, { "access-control-allow-origin": "*" });
+      return res.end();
+    }
+
+    if (person && (req.method === "PUT" || req.method === "DELETE")) {
+      if (team.everyone && req.method === "PUT") {
+        return json(res, { code: "InvalidRequest", message: "everybody is already in that team" }, 400);
+      }
+      const held = (TEAM_MEMBERS[team.id] ??= []);
+      if (req.method === "PUT") {
+        if (!held.some((m) => m.id === person)) {
+          const who = COLLEAGUES.find((c) => c.id === person);
+          if (who) held.push(who);
+        }
+      } else {
+        TEAM_MEMBERS[team.id] = held.filter((m) => m.id !== person);
+      }
+      team.members = TEAM_MEMBERS[team.id].length;
+      res.writeHead(204, { "access-control-allow-origin": "*" });
+      return res.end();
+    }
+  }
+
+  /* ── The deployment, written to ───────────────────────────────────────
+     The organisation's name and telemetry, which are the two of F3's four
+     named capabilities that exist — the password minimum is a compile-time
+     constant and the sign-in configuration is environment variables read at
+     boot, so there is nothing here to stand in for them. Both are `admin` on
+     the server. */
+  if (req.method === "PATCH" && path === "/api/v1/organization") {
+    if (scene === "member") {
+      return json(res, { code: "Forbidden", message: "only an administrator can do that" }, 403);
+    }
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    const wanted = (body.name ?? "").trim();
+    if (!wanted) return json(res, { code: "InvalidRequest", message: "a name is needed" }, 400);
+    ORG.name = wanted;
+    return json(res, ORG);
+  }
+
+  if (path === "/api/v1/telemetry/settings" && req.method === "PUT") {
+    if (scene === "member") {
+      return json(res, { code: "Forbidden", message: "only an administrator can do that" }, 403);
+    }
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    telemetry = !!body.enabled;
+    return json(res, { enabled: telemetry });
+  }
+
+  if (req.method === "POST" && path === "/api/v1/teams") {
+    if (scene === "member") {
+      return json(res, { code: "Forbidden", message: "only an administrator can do that" }, 403);
+    }
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    const wanted = (body.name ?? "").trim();
+    if (TEAMS.some((t) => t.name === wanted)) {
+      return json(res, { code: "InvalidRequest", message: `there is already a team called ${wanted}` }, 400);
+    }
+    const made = { id: `t_${Date.now() % 100000}`, name: wanted, everyone: false, members: 0 };
+    TEAMS.push(made);
+    TEAM_MEMBERS[made.id] = [];
+    return json(res, made);
   }
 
   const members_of = /^\/api\/v1\/teams\/([^/]+)\/members$/.exec(path);
@@ -884,16 +1150,44 @@ const server = createServer(async (req, res) => {
   }
 
   const routes = {
-    "/api/v1/bootstrap": { version: "0.34.1", eventsPath: "/api/v1/events", authModes: ["password"], organization: ORG.name, serverId: "o_1" },
+    /* **`authModes` is scene-varied, because its loud state was otherwise
+       unphotographable.** `open` means anything that can reach the port is in,
+       and the deployment pane says so in brick — a fixture that only ever
+       answers `password` makes the one state worth warning about invisible to
+       every check at once, which is the same gap the people fixture had.
+         `proxied`   a proxy in front, and passwords still accepted;
+         `wide-open` nothing asked of anybody, which start-up allows on a
+                     loopback bind only. */
+    "/api/v1/bootstrap": {
+      version: "0.34.1",
+      eventsPath: "/api/v1/events",
+      authModes:
+        scene === "wide-open" ? ["open"] : scene === "proxied" ? ["password", "proxy"] : ["password"],
+      organization: ORG.name,
+      serverId: "o_1",
+    },
     /* `locked` and `needs-setup` are what `Gate.tsx` stands between a
        connected server and the app for, and neither could be reached. */
-    "/api/v1/auth/me": { user: { ...USER, mustChangePassword: scene === "locked" }, organization: ORG },
+    /* **`member` is the scene that drives the ⌘8 trap.** People reads a
+       different endpoint depending on this role — the colleague list for a
+       member, the administrators-only user list for an administrator — so
+       without a way to be a member here, the only surface in the app that can
+       be *forbidden* is the one surface nothing in the harness could reach. */
+    "/api/v1/auth/me": {
+      user: { ...USER, mustChangePassword: scene === "locked", role: scene === "member" ? "member" : "admin" },
+      organization: ORG,
+    },
+    /* `publicUrl` was missing from all three, and it is required on
+       `SetupState` — so the one screen that reads it, the password handed over
+       once, drew *Sign in at* with nothing after it. The address is the
+       server's own answer rather than whatever host served the page, because
+       the interface and the control plane can be two names behind a proxy. */
     "/api/v1/setup":
       scene === "needs-setup"
-        ? { needsPassword: false, needsOrganization: true, needsGithub: false, completed: false, organization: null }
+        ? { needsPassword: false, needsOrganization: true, needsGithub: false, completed: false, organization: null, publicUrl: PUBLIC_URL }
         : scene === "setup-done"
-          ? { needsPassword: false, needsOrganization: false, needsGithub: false, completed: false, organization: ORG }
-          : { needsPassword: false, needsOrganization: false, needsGithub: false, completed: true, organization: ORG },
+          ? { needsPassword: false, needsOrganization: false, needsGithub: false, completed: false, organization: ORG, publicUrl: PUBLIC_URL }
+          : { needsPassword: false, needsOrganization: false, needsGithub: false, completed: true, organization: ORG, publicUrl: PUBLIC_URL },
     "/api/v1/sessions": dashboard(),
     "/api/v1/sessions/s_1": session(),
     "/api/v1/sessions/w_1": session(),
@@ -980,6 +1274,37 @@ const server = createServer(async (req, res) => {
     "/api/v1/trackers": scene === "no-trackers" ? [] : TRACKERS,
     "/api/v1/tasks": scene === "no-tasks" ? { more: false, next: null, tasks: [] } : TASKS,
     "/api/v1/colleagues": scene === "no-people" ? [] : COLLEAGUES,
+    "/api/v1/telemetry/settings": { enabled: telemetry },
+    /* **What the client is owed to post**, which `telemetry.ts` polls on a
+       timer whatever screen is open — so without it every run of the harness
+       logged a 404 that had nothing to do with what it was driving, and a real
+       failure would have been one more line in the noise. Empty: the courier
+       has nothing to carry, which is the quiet case and the right default. */
+    "/api/v1/telemetry/pending": [],
+    /* Exactly what would leave this install, which is the whole point of the
+       panel: the example is what *Show exactly what is sent* opens, and it has
+       to be readable as "no prompts, no names, nothing sensitive" rather than
+       taken on trust. */
+    "/api/v1/telemetry/preview": {
+      enabled: telemetry,
+      endpoint: "https://telemetry.firetower.cloud/v1/daily",
+      waiting: telemetry ? 3 : 0,
+      example: {
+        day: "2026-11-25",
+        version: "0.34.1",
+        installation: "a7c3…e11f",
+        workspaces: 14,
+        sessions: 62,
+        machines: 2,
+        agents: { "claude-code": 41, codex: 21 },
+      },
+    },
+    /* Everybody, as an administrator is told it. **A member asking is refused
+       below, before this table is reached** — see the guard above — so a
+       People pane built on this list rather than on the colleague list fails
+       here the way it fails in production, rather than quietly working against
+       a mock that answers everybody. */
+    "/api/v1/users": scene === "one-person" ? [PEOPLE[0]] : PEOPLE,
     "/api/v1/teams": scene === "no-people" ? [] : TEAMS,
     "/api/v1/directories": scene === "no-dirs" ? [] : DIRECTORIES,
     "/api/v1/secrets": scene === "no-secrets" ? { ...SECRETS, held: [], access: [] } : SECRETS,
@@ -1044,6 +1369,115 @@ const server = createServer(async (req, res) => {
     "/api/v1/events": [],
   };
 
+  /* **Administrators only, as the server has it.** `list_users` is the one
+     read in this table with a role on it, and the whole of the People pane's
+     design turns on it refusing: a pane built on this list instead of on the
+     colleague list has to break here, under `?scene=member`, rather than work
+     against a mock that answers everybody and break in front of a customer. */
+  if (path.startsWith("/api/v1/users") && scene === "member") {
+    return json(res, { code: "Forbidden", message: "only an administrator can do that" }, 403);
+  }
+
+  /* ── The organisation, written to ──────────────────────────────────────
+     Enough of `api/users.rs` to drive the demo without a Postgres: the
+     refusals included, because they are most of what the screen is for. The
+     last-administrator rule and the three self-refusals are the ones the pane
+     has to show as sentences, and a mock that said yes to everything would
+     photograph a screen nobody can check. */
+  if (req.method === "POST" && path === "/api/v1/users") {
+    const body = await new Promise((done) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+    });
+    const name = (body.username ?? "").trim();
+    const mail = (body.email ?? "").trim();
+    if (PEOPLE.some((u) => u.username === name)) {
+      return json(res, { code: "InvalidRequest", message: `there is already a user called ${name}` }, 400);
+    }
+    if (PEOPLE.some((u) => u.email === mail)) {
+      return json(res, { code: "InvalidRequest", message: `${mail} is already somebody's here` }, 400);
+    }
+    const made = {
+      // Not `PEOPLE.length + 1`: offboarding splices the array, so the next
+      // add reuses an id that TEAM_MEMBERS and GRANTS still point at. Same
+      // shape the team ids already use.
+      id: `u_${Date.now() % 100000}`, orgId: "o_1", username: name, slug: name,
+      email: mail, role: body.role ?? "member", mustChangePassword: true, disabled: false,
+    };
+    PEOPLE.push(made);
+    COLLEAGUES.push({ id: made.id, username: made.username });
+    return json(res, { user: made, password: "wiry-garnet-04" });
+  }
+
+  const one_of_ours = /^\/api\/v1\/users\/([^/]+)(\/password|\/reach|\/offboard)?$/.exec(path);
+  if (one_of_ours) {
+    const them = PEOPLE.find((u) => u.id === one_of_ours[1]);
+    if (!them) return json(res, { code: "NotFound", message: "no such user" }, 404);
+    /* An administrator who can still sign in. A switched-off one cannot add
+       anybody, so it does not count — which is `active_admins`' arithmetic. */
+    const admins = PEOPLE.filter((u) => u.role === "admin" && !u.disabled);
+    const alone = admins.length <= 1 && admins.some((u) => u.id === them.id);
+
+    if (req.method === "PATCH" && !one_of_ours[2]) {
+      const body = await new Promise((done) => {
+        let raw = "";
+        req.on("data", (c) => (raw += c));
+        req.on("end", () => done(raw ? JSON.parse(raw) : {}));
+      });
+      if (body.disabled === true && them.id === USER.id) {
+        return json(res, { code: "InvalidRequest", message: "you cannot switch yourself off" }, 400);
+      }
+      if ((body.role === "member" || body.disabled === true) && alone) {
+        return json(res, { code: "InvalidRequest", message: `${them.username} is the only administrator` }, 400);
+      }
+      if (body.role !== undefined && body.role !== null) them.role = body.role;
+      if (body.email !== undefined && body.email !== null) them.email = body.email;
+      if (body.disabled !== undefined && body.disabled !== null) them.disabled = body.disabled;
+      return json(res, them);
+    }
+    if (req.method === "POST" && one_of_ours[2] === "/password") {
+      them.mustChangePassword = true;
+      return json(res, { password: "plain-cobalt-71" });
+    }
+    /* What is theirs, which is what the offboarding sheet is a list of. Two
+       things and one directory nobody else administers, so the one decision
+       the sheet asks for is on screen rather than only in the code. */
+    if (one_of_ours[2] === "/reach") {
+      return json(res, {
+        owns: [
+          { kind: "workspace", id: "w_ledger", name: "Ledger exports", path: `u/${them.slug}/ledger_exports`, detail: "acme/api", ownerName: them.username },
+          { kind: "secret", id: `personal/OPENAI_KEY/${them.id}`, name: "OPENAI_KEY", path: `u/${them.slug}/openai_key`, detail: "personal", ownerName: them.username },
+        ],
+        administers: [{ directoryId: "d_1", name: "Platform", slug: "platform", alone: true }],
+        created: [{ kind: "skill", id: "sk_1", name: "Incident timeline", path: "d/platform/incident_timeline", detail: null, ownerName: them.username }],
+        directories: [{ directoryId: "d_1", name: "Platform", slug: "platform", level: "admin", through: [{ how: "direct" }] }],
+        teams: [{ id: "t_1", name: "Platform", everyone: false, members: 4 }],
+        exceptions: [],
+      });
+    }
+    if (req.method === "POST" && one_of_ours[2] === "/offboard") {
+      if (them.id === USER.id) {
+        return json(res, { code: "InvalidRequest", message: "you cannot offboard yourself" }, 400);
+      }
+      const at = PEOPLE.findIndex((u) => u.id === them.id);
+      PEOPLE.splice(at, 1);
+      const also = COLLEAGUES.findIndex((u) => u.id === them.id);
+      if (also >= 0) COLLEAGUES.splice(also, 1);
+      res.writeHead(204, { "access-control-allow-origin": "*" });
+      return res.end();
+    }
+  }
+  /* Before the static table, because this one reads its query. A period with
+     nothing in it is a scene rather than a special case. */
+  if (path === "/api/v1/consumption") {
+    if (scene === "no-usage")
+      return json(res, {
+        totals: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, cacheWrite1hTokens: 0, cacheWrite5mTokens: 0, tokens: 0, costUsd: null, pricedRows: 0, rows: 0, unreportedTurns: 0, turns: 0, conversations: 0, workspaces: 0, people: 0, tasks: 0 },
+        series: [], groups: [], groupCount: 0, rest: null,
+      });
+    return json(res, consumption(url.searchParams));
+  }
   if (path in routes) return json(res, routes[path]);
   /* The file itself. `useFileText` reads the body as bytes and decides for
      itself whether it is text, a picture or too big — so this answers with
@@ -1415,28 +1849,57 @@ const library = () =>
  * is a state worth photographing — it is just not the one those five screens
  * are mostly in.
  */
-const COLLEAGUES = [
-  { id: "u_1", username: "kevin", slug: "kevin" },
-  { id: "u_2", username: "ana" },
-  { id: "u_3", username: "lisa" },
-  { id: "u_4", username: "tomas" },
-  { id: "u_5", username: "priya" },
-  { id: "u_6", username: "omar" },
+/**
+ * Everybody, as an administrator is told it.
+ *
+ * The same six as `COLLEAGUES` and three facts more per row — role, address and
+ * switched-off state — which is the whole difference between the two
+ * endpoints. **Every state a row can wear is in here**, because a fixture where
+ * everybody is in the ordinary state makes the states that are wrong invisible
+ * to every check at once: `tomas` predates addresses being asked for and has
+ * never signed in, and `omar` is switched off.
+ *
+ * **Rebuilt by `POST /__reset`**, like the checkouts, because People is now
+ * written to: a run that invites somebody would otherwise leave them behind for
+ * the next one, and the second run of the same state photographs a different
+ * screen from the first.
+ */
+const PEOPLE_START = () => [
+  { id: "u_1", orgId: "o_1", username: "kevin", slug: "kevin", email: "kevin@acme.co", role: "admin", mustChangePassword: false, disabled: false },
+  { id: "u_2", orgId: "o_1", username: "ana", slug: "ana", email: "ana@acme.co", role: "admin", mustChangePassword: false, disabled: false },
+  { id: "u_3", orgId: "o_1", username: "lisa", slug: "lisa", email: "lisa@acme.co", role: "member", mustChangePassword: false, disabled: false },
+  { id: "u_4", orgId: "o_1", username: "tomas", slug: "tomas", email: null, role: "member", mustChangePassword: true, disabled: false },
+  { id: "u_5", orgId: "o_1", username: "priya", slug: "priya", email: "priya@acme.co", role: "member", mustChangePassword: false, disabled: false },
+  { id: "u_6", orgId: "o_1", username: "omar", slug: "omar", email: "omar@acme.co", role: "member", mustChangePassword: false, disabled: true },
 ];
 
-const TEAMS = [
+/** The same people as a member is told it: a name and an id, and nothing else. */
+const COLLEAGUES_START = () =>
+  PEOPLE_START().map((u) => ({ id: u.id, username: u.username, ...(u.id === "u_1" ? { slug: u.slug } : {}) }));
+
+let PEOPLE = PEOPLE_START();
+let COLLEAGUES = COLLEAGUES_START();
+
+/* **`t_1` holds a grant and `t_3` holds none**, which is the pair the delete
+   confirmation has two different sentences for — see `GRANTS` below. A fixture
+   where every team was the same shape would photograph one of the two. */
+const TEAMS_START = () => [
   { id: "t_0", name: "Everyone", everyone: true, members: 6 },
   { id: "t_1", name: "Platform", everyone: false, members: 4 },
   { id: "t_2", name: "Design", everyone: false, members: 2 },
   { id: "t_3", name: "Support", everyone: false, members: 3 },
 ];
+let TEAMS = TEAMS_START();
 
-const TEAM_MEMBERS = {
-  t_0: COLLEAGUES,
+/** Rebuilt by `POST /__reset`, like the checkouts and the people — Teams is
+ *  written to now, so a run that makes one would otherwise leave it behind. */
+const TEAM_MEMBERS_START = () => ({
+  t_0: [...COLLEAGUES],
   t_1: COLLEAGUES.slice(0, 4),
   t_2: COLLEAGUES.slice(2, 4),
   t_3: COLLEAGUES.slice(3),
-};
+});
+let TEAM_MEMBERS = TEAM_MEMBERS_START();
 
 const DIRECTORIES = [
   { id: "d_1", name: "Platform", slug: "platform", level: "admin", workspaces: 12, skills: 4, secrets: 3, hosts: 1, agentAccounts: 2 },
@@ -1444,7 +1907,7 @@ const DIRECTORIES = [
   { id: "d_3", name: "Firetower", slug: "firetower", level: "viewer", workspaces: 31, skills: 7, secrets: 6, hosts: 1, agentAccounts: 3 },
 ];
 
-const GRANTS = {
+const GRANTS_START = () => ({
   d_1: [
     { subjectKind: "person", subjectId: "u_1", subjectName: "kevin", level: "admin" },
     { subjectKind: "team", subjectId: "t_1", subjectName: "Platform", level: "writer" },
@@ -1452,7 +1915,8 @@ const GRANTS = {
   ],
   d_2: [{ subjectKind: "team", subjectId: "t_2", subjectName: "Design", level: "writer" }],
   d_3: [{ subjectKind: "team", subjectId: "t_0", subjectName: "Everyone", level: "viewer" }],
-};
+});
+let GRANTS = GRANTS_START();
 
 /* The vault, with one of each: a key of this person's own, one a directory
    holds for everybody, and the access log the reveal line points at. */

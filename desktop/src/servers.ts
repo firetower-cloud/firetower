@@ -699,6 +699,30 @@ export function updateToken(serverId: string, token: string) {
 }
 
 /**
+ * The organisation renamed itself. Keep the registry's copy in step.
+ *
+ * **The stored copy is not redundant**, which is why this updates it rather
+ * than removing it and reading the server everywhere. `org` is what names a
+ * Firetower you are *not currently connected to*: the switcher draws every row
+ * from the registry, `markOf` takes the monogram off it, and a server that is
+ * unreachable right now still has to be nameable. Reading it from `/bootstrap`
+ * would work for exactly the one server a window is pointed at.
+ *
+ * It is written once, by `Connect.tsx`, from the bootstrap answer at sign-in —
+ * and nothing wrote it again, so **renaming the organisation left every piece
+ * of chrome on this Mac saying the old name, and a reload rehydrated the old
+ * name from disk rather than correcting it.** The title bar, the profile
+ * menu's five readers and the switcher row all read `Backend.org`, which comes
+ * from here.
+ *
+ * `kept` is deliberately not touched, unlike `updateToken`: a name is not a
+ * credential and nothing about the keychain has changed.
+ */
+export function renamed(serverId: string, org: string) {
+  write(rows().map((s) => (s.serverId === serverId ? { ...s, org } : s)));
+}
+
+/**
  * The token this Mac holds for a server is no longer good.
  *
  * Kept, not forgotten: the address is still right and the organisation is

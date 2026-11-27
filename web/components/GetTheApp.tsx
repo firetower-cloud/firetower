@@ -1009,7 +1009,7 @@ function Row({
   );
 }
 
-/** The platform marks. Fixed shapes, filled, like the brand marks in `ui/Brand`. */
+/** The platform marks. Fixed shapes, filled, drawn at the size they are used. */
 function AppleGlyph() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>

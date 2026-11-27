@@ -66,11 +66,31 @@ export function QrCode({
       className={`block ${className}`}
       shapeRendering="geometricPrecision"
     >
-      {/* The plate. A code needs a light field around it, and the page is dark,
-          so the field is an object on the page rather than the page showing
-          through. */}
-      <rect width={code.span} height={code.span} rx={QUIET} fill="var(--color-bone)" />
-      <g fill="var(--color-ground)">
+      {/* The plate. A code needs a light field around it, and the page may be
+          either colour, so the field is an object on the page rather than the
+          page showing through.
+
+          **Dark-on-light in both themes, which it was not.** This drew the
+          plate in `--color-bone` and the modules in `--color-ground` — the
+          right way round in dark, and reversed in light, where bone is
+          `#161617` and ground is `#f2f2f3`. The result was near-white modules
+          on a near-black plate: an inverted code, which is outside ISO/IEC
+          18004. An iPhone camera decodes one anyway; a good many Android
+          scanners do not, and this is the page whose whole job is handing out
+          the Android build.
+
+          So the pair is bound to the two tokens that are light and dark *in
+          each theme* rather than to one token whose role flips. As utilities
+          rather than as a class, because `globals.css` is shared byte for byte
+          with the desk and a web-only rule has nowhere to live in it; the desk
+          carries the same pair as `.qr` in `desktop/src/styles.css`. */}
+      <rect
+        width={code.span}
+        height={code.span}
+        rx={QUIET}
+        className="fill-bone [[data-theme=light]_&]:fill-panel"
+      />
+      <g className="fill-ground [[data-theme=light]_&]:fill-bone">
         <path d={code.data} />
         {/* The three corners, drawn as shapes rather than as modules. They are
             the part of a code the eye actually reads as a code, and a ring and
@@ -84,8 +104,8 @@ export function QrCode({
               height={6}
               rx={2}
               fill="none"
-              stroke="var(--color-ground)"
               strokeWidth={1}
+              className="stroke-ground [[data-theme=light]_&]:stroke-bone"
             />
             <rect x={x + 2} y={y + 2} width={3} height={3} rx={1} />
           </g>

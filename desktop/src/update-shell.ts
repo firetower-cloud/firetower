@@ -19,7 +19,7 @@
  * a check finds nothing and an install refuses rather than reaching for a
  * bridge that is not there.
  */
-import { bridge } from "~/bridge";
+import { installedApp } from "~/installed-app";
 
 /** One check's answer. */
 export type Found = {
@@ -50,7 +50,7 @@ export type Progress = { downloaded: number; total: number | null };
  * address anything bypassing this path still reads.
  */
 export async function check(endpoint: string | null): Promise<Found | null> {
-  if (!bridge.native) return null;
+  if (!installedApp()) return null;
   const { invoke } = await import("@tauri-apps/api/core");
   return await invoke<Found | null>("update_check", { endpoint });
 }
@@ -62,7 +62,7 @@ export async function check(endpoint: string | null): Promise<Found | null> {
  * pressed the button has to be readable on the screen they pressed it from.
  */
 export async function install(onProgress?: (p: Progress) => void): Promise<void> {
-  if (!bridge.native) throw new Error("There is nothing to install — check again.");
+  if (!installedApp()) throw new Error("There is nothing to install — check again.");
   const [{ invoke }, { listen }] = await Promise.all([
     import("@tauri-apps/api/core"),
     import("@tauri-apps/api/event"),
@@ -83,7 +83,7 @@ export async function install(onProgress?: (p: Progress) => void): Promise<void>
 
 /** What this window is running. Null in a browser tab, and when the shell will not say. */
 export async function version(): Promise<string | null> {
-  if (!bridge.native) return null;
+  if (!installedApp()) return null;
   const { getVersion } = await import("@tauri-apps/api/app");
   return await getVersion();
 }

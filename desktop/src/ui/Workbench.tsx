@@ -43,7 +43,8 @@ import { useDirectories } from "~/data";
 import { useEndAgent, useEndWorkspace } from "~/ui/end";
 import { useConfirm } from "~/ui/Confirm";
 import { drag } from "~/drag";
-import { isGlobalMod, isLocalMod, key } from "~/platform";
+import { advertisedKey, installedApp } from "~/installed-app";
+import { isGlobalMod, isLocalMod } from "~/platform";
 
 /** The rail can be dragged between these. */
 const RAIL_MIN = 288;
@@ -53,6 +54,77 @@ const TERM_MIN = 120;
 const TERM_DEFAULT = 256;
 
 type Side = "diff" | "files" | "ship" | "overview";
+
+/**
+ * What a keystroke means inside a workspace, or nothing.
+ *
+ * **Pure and exported for the same reason as `Rail.tsx`'s `railKey`**: the
+ * gate it carries is otherwise inside a `useEffect`, which
+ * `renderToStaticMarkup` cannot reach, so the workbench's keyboard had no
+ * test in either client. A transcription of the handler it came from and
+ * nothing more — the caller does the `preventDefault`, once, for exactly the
+ * branches that used to do it themselves.
+ *
+ * **The two modifiers are the whole shape of this, and only one of them
+ * goes.** `⌃1`–`⌃3` are the inspector's tabs on the *local* modifier, which
+ * `platform.ts` keeps deliberately apart from the window's — and they are
+ * untouched on a served page, because no browser claims Ctrl with a digit on
+ * a Mac or Alt with one anywhere else, and they were never part of what was
+ * being argued about. `⌘\`, `⌘J` and `⌘W` are the window's and go with every
+ * other ⌘ chord but `⌘F`. Each keeps a control: the rail has a glyph to show
+ * it and its own tab row to hide it, the terminal has its button in the
+ * header and its own close, and a tab has an × and a *Close* in its menu. See
+ * `~/installed-app`.
+ *
+ * `inTerminal` is a boolean rather than a function, unlike `railKey`'s: this
+ * handler already read it unconditionally on every keystroke, and the local
+ * modifier's branch above the gate needs it, so making it lazy here would
+ * change nothing and hide that.
+ */
+export type WorkbenchKey =
+  | { at: "side"; side: Side }
+  | { at: "panel" }
+  | { at: "terminal" }
+  | { at: "close" }
+  | null;
+
+export function workbenchKey(
+  e: { key: string; ctrlKey: boolean; altKey: boolean; metaKey: boolean },
+  where: { installed: boolean; inTerminal: boolean; mayAct: boolean },
+): WorkbenchKey {
+  /* The inspector's tabs, on the *local* modifier. They were ⌘1–⌘3 until the
+     rail took the global number row for its six destinations: a destination
+     is global, a panel tab is local to one workspace, and the modifier is
+     what says which. */
+  const to: Record<string, Side> = { "1": "diff", "2": "files", "3": "ship" };
+  if (isLocalMod(e) && to[e.key] && !where.inTerminal) {
+    // The Commit panel is not a viewer's; neither is the shortcut to it.
+    if (to[e.key] === "ship" && !where.mayAct) return null;
+    return { at: "side", side: to[e.key] };
+  }
+
+  if (!where.installed) return null;
+  if (!isGlobalMod(e)) return null;
+  /* A focused terminal owns the keyboard. `⌘J` is the one gesture that is
+     about the panel rather than what is in it. */
+  if (where.inTerminal && e.key.toLowerCase() !== "j") return null;
+  if (e.key === "\\") return { at: "panel" };
+  const k = e.key.toLowerCase();
+  if (k === "j") return { at: "terminal" };
+  /* **⌘P is deliberately unbound.** It opened `QuickOpen` — a finder scoped
+     to this workspace's files — which was deprecated and is gone. Nothing is
+     put in its place, because reassigning a key somebody has muscle memory
+     for is worse than leaving it quiet. Changing that is the user's call, not
+     this file's.
+
+     **What went with it: there is no way to reach a file by typing its
+     name.** `Palette.tsx` searches workspaces and the rail's destinations,
+     not files — the drawing's own palette specimen draws a file row, which
+     the build has never done. The file tree is the only route now. Recorded
+     in `check-hook-delta.mjs` as REPORTED. */
+  if (k === "w") return { at: "close" };
+  return null;
+}
 
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
   const hostOf = useHostOf();
@@ -219,7 +291,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     const left = tabs.slice(1, at).filter((t) => t.id !== "chat").map((t) => t.id);
     const all = tabs.filter((t) => t.id !== "chat").map((t) => t.id);
     return [
-      { label: "Close", shortcut: key("W"), disabled: id === "chat", onPick: () => closeTab(id) },
+      { label: "Close", shortcut: advertisedKey("W"), disabled: id === "chat", onPick: () => closeTab(id) },
       { label: "Close others", disabled: others.length === 0, onPick: () => closeTabs(others) },
       { label: "Close to the right", disabled: right.length === 0, onPick: () => closeTabs(right) },
       { label: "Close to the left", disabled: left.length === 0, onPick: () => closeTabs(left) },
@@ -335,49 +407,25 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   }, [immersive]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      /* A focused terminal owns the keyboard. `⌘J` is the one gesture that
-         is about the panel rather than what is in it. */
-      const inTerminal = !!(document.activeElement as HTMLElement | null)?.closest(".xterm");
-
-      /* The inspector's tabs, on the *local* modifier. They were ⌘1–⌘3 until
-         the rail took the global number row for its six destinations: a
-         destination is global, a panel tab is local to one workspace, and the
-         modifier is what says which. */
-      const to: Record<string, Side> = { "1": "diff", "2": "files", "3": "ship" };
-      if (isLocalMod(e) && to[e.key] && !inTerminal) {
-        // The Commit panel is not a viewer's; neither is the shortcut to it.
-        if (to[e.key] === "ship" && !mayAct) return;
-        e.preventDefault();
-        setSide(to[e.key]);
+      const act = workbenchKey(e, {
+        installed: installedApp(),
+        inTerminal: !!(document.activeElement as HTMLElement | null)?.closest(".xterm"),
+        mayAct,
+      });
+      if (!act) return;
+      e.preventDefault();
+      if (act.at === "side") {
+        setSide(act.side);
         setOpen(true);
-        return;
-      }
-
-      if (!isGlobalMod(e)) return;
-      if (inTerminal && e.key.toLowerCase() !== "j") return;
-      if (e.key === "\\") {
-        e.preventDefault();
+      } else if (act.at === "panel") {
         setOpen((o) => !o);
-      }
-      if (e.key.toLowerCase() === "j") {
-        e.preventDefault();
+      } else if (act.at === "terminal") {
         setShell(true);
         setTerm((t) => !t);
-      }
-      /* **⌘P is deliberately unbound.** It opened `QuickOpen` — a finder
-         scoped to this workspace's files — which was deprecated and is gone.
-         Nothing is put in its place, because reassigning a key somebody has
-         muscle memory for is worse than leaving it quiet. Changing that is
-         the user's call, not this file's.
-
-         **What went with it: there is no way to reach a file by typing its
-         name.** `Palette.tsx` searches workspaces and the rail's
-         destinations, not files — the drawing's own palette specimen draws a
-         file row, which the build has never done. The file tree is the only
-         route now. Recorded in `check-hook-delta.mjs` as REPORTED. */
-      if (e.key.toLowerCase() === "w") {
-        e.preventDefault();
-        if (activeRef.current !== "chat") closeTab(activeRef.current);
+      } else if (activeRef.current !== "chat") {
+        /* The conversation is pinned and cannot be closed — `Tabs.tsx` says
+           why — so ⌘W over it is claimed and does nothing, exactly as before. */
+        closeTab(activeRef.current);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -391,6 +439,11 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
   const endAgent = useEndAgent();
   const me = useMe();
   const directories = useDirectories();
+  /* The two shortcuts this screen advertises in prose rather than through a
+     `hint` prop. Null where there is no key to name, which is what takes the
+     suffix off the title and the line out of the terminal's header. */
+  const termKey = advertisedKey("J");
+  const railKey = advertisedKey("\\");
   const tabMenu = useMenu<string>();
   const chipMenu = useMenu<string>();
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -609,7 +662,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                   setShell(true);
                   setTerm(!term);
                 }}
-                title={`Terminal  ${key("J")}`}
+                title={termKey ? `Terminal  ${termKey}` : "Terminal"}
                 aria-label="Terminal"
                 className={`gbtn ${term ? "bg-overlay text-bone" : ""}`}
               >
@@ -645,7 +698,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                 them — rather than one toggle that is in the wrong place half
                 the time. */}
             {!open && (
-              <IconButton of={PanelRight} onClick={() => setOpen(true)} label="Show the rail" hint={`Show the rail  ${key("\\")}`} />
+              <IconButton of={PanelRight} onClick={() => setOpen(true)} label="Show the rail" hint={railKey ? `Show the rail  ${railKey}` : undefined} />
             )}
           </div>
         </div>
@@ -722,7 +775,14 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
             <div className="flex h-8 shrink-0 items-center gap-2 border-b border-line bg-panel px-3">
               <span className="text-meta text-dim">Shell</span>
               <span className="font-mono text-micro text-mute">{place.branch}</span>
-              <span className="ml-auto text-micro text-mute">{key("J")} hides</span>
+              {/* The `ml-auto` is the row's layout and not the line's, so it
+                  stays on a spacer when there is no key to name — without it
+                  the close button walks left to meet the branch. */}
+              {termKey ? (
+                <span className="ml-auto text-micro text-mute">{termKey} hides</span>
+              ) : (
+                <span className="ml-auto" />
+              )}
               <button
                 onClick={() => {
                   setShell(false);

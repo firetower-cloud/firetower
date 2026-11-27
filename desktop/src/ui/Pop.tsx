@@ -49,7 +49,7 @@ export type Spot = {
  * a top-anchored one would walk away from the button it dropped from.
  */
 export function place(
-  to: { top: number; bottom: number; right: number },
+  to: { top: number; bottom: number; left?: number; right: number },
   card: { width: number; height: number },
   view: { width: number; height: number },
   /**
@@ -60,6 +60,17 @@ export function place(
    * read as belonging to that button rather than floating over the window.
    */
   beside = false,
+  /**
+   * Which edge the card lines up with — **the trigger's right by default**,
+   * which is what a row menu at the right of a list wants.
+   *
+   * `left` is for a trigger at the *left* of a toolbar, where right-alignment
+   * drops a 290px card leftwards over the panel beside the sheet and reads as
+   * a menu escaping the window it belongs to. Usage's scope picker is that
+   * trigger. It is still clamped to the window on both sides, so a
+   * left-aligned card near the right edge comes back rather than running off.
+   */
+  align: "left" | "right" = "right",
 ): Spot {
   if (beside) {
     return {
@@ -73,8 +84,12 @@ export function place(
   // Below unless it does not fit and above is roomier — so a menu that fits
   // keeps dropping downward, which is where a menu is looked for.
   const up = card.height > below && above > below;
+  const left =
+    align === "left"
+      ? Math.min(Math.max(EDGE, to.left ?? to.right), Math.max(EDGE, view.width - card.width - EDGE))
+      : Math.max(EDGE, to.right - card.width);
   return {
-    left: Math.max(EDGE, to.right - card.width),
+    left,
     ...(up ? { bottom: view.height - to.top + GAP } : { top: to.bottom + GAP }),
     room: Math.max(0, up ? above : below),
   };
@@ -105,6 +120,7 @@ export function Pop({
   children,
   width,
   beside = false,
+  align = "right",
 }: {
   anchor: HTMLElement;
   onClose: () => void;
@@ -114,6 +130,8 @@ export function Pop({
   width?: number;
   /** Opens to the right of the button and bottom-aligned with it. See `place`. */
   beside?: boolean;
+  /** Which of the trigger's edges the card lines up with. See `place`. */
+  align?: "left" | "right";
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [spot, setSpot] = useState<Spot | null>(null);
@@ -130,9 +148,10 @@ export function Pop({
         { width: el.offsetWidth, height: el.offsetHeight },
         { width: window.innerWidth, height: window.innerHeight },
         beside,
+        align,
       ),
     );
-  }, [anchor, beside]);
+  }, [anchor, beside, align]);
 
   useEffect(() => {
     const away = (e: MouseEvent) => {

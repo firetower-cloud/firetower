@@ -19,10 +19,12 @@
 import { Fragment, useMemo, useState } from "react";
 import {
   Blocks,
+  ChartNoAxesColumn,
   CircleSlash2,
   Clock,
   FileClock,
   FolderGit2,
+  FolderOpen,
   GitBranch,
   Inbox,
   Monitor,
@@ -32,6 +34,7 @@ import {
   Puzzle,
   Server,
   Search,
+  Settings2,
   Shapes,
   Ticket,
   CircleAlert,
@@ -45,11 +48,12 @@ import { useListArtifacts } from "~/api/generated/artifacts/artifacts";
 import { useAllRuns, useListSchedules } from "~/api/generated/schedules/schedules";
 import type { Schedule } from "~/api/generated/model";
 import { useMe } from "~/api/generated/auth/auth";
+import { deploymentMode, panesFor } from "~/ui/config/organisation";
 import { elapsed, minutesSince, needsYou } from "~/api/view";
 import { childrenElsewhere, doing, flat, group, isChild, placeBeat, rowLabel, type Repositories, type Workspace } from "~/api/workspaces";
 import { useHosts, useRepos, useSessions, useSkills } from "~/data";
 import { isPersonal } from "~/filing";
-import { key } from "~/platform";
+import { advertisedKey } from "~/installed-app";
 import { navigate, usePathname } from "~/shims/next-navigation";
 import { useStart } from "~/start";
 import { useNow } from "~/ui/clock";
@@ -123,7 +127,8 @@ function Contents({ at, stale, onCollapse }: { at: DestinationId; stale: boolean
         {at === "customize" && <Customize />}
         {at === "repos" && <Repositories />}
         {at === "machines" && <Machines />}
-        {/* **Settings' five panes and Updates' two rows used to be here.** They
+        {at === "organisation" && <Organisation path={path} />}
+        {/* **Settings' panes and Updates' two rows used to be here.** They
             were the panels of the two doors below the rail's rule, and both
             doors have gone — the profile menu is the only Settings and the only
             Updates now. Settings' index moved into the page it indexes
@@ -229,6 +234,9 @@ const worstFirst = (every: Workspace[]) => (a: Workspace, b: Workspace) =>
 function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => void }) {
   const path = usePathname();
   const start = useStart();
+  /* The row is the way in either way; the keycap is only drawn where the key
+     is actually listened for. See `~/installed-app`. */
+  const newKey = advertisedKey("N");
   const { data: sessions, loading, error } = useSessions();
   const me = useMe();
   const [by, setBy] = useState<By>(heldBy);
@@ -293,7 +301,7 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
             <Icon of={Pencil} size={14} />
           </span>
           <span className="min-w-0 flex-1 truncate text-bone">New workspace</span>
-          <span className="shrink-0 text-micro text-mute">{key("N")}</span>
+          {newKey && <span className="shrink-0 text-micro text-mute">{newKey}</span>}
         </button>
 
         {loading && <p className="px-2.5 py-1 text-ui text-mute">Loading…</p>}
@@ -523,6 +531,70 @@ function Customize() {
   );
 }
 
+/**
+ * Organisation's panes.
+ *
+ * **An index and nothing under it**, which is the one place this panel differs
+ * from Customize's: there is no *your people* run of rows beneath, because the
+ * list of people is the pane and repeating its first eight here would be the
+ * same list twice on one screen.
+ *
+ * **And no counts, which the drawing had.** The sketch puts `14`, `5` and `6`
+ * beside the three rows, and the number beside People cannot be got without
+ * the administrators-only user list — so drawing it would make a member's rail
+ * panel fire the one request a member is forbidden, on every destination hover,
+ * to render a number. That is the ⌘8 trap in miniature, and it is the reason
+ * the counts are not here. `Configuration.tsx` already refuses counts in an
+ * index for the cheaper version of the same reason: a number beside every row
+ * fetches every list to render it.
+ *
+ * **The fourth row is listed by a rule, not by a condition written here.**
+ * `panesFor` answers which panes this person has on this deployment, and the
+ * property that matters is the one it protects rather than the row it adds:
+ * the list is never empty, for any role on any deployment, so hiding the
+ * deployment pane never makes the destination itself conditional. A member
+ * hovering ⌘8 sees the same three panes they have always had.
+ */
+function Organisation({ path }: { path: string }) {
+  /* Already answered for every screen in this window — the gate reads it — so
+     asking here costs nothing, and asking it here rather than threading a role
+     down from `Rail` keeps the rule next to the rows it decides. */
+  const me = useMe({ query: { staleTime: 60_000 } });
+  const glyph: Record<string, LucideIcon> = {
+    people: UserRound,
+    teams: UsersRound,
+    directories: FolderOpen,
+    usage: ChartNoAxesColumn,
+    server: Settings2,
+  };
+  const panes = panesFor(deploymentMode(), me.data?.user);
+
+  return (
+    <>
+      {panes.map((p) => (
+        <Fragment key={p.at}>
+          {/* The one pane that is about what happened rather than about who
+              may do what. The sketch's own label, and it is a label rather
+              than a divider because *what it cost* is a different question
+              from *who can reach what* and not a quieter version of it. */}
+          {p.at === "usage" && <Label>What it cost</Label>}
+          {/* A sentence over the one that is not about people, because that is
+              what the group was called while it lived in Settings and it is
+              the only thing on this panel that is about the installation
+              rather than about who is in it. */}
+          {p.at === "server" && <Label>This deployment</Label>}
+          <Row
+            label={p.label}
+            icon={glyph[p.at] ?? UserRound}
+            on={pane(path) === p.at}
+            to={`/configuration/${p.at}`}
+          />
+        </Fragment>
+      ))}
+    </>
+  );
+}
+
 function Repositories() {
   const path = usePathname();
   const repos = useRepos();
@@ -726,10 +798,10 @@ function Head({ name, onCollapse }: { name: string; onCollapse: () => void }) {
       <Glyph
         of={Search}
         label="Find anything"
-        hint={key("K")}
+        hint={advertisedKey("K")}
         onPick={() => window.dispatchEvent(new CustomEvent("firetower:palette"))}
       />
-      <Glyph of={PanelLeftClose} label="Hide this panel" hint={key("\\")} onPick={onCollapse} />
+      <Glyph of={PanelLeftClose} label="Hide this panel" hint={advertisedKey("\\")} onPick={onCollapse} />
     </div>
   );
 }

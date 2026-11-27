@@ -56,6 +56,96 @@ export function packaged(origin = globalThis.location?.origin ?? ""): boolean {
   return PACKAGED_ORIGINS.includes(origin);
 }
 
+/**
+ * Which Firetower this client is for, before anybody has been asked anything.
+ *
+ * **A page served by a control plane already knows the answer.** It was loaded
+ * from that control plane's own origin, and the specification is explicit that
+ * this is the arrangement — "no address configured at build time; the client
+ * reads the API from the origin it was loaded from" — because it is what makes
+ * a client and a server impossible to skew. So in a browser the *where*
+ * question has an answer before it is asked, and asking it anyway is how a
+ * self-hoster's first sight of their own address became a form demanding that
+ * address.
+ *
+ * **Inside the shell it genuinely does not know.** A window loaded from a file
+ * is for whichever Firetower somebody points it at, which is the whole of why
+ * `Connect` exists and why multi-installation switching exists behind it.
+ * Nothing about that changes here: `ask` comes back true and the shell draws
+ * exactly the screen it drew before.
+ *
+ * This answers only the first of `Connect`'s two questions. Who you are, and
+ * every mode the server will accept for proving it, is untouched.
+ */
+export type Own =
+  /** Ask where it is, as the app always has. */
+  | { ask: true }
+  /** Don't: this is the control plane that sent us the page. */
+  | { ask: false; url: string };
+
+/**
+ * The rule, as a function of what can be observed and nothing else.
+ *
+ * Takes its inputs rather than reading them so the decision can be read back
+ * for every combination that matters — see `probe.test.ts`. [`ownFiretower`]
+ * is the one-line reader that feeds it the real window.
+ *
+ * The order of the refusals is the order of how sure each one is:
+ *
+ * - **The shell is present.** `__TAURI_INTERNALS__` is this codebase's test for
+ *   that already, in `open.ts`, `drag.ts` and `bridge.ts`, and it is the one
+ *   that actually means "there is a native shell around this page".
+ * - **The origin is one a shipped shell serves itself from.** `packaged()`
+ *   above, reused rather than re-derived. Belt and braces behind the first
+ *   check, and not redundant: two of the three packaged origins are
+ *   `http://tauri.localhost` and `https://tauri.localhost`, which pass every
+ *   test below this one. If the native API were ever absent or late on
+ *   Windows or Linux, a shell window would otherwise adopt itself as a control
+ *   plane and probe `http://tauri.localhost/api/v1/bootstrap`.
+ * - **This is a dev build.** The pages come from vite on :5273 and the control
+ *   plane is somewhere else entirely — adopting :5273 would point the app at a
+ *   bundler. `import.meta.env.DEV` is read by the caller, the same way
+ *   `platform.ts` gates its own development-only behaviour, and passed in here
+ *   so this function stays pure. (`pnpm preview` is the one gap: it serves a
+ *   built bundle from a port that is not a Firetower, so it will try to adopt
+ *   itself and land on the existing *could not reach* screen, which offers
+ *   "Use a different address". No recipe in the `justfile` runs it, and the
+ *   alternative — probing the origin and silently falling back to the form —
+ *   is the behaviour this ticket is told not to build.)
+ * - **The protocol is not http(s).** `file://` and `tauri://` have no control
+ *   plane behind them to adopt.
+ */
+export function ownFiretowerFrom(seen: {
+  protocol: string;
+  origin: string;
+  /** Whether a native shell is wrapped around this page. */
+  shell: boolean;
+  /** Whether this bundle came from `vite dev` rather than `vite build`. */
+  dev: boolean;
+}): Own {
+  if (seen.shell) return { ask: true };
+  if (packaged(seen.origin)) return { ask: true };
+  if (seen.dev) return { ask: true };
+  if (seen.protocol !== "http:" && seen.protocol !== "https:") return { ask: true };
+  // An origin of `"null"` is what a sandboxed frame reports, and `""` is what
+  // there is no window to report. Neither is an address anything can be
+  // fetched from.
+  if (!seen.origin || seen.origin === "null") return { ask: true };
+  return { ask: false, url: seen.origin };
+}
+
+/** [`ownFiretowerFrom`], asked of the window this is actually running in. */
+export function ownFiretower(): Own {
+  if (typeof window === "undefined") return { ask: true };
+  const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
+  return ownFiretowerFrom({
+    protocol: window.location?.protocol ?? "",
+    origin: window.location?.origin ?? "",
+    shell: !!w.__TAURI_INTERNALS__,
+    dev: import.meta.env.DEV,
+  });
+}
+
 /** `a` is at least `b`, reading the first three dotted numbers of each. */
 export function atLeast(a: string, b: string): boolean {
   const num = (v: string) =>

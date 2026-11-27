@@ -33,6 +33,31 @@ describe("where the menu lands", () => {
     expect(place(PILL, TALL, VIEW)).toEqual({ left: 360, top: 452, room: 440 });
   });
 
+  /**
+   * **Left-aligned, for a trigger at the left of a toolbar.**
+   *
+   * Right-alignment is the default and is what a row menu at the right of a
+   * list wants; dropping a 290px card leftwards from a control at the *left*
+   * edge of the sheet puts it over the panel beside it, which reads as a menu
+   * escaping the window it belongs to. Usage's scope picker is that trigger.
+   */
+  it("lines up with the trigger's left edge when asked to", () => {
+    const at = { top: 420, bottom: 448, left: 360, right: 700 };
+    expect(place(at, TALL, VIEW, false, "left").left).toBe(360);
+    expect(place(at, TALL, VIEW).left).toBe(360); // the default is unchanged here
+    expect(place(at, { width: 290, height: 320 }, VIEW, false, "left").left).toBe(360);
+    expect(place(at, { width: 290, height: 320 }, VIEW).left).toBe(410);
+  });
+
+  /** And it is still held inside the window, so a trigger near the right edge
+   *  brings the card back rather than letting it run off. */
+  it("brings a left-aligned card back off the right edge", () => {
+    const at = { top: 420, bottom: 448, left: 1200, right: 1260 };
+    const spot = place(at, TALL, VIEW, false, "left");
+    expect(spot.left).toBe(VIEW.width - TALL.width - 8);
+    expect(spot.left + TALL.width).toBeLessThanOrEqual(VIEW.width - 8);
+  });
+
   it("flips above when it does not fit below and above is roomier", () => {
     // 200px of window under the pill, 420 over it.
     const spot = place(PILL, TALL, { width: 1280, height: 648 });
