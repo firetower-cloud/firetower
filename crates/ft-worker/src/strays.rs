@@ -57,9 +57,18 @@
 //! pnpm, esbuild, vite, workerd — which come from Homebrew, from cargo, or
 //! from the agent's own toolchain, and none of those are platform binaries;
 //! every one of the 23 strays found on a real worker was read without trouble.
-//! It is also why a survey done with `ps -E` sees more than this does: `ps` is
-//! setuid root. The cgroup on Linux has no equivalent hole — membership is not
-//! privileged, and holds whatever the workspace started.
+//! Even `/usr/bin/python3` is read, because the shim there `exec`s into an
+//! interpreter bundled with Xcode and what is left running is not a platform
+//! binary; a good deal of `/usr/bin` behaves that way.
+//!
+//! `ps -E` will not tell you which case you are looking at, whatever its
+//! permissions suggest. It is setuid root, but run as an ordinary user it has
+//! exactly this blind spot — the tag for a `node`, and a few dozen characters
+//! with no environment in them for a `/bin/sleep` — so a process that looks
+//! untagged there may be one whose environment is simply not ours to read.
+//!
+//! The cgroup on Linux has no equivalent hole — membership is not privileged,
+//! and holds whatever the workspace started.
 //!
 //! ## The tmux server carries a tag too, and must never be killed
 //!
