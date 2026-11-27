@@ -117,10 +117,10 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     return () => clearTimeout(t);
   }, [query]);
   const [busy, setBusy] = useState<string | null>(null);
-  /* **Rows added in this sitting stay where they were.** Pressing a button
-     and having the thing you pressed jump to another part of the page is how
-     somebody loses their place and presses again — so the move to "Already
-     added" waits until the list is next looked at fresh. */
+  /* **Which rows this sitting started an authorization for.**
+     It used to also keep a pressed row from jumping to the "Already added"
+     shelf above — there is one list now, so a row stays where it is by
+     construction and this is only the set a browser tab is open for. */
   const [stayPut, setStayPut] = useState<Set<string>>(new Set());
 
   const [trouble, setTrouble] = useState<string | null>(null);
@@ -181,11 +181,13 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     q: settled || undefined,
     kind: kind === "all" ? undefined : kind === "mcp" ? "mcp" : "skills",
   };
-  const held = useListEntries(
-    { ...asking, installed: true },
-    { query: { select: (r) => r?.entries ?? [] } },
-  );
-  const catalogue = useListEntries({ ...asking, installed: false, page: 1 }, {});
+  /* **One list, with what you have still in it.** Discover used to ask for
+     the uninstalled and show the installed in a shelf of their own above,
+     which meant taking something made it *leave* the list you were reading —
+     the row you just pressed vanishing is indistinguishable from the press
+     having gone wrong. Everything the sources offer is here; a row says for
+     itself whether you have it. */
+  const catalogue = useListEntries({ ...asking, page: 1 }, {});
 
   const refresh = async () => {
     await Promise.all([
@@ -222,14 +224,6 @@ export function Library({ open: asked = null }: { open?: string | null }) {
     return by;
   }, [lib.data]);
 
-  /* A row pressed in this sitting is still on the shelf it was pressed on,
-     because it has not been looked at fresh yet. */
-  const have = [
-    ...(held.data ?? []),
-    ...offered.filter((e) => e.installed && stayPut.has(e.slug)),
-  ];
-  const rest = offered.filter((e) => !e.installed || stayPut.has(e.slug));
-  const [all, setAll] = useState(false);
   const [browsing, setBrowsing] = useState(false);
   /** The catalogue row a preview is open on, handed over when it was opened. */
   const [peek, setPeek] = useState<Listed | undefined>();
@@ -239,8 +233,7 @@ export function Library({ open: asked = null }: { open?: string | null }) {
      to reach a form we already knew they needed. Nineteen entries hit that,
      including every Google one. */
   const [setting, setSetting] = useState<NeedsClient | null>(null);
-  const INSTALLED = 4;
-  const shown = rest.slice(0, SHELF);
+  const shown = offered.slice(0, SHELF);
   const more = Math.max(0, waiting - shown.length);
 
   /**
@@ -578,56 +571,9 @@ export function Library({ open: asked = null }: { open?: string | null }) {
           </>
         ) : (
           <>
-            {/* **What you have, first and small.** Browsing a catalogue with
-                no sense of what is already yours is how somebody installs the
-                same thing twice — and the one thing a just-added server still
-                needs is a press, which belonged here rather than a tab away. */}
-            {have.length > 0 && (
-              <>
-                <div className="mt-4 flex items-baseline gap-3">
-                  <h3 className="text-ui text-dim">Already added</h3>
-                  <span className="text-meta text-mute">{have.length}</span>
-                  {have.length > INSTALLED && (
-                    <button
-                      type="button"
-                      className="ml-auto text-meta text-dim hover:text-bone"
-                      onClick={() => setAll((v) => !v)}
-                    >
-                      {all ? "Show fewer" : `Show all ${have.length}`}
-                    </button>
-                  )}
-                </div>
-                <div className="offers mt-2">
-                  {(all ? have : have.slice(0, INSTALLED)).map((e) => (
-                    <Offer
-                      key={`${e.marketplaceId}/${e.slug}`}
-                      of={e}
-                      item={mine.get(e.name)}
-                      busy={busy === e.slug}
-                      waiting={awaiting && stayPut.has(e.slug)}
-                      onOpen={(id, e) => {
-                        setPeek(e);
-                        setOpen(id);
-                      }}
-                      onSetUp={(i) =>
-                        setSetting({
-                          skillId: i.skillId,
-                          displayName: i.displayName,
-                          setup: i.setup,
-                        })
-                      }
-                      onConnect={offerToConnect}
-                      onAdd={take}
-                    />
-                  ))}
-                </div>
-                <div className="mt-6 border-t border-line" />
-              </>
-            )}
-
             <p className="mt-4 text-meta text-dim">
-              {rest.length} more from your sources. Adding one takes a copy pinned to the
-              commit the list was read at.
+              {waiting} from your sources. Taking one copies it, pinned to the commit the
+              list was read at; what you already have says so on its own row.
             </p>
             <div className="offers mt-2">
               {shown.map((e) => (
