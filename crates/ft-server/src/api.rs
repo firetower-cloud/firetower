@@ -198,6 +198,18 @@ type ApiResult<T> = Result<T, ApiError>;
 #[serde(rename_all = "camelCase")]
 pub struct Bootstrap {
     pub version: String,
+    /// Which build of the interface this binary carries, when it carries one.
+    ///
+    /// `version` names the last release, so it is the same string on every
+    /// image built from `main` between two of them — including every `edge`
+    /// image, which is rebuilt on each push. That makes it unable to answer
+    /// the question the deployment screen is read for: whether what was
+    /// deployed is what is running. This changes whenever the interface does.
+    ///
+    /// `None` for a binary built without the bundles, which is every test run
+    /// and every `cargo run` that skipped `just build`. See
+    /// [`crate::web::interface_build`].
+    pub build: Option<&'static str>,
     /// Where the event stream lives. Config, never assumed same-origin — which
     /// is what lets one bundle serve localhost and a hosted deployment alike.
     pub events_path: String,
@@ -236,6 +248,7 @@ async fn bootstrap(State(state): State<AppState>) -> Json<Bootstrap> {
 
     Json(Bootstrap {
         version: env!("CARGO_PKG_VERSION").to_string(),
+        build: crate::web::interface_build(),
         events_path: "/api/v1/events".to_string(),
         server_id: org.as_ref().map(|o| o.id.as_str().to_string()),
         organization: org.map(|o| o.name),

@@ -11148,6 +11148,13 @@
             },
             "description": "How to sign in here: `password`, `proxy`, or `open`.\n\nA native client cannot see the deployment's configuration and must not\nguess: a password form shown to an SSO deployment is a dead end, and a\nbrowser round trip demanded of a laptop install is rude."
           },
+          "build": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Which build of the interface this binary carries, when it carries one.\n\n`version` names the last release, so it is the same string on every\nimage built from `main` between two of them — including every `edge`\nimage, which is rebuilt on each push. That makes it unable to answer\nthe question the deployment screen is read for: whether what was\ndeployed is what is running. This changes whenever the interface does.\n\n`None` for a binary built without the bundles, which is every test run\nand every `cargo run` that skipped `just build`. See\n[`crate::web::interface_build`]."
+          },
           "eventsPath": {
             "type": "string",
             "description": "Where the event stream lives. Config, never assumed same-origin — which\nis what lets one bundle serve localhost and a hosted deployment alike."

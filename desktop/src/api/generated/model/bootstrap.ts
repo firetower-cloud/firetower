@@ -19,6 +19,21 @@ export interface Bootstrap {
      */
   authModes: string[];
   /**
+     * Which build of the interface this binary carries, when it carries one.
+     *
+     * `version` names the last release, so it is the same string on every
+     * image built from `main` between two of them — including every `edge`
+     * image, which is rebuilt on each push. That makes it unable to answer
+     * the question the deployment screen is read for: whether what was
+     * deployed is what is running. This changes whenever the interface does.
+     *
+     * `None` for a binary built without the bundles, which is every test run
+     * and every `cargo run` that skipped `just build`. See
+     * [`crate::web::interface_build`].
+     * @nullable
+     */
+  build?: string | null;
+  /**
      * Where the event stream lives. Config, never assumed same-origin — which
      * is what lets one bundle serve localhost and a hosted deployment alike.
      */
