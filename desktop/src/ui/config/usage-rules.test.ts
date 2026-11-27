@@ -72,11 +72,16 @@ import {
  * Both halves matter: the variable, because restoring it wrongly is the bug;
  * and the *offset*, because a restore that puts the variable back and leaves
  * V8 on another zone would be the same failure wearing a tidier face.
+ *
+ * `zone` is the third, and it is here because that sentence came true on
+ * Windows — see the restore below. It is the name of the zone this file
+ * started in, which is the only way to ask for that zone back by name.
  */
 const WHENEVER = Date.UTC(2026, 5, 15, 12);
 const BEFORE = {
   had: "TZ" in process.env,
   tz: process.env.TZ,
+  zone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   offset: new Date(WHENEVER).getTimezoneOffset(),
   hours: new Date(WHENEVER).getHours(),
 };
@@ -244,10 +249,32 @@ describe("a column of the chart", () => {
      * below asserts it rather than trusting it. Third time something in this
      * area has been kinder than the server: the loose assertion, the
      * local-midnight mock, and this.
+     *
+     * **Deleting is not enough on Windows, and the assertion below is what
+     * found that.** On `depot-windows-2022`, Node 22: setting `TZ` moved the
+     * clock, deleting it removed the variable — `restores the variable
+     * exactly` passed — and the clock stayed in Los Angeles. Exactly the
+     * failure the comment on `BEFORE` describes, arriving from the other
+     * direction: the variable back, V8 left in another zone. Everything
+     * after this block would have run on Los Angeles time.
+     *
+     * So the zone is asked for **by name** before the variable goes, which
+     * works on every platform for the same reason moving the clock worked in
+     * the first place: an assignment is honoured. The delete then takes the
+     * variable away, which on POSIX re-detects the same zone from the host
+     * and on Windows was measured to leave the clock alone — and leaving it
+     * alone is now the right answer, because it has just been put back.
+     *
+     * That reasoning is from a CI log rather than from a Windows machine. If
+     * it is ever wrong, the two assertions below say so loudly rather than
+     * stranding the rest of this file, which is the whole point of them.
      */
     afterAll(() => {
       if (BEFORE.had) process.env.TZ = BEFORE.tz as string;
-      else delete process.env.TZ;
+      else {
+        process.env.TZ = BEFORE.zone;
+        delete process.env.TZ;
+      }
     });
 
     /** The harness itself, or the three below pass by not having moved. */
@@ -321,6 +348,12 @@ describe("the clock is handed back", () => {
     expect(process.env.TZ).not.toBe("undefined");
   });
 
+  /**
+   * **This is the one that fires on Windows, and it has already fired once.**
+   * The variable came back and the clock did not, which is the failure the
+   * header of this file names and the reason the restore now asks for the
+   * zone by name. Deleting alone satisfies the test above and not this one.
+   */
   it("restores the offset, not merely the variable", () => {
     expect(new Date(WHENEVER).getTimezoneOffset()).toBe(BEFORE.offset);
     expect(new Date(WHENEVER).getHours()).toBe(BEFORE.hours);
