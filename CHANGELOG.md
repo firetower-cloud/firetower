@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.59.1](https://github.com/firetower-cloud/firetower/compare/firetower-v0.59.0...firetower-v0.59.1) (2026-11-27)
+
+
+### Bug Fixes
+
+* **worker:** a macOS worker kills what its workspaces left running too ([d6c6c66](https://github.com/firetower-cloud/firetower/commit/d6c6c66479b6d97cf3d4b0b76b201a46e9d82033))
+* **worker:** a macOS worker kills what its workspaces left running too ([ebf3de5](https://github.com/firetower-cloud/firetower/commit/ebf3de523f43f160b227564026f65f9e66676398))
+* **worker:** destroying a workspace kills the processes it left running ([83a25e0](https://github.com/firetower-cloud/firetower/commit/83a25e0e7df546c0aedb26f4aed97e9c24886f35))
+* **worker:** destroying a workspace kills the processes it left running ([8e67f38](https://github.com/firetower-cloud/firetower/commit/8e67f3830c6f899fa7a3ab2ab1dd67cceac715c6))
+* **worker:** one workspace's probe must not answer for another's ([af20361](https://github.com/firetower-cloud/firetower/commit/af2036170b39473b5bd6f2738a1b9a038e7430af))
+
 ## [0.59.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.58.0...firetower-v0.59.0) (2026-11-27)
 
 
