@@ -88,6 +88,8 @@ import {
   folder,
   fuller,
   dayKey,
+  LEVELS_START,
+  levelsAfter,
   liveModels,
   maySwap,
   meterWidth,
@@ -112,6 +114,7 @@ import {
   windowSaid,
   type Bucket,
   type GroupKey,
+  type Levels,
   type RangeKey,
   type Scope,
   type SortKey,
@@ -140,6 +143,30 @@ function useDebounced<T>(value: T, ms: number) {
     return () => clearTimeout(t);
   }, [value, ms]);
   return settled;
+}
+
+/**
+ * The two levels, and **the only way to move them**.
+ *
+ * `group` and `then` were two `useState`s, so every control that touched
+ * either had to remember the other. Three of them did, by accident rather
+ * than by rule — the Group-by and Then-by menus only ever offer legal values,
+ * and the swap is gated by `maySwap`. The fourth did not: the scope picker
+ * forces the grouping to *task* when you narrow to one person, left the
+ * second level alone, and turned *by person, then by task* into *by task,
+ * then by task* — a pair the menu refuses to offer, with every row openable
+ * and every one empty.
+ *
+ * This is the third time on this branch that a rule was enforced at one
+ * entry point and reached through another, so it is not enforced at entry
+ * points any more. The pair is one piece of state, the raw setter never
+ * leaves this function, and the only setter a control can reach runs
+ * `levelsAfter`. A fifth control cannot forget, because there is nothing for
+ * it to forget with.
+ */
+function useLevels(): [Levels, (want: Levels) => void] {
+  const [at, set] = useState<Levels>(LEVELS_START);
+  return [at, (want) => set(levelsAfter(want))];
 }
 
 /**
@@ -175,8 +202,7 @@ function useToday(): string {
 
 export function Usage() {
   const [range, setRange] = useState<RangeKey>("d14");
-  const [group, setGroup] = useState<GroupKey>("task");
-  const [then, setThen] = useState<GroupKey | "">("");
+  const [{ group, then }, moveLevels] = useLevels();
   const [scope, setScope] = useState<Scope>({ kind: "all" });
   const [picking, setPicking] = useState<HTMLElement | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -348,7 +374,14 @@ export function Usage() {
                   onPick={(s) => {
                     setScope(s);
                     setPicking(null);
-                    if (s.kind !== "all" && group === "person") setGroup("task");
+                    /* Grouping by person under a scope of one person is
+                       one row, so the ledger moves to tasks — and the second
+                       level goes with it where it named what the first level
+                       has just become. `moveLevels` is what makes that true
+                       rather than something this line has to remember. */
+                    if (s.kind !== "all" && group === "person") {
+                      moveLevels({ group: "task", then });
+                    }
                     reset();
                   }}
                 />
@@ -442,20 +475,18 @@ export function Usage() {
                        hunted. The *request* needs no such care: the search
                        goes nowhere a search is not offered, whatever the
                        debounced copy is still holding. */
-                    setGroup(v);
+                    moveLevels({ group: v, then });
                     if (!SEARCHABLE.includes(v)) setTyped("");
                     setOpen(null);
                     reset();
                   }}
                   onThen={(v) => {
-                    setThen(v);
+                    moveLevels({ group, then: v });
                     setOpen(null);
                   }}
                   onSwap={() => {
-                    if (!then || !maySwap(group, then)) return;
-                    const outer = group;
-                    setGroup(then);
-                    setThen(outer);
+                    if (!maySwap(group, then)) return;
+                    moveLevels({ group: then as GroupKey, then: group });
                     setOpen(null);
                   }}
                   onSort={(v) => {

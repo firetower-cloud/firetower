@@ -173,33 +173,86 @@ export const BREADTH: Record<GroupKey, string> = {
 /** Where a list is long enough that finding beats ranking. */
 export const SEARCHABLE: GroupKey[] = ["task", "workspace"];
 
+/** The two levels the ledger is cut by. */
+export type Levels = { group: GroupKey; then: GroupKey | "" };
+
+/**
+ * Where the ledger opens — and the base of the induction that makes the pair
+ * always offerable.
+ *
+ * `levelsAfter` guarantees every *write* is offerable; this guarantees the
+ * first value is. Between them no control ever starts from an illegal pair,
+ * which is why the controls are only asserted from legal ones: an illegal
+ * start is a state the product cannot be in, and testing it would be testing
+ * a precondition rather than the rule.
+ */
+export const LEVELS_START: Levels = { group: "task", then: "" };
+
 /**
  * Which second levels a first level may be cut by.
  *
  * **Directory is never one.** It is a place rather than a thing that happens
  * inside another row: "this task, broken down by directory" is one directory
- * every time. And a level cannot be cut by itself.
+ * every time. And a level cannot be cut by itself — the server agrees and
+ * drops a `then` equal to the `group`, so the pair asks for the same answer
+ * twice while the heading claims a breakdown and every row opens on nothing.
  */
 export function thenOptions(group: GroupKey): GroupKey[] {
   return (Object.keys(GROUPS) as GroupKey[]).filter((k) => k !== group && k !== "directory");
 }
 
 /**
+ * Whether a pair is one the controls would offer.
+ *
+ * **The single question every control asks**, rather than a guard per
+ * control. Three of them were protected only by their own menu's option list
+ * and the fourth — the scope picker, which forces the grouping to *task* when
+ * you narrow to one person — had nothing, so *by person, then by task*
+ * narrowed to Dana became *by task, then by task*: a pair the Then-by menu
+ * does not offer, with no way back to a legal one, every row openable and
+ * every one of them empty.
+ *
+ * That is the third time on this branch that a rule was enforced at one
+ * entry point and reached through another. So it is not enforced at entry
+ * points any more — see `levelsAfter`.
+ */
+export function offerable(at: Levels): boolean {
+  return at.then === "" || thenOptions(at.group).includes(at.then);
+}
+
+/**
+ * The pair a control arrives at, having asked for one.
+ *
+ * **Total: whatever it is handed, what comes back is offerable.** A second
+ * level that the new first level cannot be cut by is dropped rather than
+ * carried — it named the thing the first level has just become, so there is
+ * no breakdown left in it, and leaving it would be the heading promising one.
+ *
+ * Every control goes through this, which `useLevels` in `config/Usage.tsx`
+ * makes true by construction rather than by each control remembering: the
+ * raw setter does not exist outside the hook.
+ */
+export function levelsAfter(want: Levels): Levels {
+  return offerable(want) ? want : { group: want.group, then: "" };
+}
+
+/**
  * Whether the two levels may trade places.
  *
  * **The swap could reach a pair the menu refuses to build.** Group by
- * directory, then by person, and pressing it made *then by directory* — which
- * `thenOptions` excludes, so the control drew the bare wire value, there was
- * no way back to a legal pair, and the request went out asking for a
- * breakdown the options list calls meaningless.
+ * directory, then by person, and pressing it made *then by directory*, which
+ * `thenOptions` excludes.
  *
- * So the question is not "is there a second level" but "is the swapped pair
- * one somebody could have built", asked of the same rule that builds it. The
- * control is absent where the answer is no, rather than drawn and refusing —
- * `config/Teams.tsx`' rule.
+ * `levelsAfter` would now clamp that rather than let it through — but
+ * clamping means silently losing the second level, and a control that
+ * quietly undoes half of what it says it does is worse than one that is not
+ * there. So the control is absent where the swapped pair is not offerable,
+ * which is the same question asked of the same rule. `config/Teams.tsx`'
+ * rule: a greyed control is how an interface says you are being withheld
+ * from.
  */
 export function maySwap(group: GroupKey, then: GroupKey | ""): boolean {
-  return !!then && thenOptions(then).includes(group);
+  return then !== "" && offerable({ group: then, then: group });
 }
 
 /**

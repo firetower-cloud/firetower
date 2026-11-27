@@ -20,6 +20,8 @@
  * is pointed at the pane. A guard that cannot fail is not a guard.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { getConsumptionQueryKey } from "~/api/generated/consumption/consumption";
@@ -120,6 +122,64 @@ describe("the containment checker, before it is trusted with the pane", () => {
 
   it("finds nothing in markup that has none", () => {
     expect(sitesOf(`<div data-testid="usage-pane"><i style="background:var(--color-dim)"></i></div>`, "--color-series-")).toEqual([]);
+  });
+});
+
+/* ══ the two levels have one writer ════════════════════════════════════
+   The enumerated controls in `usage-rules.test.ts` are only as good as the
+   claim that those four are all of them — and *a list of three that forgot
+   the fourth* is what produced the defect they were written for. What makes
+   the list complete is that there is nothing else to write the pair with:
+   `useLevels` owns the state and hands out one setter, which runs
+   `levelsAfter`.
+
+   Source-level, like `reuse.test.ts` and `configuration-panes.test.ts`: the
+   question is about what exists in the file, not about pixels. */
+
+/* `fileURLToPath`, never `.pathname` — a file URL's pathname is `/C:/src/…`
+   on Windows, which is not a path `readFileSync` there will take. */
+const PANE = readFileSync(fileURLToPath(new URL("./Usage.tsx", import.meta.url)), "utf8");
+
+describe("the two levels have one writer", () => {
+  /**
+   * **The raw setter never leaves the hook.** `useState` for the pair is
+   * written once, and a control reaching past `moveLevels` would need a
+   * second one — which is what two independent `useState`s were, and how the
+   * scope picker came to write the grouping without the second level.
+   */
+  it("holds the pair in one piece of state, created once", () => {
+    const held = PANE.match(/useState<Levels>/g) ?? [];
+    expect(held).toHaveLength(1);
+    /* And it is inside the hook rather than in the pane, or the setter is in
+       scope for everything below it. */
+    const hook = PANE.slice(PANE.indexOf("function useLevels"), PANE.indexOf("function useToday"));
+    expect(hook).toContain("useState<Levels>");
+    expect(hook).toContain("levelsAfter(want)");
+    /* And the pane takes the pair from the hook, once — a `useLevels` that
+       exists and is not used is a rule nothing consults, which is the shape
+       this whole branch keeps meeting. */
+    expect(PANE.match(/=\s*useLevels\(\)/g) ?? []).toHaveLength(1);
+  });
+
+  /**
+   * **And the two bare setters are gone.** They are what a reintroduced pair
+   * of independent states would be called, and their absence is the shape of
+   * the claim: a control can ask for a pair and cannot write one.
+   */
+  it("has no way to set a level on its own", () => {
+    expect(PANE).not.toMatch(/\bsetGroup\s*\(/);
+    expect(PANE).not.toMatch(/\bsetThen\s*\(/);
+  });
+
+  /**
+   * Every control that moves the pair calls the one setter — and there are
+   * four of them, which is the number `usage-rules.test.ts` enumerates. A
+   * fifth appearing here without a line in that table is the thing to look
+   * at; a fifth appearing *nowhere* here cannot move the levels at all.
+   */
+  it("moves the pair from four places, which is what the table enumerates", () => {
+    const moves = PANE.match(/moveLevels\(/g) ?? [];
+    expect(moves).toHaveLength(4);
   });
 });
 

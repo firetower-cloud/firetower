@@ -32,8 +32,11 @@ import {
   folder,
   fuller,
   fullness,
+  LEVELS_START,
+  levelsAfter,
   liveModels,
   maySwap,
+  offerable,
   meterWidth,
   modelsByWeight,
   peak,
@@ -58,6 +61,8 @@ import {
   usedSaid,
   whenSaid,
   windowSaid,
+  type GroupKey,
+  type Levels,
   type SortKey,
 } from "./usage-rules";
 
@@ -499,7 +504,104 @@ describe("saying more than one of a thing", () => {
   });
 });
 
+/** Every pair, legal or not, as a starting point. */
+const ALL_GROUPS = Object.keys(GROUPS) as GroupKey[];
+const EVERY_PAIR: Levels[] = ALL_GROUPS.flatMap((group) =>
+  (["", ...ALL_GROUPS] as (GroupKey | "")[]).map((then) => ({ group, then })),
+);
+
+/**
+ * **Every control that can move the two levels, named.**
+ *
+ * The defect this exists for: `maySwap` gated the swap so it could not make
+ * a pair the Then-by menu refuses to offer, and the *scope picker* made the
+ * same kind of pair one control along. Three of these were protected only by
+ * their own menu's option list; the fourth had nothing at all.
+ *
+ * So each is written as *what it asks for*, and asserted to land offerable
+ * from every pair the product can actually hold. That is every *offerable*
+ * pair, and no more, because `LEVELS_START` is offerable and `levelsAfter`
+ * keeps every write offerable — so an illegal pair is a state nothing can
+ * reach, and starting from one would be testing a precondition rather than
+ * the rule. Both halves of that induction are asserted below.
+ *
+ * What binds the controls in the product is `useLevels`, which owns the only
+ * setter; `the levels have one writer` is what stops a fifth slipping past.
+ */
+const MOVERS: Record<string, (at: Levels) => Levels> = {
+  /* The Group-by menu, asked for anything — not only the values it offers,
+     because what protects the pair must not be the menu's own list. */
+  "group-by menu": (at) => levelsAfter({ group: "model", then: at.then }),
+  "then-by menu": (at) => levelsAfter({ group: at.group, then: "model" }),
+  /* Only drawn where the swapped pair is offerable, and clamped even so. */
+  swap: (at) => (maySwap(at.group, at.then) ? levelsAfter({ group: at.then as GroupKey, then: at.group }) : at),
+  /* Narrowing the scope to one person forces the grouping to task. */
+  "scope picker": (at) => (at.group === "person" ? levelsAfter({ group: "task", then: at.then }) : at),
+};
+
+describe("every control leaves the two levels offerable", () => {
+  it.each(Object.keys(MOVERS))("%s", (name) => {
+    for (const from of EVERY_PAIR.filter(offerable)) {
+      const next = MOVERS[name](from);
+      expect({ from, next, offerable: offerable(next) }).toMatchObject({ offerable: true });
+    }
+  });
+
+  /**
+   * **The one that broke, spelled out**, because a property over every pair
+   * is easy to read past: *by person, then by task*, narrowed to one person,
+   * became *by task, then by task* — which the menu does not offer, and
+   * which the server drops, so the heading promised a breakdown every row
+   * then opened on nothing.
+   */
+  it("drops a second level that names what the first has just become", () => {
+    expect(MOVERS["scope picker"]({ group: "person", then: "task" })).toEqual({
+      group: "task",
+      then: "",
+    });
+  });
+
+  /** And a second level the new grouping *can* be cut by survives. */
+  it("keeps a second level the new grouping can still be cut by", () => {
+    expect(MOVERS["scope picker"]({ group: "person", then: "model" })).toEqual({
+      group: "task",
+      then: "model",
+    });
+  });
+});
+
 describe("the two levels", () => {
+  /**
+   * **Total.** Whatever it is handed — including a pair no control should
+   * ever have held — what comes back is one the controls would offer. That
+   * is what lets `useLevels` be the only guard rather than one per control.
+   */
+  it("hands back an offerable pair for every pair there is", () => {
+    for (const want of EVERY_PAIR) expect(offerable(levelsAfter(want))).toBe(true);
+    /* And the paired half: there really are illegal pairs in that set, or
+       this passes by having nothing to clamp. */
+    expect(EVERY_PAIR.filter((p) => !offerable(p)).length).toBeGreaterThan(0);
+  });
+
+  /** The base of the induction the controls are asserted under: the pane
+   *  opens on a pair it would offer, so no control ever starts from one it
+   *  would not. */
+  it("opens on a pair it would offer", () => {
+    expect(offerable(LEVELS_START)).toBe(true);
+    expect(LEVELS_START).toEqual({ group: "task", then: "" });
+  });
+
+  /** A legal pair is passed through untouched — clamping is not rewriting. */
+  it("leaves a pair it would offer exactly as it is", () => {
+    for (const want of EVERY_PAIR.filter(offerable)) expect(levelsAfter(want)).toEqual(want);
+  });
+
+  /** Only the second level is ever given up: the grouping is what the
+   *  reader just asked for and must not move under them. */
+  it("never changes the grouping somebody asked for", () => {
+    for (const want of EVERY_PAIR) expect(levelsAfter(want).group).toBe(want.group);
+  });
+
   /** Directory is a place, not a thing that happens inside another row. */
   it("never offers directory as a second level, or a level under itself", () => {
     for (const k of Object.keys(GROUPS) as (keyof typeof GROUPS)[]) {
