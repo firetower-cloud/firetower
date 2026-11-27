@@ -8179,6 +8179,8 @@ html:not([data-platform="macos"]) {
     border-radius: 99px;
   }
 
+}
+
 @layer components {
   /* ── The plugin library ─────────────────────────────────────────
      Two shapes on one screen, and the shift between them is the signal
@@ -8308,7 +8310,6 @@ html:not([data-platform="macos"]) {
     font-weight: var(--weight-mid);
     box-shadow: var(--shadow-raise);
   }
-}
 
 @layer components {
   /* ── Get the mobile app ─────────────────────────────────────────
