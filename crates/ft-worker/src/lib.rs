@@ -892,6 +892,25 @@ impl Worker {
                     None
                 };
                 if let Some(workspace) = workspace.as_deref().map(std::path::Path::new) {
+                    // Whatever the workspace still has running, before the
+                    // directory it is running in goes.
+                    //
+                    // The two `kill-session` calls above reached the panes and
+                    // the foreground of them. They do not reach a dev server
+                    // the agent left in the background, or the `workerd` a
+                    // `wrangler dev` spawned: those are in process groups of
+                    // their own, they outlive the pane, and they hold their
+                    // memory until somebody finds them by hand. The cgroup is
+                    // the one handle left on all of them — see `cgroup::kill`.
+                    //
+                    // Before the worktree for the same reason the Docker sweep
+                    // is before it: something still writing into a checkout
+                    // that `remove_dir_all` is taking apart is the next bug
+                    // along. And inside this branch because `alone` is what
+                    // put us in it — the cgroup belongs to the workspace, so a
+                    // sibling agent would be killed by this too.
+                    crate::cgroup::kill(workspace, &session_id).await;
+
                     // The accounting goes with the workspace it accounted for.
                     //
                     // Here rather than beside the Docker sweep because this is
@@ -6385,6 +6404,34 @@ mod tests {
         )
         .await;
 
+        // A process in the workspace's cgroup, put there the way a pane puts
+        // itself there — see `cgroup::join_command` — and then orphaned by the
+        // shell that started it. This is the dev server an agent leaves
+        // running: no `kill-session` reaches it, and teardown used to leave it
+        // holding its memory for as long as the machine was up.
+        //
+        // Only where there are cgroups to hold it. A macOS worker has no
+        // handle on a detached process at all, so there is nothing for this
+        // half of the test to ask there.
+        let workspace = std::path::Path::new(&path);
+        let detached = cgroup::available().then(|| {
+            let procs = cgroup::agents_dir(workspace).join("cgroup.procs");
+            let started = std::process::Command::new("sh")
+                .args([
+                    "-c",
+                    &format!(
+                        "echo $$ > {}; sleep 60 >/dev/null 2>&1 </dev/null & echo $!",
+                        procs.display()
+                    ),
+                ])
+                .output()
+                .expect("the shell should run");
+            String::from_utf8_lossy(&started.stdout)
+                .trim()
+                .parse::<i32>()
+                .expect("the shell should have said the pid")
+        });
+
         // End the second one, the way closing its tab does.
         exchange(
             &worker,
@@ -6415,6 +6462,21 @@ mod tests {
             tmux::Tmux::for_session(first.as_str()).exists().await,
             "the agent nobody ended should still be running"
         );
+        if let Some(pid) = detached {
+            // And so should everything it started. The cgroup is the
+            // workspace's rather than the session's, so a teardown that
+            // emptied it here would take out the agent nobody ended along with
+            // whatever it had running — which is why the kill is on the last
+            // one out and not on every one.
+            let procs =
+                tokio::fs::read_to_string(cgroup::agents_dir(workspace).join("cgroup.procs"))
+                    .await
+                    .unwrap_or_default();
+            assert!(
+                procs.lines().any(|line| line.trim() == pid.to_string()),
+                "a sibling's processes must survive somebody else's teardown: {procs:?}"
+            );
+        }
 
         // And when the last one goes, the worktree is reclaimed.
         exchange(
@@ -6433,6 +6495,17 @@ mod tests {
             !std::path::Path::new(&path).exists(),
             "the last agent out should reclaim the worktree, not leak it"
         );
+        if detached.is_some() {
+            // The cgroup being gone is the proof, and a stronger one than
+            // asking after the pid: the kernel refuses `rmdir` on a cgroup
+            // that still holds a live process, so an absent directory says
+            // both that the dev server was killed and that the accounting it
+            // was in went with it.
+            assert!(
+                !cgroup::dir(workspace).exists(),
+                "the last agent out should take the workspace's processes and its cgroup with it"
+            );
+        }
 
         cleanup(&first).await;
         cleanup(&second).await;
