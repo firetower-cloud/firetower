@@ -57,6 +57,10 @@ export function ServerInside({
   const [bad, setBad] = useState<string | null>(null);
   const [supplying, setSupplying] = useState(false);
   const [menu, setMenu] = useState<HTMLElement | null>(null);
+  /* **Asking somebody else's server takes a second or two.** Without this the
+     menu shut and nothing moved, so the only way to tell a refresh from a
+     no-op was to notice the timestamp under the tool list change. */
+  const [recounting, setRecounting] = useState(false);
   const confirm = useConfirm();
   const cache = useQueryClient();
 
@@ -142,6 +146,12 @@ export function ServerInside({
               <Check className="h-3.5 w-3.5" strokeWidth={2} />
               Connected
             </span>
+            {recounting && (
+              <span className="act-said" role="status">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+                Asking {of.displayName}…
+              </span>
+            )}
             <div>
               <IconButton
                 of={MoreHorizontal}
@@ -152,15 +162,22 @@ export function ServerInside({
                 <Pop anchor={menu} onClose={() => setMenu(null)}>
                   <div className="w-60 py-1">
                     <MenuItem
+                      disabled={recounting}
                       onClick={() => {
                         setMenu(null);
+                        setRecounting(true);
                         /* `refresh` on the request: invalidating alone would
                            re-fetch a route that answers from its own cache. */
-                        void connectorTools(of.skillId, { refresh: true }).then(() =>
-                          cache.invalidateQueries({
-                            queryKey: getConnectorToolsQueryKey(of.skillId),
-                          }),
-                        );
+                        void connectorTools(of.skillId, { refresh: true })
+                          .then(() =>
+                            cache.invalidateQueries({
+                              queryKey: getConnectorToolsQueryKey(of.skillId),
+                            }),
+                          )
+                          /* A server that refuses answers in the tool list's
+                             own `why`, so there is nothing to say twice. */
+                          .catch(() => {})
+                          .finally(() => setRecounting(false));
                       }}
                     >
                       Refresh tools list
