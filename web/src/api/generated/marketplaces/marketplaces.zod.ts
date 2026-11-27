@@ -108,6 +108,7 @@ export const InstallEntryResponse = zod.object({
   "bytes": zod.int(),
   "defaultIn": zod.array(zod.string()).describe('The repositories this person has it on by default. Empty for most.'),
   "description": zod.string(),
+  "displayName": zod.string().describe('The name for people, already resolved — the bundle\'s own, or a\ntitle-cased `name`. **The composer draws this**, and it was the one\nscreen still saying `google-sheets` after the library and the detail\nscreens were given it.'),
   "files": zod.int(),
   "hasConnector": zod.boolean(),
   "held": zod.boolean().describe('An agent wrote a version of this that ships an executable, and it is\nwaiting for the owner to approve it. Held content is never the current\nversion, so it runs nowhere until then — this is only here so a list can\nbadge it. See `review`, `approve`, `discard`.'),

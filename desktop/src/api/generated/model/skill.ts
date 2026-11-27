@@ -32,6 +32,13 @@ export interface Skill {
   /** The repositories this person has it on by default. Empty for most. */
   defaultIn: string[];
   description: string;
+  /**
+     * The name for people, already resolved — the bundle's own, or a
+     * title-cased `name`. **The composer draws this**, and it was the one
+     * screen still saying `google-sheets` after the library and the detail
+     * screens were given it.
+     */
+  displayName: string;
   files: number;
   hasConnector: boolean;
   /**

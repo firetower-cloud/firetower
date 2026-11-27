@@ -19199,6 +19199,7 @@
           "id",
           "path",
           "name",
+          "displayName",
           "slug",
           "description",
           "version",
@@ -19248,6 +19249,10 @@
           },
           "description": {
             "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "description": "The name for people, already resolved — the bundle's own, or a\ntitle-cased `name`. **The composer draws this**, and it was the one\nscreen still saying `google-sheets` after the library and the detail\nscreens were given it."
           },
           "files": {
             "type": "integer",

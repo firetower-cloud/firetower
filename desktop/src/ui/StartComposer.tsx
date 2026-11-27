@@ -1029,14 +1029,24 @@ export function StartComposer({
               </p>
             )}
             {choosable
-              .filter((s) => !look.trim() || s.name.toLowerCase().includes(look.trim().toLowerCase()))
+              /* Both, because the readable name is what somebody sees and the
+                 slug is what they may have read in a manifest. */
+              .filter((s) => {
+                const t = look.trim().toLowerCase();
+                return !t || `${s.displayName ?? ""} ${s.name}`.toLowerCase().includes(t);
+              })
               .map((s) => {
                 const on = !muted.has(s.id);
                 const short = unconnected.has(s.id);
                 return (
                   <div key={s.id} className="prow tight">
-                    <Mark logo={s.logo} name={s.name} />
-                    <span className="lbl flex-1 truncate">{s.name}</span>
+                    <Mark logo={s.logo} name={s.displayName || s.name} />
+                    {/* **The name for people, which this screen was still
+                        missing.** The library and the detail screens were
+                        given `displayName` and the composer was not — so the
+                        one list somebody opens every time they start an agent
+                        was the one still saying `google-sheets`. */}
+                    <span className="lbl flex-1 truncate">{s.displayName || s.name}</span>
                     {/* The one thing that stops it working gets the only
                         colour, and takes the switch's place: a server nobody
                         authorized has nothing to turn on. */}

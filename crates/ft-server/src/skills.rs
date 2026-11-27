@@ -107,6 +107,11 @@ pub struct Skill {
     /// `u/kevin/rust_review` — slashes on the wire, dots in the database.
     pub path: String,
     pub name: String,
+    /// The name for people, already resolved — the bundle's own, or a
+    /// title-cased `name`. **The composer draws this**, and it was the one
+    /// screen still saying `google-sheets` after the library and the detail
+    /// screens were given it.
+    pub display_name: String,
     pub slug: String,
     pub description: String,
     pub version: i32,
@@ -2095,7 +2100,8 @@ pub struct Skills {
 }
 
 /// Columns every list of skills reads.
-const COLUMNS: &str = "k.id, k.path::text AS path, k.name, k.slug, k.description, \
+const COLUMNS: &str = "k.id, k.path::text AS path, k.name, k.display_name, k.slug, \
+     k.description, \
      k.current_version_id, k.updated_at, \
      v.version, v.tokens, v.files, v.bytes, v.frontmatter, v.body, \
      EXISTS (SELECT 1 FROM skill_files f \
@@ -4000,11 +4006,18 @@ fn read_skill(r: sqlx::postgres::PgRow) -> Result<Skill> {
     // query rather than by loading every path of every skill in the list.
     let scripts: bool = r.try_get("has_scripts").unwrap_or(false);
     let name: String = r.get("name");
+    let display_name: String = r
+        .try_get::<Option<String>, _>("display_name")
+        .ok()
+        .flatten()
+        .filter(|d| !d.trim().is_empty())
+        .unwrap_or_else(|| crate::marketplace::title_of(&name));
     let description: String = r.get("description");
     let version_id: Option<String> = r.try_get("current_version_id").ok().flatten();
 
     Ok(Skill {
         id: SkillId::from_stored(r.get::<String, _>("id")),
+        display_name,
         kind: r.try_get("kind").unwrap_or_else(|_| "skill".to_string()),
         n_skills: r.try_get("n_skills").unwrap_or(0),
         n_commands: r.try_get("n_commands").unwrap_or(0),
