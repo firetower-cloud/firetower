@@ -5,68 +5,24 @@
  * from it loads — never unioned with whoever starts it. It replaces three
  * additive sources governed by two switches, and the reason is not tidiness:
  * the other two belonged to the *starter*, so two people beginning the same
- * profile got two different agents. A saved kind of agent that is not the same
- * agent for everybody is not a saved kind of agent.
+ * profile got two different agents.
  *
- * **The connector line is the thing the plugin abstraction otherwise hides.**
- * A skill installs once for everybody; a connector authorizes per person. So
- * "this profile has GitHub" is a task for whoever starts it rather than a
- * finished state, and the count is read for the person looking at the screen.
+ * **One screen, the same two nouns as everywhere else.** This one used to
+ * speak four: a *connector* pill beside a *bundle* in the prose under a button
+ * offering a *plugin* or a *skill*. There are two things in Firetower and a
+ * person has to learn both once — a skill, and an MCP server.
+ *
+ * **And it is the library's row, not its own.** It drew a two-letter monogram
+ * where the library draws the vendor's mark, and `1 connector` where the
+ * library draws what the thing does. Both were already on the data.
  */
 import { useMemo, useState } from "react";
-import { Link2, Plus, X } from "lucide-react";
+import { Check, Link2, Plus, Search, X } from "lucide-react";
 import { IconButton } from "~/components/ui";
 import { useSkills } from "~/data";
-import { useConnectorState } from "~/api/generated/connectors/connectors";
+import { Mark } from "~/ui/config/Library";
+import { useListLibrary } from "~/api/generated/library/library";
 import type { Skill } from "~/api/generated/model";
-
-/**
- * What is inside a bundle, as a phrase rather than a meta string.
- *
- * Kept for the screens that still think in bundles — a profile's list is one
- * — while the library itself lists components and has no use for it.
- */
-export function contents(p: { hasConnector?: boolean; nSkills?: number; nCommands?: number }): string {
-  const bits: string[] = [];
-  const say = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
-  if (p.hasConnector) bits.push("1 connector");
-  if (p.nSkills) bits.push(say(p.nSkills, "skill", "skills"));
-  if (p.nCommands) bits.push(say(p.nCommands, "command", "commands"));
-  if (!bits.length) return "nothing in it yet";
-  if (bits.length === 1) return bits[0];
-  return `${bits.slice(0, -1).join(", ")} and ${bits[bits.length - 1]}`;
-}
-
-
-
-/** A monogram, from the initial of each hyphenated part. */
-function mono(name: string): string {
-  const parts = name.split(/[-_ ]/).filter(Boolean);
-  return (parts.length > 1 ? parts[0][0] + parts[1][0] : name.slice(0, 2)).toLowerCase();
-}
-
-/**
- * Whether **you** hold a credential for one of this profile's connectors.
- *
- * Read per row and per person. A colleague opening the same profile sees a
- * different answer, which is the whole point of the line this feeds.
- */
-function useConnected(of: Skill[]): { held: number; total: number } {
-  /* Hooks cannot be called in a loop over a changing list, so this asks about
-     at most four — enough for the sentence to be true in every real profile,
-     and the list itself says which ones when it is longer. */
-  const slots = [0, 1, 2, 3];
-  const ids = slots.map((i) => of[i]?.id ?? "");
-  const answers = [
-    useConnectorState(ids[0]!, { query: { enabled: !!ids[0] } }),
-    useConnectorState(ids[1]!, { query: { enabled: !!ids[1] } }),
-    useConnectorState(ids[2]!, { query: { enabled: !!ids[2] } }),
-    useConnectorState(ids[3]!, { query: { enabled: !!ids[3] } }),
-  ];
-  const total = of.length;
-  const held = answers.filter((a) => a.data?.connected).length;
-  return { held, total };
-}
 
 export function ProfilePlugins({
   scope,
@@ -75,116 +31,168 @@ export function ProfilePlugins({
   scope: string[];
   onChange: (next: string[]) => void;
 }) {
-  const { data: library } = useSkills();
+  const library = useSkills().data;
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState("");
+
+  /* **Asked once, for every row.** Whether *you* hold a credential is a fact
+     the library already answers per person; this used to ask the connector
+     endpoint through four fixed hook slots, so a profile's fifth server was
+     silently left out of its own count. */
+  const mine = useListLibrary({ query: { select: (r) => r ?? [] } }).data ?? [];
+  const connected = useMemo(() => {
+    const by = new Map<string, boolean>();
+    for (const i of mine) {
+      if (i.kind === "server") by.set(i.skillId, i.connected === true);
+    }
+    return by;
+  }, [mine]);
 
   const chosen = useMemo(
     () => scope.map((id) => library.find((s) => s.id === id)).filter((s): s is Skill => !!s),
     [scope, library],
   );
-  const connectors = chosen.filter((s) => s.hasConnector);
-  const { held, total } = useConnected(connectors);
+  const servers = chosen.filter((s) => s.hasConnector);
+  const held = servers.filter((s) => connected.get(s.id)).length;
 
+  const said = (s: Skill) => s.displayName || s.name;
   const offer = useMemo(() => {
     const term = query.trim().toLowerCase();
     return library
       .filter((s) => !scope.includes(s.id))
-      .filter((s) => !term || s.name.toLowerCase().includes(term) || s.description.toLowerCase().includes(term))
+      .filter(
+        (s) =>
+          !term ||
+          `${s.displayName ?? ""} ${s.name} ${s.description}`.toLowerCase().includes(term),
+      )
       .slice(0, 40);
   }, [library, scope, query]);
 
   return (
     <section className="mt-7">
-      <h3 className="text-ui text-dim">What it always has</h3>
+      <h3 className="text-ui text-bone">What it always has</h3>
       <p className="mt-1 max-w-[70ch] text-meta text-dim">
-        Exactly this, whoever starts it. A person&rsquo;s own always-on bundles are what an
-        ad-hoc session opens with; a profile decides for itself.
+        Exactly this, whoever starts it — an ad-hoc session opens with whatever you have,
+        a profile decides for itself.
       </p>
 
-      <div className="mt-2">
+      <div className="mt-3">
         {chosen.map((s) => (
           <div key={s.id} className="r">
-            <span className="plg">{mono(s.name)}</span>
-            <span className="tx">
-              <b>{s.name}</b>
-              <s>{s.kind === "plugin" ? contents(s) : s.description}</s>
+            <span className="g">
+              <Mark logo={s.logo} name={said(s)} />
             </span>
-            {s.hasConnector && (
-              <span className="chip3">
-                <Link2 className="mr-1 inline h-3.5 w-3.5 align-[-2px]" strokeWidth={1.5} />
-                connector
-              </span>
-            )}
+            <span className="tx">
+              <b>{said(s)}</b>
+              <s>{s.description || "no description of its own"}</s>
+            </span>
+            {/* **The per-person fact, where the noun used to be.** A pill
+                reading "connector" said what the row already showed. Whether
+                you have authorized it is the one thing this screen knows that
+                the profile itself does not. */}
+            {s.hasConnector &&
+              (connected.get(s.id) ? (
+                <span className="act-said act-done">
+                  <Check className="h-3.5 w-3.5" strokeWidth={2} />
+                  Connected
+                </span>
+              ) : (
+                <span className="act-said" title="You have not authorized this one yet.">
+                  <Link2 className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  Not connected
+                </span>
+              ))}
             <IconButton
               of={X}
-              label={`Take ${s.name} off this profile`}
+              label={`Take ${said(s)} off this profile`}
               className="hov"
               onClick={() => onChange(scope.filter((id) => id !== s.id))}
             />
           </div>
         ))}
 
-        {chosen.length === 0 && (
+        {chosen.length === 0 && !adding && (
           <p className="py-3 text-ui text-dim">
             Nothing yet, so an agent started from this profile reads only what the checkout
             commits.
           </p>
         )}
 
+        {/* **The search is a row of this list, not a panel inside it.** It was
+            a grey box with its own row style and a bare "Done", which read as
+            a different screen that had opened on top of this one. */}
         {adding ? (
-          <div className="mt-2 rounded-xl bg-raise p-3">
-            <input
-              autoFocus
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search the library"
-              aria-label="Search the library"
-              className="w-full bg-transparent text-ui text-bone outline-none placeholder:text-mute"
-            />
-            <div className="mt-2 max-h-64 overflow-y-auto">
+          <>
+            <label className="srch mt-2 w-full">
+              <Search className="h-4 w-4 text-mute" strokeWidth={1.5} />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search your skills and MCP servers"
+                aria-label="Search your skills and MCP servers"
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    setAdding(false);
+                    setQuery("");
+                  }
+                }}
+              />
+            </label>
+            <div className="mt-1 max-h-72 overflow-y-auto">
               {offer.map((s) => (
                 <button
                   key={s.id}
                   type="button"
-                  className="r"
+                  className="r w-full"
                   onClick={() => {
                     onChange([...scope, s.id]);
                     setQuery("");
                   }}
                 >
-                  <span className="plg">{mono(s.name)}</span>
-                  <span className="tx">
-                    <b>{s.name}</b>
-                    <s>{s.kind === "plugin" ? contents(s) : s.description}</s>
+                  <span className="g">
+                    <Mark logo={s.logo} name={said(s)} />
                   </span>
+                  <span className="tx">
+                    <b>{said(s)}</b>
+                    <s>{s.description || "no description of its own"}</s>
+                  </span>
+                  <Plus className="h-4 w-4 shrink-0 text-mute" strokeWidth={1.75} />
                 </button>
               ))}
               {offer.length === 0 && (
-                <p className="py-2 text-ui text-dim">Nothing left that matches.</p>
+                <p className="py-2 text-ui text-dim">
+                  {query ? "Nothing left that matches." : "Everything you have is already on it."}
+                </p>
               )}
             </div>
-            <button type="button" className="btn quiet mt-2" onClick={() => setAdding(false)}>
+            <button
+              type="button"
+              className="out mt-2"
+              onClick={() => {
+                setAdding(false);
+                setQuery("");
+              }}
+            >
               Done
             </button>
-          </div>
+          </>
         ) : (
           <button type="button" className="out mt-2" onClick={() => setAdding(true)}>
             <Plus className="h-4 w-4" strokeWidth={1.5} />
-            Add a plugin or a skill
+            Add
           </button>
         )}
       </div>
 
-      {total > 0 && (
-        <p className="mt-3 max-w-[70ch] text-meta text-dim">
+      {servers.length > 0 && (
+        <p className="mt-4 max-w-[70ch] text-meta text-dim">
           <b className="font-mid text-bone">
-            You have connected {held} of this profile&rsquo;s {total}{" "}
-            {total === 1 ? "connector" : "connectors"}.
+            You have connected {held} of this profile&rsquo;s {servers.length}{" "}
+            {servers.length === 1 ? "MCP server" : "MCP servers"}.
           </b>{" "}
-          A connector travels with the profile; the authorization never does. A colleague sees
-          their own count here, and starting this before connecting stops with the button rather
-          than running without the tools it was built around.
+          A server travels with the profile; your authorization never does. A colleague sees
+          their own count here.
         </p>
       )}
     </section>
