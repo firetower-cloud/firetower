@@ -39,6 +39,28 @@
 //! that ended last week would be missed, and the Linux side, which empties the
 //! whole cgroup, would be doing a different job from this one.
 //!
+//! ## What the tag cannot see
+//!
+//! macOS shows the environment of an Apple *platform* binary to nobody but
+//! root, and everything in `/bin` and `/usr/bin` is one. A worker does not run
+//! as root, so a workspace that left `/bin/sleep` running keeps it.
+//!
+//! The refusal is silent, which is the part worth knowing. There is no error
+//! to notice: `KERN_PROCARGS2` succeeds, the block comes back with the
+//! executable and the arguments in it, and the environment is simply not
+//! there — 34 bytes for a `/bin/sleep`, `argc` of 2, no environment region at
+//! all. Such a process reads as one carrying no tag, so it is passed over
+//! exactly like somebody else's, and nothing says so.
+//!
+//! What that costs in practice is small, and worth stating plainly rather than
+//! leaving to be rediscovered. The things that leak are dev servers — node,
+//! pnpm, esbuild, vite, workerd — which come from Homebrew, from cargo, or
+//! from the agent's own toolchain, and none of those are platform binaries;
+//! every one of the 23 strays found on a real worker was read without trouble.
+//! It is also why a survey done with `ps -E` sees more than this does: `ps` is
+//! setuid root. The cgroup on Linux has no equivalent hole — membership is not
+//! privileged, and holds whatever the workspace started.
+//!
 //! ## The tmux server carries a tag too, and must never be killed
 //!
 //! The server is forked from the first `new-session` the worker ever ran, so
@@ -311,6 +333,12 @@ fn argmax() -> usize {
 /// environment honestly — rather than looking for the tag anywhere in the
 /// block — is what keeps a `tmux new-session -e FIRETOWER_SESSION=…` on
 /// somebody's command line from being mistaken for a process that carries it.
+///
+/// The environment is not always in it. For an Apple platform binary this
+/// succeeds and returns a block with no environment region at all, so the
+/// process reads back as one carrying no tag and is passed over without a
+/// word — see *What the tag cannot see* in this module's header for what that
+/// does and does not leave behind.
 #[cfg(target_os = "macos")]
 fn describe(pid: i32, buffer: &mut [u8]) -> Option<Described> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
@@ -442,12 +470,11 @@ mod tests {
     /// which by then is the only thing that says where it came from.
     ///
     /// This binary, told to sit still, rather than the `sleep` a test would
-    /// reach for first. macOS shows nobody but root the environment of an
-    /// Apple *platform* binary, and everything in `/bin` is one: a `/bin/sleep`
-    /// is invisible to the very handle under test here, while anything built
-    /// by Homebrew or cargo — node, pnpm, esbuild, workerd, this test — is
-    /// read without trouble. See [`describe`], which says the same thing where
-    /// somebody reading the module will meet it.
+    /// reach for first: a `/bin/sleep` is invisible to the very handle under
+    /// test here, while anything built by Homebrew or cargo — node, pnpm,
+    /// esbuild, workerd, this test — is read without trouble. See *What the
+    /// tag cannot see* in this module's header for which binaries hide their
+    /// environment and how quietly they do it.
     fn detached(tag: &str) -> i32 {
         let own = std::env::current_exe().expect("a test has a binary");
         let started = std::process::Command::new("sh")

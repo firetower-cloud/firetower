@@ -5869,10 +5869,11 @@ mod tests {
     /// joins the workspace's cgroup before forking, the way a pane does, and
     /// anything at all will do after that. On macOS the handle is the session
     /// tag the process inherits, so it has to be a binary whose environment
-    /// can be read — and `/bin/sleep`, the obvious choice, is not one: the
-    /// kernel shows nobody but root the environment of an Apple platform
-    /// binary. This test binary is not one, so it is what gets started,
-    /// sitting still in `strays::tests::the_sleeper`.
+    /// can be read — and `/bin/sleep`, the obvious choice, is not one. See
+    /// the "What the tag cannot see" section of the `strays` module header
+    /// for whose environments are hidden and why it is silent about it. This
+    /// test binary is not one of them, so it is what gets started, sitting
+    /// still in `strays::tests::the_sleeper`.
     fn detached_in(workspace: &std::path::Path, session: &SessionId) -> Option<i32> {
         if !cgroup::available() && !cfg!(target_os = "macos") {
             return None;
@@ -6516,13 +6517,24 @@ mod tests {
         )
         .await;
 
-        // A process in the shape of the leak: detached from the shell that
-        // started it, orphaned, and reachable afterwards only by the handle
-        // the platform hands teardown. This is the dev server an agent leaves
-        // running — no `kill-session` goes anywhere near it, and teardown used
-        // to leave it holding its memory for as long as the machine was up.
+        // One process in the shape of the leak per agent: detached from the
+        // shell that started it, orphaned, and reachable afterwards only by
+        // the handle the platform hands teardown. This is the dev server an
+        // agent leaves running — no `kill-session` goes anywhere near it, and
+        // teardown used to leave it holding its memory for as long as the
+        // machine was up.
+        //
+        // Two of them, because one would not test what this workspace is for.
+        // The tag a process carries names the *session* that started it while
+        // the thing being reclaimed is the *workspace*, so the agent that ends
+        // first leaves strays that no later teardown would recognise unless it
+        // asks which sessions ever worked here. With only a stray of the last
+        // agent's, matching the destroying session's own id would pass, and
+        // the store lookup that makes macOS cover what the cgroup covers could
+        // be deleted without a test noticing.
         let workspace = std::path::Path::new(&path);
-        let detached = detached_in(workspace, &first);
+        let from_first = detached_in(workspace, &first);
+        let from_second = detached_in(workspace, &second);
 
         // End the second one, the way closing its tab does.
         exchange(
@@ -6554,17 +6566,18 @@ mod tests {
             tmux::Tmux::for_session(first.as_str()).exists().await,
             "the agent nobody ended should still be running"
         );
-        if let Some(pid) = detached {
-            // And so should everything it started. Both handles are the
-            // workspace's rather than the session's — the cgroup holds every
-            // pane in the place, and a sibling's own processes carry a tag
-            // from the same workspace — so a teardown that swept here would
-            // take out the agent nobody ended along with whatever it had
-            // running. Which is why the kill is on the last one out and not
-            // on every one.
+        for pid in [from_first, from_second].into_iter().flatten() {
+            // And so should everything either of them started, including the
+            // ended agent's own. Both handles are the workspace's rather than
+            // the session's — the cgroup holds every pane in the place, and
+            // every process here carries a tag from the same workspace — so a
+            // teardown that swept now would take out the agent nobody ended
+            // along with whatever it had running. Which is why the sweep is on
+            // the last one out and not on every one, and why what the agent
+            // that ended first left behind waits for the workspace to go.
             assert!(
                 running(pid),
-                "a sibling's processes must survive somebody else's teardown"
+                "nothing in a workspace is swept while an agent is still working in it"
             );
         }
 
@@ -6585,10 +6598,22 @@ mod tests {
             !std::path::Path::new(&path).exists(),
             "the last agent out should reclaim the worktree, not leak it"
         );
-        if let Some(pid) = detached {
+        if let Some(pid) = from_first {
             assert!(
                 !running(pid),
                 "the last agent out should take the workspace's processes with it"
+            );
+        }
+        if let Some(pid) = from_second {
+            // The one that proves the workspace is the unit. This process
+            // carries the tag of the agent that ended first, so reaching it
+            // means teardown asked which sessions had ever worked here rather
+            // than only which one it was told to destroy — `alone` says the
+            // workspace is finished, and finished means all of it.
+            assert!(
+                !running(pid),
+                "and what the agent that ended first left behind, which only \
+                 asking for every session of this workspace will find"
             );
         }
         if cgroup::available() {
