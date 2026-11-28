@@ -936,8 +936,8 @@ export function StartComposer({
                   about to happen is not otherwise on the screen.
 
                   `margin-left: auto` so it right-aligns whether or not
-                  dictation is available on this machine; the mic keeps its
-                  own, which does nothing once this has taken the slack. */}
+                  dictation is available on this machine; the mic and send
+                  keep their own, as one group. */}
               {task && (
                 <span
                   className="br"
@@ -948,33 +948,35 @@ export function StartComposer({
                 </span>
               )}
 
-              {/* **At the right-hand end**, where the drawing puts it: the
-                  chips on the left are what this run will be, and dictation
-                  is a way of typing — it belongs beside the thing it types
-                  into, not in the middle of the settings. */}
-              {voice.possible && (
-                <span className="ml-auto">
-                  <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />
-                </span>
-              )}
-              {/* Already disabled, correctly, by `ready`. Its title said
-                  **Start it** either way, which is the one thing it cannot
-                  do. */}
-              <button
-                onClick={go}
-                disabled={!ready}
-                title={
-                  busy
-                    ? "Waiting for the images"
-                    : all.length === 0
-                      ? "Add a machine first"
-                      : "Start it   ⏎"
-                }
-                aria-label={all.length === 0 ? "Add a machine first" : "Start it"}
-                className="send"
-              >
-                <ArrowUp className="h-[17px] w-[17px]" strokeWidth={2.5} />
-              </button>
+              {/* **At the right-hand end, directly beside send**: the chips on
+                  the left are what this run will be, and dictation is a way
+                  of typing — it belongs beside the thing that sends what was
+                  typed, not in the middle of the settings. One group with one
+                  `margin-left: auto`: the mic used to carry its own and so
+                  did `.send`, and two auto margins split the slack, which
+                  left the mic floating a long way from the button it serves.
+                  The session's composer draws it in the same place. */}
+              <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} pair="h-(--send) rounded-full" />}
+                {/* Already disabled, correctly, by `ready`. Its title said
+                    **Start it** either way, which is the one thing it cannot
+                    do. */}
+                <button
+                  onClick={go}
+                  disabled={!ready}
+                  title={
+                    busy
+                      ? "Waiting for the images"
+                      : all.length === 0
+                        ? "Add a machine first"
+                        : "Start it   ⏎"
+                  }
+                  aria-label={all.length === 0 ? "Add a machine first" : "Start it"}
+                  className="send"
+                >
+                  <ArrowUp className="h-[17px] w-[17px]" strokeWidth={2.5} />
+                </button>
+              </span>
             </div>
           </div>
           </div>
