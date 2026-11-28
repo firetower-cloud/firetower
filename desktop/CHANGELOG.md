@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.38.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.37.0...desktop-v0.38.0) (2026-11-28)
+
+
+### Features
+
+* **web:** the control plane's tabs carry the mark ([e8c49e5](https://github.com/firetower-cloud/firetower/commit/e8c49e50e73b1fd546ee76ddba7d4d8044700e04))
+
+
+### Bug Fixes
+
+* **desktop:** a modal scrim in a tab covers the whole tab ([9cc49e7](https://github.com/firetower-cloud/firetower/commit/9cc49e75efe44ed4fff7a00e9c3f8af176df2316))
+* **desktop:** take the window's chrome out of the browser ([b0c5b17](https://github.com/firetower-cloud/firetower/commit/b0c5b178f48d174b932105ead5ce9e284387dd32))
+* **desktop:** the line under a removed machine's card is gone ([7f64c41](https://github.com/firetower-cloud/firetower/commit/7f64c419c104e5ab47edd7b4da638aa6cef8e228))
+* **desktop:** the repository chip clips what it cannot fit ([36e4261](https://github.com/firetower-cloud/firetower/commit/36e42615fb0d394f0aafcc5b09743c6c2810010c))
+* **desktop:** the repository chip yields instead of covering the controls ([ae1a9f8](https://github.com/firetower-cloud/firetower/commit/ae1a9f842da3f614d894b0e3362625b9b7d2d258))
+* **desktop:** the rules a merge dropped are back in the sheet ([56cb19d](https://github.com/firetower-cloud/firetower/commit/56cb19de84864a603967a6f7c19e0ccd301f2d0a))
+* **desktop:** the workspace's name keeps its width ([0085f44](https://github.com/firetower-cloud/firetower/commit/0085f44662f9e8111605596a39bda8c2e79c837c))
+* the renderer stops being a desktop app in a browser tab ([f860ec5](https://github.com/firetower-cloud/firetower/commit/f860ec533f50c4e0ee556b45481b9328e01206d4))
+
 ## [0.37.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.36.0...desktop-v0.37.0) (2026-11-27)
 
 
