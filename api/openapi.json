@@ -1089,6 +1089,48 @@
         }
       }
     },
+    "/api/v1/auth/email": {
+      "put": {
+        "tags": [
+          "auth"
+        ],
+        "summary": "Change your own email address.",
+        "description": "**Your own, and so no administrator.** `PATCH /users/{id}` changes anyone's\nand is an administrator's; this one names nobody, because the only account\nit can reach is the caller's. The rules are the same ones, in the same\nplace: `Accounts::set_email` trims it, checks its shape, and refuses an\naddress somebody else here already has.\n\n**Its own path rather than a `PATCH` on `/auth/me`**, because the lock on\nan account whose password has to be replaced lets `/auth/me` through by\npath (`permitted_while_locked`). Changing an address on a credential\nsomebody else chose is exactly what that lock is for.",
+        "operationId": "change_email",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewEmail"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/User"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not an address, or somebody else's",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -15153,6 +15195,18 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "NewEmail": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The address to be reached at. Held to the same rules as an\nadministrator setting it: trimmed, shaped like an address, and nobody\nelse's here."
           }
         }
       },

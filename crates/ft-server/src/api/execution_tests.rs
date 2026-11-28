@@ -11771,3 +11771,53 @@ async fn a_long_name_is_kept_whole_on_both_paths() {
         "nothing counts the characters on this path either"
     );
 }
+
+/// **Your own address, with no administrator, and only yours.**
+///
+/// `PUT /auth/email` takes no id, so there is nobody else to name — the test
+/// checks that a member can change theirs, that a colleague's is untouched,
+/// and that the rules are `set_email`'s own: trimmed, shaped like an address,
+/// nobody else's.
+#[tokio::test]
+async fn anybody_may_change_their_own_email_and_only_their_own() {
+    let (state, _admin, _host, _ready, _owner) = fixture().await;
+    let org = ft_core::OrgId::from_stored(state.db.org().await.unwrap());
+    let ana = state
+        .accounts
+        .create_user(&org, "ana", "ana@example.test", "member")
+        .await
+        .unwrap()
+        .0;
+    state
+        .accounts
+        .create_user(&org, "bob", "bob@example.test", "member")
+        .await
+        .unwrap();
+    let as_ana = crate::auth::Principal {
+        subject: "ana".into(),
+        via: crate::auth::Via::Session,
+        user: Some(ana.clone()),
+    };
+    let change = |email: &str| {
+        super::auth::change_email(
+            State(state.clone()),
+            Extension(as_ana.clone()),
+            Json(super::auth::NewEmail { email: email.into() }),
+        )
+    };
+
+    let Json(changed) = change("  ana@elsewhere.test ").await.unwrap();
+    assert_eq!(changed.id, ana.id);
+    assert_eq!(changed.email.as_deref(), Some("ana@elsewhere.test"));
+
+    let bob = state.accounts.user_by_name("bob").await.unwrap().unwrap();
+    assert_eq!(bob.email.as_deref(), Some("bob@example.test"));
+
+    let error = change("not an address").await.unwrap_err();
+    assert!(error.message.contains("does not look like an email address"), "{}", error.message);
+    let error = change("bob@example.test").await.unwrap_err();
+    assert!(error.message.contains("already somebody's"), "{}", error.message);
+
+    let ana = state.accounts.user_by_name("ana").await.unwrap().unwrap();
+    assert_eq!(ana.email.as_deref(), Some("ana@elsewhere.test"));
+}

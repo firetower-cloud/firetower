@@ -5,7 +5,8 @@
  * stored user can be stale, and whether a password still has to be replaced is
  * a fact about the server, not about this client.
  *
- * **A password form in a tab, and none in the app.** The installed app sends
+ * **An email and a password form in a tab, and neither in the app.** The
+ * installed app sends
  * you to the control plane's own interface, which is one address it already
  * knows and is never a version behind the server, as an app can be. A page in
  * a tab *is* that interface, served by the same server, so sending it
@@ -14,6 +15,11 @@
  * The server answers a change with a fresh token and ends every other
  * session, this one included, so the token is swapped before anything else
  * can be refused (`updateToken`).
+ *
+ * The email form is the tab's only for a second reason: `PUT /auth/email`
+ * is newer than the apps already installed, and an app can be talking to a
+ * server that does not have it yet. A page is always served by its own
+ * server, so it always does.
  *
  * What is left here is the two things that are about this client rather than
  * about the account: sign out revokes this client's token on the server, and
@@ -25,9 +31,9 @@
  * that one — see `~/installed-app`. Sign out is everybody's.
  */
 import { useState, type FormEvent } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink, KeyRound, LogOut, Trash2 } from "lucide-react";
-import { useChangePassword, useLogout, useMe } from "~/api/generated/auth/auth";
+import { getMeQueryKey, useChangeEmail, useChangePassword, useLogout, useMe } from "~/api/generated/auth/auth";
 import { Button } from "~/components/ui";
 import { useBackendKey, dropCache } from "~/backend";
 import { installedApp } from "~/installed-app";
@@ -142,6 +148,17 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
             **The app's only.** In a tab this page is already the control
             plane's own interface, so the form is drawn here instead; see the
             top of this file. */}
+        {/* Above the password: it is the one of the two that is about how
+            you are reached rather than how you get in. The tab's only — see
+            the top of this file. */}
+        {!canForget && (
+          <section className="lsec">
+            <h2>Email</h2>
+            <p className="note">Where we will write to you. One address, one account.</p>
+            <NewEmail current={user?.email ?? ""} />
+          </section>
+        )}
+
         <section className="lsec">
           <h2>Password</h2>
           {canForget ? (
@@ -255,20 +272,27 @@ function NewPassword({ serverId }: { serverId: string }) {
     );
   };
 
-  const field = (label: string, value: string, set: (v: string) => void, autoComplete: string) => (
+  const field = (label: string, value: string, set: (v: string) => void, autoComplete: string, placeholder: string) => (
     <label className="fld">
       <span>{label}</span>
-      <span className="box">
-        <input type="password" value={value} onChange={(e) => set(e.target.value)} autoComplete={autoComplete} spellCheck={false} />
+      <span className="box tight">
+        <input
+          type="password"
+          value={value}
+          onChange={(e) => set(e.target.value)}
+          autoComplete={autoComplete}
+          placeholder={placeholder}
+          spellCheck={false}
+        />
       </span>
     </label>
   );
 
   return (
     <form onSubmit={submit} className="form mt-[11px]">
-      {field("Current password", current, setCurrent, "current-password")}
-      {field("New password", next, setNext, "new-password")}
-      {field("New password, again", again, setAgain, "new-password")}
+      {field("Current password", current, setCurrent, "current-password", "Your current password")}
+      {field("New password", next, setNext, "new-password", "At least 5 characters")}
+      {field("New password, again", again, setAgain, "new-password", "The same again")}
       <div className="flex flex-wrap items-center gap-3">
         <Button type="submit" disabled={!current || !next || !again || change.isPending}>
           {change.isPending ? "Changing…" : "Change password"}
@@ -277,6 +301,77 @@ function NewPassword({ serverId }: { serverId: string }) {
           <span role="alert" className="aside1 !text-brick">{trouble}</span>
         ) : (
           done && <span className="aside1">Password changed.</span>
+        )}
+      </div>
+    </form>
+  );
+}
+
+/**
+ * Your own address — the password form's shape, one field long.
+ *
+ * Prefilled with the one on file, and the button wakes only once it differs:
+ * an untouched field has nothing to save. `me` is asked again afterwards, so
+ * what the page shows is what the server now holds rather than what was typed.
+ * The rules are the server's (`Accounts::set_email`), as the password's
+ * length is, and its sentence is shown as it is said.
+ */
+function NewEmail({ current }: { current: string }) {
+  const cache = useQueryClient();
+  const [draft, setDraft] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  const change = useChangeEmail();
+  const value = draft ?? current;
+  const changed = value.trim() !== "" && value.trim() !== current;
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!changed || change.isPending) return;
+    setDone(false);
+    setTrouble(null);
+    change.mutate(
+      { data: { email: value } },
+      {
+        onSuccess: async () => {
+          await cache.invalidateQueries({ queryKey: getMeQueryKey() });
+          setDraft(null);
+          setDone(true);
+        },
+        onError: (err) => setTrouble(why(err)),
+      },
+    );
+  };
+
+  /* `noValidate`: the browser's own bubble would answer a malformed address
+     in its own voice before the server could, and the server's sentence is
+     the one this page shows. */
+  return (
+    <form onSubmit={submit} noValidate className="form mt-[11px]">
+      <label className="fld">
+        <span>Email address</span>
+        <span className="box tight">
+          <input
+            type="email"
+            value={value}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setDone(false);
+            }}
+            autoComplete="email"
+            placeholder="you@example.com"
+            spellCheck={false}
+          />
+        </span>
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" disabled={!changed || change.isPending}>
+          {change.isPending ? "Updating…" : "Update email"}
+        </Button>
+        {trouble ? (
+          <span role="alert" className="aside1 !text-brick">{trouble}</span>
+        ) : (
+          done && <span className="aside1">Email updated.</span>
         )}
       </div>
     </form>
