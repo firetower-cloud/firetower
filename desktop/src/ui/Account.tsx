@@ -26,9 +26,9 @@
  */
 import { useState, type FormEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { ExternalLink, KeyRound, LogOut, Trash2, UsersRound } from "lucide-react";
+import { ExternalLink, KeyRound, LogOut, Trash2 } from "lucide-react";
 import { useChangePassword, useLogout, useMe } from "~/api/generated/auth/auth";
-import { Input } from "~/components/ui";
+import { Button } from "~/components/ui";
 import { useBackendKey, dropCache } from "~/backend";
 import { installedApp } from "~/installed-app";
 import { forget, servers, updateToken } from "~/servers";
@@ -39,7 +39,6 @@ import type { Backend } from "~/fleet";
 
 import { why } from "~/data";
 import { useConfirm } from "~/ui/Confirm";
-import { WhereTo } from "~/ui/config/bits";
 
 export function Account({ backend, onForgot }: { backend: Backend; onForgot: () => void }) {
   const confirm = useConfirm();
@@ -57,7 +56,7 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
   });
 
   /* Dropping a Firetower is only meaningful where there can be another one.
-     Read once: the heading's note and the control itself have to agree. */
+     Read once: the password section and the sign-in row both ask it. */
   const canForget = installedApp();
   const user = me.data?.user;
   const org = me.data?.organization;
@@ -166,22 +165,13 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
           )}
         </section>
 
-        {/* **"This sign-in", not "this Mac".** The two controls under it are
-            about the connection this client holds rather than about the
-            account, which is what the heading has always been for — and the
-            client is a window on a Mac in one build and a tab in somebody's
-            browser in the other, so naming one of the two was never right and
-            is now wrong on the surface most people will use. */}
+        {/* **The way out, and nothing said around it.** It had a heading,
+            a note about connections and an aside on what signing out
+            revokes; the user asked for the buttons alone. Sign out still
+            revokes this client's token on the server. */}
         <section className="lsec">
-          <h2>This sign-in</h2>
-          <p className="note">
-            {canForget
-              ? "Both of these are about this connection rather than about your account. Neither touches anything running on the server."
-              : "This is about this connection rather than about your account. It does not touch anything running on the server."}
-          </p>
           <div className="card1 flex flex-wrap items-center gap-3">
             <button disabled={leave.isPending} onClick={() => leave.mutate(true)} className="btn plain"><LogOut className="h-3.5 w-3.5" strokeWidth={1.75} />Sign out</button>
-            <span className="aside1">revokes this token on the server</span>
             {/* **Brick, and it says Firetower.** It was dim and said "server",
                 which is the one control on this screen that cannot be undone
                 drawn as the quietest thing on it.
@@ -212,23 +202,6 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
             )}
           </div>
         </section>
-
-        {/* Where the rest of it is. Everything an administrator does to an
-            account happens somewhere else, and a screen that does not say so
-            is a screen people hunt around in.
-
-            **It used to say the administration site, and it does not any
-            more.** Inviting somebody, changing a role and switching an account
-            off are all in the app now, in the Organisation destination — so
-            this is a pointer across the window rather than out of it, and
-            naming `⌘8` is what makes it one. *Settings → People* would have
-            been doubly wrong: People is not in Settings any more, and `⌘,`
-            goes to Vault. */}
-        <WhereTo className="mt-[22px]" icon={<UsersRound className="h-4 w-4" strokeWidth={1.75} />}>
-          Everything else about an account — inviting somebody, changing a role, switching one off or
-          removing it — is about <b>other people</b> and is never drawn here. An administrator does it
-          in <b>Organisation &rarr; People</b>.
-        </WhereTo>
       </div>
     </div>
   );
@@ -237,6 +210,14 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
 /**
  * Current, new, again — the form `web/components/Account.tsx` carries, for a
  * page served by the control plane.
+ *
+ * **Drawn the way this app draws a form**, not the way the web site does:
+ * `.form` of `.fld` labels over `.box` fields, as the profile editor and the
+ * invite sheet have them, on the sheet rather than in a `.card1`. The fields
+ * are `--color-ground` and a card is `--color-raise`, two greys apart by a
+ * shade, which is why the first draft's boxes read as switched off. The
+ * button and its message are the Name row's in Deployment: a plain `Button`,
+ * and an `aside1` that turns brick only for something that failed.
  *
  * The length rule is the server's and so is its sentence: it is checked
  * there, and a second copy here would be a second number to keep in step.
@@ -274,17 +255,29 @@ function NewPassword({ serverId }: { serverId: string }) {
     );
   };
 
+  const field = (label: string, value: string, set: (v: string) => void, autoComplete: string) => (
+    <label className="fld">
+      <span>{label}</span>
+      <span className="box">
+        <input type="password" value={value} onChange={(e) => set(e.target.value)} autoComplete={autoComplete} spellCheck={false} />
+      </span>
+    </label>
+  );
+
   return (
-    <form onSubmit={submit} className="card1 flex max-w-[24rem] flex-col gap-2">
-      <Input type="password" value={current} onChange={setCurrent} placeholder="Current password" aria-label="Current password" autoComplete="current-password" />
-      <Input type="password" value={next} onChange={setNext} placeholder="New password" aria-label="New password" autoComplete="new-password" />
-      <Input type="password" value={again} onChange={setAgain} placeholder="New password, again" aria-label="New password, again" autoComplete="new-password" />
-      <div className="mt-1 flex flex-wrap items-center gap-3">
-        <button type="submit" disabled={!current || !next || change.isPending} className="btn primary">
+    <form onSubmit={submit} className="form mt-[11px]">
+      {field("Current password", current, setCurrent, "current-password")}
+      {field("New password", next, setNext, "new-password")}
+      {field("New password, again", again, setAgain, "new-password")}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" disabled={!current || !next || !again || change.isPending}>
           {change.isPending ? "Changing…" : "Change password"}
-        </button>
-        {done && <span className="text-meta text-sage">Password changed.</span>}
-        {trouble && <span role="alert" className="text-meta text-brick">{trouble}</span>}
+        </Button>
+        {trouble ? (
+          <span role="alert" className="aside1 !text-brick">{trouble}</span>
+        ) : (
+          done && <span className="aside1">Password changed.</span>
+        )}
       </div>
     </form>
   );
