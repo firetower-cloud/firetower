@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.61.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.60.0...firetower-v0.61.0) (2026-11-28)
+
+
+### Features
+
+* **web:** the control plane's tabs carry the mark ([e8c49e5](https://github.com/firetower-cloud/firetower/commit/e8c49e50e73b1fd546ee76ddba7d4d8044700e04))
+
+
+### Bug Fixes
+
+* the renderer stops being a desktop app in a browser tab ([f860ec5](https://github.com/firetower-cloud/firetower/commit/f860ec533f50c4e0ee556b45481b9328e01206d4))
+* **web:** the fallback icon decodes, so the site still builds ([c8a26e5](https://github.com/firetower-cloud/firetower/commit/c8a26e53397b79d6605167d80f5a93f44dc73def))
+
 ## [0.60.0](https://github.com/firetower-cloud/firetower/compare/firetower-v0.59.1...firetower-v0.60.0) (2026-11-27)
 
 
