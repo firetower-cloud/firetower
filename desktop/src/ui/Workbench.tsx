@@ -126,6 +126,41 @@ export function workbenchKey(
   return null;
 }
 
+/**
+ * Which of a workspace's runs the header's strip of marks is for.
+ *
+ * **The ones a person started, and the one you are reading.** The strip used
+ * to be every run in the workspace, and a manager that spawns a child per
+ * file turns it into a dozen marks that run out of room and lie over the
+ * controls to their right. A spawned child is not a thing somebody chose to
+ * open and is not what this control is for: `parentId` is set by whatever
+ * spawned it and absent on a session a person began, so the question has an
+ * answer rather than needing a guess.
+ *
+ * **The run being read is kept whatever its parentage**, which is the one
+ * case the bare filter gets wrong. Opening a child by its own address — from
+ * the Overview's team, from a link, from the dashboard — makes it the run on
+ * screen, and dropping it from the strip would leave the only row saying
+ * *which of these am I in* with the current one missing from it. Here it is
+ * the lit mark, beside the session that started it, which is also the way
+ * back.
+ *
+ * So a workspace whose only extra runs are spawned children draws **no strip
+ * at all** while you read the session you opened, which is the whole point:
+ * `> 1` is asked of this list and not of `place.runs`, so a row of one is
+ * never drawn either.
+ *
+ * Pure and exported, like `workbenchKey` above and `Inspector.tsx`'s
+ * `tabsFor`, so the rule can be asked every shape of question without
+ * standing a workspace up to do it.
+ */
+export function strippedRuns<T extends { id: string; parentId?: string | null }>(
+  runs: T[],
+  readingId: string,
+): T[] {
+  return runs.filter((r) => !r.parentId || r.id === readingId);
+}
+
 export function Workbench({ backend, workspace }: { backend: Backend; workspace: string }) {
   const hostOf = useHostOf();
   const { data: sessions } = useSessions();
@@ -470,6 +505,9 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
     place.runs.find((r) => r.id === reading) ??
     place.runs.find((r) => r.id === workspace) ??
     primary;
+  /* The strip of marks in the header, which is the sessions somebody started
+     plus whichever one is on screen. `strippedRuns` above has the argument. */
+  const switchable = strippedRuns(place.runs, run.id);
 
   /* The Overview's team, from the point of view of the agent being read: the
      manager is this run when it leads, or the one that started it when this is
@@ -593,7 +631,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               per repository, and the second and third of them had nowhere to be
               said — so this names the first, counts the rest, and goes brick
               when one of them is not there. */}
-          <div className="relative shrink-0">
+          {/* **This is what gives when the row is narrow, not the name.**
+              It was `shrink-0`, which left the workspace's own name as the
+              only flexible thing in the row — so a narrow window ate the
+              name down to one letter while a repository slug kept its full
+              width. A slug already truncates well and is the cheaper thing
+              to lose. */}
+          <div className="repo relative">
             <button
               onClick={() => setRepos((r) => !r)}
               title="Repositories in this workspace"
@@ -602,7 +646,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                  does not say where this sheet opens from — it reaches it from
                  its own control strip — so this is the build's answer and is
                  recorded as such in the reconciliation. */
-              className={`who max-w-[15rem] rounded-md px-1.5 py-1 transition-colors ${repos ? "bg-raise text-bone" : "hover:text-bone"}`}
+              className={`who rounded-md px-1.5 py-1 transition-colors ${repos ? "bg-raise text-bone" : "hover:text-bone"}`}
             >
               <HostMark kind={hostOf(checkouts[0]?.slug)?.kind} size={13} className={checkouts.some((c) => c.trouble) ? "text-brick" : ""} />
               <span className="min-w-0 truncate">{checkouts[0]?.slug ?? "No repository"}</span>
@@ -614,10 +658,18 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
           {/* Which agent you are reading, when there is a choice. A count would
               not do: two of one and one of another is a different place from
               three of one — but with one agent the row of marks is a control
-              that never changes anything. */}
-          {place.runs.length > 1 && (
+              that never changes anything.
+
+              **And the choice is between the sessions a person started**, not
+              between every run in the workspace: a manager spawning a child
+              per file put a dozen marks here and they ran out of room and lay
+              over the controls at the right. `strippedRuns` says which, and
+              the "more than one" test is asked of its answer — so a workspace
+              whose only other runs are spawned children draws nothing here at
+              all rather than a row of one. */}
+          {switchable.length > 1 && (
           <span className="flex shrink-0 items-center gap-1">
-            {place.runs.map((r) => (
+            {switchable.map((r) => (
               <button
                 key={r.id}
                 onClick={() => setReading(r.id)}

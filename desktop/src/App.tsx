@@ -127,10 +127,17 @@ export function dockBadge(waiting: number, installed: boolean): number | null | 
  * keychain answered, and a locked keyring means it never does. `servers.ts`
  * stops waiting after a moment either way, so this is never what anybody is
  * left looking at.
+ *
+ * **Both of them draw nothing in a browser**, which is the right answer for
+ * the same reason: a tab has no frame to move and no edges to drag, so the
+ * half-second before the registry answers is the page's own background rather
+ * than a strip of chrome with nothing under it.
  */
 function Starting() {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
+      {/* Nothing in a browser — the gate is inside it, so both call sites get
+          the answer without either of them asking. See `~/ui/Titlebar`. */}
       <Titlebar serverId={null} onSwitch={() => {}} />
       <Resize />
       <div className="relative flex min-h-0 flex-1" />
@@ -276,6 +283,10 @@ function Window() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-ground text-text">
+      {/* Nothing in a browser, and no space where it was — the gate is inside
+          it rather than here, so this and `Starting` above cannot disagree.
+          What a browser loses with it is the panel toggle, which `RailPanel`'s
+          head now carries in both directions. See `~/ui/Titlebar`. */}
       <Titlebar serverId={on} onSwitch={pick} />
       {/* The window's own edges, where there is no frame to grab. Beside the
           title bar and not inside it: nested, one mousedown would start a

@@ -1,0 +1,38 @@
+<!--
+  The tab's glyph: the same lookout tower the application draws as its own
+  mark, with the light lit.
+
+  Taken from `src/ui/Mark.tsx` rather than from the dock icon in
+  `src-tauri/icons-src/app-icon.svg`. Both are the logo, but they answer
+  different questions: the dock icon is a tile, so it carries a white ground
+  and a solid square where the light is, which is what an icon grid wants. A
+  tab favicon sits on the browser's own chrome and has no tile, so the ground
+  is transparent here and the light is ember — the one place ember is a fill
+  rather than a signal, which is what the mark means.
+
+  The viewBox is Mark's 20-unit space cropped to the drawing's own bounds and
+  squared: the art spans x 4.4–15.6 and y 2.2–19, so a 0 0 20 20 box would
+  leave it small and sitting low. Tabs render this at 16px.
+
+  Two colours, both ways round. A favicon cannot ask the page what theme it is
+  in — it is rendered against the browser's chrome, which follows the system —
+  so the switch is `prefers-color-scheme` inside the file. Without it the mark
+  is a dark tower on a dark tab bar, which is no mark at all.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0.8 1.4 18.4 18.4" width="32" height="32">
+  <style>
+    .tower { stroke: #1d1d1e }
+    .light { fill: #ff5e1a }
+    @media (prefers-color-scheme: dark) {
+      .tower { stroke: #eaeaeb }
+      .light { fill: #ff6b2c }
+    }
+  </style>
+  <g class="tower" fill="none" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4.4 19L7 9.6M15.6 19L13 9.6" />
+    <path d="M6.1 14.4h7.8" stroke-width="1.1" opacity=".55" />
+    <path d="M6.4 9.4h7.2v-3H6.4z" />
+    <path d="M4.8 6.4L10 2.2l5.2 4.2" />
+  </g>
+  <circle class="light" cx="10" cy="7.9" r="1.15" />
+</svg>

@@ -798,6 +798,48 @@ mod tests {
         }
     }
 
+    /// The tab's glyph, and which bundle answers for each of its two names.
+    ///
+    /// They are deliberately in different bundles. `favicon.svg` is the
+    /// application's and ships in `desktop/public`; `favicon.ico` is the
+    /// fallback for browsers that refuse an SVG and is the administration
+    /// site's, where Next already emits it. A copy of either in both would be
+    /// one name answered by two files — which
+    /// `the_bundles_claim_no_name_in_common` refuses, and which would be
+    /// settled silently by whichever lookup `resolve` happens to try first.
+    #[test]
+    fn the_tab_icon_is_served_under_both_of_its_names() {
+        if Bundle::Renderer.built() {
+            let icon = resolve_path("/favicon.svg").expect("the application ships its icon");
+            assert!(
+                icon.content_type.contains("svg"),
+                "served as {}",
+                icon.content_type
+            );
+        }
+        if Bundle::Site.built() {
+            resolve_path("/favicon.ico").expect("the fallback icon is still exported");
+        }
+    }
+
+    /// **And neither is pinned forever.**
+    ///
+    /// Both names are stable — that is the whole point of them, since the
+    /// browser asks for `/favicon.ico` without being told to and the shell
+    /// names `/favicon.svg` literally. A stable name carrying
+    /// `immutable` is a mark that can never be changed again for anybody who
+    /// has loaded the page once, which is the mirror of the bug the caching
+    /// rule already guards: hashed names may be pinned precisely *because*
+    /// changing the file changes the name, and these two cannot.
+    #[test]
+    fn the_tab_icon_is_never_pinned() {
+        for name in ["favicon.svg", "favicon.ico"] {
+            for bundle in [Bundle::Renderer, Bundle::Site] {
+                assert!(!bundle.hashed(name), "{name} must be allowed to change");
+            }
+        }
+    }
+
     #[test]
     fn a_deleted_administration_route_is_not_served() {
         if !Bundle::Site.built() {
@@ -1287,6 +1329,11 @@ mod tests {
             "/index.html",
             // The administration site keeps its own paths.
             "/login",
+            // The tab's two icons, one from each bundle. A browser asks for
+            // `/favicon.ico` on its own, without the page naming it, so it is
+            // reached here by more visitors than any route below.
+            "/favicon.svg",
+            "/favicon.ico",
             // Nothing by either name: the site's 404 page, or a bare one.
             "/assets/nothing-is-here.js",
             "/deep/unknown/path",

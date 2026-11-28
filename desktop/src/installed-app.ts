@@ -10,13 +10,21 @@
  * it was loaded from is the whole answer to *which Firetower*, which is what
  * `probe.ts` establishes, and the window belongs to Chrome or Safari.
  *
- * Everything this gates falls out of those two sentences:
+ * Everything this gates falls out of those two sentences, and the title bar
+ * is the row that was slowest to follow from them: the gutter is the traffic
+ * lights', the buttons at the other end are the frameless platforms', the
+ * whole strip is a drag region, and the mark and the press behind it are the
+ * switcher's. Take those away and what is left is `org / user` as text, which
+ * named a Firetower nobody could have arrived at by mistake and could not
+ * leave — so the row went too, and with it 40px of grey across the top of
+ * every screen in a tab. The one control on it that still did something, the
+ * panel toggle, is the panel's own now (`ui/RailPanel.tsx`'s head).
  *
  * | what | why it needs an installed app |
  * |---|---|
  * | switching, connecting, forgetting a Firetower | there is only ever one behind a served page |
  * | the avatar's ember dot | it means *waiting somewhere you are not*, and there is no elsewhere |
- * | the title bar's server mark | a constant monogram for a constant server is decoration |
+ * | the title bar, whole | every reason it exists is the window's — above |
  * | window controls, the resize strips, drag regions | the window is not ours to move, size or close |
  * | the dock badge, OS notifications | there is no dock and no notification centre to reach |
  * | the *This app* section on Updates | a tab updates by reloading |
@@ -72,9 +80,10 @@
  * `isMac` asks *which desktop is this*, and is correct and still needed on
  * both sides of this: a page served to Safari on a Mac is still on a Mac, so
  * `⌘` is still the modifier's name and `localKey` is still `⌃`. This asks
- * whether there is a desktop client at all. The two are independent and both
- * are read side by side in `Titlebar.tsx`, where the traffic-light gutter
- * needs a shell *and* a Mac.
+ * whether there is a desktop client at all. The two are independent and
+ * `Titlebar.tsx` is where both are asked — this one at the door, because a
+ * tab gets no bar, and `isMac` inside it, because a window on a Mac gets the
+ * traffic lights' gutter and a window anywhere else gets its own buttons.
  *
  * ## A development tab is a tab, deliberately
  *
@@ -138,4 +147,17 @@ export function installedApp(): boolean {
  */
 export function advertisedKey(k: string): string | undefined {
   return installedApp() ? key(k) : undefined;
+}
+
+/* Told to the stylesheet, the way `~/platform` tells it which desktop this
+   is. The chrome tokens differ between a window and a tab — `--chrome-title`
+   is the height of a bar that does not exist here — and CSS cannot ask
+   `bridge.native` for itself.
+
+   Safe at module scope: `bridge.native` is decided synchronously from
+   `window.__TAURI_INTERNALS__`, which the shell injects before this script
+   runs. Guarded on `document` because the tests render to a string with no
+   DOM at all. */
+if (typeof document !== "undefined") {
+  document.documentElement.dataset.shell = installedApp() ? "native" : "browser";
 }

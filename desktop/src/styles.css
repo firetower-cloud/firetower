@@ -497,6 +497,148 @@
       background var(--dur-native) var(--ease-swift),
       color var(--dur-native) var(--ease-swift);
   }
+  /* A denser row for a list somebody reads at a glance rather than works
+     through. Four of these used to stand as tall as the composer they hang
+     off, which made a short list look like a settings screen. */
+  /* A catalogue is scanned, not read. Two columns of hairline rows rather
+     than cards: the padding, the border and the separate footer each spent
+     height saying nothing, and six cards filled a screen that now holds
+     twelve rows. */
+  .offers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 28px;
+  }
+  @media (max-width: 900px) {
+    .offers { grid-template-columns: 1fr; }
+  }
+  /* **No rules between them.** A hairline under every row drew a grid
+     nobody asked for and made a short list look like a table. This design
+     separates by fill: a row lifts when the pointer is on it, and the space
+     does the rest. */
+  .offer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 10px;
+    margin: 0 -10px;
+    border-radius: 10px;
+    min-width: 0;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .offer:hover {
+    background: var(--color-raise);
+  }
+  .offer .g {
+    flex: none;
+  }
+  .offer .tx {
+    flex: 1;
+    min-width: 0;
+    display: block;
+  }
+  .offer .tx b {
+    display: block;
+    font-size: var(--text-ui);
+    font-weight: var(--weight-mid);
+    color: var(--color-bone);
+  }
+  .offer .tx s,
+  .offer .tx u {
+    display: block;
+    text-decoration: none;
+    font-size: var(--text-meta);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .offer .tx s { color: var(--color-dim); }
+  .offer .tx u { color: var(--color-mute); margin-top: 1px; }
+  /* **One shape for the one action, wherever it is drawn.** A catalogue row,
+     an installed row and a detail header each had their own button for
+     taking something — different sizes, different words, a few pixels apart.
+     `.act` is that control; `Take` is the component that picks its words. */
+  .act {
+    flex: none;
+    height: 28px;
+    padding: 0 11px;
+    border-radius: 99px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
+    transition:
+      opacity var(--dur-native) var(--ease-swift),
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .act:hover {
+    color: var(--color-bone);
+  }
+  .act[disabled] {
+    opacity: 0.5;
+  }
+  /* **Quiet until the row is under the pointer.** A list of thirty rows each
+     carrying a lit button is thirty things asking to be pressed; the row is
+     the thing being read, and the action belongs to the one being looked at.
+     Opacity rather than display, so it keeps its space — a row must not
+     reflow under the pointer — and `:focus-within` so the keyboard still
+     reaches it. */
+  .offer .act,
+  .r .act {
+    opacity: 0;
+  }
+  .offer:hover .act,
+  .offer:focus-within .act,
+  .r:hover .act,
+  .r:focus-within .act {
+    opacity: 1;
+  }
+  /* What is already true is not an action, so it is always legible. */
+  .act-said {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .act-done {
+    color: var(--color-sage);
+  }
+  /* The detail screen has one subject and one action; nothing to reveal. */
+  .act-page {
+    height: 32px;
+    padding: 0 14px;
+    color: var(--color-bone);
+    background: var(--color-raise);
+    opacity: 1;
+  }
+  .offer > span:last-child {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .prow.tight {
+    min-height: 30px;
+    gap: 8px;
+    padding: 3px 9px;
+  }
+  .prow.tight .plg {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    font-size: 9px;
+  }
+  .prow.tight .plg img {
+    width: 14px;
+    height: 14px;
+  }
   .prow:hover,
   .mrow:hover {
     background: color-mix(in srgb, var(--color-raise) 70%, transparent);
@@ -855,6 +997,25 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* A start that is going to be short of something. Ember and nowhere else:
+     a server nobody authorized is the one thing on this bar that stops the
+     agent doing what it was asked, and it fails on the first turn rather
+     than here if it is not said now. */
+  .chip .need {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--color-dim);
+  }
+  .chip .need::before {
+    content: "";
+    display: inline-block;
+    width: 1px;
+    height: 11px;
+    margin-right: 7px;
+    vertical-align: -1px;
+    background: var(--color-line);
   }
   .chip:hover {
     background: var(--color-raise);
@@ -1921,6 +2082,21 @@ html:not([data-platform="macos"]) {
   --chrome-lights: 0.75rem;
 }
 
+/* **In a tab there is no title bar to leave room for.** `Titlebar` draws
+   nothing when the page is not inside the native shell, so the overlays that
+   clear it must clear nothing: `.dveil` and `.mapdrawer`, `.bigroom`, and the
+   expanded artifact in `ArtifactTab.tsx`. Left at 40px they began a modal
+   scrim forty pixels down the viewport — the workspace header and the
+   inspector tabs sat above it, undimmed and still reachable, while the page
+   claimed to be modal.
+
+   Their own comments give window reasons for clearing it ("the traffic
+   lights", "minimise/maximise at the top right"), and every one of those
+   reasons is absent in a browser. */
+html[data-shell="browser"] {
+  --chrome-title: 0px;
+}
+
 /* With the walk stopped, working would be a solid square — the one shape the
    glyph never makes, and no longer one of the family. It keeps a quadrant
    away, and the glow does the work the movement was doing. */
@@ -2925,8 +3101,18 @@ html:not([data-platform="macos"]) {
     height: 52px;
     padding: 0 18px 0 24px;
   }
+  /* **The name does not give up its width to anything beside it.** Every
+     other item in this row is `flex: none`, so this was the only thing that
+     could absorb a narrow window — and it absorbed all of it, down to a
+     single letter. The workspace's name is what the screen is *about*; the
+     repository chip beside it truncates far more cheaply, and now does.
+
+     A cap rather than no limit, because a long name should not push the
+     controls off the end either. Past it the ellipsis does the work. */
   .whead .nm {
-    min-width: 0;
+    flex: 0 1 auto;
+    min-width: 10rem;
+    max-width: 28rem;
     font-size: 1.0625rem;
     font-weight: var(--font-weight-mid);
     letter-spacing: -0.008em;
@@ -2943,6 +3129,53 @@ html:not([data-platform="macos"]) {
     font-size: 0.875rem;
     color: var(--color-dim);
   }
+  /* **The repository chip is what yields, and the only thing that can.**
+     It drew straight over *Another agent here*, *Who can access it* and the
+     terminal button — three controls that became unclickable while still
+     looking clickable.
+
+     Two rules because there are two elements, and the first attempt fixed the
+     wrong one. **The flex item of this row is the wrapper, not the chip**:
+     the chip sits inside it, so `flex-shrink` on the chip is a property on a
+     thing that is not a flex item and does nothing at all. The wrapper duly
+     shrank, the chip kept its content width, and the overflow is what landed
+     on the controls.
+
+     So the wrapper yields — hard, because it has to go *before* the name
+     does, and flex shares shortfall in proportion to this — and the chip is
+     held to the wrapper it is in. The slug's own `truncate` does the rest.
+
+     No `overflow` on the wrapper: it is the positioning context for the
+     repositories sheet, and clipping there would cut the sheet off. */
+  .whead .repo {
+    flex-shrink: 1000;
+    min-width: 0;
+  }
+  /* **Both caps in one declaration, because they cannot be in two.** The
+     chip carried its 15rem cap as a `max-w-[15rem]` utility, and utilities
+     are a later layer than components — so they win here whatever the
+     specificity, and a `max-width: 100%` written beside this rule was simply
+     overridden. The button kept its content width, escaped the wrapper, and
+     landed on the controls.
+
+     `min()` says the real rule: never wider than 15rem, and never wider than
+     the space actually left. The slug's `truncate` takes it from there. */
+  .whead .repo > .who {
+    max-width: min(15rem, 100%);
+    /* **Capping the box is not the same as containing what is in it.** The
+       host mark and the `+N` counter are both `shrink-0`, so once the chip is
+       narrower than mark + gap + counter they simply paint outside it — the
+       counter landed on *Another agent here* at 1200px, thirteen pixels past
+       the controls' left edge, while every control still passed hit-testing.
+       A visibly collided row that reports clean is worse than one that does
+       not, so this is the rule that makes the cap mean something.
+
+       Safe here and nowhere above: the repositories sheet is a *sibling* of
+       this button inside `.repo`, so clipping the button cannot clip the
+       sheet. On the wrapper it would. */
+    overflow: hidden;
+  }
+
   .whead .right {
     display: flex;
     align-items: center;
@@ -3561,6 +3794,28 @@ html:not([data-platform="macos"]) {
     border-radius: 12px;
     background: var(--color-ground);
     transition: border-color var(--dur-native) var(--ease-swift);
+  }
+  /* **A box that stacks, for a control that is a list.**
+     `.fld .box` is a row — a label beside an input, centred — which is right
+     for every field that holds one control. A field whose control is a filter
+     over a list has two children, and as a row they sat side by side at half
+     the width each, with every name truncated to four characters. */
+  .fld .box.stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 9px;
+  }
+  /* `.fld .box input` is `flex: 1`, which in a row means "take the width
+     left over" and in a column means "grow tall". Unset along this axis, or
+     the filter stretches and the list it filters is squeezed under it. */
+  .fld .box.stack > input {
+    flex: none;
+  }
+  .fld .box.stack .rows {
+    max-height: 232px;
+    overflow-y: auto;
+    margin: 0 -3px;
   }
   .fld .box:focus-within {
     border-color: var(--color-dim);

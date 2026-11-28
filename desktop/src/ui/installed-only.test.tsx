@@ -343,7 +343,7 @@ const COVERED: Record<string, { how: "rendered" | "called" | "rule"; by: string;
   "src/ui/RailPanel.tsx": { how: "rendered", by: "drawn by Rail, which is pinned by default" },
   "src/ui/Resize.tsx": { how: "rendered", by: "the window's own resize strips" },
   "src/ui/Shell.tsx": { how: "rule", by: "terminalKey — the gate is inside xterm's key handler" },
-  "src/ui/Titlebar.tsx": { how: "rendered", by: "the mark, the gutter and the window's buttons" },
+  "src/ui/Titlebar.tsx": { how: "rendered", by: "the whole bar — it draws nothing at all in a browser" },
   "src/ui/Updates.tsx": { how: "rendered", by: "the This app section" },
   "src/ui/Workbench.tsx": {
     how: "rendered",
@@ -432,17 +432,19 @@ describe("switching between Firetowers", () => {
     }
   });
 
-  it("takes the title bar's mark but keeps org / user as text", async () => {
+  /* **The bar goes with the switcher, rather than keeping its sentence.** It
+     kept `org / user` as text for a while, on the grounds that it is what a
+     client for several Firetowers has to answer everywhere. With one, it
+     answers nothing — and it was the last thing holding up a 40px row whose
+     every other job is the window's. What the row has to be is *absent*,
+     not merely emptied: the space across the top is the defect. */
+  it("takes the whole title bar, mark, sentence and row alike", async () => {
     const { app, tab } = await titlebar();
     expect(app).toContain("server-mark");
     expect(app).toContain("Switch Firetower");
-    expect(tab).not.toContain("server-mark");
-    expect(tab).not.toContain("Switch Firetower");
-    // The sentence the bar exists for survives in both.
-    for (const html of [app, tab]) {
-      expect(html).toContain("Acme");
-      expect(html).toContain("kevin");
-    }
+    expect(app).toContain("Acme");
+    expect(app).toContain("kevin");
+    expect(tab).toBe("");
   });
 
   it("takes the avatar's ember dot, because there is no elsewhere to be waited on in", async () => {
@@ -624,11 +626,13 @@ describe("the app updating itself", () => {
 /* ── 4 · The shortcuts ─────────────────────────────────────────────────── */
 
 describe("the shortcuts, where they are drawn", () => {
-  it("advertises none of the window's keys in the title bar", async () => {
+  /* The bar's own toggle keeps its keycap in the window. In a browser there
+     is no bar to carry one at all — the panel's head holds both directions
+     of this control now, and the panel's glyphs are asserted below. */
+  it("advertises the window's keys in the title bar, where there is one", async () => {
     const { app, tab } = await titlebar();
     expect(app).toContain("Hide the panel  ⌘\\");
-    expect(tab).toContain("Hide the panel");
-    expect(tab).not.toContain("⌘\\");
+    expect(tab).toBe("");
   });
 
   it("takes ⌘, off the Settings row and leaves the row", async () => {
@@ -798,18 +802,43 @@ describe("the shortcuts, where they are listened for", () => {
 describe("what must not change", () => {
   /* Dimmed, never red, and never gone. One control plane can still be out of
      reach — a VPN that is off is the case the memo predicts — and that rule
-     was about reachability rather than about having several, so replacing the
-     bar's button with text must not have taken the dark case with it. */
-  it("still draws a Firetower that cannot be reached, in both clients", async () => {
+     was about reachability rather than about having several, so neither the
+     bar's button becoming text nor the bar going entirely may take the dark
+     case with it. */
+  it("still names a Firetower that cannot be reached, where there is a bar", async () => {
     const dark: Backend = { ...HERE, reach: "unreachable" };
-    const { app, tab } = await both((m) => <m.Titlebar serverId={dark.id} onSwitch={() => {}} />, { here: dark });
+    const { app } = await both((m) => <m.Titlebar serverId={dark.id} onSwitch={() => {}} />, { here: dark });
+    expect(app).toContain("Acme");
+    expect(app).toContain("kevin");
+    expect(app).not.toContain("brick");
+    // The mark says so in the one allowed way.
+    expect(app).toContain('data-reach="unreachable"');
+  });
+
+  /**
+   * **And the rule itself is the rows', which is where a browser still has
+   * it.** The title bar went, so this is the pair that matters now: a dark
+   * Firetower's work stays on screen in both clients, dimmed by `.stale` and
+   * not by anything red, because a list that empties itself when the network
+   * drops reads as work being lost. Nothing in this file may be read as
+   * licence to gate that on the shell — `~/installed-app` says so in as many
+   * words — and with the bar gone this is the assertion standing behind it.
+   */
+  it("keeps a dark Firetower's rows on screen in both, dimmed and never red", async () => {
+    const dark: Backend = { ...HERE, reach: "unreachable" };
+    const { app, tab } = await both(
+      (m) => (
+        <m.StartProvider>
+          <m.Rail backend={dark} onSwitch={() => {}} onForgot={() => {}} />
+        </m.StartProvider>
+      ),
+      { here: dark },
+    );
     for (const html of [app, tab]) {
-      expect(html).toContain("Acme");
-      expect(html).toContain("kevin");
+      expect(html).toContain("stale");
+      expect(html).toContain("Workspaces");
       expect(html).not.toContain("brick");
     }
-    // The mark the installed build keeps says so in the one allowed way.
-    expect(app).toContain('data-reach="unreachable"');
   });
 
   /* `platform.ts` decides what a modifier is *called* and is untouched by any
