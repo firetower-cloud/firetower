@@ -259,9 +259,18 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
           at={showing}
           floating={floating}
           stale={backend.reach === "unreachable"}
-          onCollapse={() => {
-            setPeek(null);
-            setPinned(false);
+          /* **Both directions, because the panel's head draws both.** It used
+             to be given only the collapse — the way back was the title bar's
+             toggle, and a browser has no title bar. Pinning from a preview
+             clears the peek for the same reason collapsing does: a pinned
+             panel is the destination you are *in*, and leaving the peek set
+             would snap it over the moment the pointer left. */
+          pin={{
+            pinned,
+            set: (next) => {
+              setPeek(null);
+              setPinned(next);
+            },
           }}
           onEnter={hold}
           onLeave={endPeek}
