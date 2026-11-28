@@ -2097,6 +2097,18 @@ html[data-shell="browser"] {
   --chrome-title: 0px;
 }
 
+/* **And what the bar used to provide, the top of the page now has to.** With
+   the title bar gone the rail's first destination and the panel's own name sat
+   hard against the edge of the viewport — in a window they never do, because
+   40px of chrome is above them. Nothing here is needed in the app, where that
+   bar still draws, so both are scoped to a tab. */
+html[data-shell="browser"] .rail {
+  padding-top: 12px;
+}
+html[data-shell="browser"] .rhead {
+  margin-top: 6px;
+}
+
 /* With the walk stopped, working would be a solid square — the one shape the
    glyph never makes, and no longer one of the family. It keeps a quadrant
    away, and the glow does the work the movement was doing. */
@@ -5218,11 +5230,15 @@ html[data-shell="browser"] {
     min-height: var(--air, 192px);
     padding-bottom: 28px;
   }
+  /* Centred over the composer it introduces, and at the text's own weight
+     rather than the mid used for labels: at 2.125rem, 530 reads as a banner
+     and this line is a greeting. */
   .air h1 {
     font-size: 2.125rem;
     line-height: 1.14;
     letter-spacing: -0.026em;
-    font-weight: var(--font-weight-mid);
+    font-weight: 400;
+    text-align: center;
     color: var(--color-bone);
   }
   /* The line under the headline, which only a task's arrival draws. It says

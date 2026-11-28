@@ -801,7 +801,7 @@ function whenNext(schedule: Schedule): string {
 
 function Head({ name, pin }: { name: string; pin: Pin }) {
   return (
-    <div className="flex h-[38px] shrink-0 items-center gap-0.5 pr-2 pl-3.5">
+    <div className="rhead flex h-[38px] shrink-0 items-center gap-0.5 pr-2 pl-3.5">
       <span className="min-w-0 flex-1 truncate text-ui font-mid text-bone">{name}</span>
       {/* **Find anything, from the panel.** The drawing puts it here beside
           the collapse, in every destination's panel — the palette was

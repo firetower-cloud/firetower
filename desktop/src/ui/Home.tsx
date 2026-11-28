@@ -8,7 +8,8 @@
  * puts the composer in the middle, because starting something is what
  * somebody is here to do far more often than triaging four agents.
  *
- * **The headline is always a greeting, never a status.** The same sentence
+ * **The headline is always an opening line, never a status.** The same kind
+ * of sentence
  * whether four are waiting or none are. What is waiting is still on the
  * screen; it is a section under the composer rather than the first thing the
  * page says.
@@ -89,22 +90,44 @@ export const severityFirst = (every: Workspace[]) => (a: Workspace, b: Workspace
   rank(placeBeat(a, every)) - rank(placeBeat(b, every));
 
 /**
- * Three greetings off the machine's own clock.
+ * Five ways of opening the home, so it is not the same sentence every
+ * morning.
  *
- * The boundaries are the ordinary ones and the late-night window is the only
- * interesting call: 00:00–04:59 takes *evening* rather than a fourth
- * greeting, because a fourth is a joke and a joke you cannot dismiss gets old
- * by the third night.
+ * Whole sentences, standing on their own — there is no greeting in front of
+ * them. They are deliberately plain: this line is read several times a day
+ * for as long as somebody uses Firetower, and a sentence with a joke in it is
+ * one that stops being funny by the third time and cannot be turned off.
+ *
+ * **The clock used to be in here**, as `Good morning` / `Good afternoon` /
+ * `Good evening` before the sentence. It went with the greeting: five lines
+ * that each stand alone do the job it was doing, which is that the top of the
+ * home is not the same words every time you open it.
  */
-export function greeting(at: Date = new Date()): string {
-  const h = at.getHours();
-  if (h < 5) return "Good evening";
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
+export const OPENERS = [
+  "What should we work on?",
+  "Ready when you are.",
+  "Let's build something good.",
+  "Where shall we start?",
+  "What needs doing?",
+] as const;
+
+/**
+ * One of them, at random.
+ *
+ * The source of randomness is an argument so a test can hand it a number
+ * rather than roll five hundred times and hope. Chosen **once per mount** at
+ * the call site, not per render: a headline that changed while somebody was
+ * typing underneath it would be the kind of motion this design spends its
+ * restraint avoiding.
+ */
+export function opener(roll: () => number = Math.random): string {
+  const at = Math.floor(roll() * OPENERS.length);
+  return OPENERS[Math.min(Math.max(at, 0), OPENERS.length - 1)];
 }
 
 export function Home({ backend, onSwitch }: { backend: Backend; onSwitch: (serverId: string) => void }) {
+  /* Once, when the home mounts. See `opener`. */
+  const [line] = useState(opener);
   const { data: sessions } = useSessions();
   const artifacts = useListArtifacts();
   const fleet = useFleet();
@@ -170,7 +193,7 @@ export function Home({ backend, onSwitch }: { backend: Backend; onSwitch: (serve
   const openBand = () => setExpanded((held) => !held);
 
   return (
-    <StartComposer mid bare={bare} above={<h1>{greeting()}, what should we work on?</h1>}>
+    <StartComposer mid bare={bare} above={<h1>{line}</h1>}>
       {agents.length > 0 && (
         <Recent list={agents} every={every} open={expanded} onAll={openBand} />
       )}
