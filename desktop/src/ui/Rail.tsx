@@ -25,7 +25,8 @@
  *
  * ## Hover previews, and so does focus
  *
- * Pointing at a destination swaps the panel's contents without navigating.
+ * With the panel collapsed, pointing at a destination floats its panel in
+ * without navigating; with it open, pointing does nothing but highlight.
  * Pressing it commits. It is a convenience rather than a load-bearing thing —
  * the rail works without it — but **focus does exactly what hover does**, so
  * nothing in here is reachable by pointer only. 180ms in and 240ms out, with
@@ -141,26 +142,29 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
   /**
    * Whether pointing at a destination should preview it.
    *
-   * | destination | panel | preview |
-   * |---|---|---|
-   * | active | open | **no** — it is already on screen |
-   * | active | collapsed | **yes** |
-   * | not active | either | **yes** |
+   * | panel | preview |
+   * |---|---|
+   * | open | **no**, for every destination — the panel is already on screen |
+   * | collapsed | **yes**, for every destination, the one you are on included |
    *
-   * It used to be "anything but the one you are on", which made the active
-   * destination the one place a collapsed panel could never be glimpsed —
-   * exactly the case somebody with the panel shut is in most of the time.
+   * It used to preview any destination but the active one even with the
+   * panel open, so running the pointer down the rail on the way somewhere
+   * swapped a panel somebody had chosen to keep open out from under them.
+   * Before that it was "anything but the one you are on", which made the
+   * active destination the one place a collapsed panel could never be
+   * glimpsed — exactly the case somebody with the panel shut is in most of
+   * the time. Focus follows the same rule.
    */
-  const previews = (to: DestinationId) => to !== here || !pinned;
+  const previews = !pinned;
 
   const startPeek = (to: DestinationId) => {
     hold();
-    if (!previews(to)) return;
+    if (!previews) return;
     timer.current = setTimeout(() => setPeek(to), 180);
   };
   const showPeek = (to: DestinationId) => {
     hold();
-    setPeek(previews(to) ? to : null);
+    setPeek(previews ? to : null);
   };
   const endPeek = () => {
     hold();
@@ -240,7 +244,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
             label={d.label}
             hint={advertisedKey(d.key)}
             on={d.id === here}
-            peeked={peek === d.id && previews(d.id)}
+            peeked={peek === d.id && previews}
             onPick={() => go(d.href)}
             onPoint={() => startPeek(d.id)}
             onFocus={() => showPeek(d.id)}
