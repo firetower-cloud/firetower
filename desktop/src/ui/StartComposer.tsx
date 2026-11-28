@@ -1023,11 +1023,6 @@ export function StartComposer({
                 costs height to say "you cannot change this". The chip still
                 counts them, because it answers what the agent will have
                 rather than what you may alter. */}
-            {choosable.length === 0 && (
-              <p className="px-3 py-2 text-meta text-dim">
-                Nothing to change — everything you have loads every time.
-              </p>
-            )}
             {/* **Capped, and the list scrolls inside the cap.** Everything a
                 person has went in one growing column, so a library of twenty
                 drew a menu taller than the window with the search at the top
@@ -1090,9 +1085,12 @@ export function StartComposer({
                 );
               })}
             </div>
+            {/* The rule sets the way out apart from switches above it. With
+                none above it there is nothing to set it apart from, and the
+                row is the whole menu. */}
             <button
               type="button"
-              className="prow tight mt-1 border-t border-line pt-2 text-dim"
+              className={`prow tight text-dim ${choosable.length > 0 ? "mt-1 border-t border-line pt-2" : ""}`}
               onClick={() => {
                 close();
                 navigate("/configuration/plugins");
@@ -1479,7 +1477,9 @@ export function ProfileMenu({
         {profiles.length === 0 && (
           <button
             onClick={() => navigate("/configuration/roles")}
-            className="control mt-2.5 border border-line bg-panel text-ui text-bone hover:bg-overlay"
+            className={`control border border-line bg-panel text-ui text-bone hover:bg-overlay ${
+              consequence(profiles, teams, profileId, teamId) ? "mt-2.5" : ""
+            }`}
           >
             Create a profile
           </button>
@@ -1515,9 +1515,6 @@ export function consequence(
   const profile = profiles.find((p) => p.id === profileId);
   if (profile) {
     return `Starts ${profile.name} on its own. It cannot hand work to anybody — a team is what gives a profile somebody to hand to.`;
-  }
-  if (profiles.length === 0 && teams.length === 0) {
-    return "You can create agent profiles to divide your work across teams of agents (e.g. a designer, an engineer, a security advisor, a QA, etc.)";
   }
   /* **Nothing when nothing is chosen.** The line used to explain what a
      profile and a team are, to somebody who is looking at a list of their
