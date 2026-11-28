@@ -29,6 +29,7 @@ import {
   Inbox,
   Monitor,
   Network,
+  PanelLeft,
   PanelLeftClose,
   Pencil,
   Puzzle,
@@ -64,11 +65,22 @@ import { useEndWorkspace } from "~/ui/end";
 import { useQueryClient } from "@tanstack/react-query";
 import { getListSessionsQueryKey, renameSession } from "~/api/generated/sessions/sessions";
 
+/**
+ * Whether the panel is pinned open, and the one control that changes it.
+ *
+ * **Both directions, carried together, because the head draws whichever one
+ * is not already true.** It used to be a bare `onCollapse`, which is the only
+ * half a pinned panel needs — and a browser has no title bar to hold the
+ * other half, so an unpinned panel could be reopened by `⌘\` and by nothing a
+ * pointer could reach. See `~/ui/Titlebar`.
+ */
+export type Pin = { pinned: boolean; set: (pinned: boolean) => void };
+
 export function RailPanel({
   at,
   floating,
   stale,
-  onCollapse,
+  pin,
   onEnter,
   onLeave,
 }: {
@@ -79,7 +91,7 @@ export function RailPanel({
   /** This Firetower is not answering. The rows stay with what was last known
    *  on them, dimmed — a list that empties itself reads as work being lost. */
   stale: boolean;
-  onCollapse: () => void;
+  pin: Pin;
   onEnter: () => void;
   onLeave: () => void;
 }) {
@@ -98,18 +110,18 @@ export function RailPanel({
       }
     >
       <div className={`flex min-h-0 flex-1 flex-col ${stale ? "stale" : ""}`}>
-        <Contents at={at} stale={stale} onCollapse={onCollapse} />
+        <Contents at={at} stale={stale} pin={pin} />
       </div>
     </aside>
   );
 }
 
-function Contents({ at, stale, onCollapse }: { at: DestinationId; stale: boolean; onCollapse: () => void }) {
+function Contents({ at, stale, pin }: { at: DestinationId; stale: boolean; pin: Pin }) {
   const path = usePathname();
-  if (at === "home") return <Workspaces stale={stale} onCollapse={onCollapse} />;
+  if (at === "home") return <Workspaces stale={stale} pin={pin} />;
   return (
     <>
-      <Head name={DESTINATIONS.find((d) => d.id === at)?.label ?? ""} onCollapse={onCollapse} />
+      <Head name={DESTINATIONS.find((d) => d.id === at)?.label ?? ""} pin={pin} />
       <Scroll>
         {at === "tasks" && (
           <>
@@ -231,7 +243,7 @@ const worstFirst = (every: Workspace[]) => (a: Workspace, b: Workspace) =>
    for. `design-rules.mjs` exempts this panel and keeps counting everywhere
    else. */
 
-function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => void }) {
+function Workspaces({ stale, pin }: { stale: boolean; pin: Pin }) {
   const path = usePathname();
   const start = useStart();
   /* The row is the way in either way; the keycap is only drawn where the key
@@ -277,7 +289,7 @@ function Workspaces({ stale, onCollapse }: { stale: boolean; onCollapse: () => v
 
   return (
     <>
-      <Head name="Workspaces" onCollapse={onCollapse} />
+      <Head name="Workspaces" pin={pin} />
       {/* **Its own row.** The header already carries a name, a search and a
           collapse at 252px, and `Repository` is the longest realistic label —
           a fourth thing on that line is what overlapped the title. This
@@ -787,7 +799,7 @@ function whenNext(schedule: Schedule): string {
 
 /* ── The pieces every panel is made of ───────────────────────────────────── */
 
-function Head({ name, onCollapse }: { name: string; onCollapse: () => void }) {
+function Head({ name, pin }: { name: string; pin: Pin }) {
   return (
     <div className="flex h-[38px] shrink-0 items-center gap-0.5 pr-2 pl-3.5">
       <span className="min-w-0 flex-1 truncate text-ui font-mid text-bone">{name}</span>
@@ -801,7 +813,22 @@ function Head({ name, onCollapse }: { name: string; onCollapse: () => void }) {
         hint={advertisedKey("K")}
         onPick={() => window.dispatchEvent(new CustomEvent("firetower:palette"))}
       />
-      <Glyph of={PanelLeftClose} label="Hide this panel" hint={advertisedKey("\\")} onPick={onCollapse} />
+      {/* **One slot, and it draws the direction you are not already in.**
+          Pinned, it closes, which is what it has always done. Collapsed, this
+          panel is the preview hovering the rail opened and the only thing
+          worth offering is keeping it — so the glyph turns round rather than
+          repeating *Hide this panel* at a panel that is already hidden.
+
+          It is the whole of the pointer's way back on a served page, where
+          there is no title bar to hold the other half (`~/ui/Titlebar`), and
+          it is in the one place somebody with the panel shut is already
+          looking. Nothing moves and nothing is covered: the slot is the same
+          slot, at the end of the head the collapse was always at. */}
+      {pin.pinned ? (
+        <Glyph of={PanelLeftClose} label="Hide this panel" hint={advertisedKey("\\")} onPick={() => pin.set(false)} />
+      ) : (
+        <Glyph of={PanelLeft} label="Keep this panel open" hint={advertisedKey("\\")} onPick={() => pin.set(true)} />
+      )}
     </div>
   );
 }

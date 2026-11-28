@@ -2,10 +2,17 @@
  * Whether the rail's panel is pinned open.
  *
  * A module rather than state in `Rail`, because two things set it and they are
- * not each other's children: the panel's own header has a close button, and
- * the title bar has the toggle that brings it back. Without the second one, a
- * collapsed panel could only be restored with ⌘\ — which is fine for somebody
- * who knows, and a dead end for everybody else.
+ * not each other's children: the panel's own header, and the title bar's
+ * toggle. Without a second one, a collapsed panel could only be restored with
+ * ⌘\ — which is fine for somebody who knows, and a dead end for everybody
+ * else.
+ *
+ * **And in a browser there is no title bar at all**, so the header carries
+ * both directions rather than only the close: hovering the rail floats the
+ * panel out as a preview, and the glyph at the end of its head keeps it. That
+ * is the whole of the pointer's way back on a served page, and it is why
+ * `RailPanel` is handed a `Pin` rather than an `onCollapse`. See
+ * `~/ui/Titlebar` for why the bar went.
  *
  * **One answer, and it survives a reload.** It used to be one answer *per
  * destination*, which is why collapsing the panel did not stay collapsed:
