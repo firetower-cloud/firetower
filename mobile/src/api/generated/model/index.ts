@@ -180,6 +180,7 @@ export * from './nameOrganization';
 export * from './newAgentTeam';
 export * from './newCheckout';
 export * from './newDirectory';
+export * from './newEmail';
 export * from './newEnv';
 export * from './newException';
 export * from './newForward';

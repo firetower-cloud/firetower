@@ -12,9 +12,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const signedOut = vi.fn();
+/* The token held right now — read on every call, so a test can replace it
+   the way a changed password does. */
+let held = "t_1";
 vi.mock("~/servers", () => ({
   servers: () => [
-    { url: "https://ft", serverId: "o_1", org: "Kev", user: "kev", token: "t_1", addedAt: "" },
+    { url: "https://ft", serverId: "o_1", org: "Kev", user: "kev", token: held, addedAt: "" },
   ],
   signedOut,
 }));
@@ -33,6 +36,7 @@ const refusing = (status: number, code: string) =>
 afterEach(() => {
   vi.unstubAllGlobals();
   signedOut.mockClear();
+  held = "t_1";
 });
 
 describe("a refusal that means the session is over", () => {
@@ -53,6 +57,25 @@ describe("a refusal that means the session is over", () => {
 
   it("is not a password that still has to be replaced", async () => {
     vi.stubGlobal("fetch", refusing(403, "PasswordChangeRequired"));
+    await expect(http("/api/v1/sessions")).rejects.toThrow();
+    expect(signedOut).not.toHaveBeenCalled();
+  });
+
+  /* A changed password ends every session, this one's old token included,
+     and answers with a new token that `Account` swaps in. A request that
+     left with the old one and is refused after the swap must not throw the
+     new one away. */
+  it("is not the old token, refused after a changed password replaced it", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        held = "t_2";
+        return new Response(JSON.stringify({ code: "Unauthorized", message: "no" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        });
+      }),
+    );
     await expect(http("/api/v1/sessions")).rejects.toThrow();
     expect(signedOut).not.toHaveBeenCalled();
   });

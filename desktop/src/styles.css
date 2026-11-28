@@ -3832,6 +3832,17 @@ html[data-shell="browser"] .rhead {
   .fld .box:focus-within {
     border-color: var(--color-dim);
   }
+  /* **A field at a control's height**, for a settings section where a form
+     sits among buttons rather than filling a sheet: `--control` tall with
+     the input at `--text-ui`, as a control's text is. The border, the ground
+     and the focus are the box's own. The Account page's fields use it. */
+  .fld .box.tight {
+    min-height: var(--control);
+    padding: 5px 12px;
+  }
+  .fld .box.tight input {
+    font-size: var(--text-ui);
+  }
   /* The box carries the focus, so the control inside it must not draw a
      second one. This is the `focus:outline-none` half of the standard. */
   .fld .box input,

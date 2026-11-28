@@ -180,6 +180,7 @@ export * from './nameOrganization.ts';
 export * from './newAgentTeam.ts';
 export * from './newCheckout.ts';
 export * from './newDirectory.ts';
+export * from './newEmail.ts';
 export * from './newEnv.ts';
 export * from './newException.ts';
 export * from './newForward.ts';

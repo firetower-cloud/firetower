@@ -8,6 +8,34 @@
 import * as zod from 'zod';
 
 
+/**
+ * **Your own, and so no administrator.** `PATCH /users/{id}` changes anyone's
+ * and is an administrator's; this one names nobody, because the only account
+ * it can reach is the caller's. The rules are the same ones, in the same
+ * place: `Accounts::set_email` trims it, checks its shape, and refuses an
+ * address somebody else here already has.
+ *
+ * **Its own path rather than a `PATCH` on `/auth/me`**, because the lock on
+ * an account whose password has to be replaced lets `/auth/me` through by
+ * path (`permitted_while_locked`). Changing an address on a credential
+ * somebody else chose is exactly what that lock is for.
+ * @summary Change your own email address.
+ */
+export const ChangeEmailBody = zod.object({
+  "email": zod.string().describe('The address to be reached at. Held to the same rules as an\nadministrator setting it: trimmed, shaped like an address, and nobody\nelse\'s here.')
+})
+
+export const ChangeEmailResponse = zod.object({
+  "disabled": zod.boolean().optional().describe('Switched off by an administrator: cannot sign in, keeps what they made.'),
+  "email": zod.string().nullish().describe('Where to write to them. Absent on accounts made before one was asked\nfor, and never filled in with a guess: a placeholder address cannot be\ntold apart from a real one that bounces.'),
+  "id": zod.string().describe('Identifies someone who can sign in.'),
+  "mustChangePassword": zod.boolean().describe('True while the password in use was chosen by somebody other than its\nowner: out of a file for the first administrator, and by an\nadministrator for everybody invited or reset since.\n\nNothing but replacing it is permitted until this clears, and replacing\nit is done on the control plane\'s own interface — the native clients\nread this to send people there rather than offering a form of their\nown.'),
+  "orgId": zod.string().describe('Identifies an organisation.'),
+  "role": zod.string(),
+  "slug": zod.string().describe('The label their own space is named with — the `kevin` in\n`u/kevin/ledger_rounding`.\n\nSent because a client cannot otherwise tell whether a path it is looking\nat is *theirs*. "Is this mine" is the first half of "may I decide where\nthis goes", and a client that has to guess gets it wrong in the generous\ndirection: it offers a control that the server then refuses.\n\nNot the username. That is chosen by people and may yet become an email\naddress; this is derived once and never changes, so renaming somebody\nnever moves anything.'),
+  "username": zod.string()
+}).describe('Someone who can sign in.')
+
 export const LoginBody = zod.object({
   "password": zod.string(),
   "username": zod.string()

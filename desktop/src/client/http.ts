@@ -84,7 +84,12 @@ export const http = async <T>(url: string, init: RequestInit = {}): Promise<T> =
     // Firetower" in its own corner and the app went on drawing a dashboard
     // around them, with no way back to a password field short of forgetting
     // the server and typing its address again.
-    if (meansSignedOut(error.code)) signedOut(server.serverId);
+    //
+    // **Only if the refused token is still the one held.** A changed password
+    // ends every session and answers with a new token; a request that left
+    // with the old one and is refused after the swap is not this client being
+    // signed out, and treating it as one would throw the new token away.
+    if (meansSignedOut(error.code) && here()?.token === server.token) signedOut(server.serverId);
 
     throw error;
   }

@@ -783,6 +783,7 @@ pub fn router() -> OpenApiRouter<AppState> {
         .routes(routes!(auth::logout))
         .routes(routes!(auth::me))
         .routes(routes!(auth::change_password))
+        .routes(routes!(auth::change_email))
         .routes(routes!(setup::setup_state))
         .routes(routes!(setup::name_organization))
         .routes(routes!(setup::complete_setup))

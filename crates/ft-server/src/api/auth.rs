@@ -1,4 +1,4 @@
-//! Signing in, signing out, and replacing a password.
+//! Signing in, signing out, replacing a password, and changing your own email.
 //!
 //! `auth` rather than `sessions`: a session in Firetower is an agent working on
 //! a branch, and two meanings for one noun in one API is how somebody calls the
@@ -59,6 +59,15 @@ pub struct NewPassword {
     /// session token should not be enough to lock the owner out.
     pub current: String,
     pub new: String,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct NewEmail {
+    /// The address to be reached at. Held to the same rules as an
+    /// administrator setting it: trimmed, shaped like an address, and nobody
+    /// else's here.
+    pub email: String,
 }
 
 #[utoipa::path(
@@ -175,6 +184,43 @@ pub(super) async fn change_password(
 
     tracing::info!(user = %user.username, "password changed; every other session ended");
     Ok(Json(Rotated { token }))
+}
+
+/// Change your own email address.
+///
+/// **Your own, and so no administrator.** `PATCH /users/{id}` changes anyone's
+/// and is an administrator's; this one names nobody, because the only account
+/// it can reach is the caller's. The rules are the same ones, in the same
+/// place: `Accounts::set_email` trims it, checks its shape, and refuses an
+/// address somebody else here already has.
+///
+/// **Its own path rather than a `PATCH` on `/auth/me`**, because the lock on
+/// an account whose password has to be replaced lets `/auth/me` through by
+/// path (`permitted_while_locked`). Changing an address on a credential
+/// somebody else chose is exactly what that lock is for.
+#[utoipa::path(
+    put, path = "/api/v1/auth/email", tag = "auth",
+    request_body = NewEmail,
+    responses(
+        (status = 200, body = User),
+        (status = 400, body = ApiError, description = "Not an address, or somebody else's"),
+    ),
+)]
+pub(super) async fn change_email(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Json(request): Json<NewEmail>,
+) -> ApiResult<Json<User>> {
+    let user = principal
+        .user
+        .ok_or_else(|| ApiError::new(ErrorCode::Unauthorized, "nobody is signed in"))?;
+    let user = state
+        .accounts
+        .set_email(&user.id, &request.email)
+        .await
+        .map_err(|e| ApiError::new(ErrorCode::InvalidRequest, format!("{e:#}")))?;
+    tracing::info!(user = %user.username, "own email changed");
+    Ok(Json(user))
 }
 
 fn bearer(headers: &axum::http::HeaderMap) -> Option<String> {
