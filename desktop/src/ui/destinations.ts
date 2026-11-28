@@ -112,6 +112,10 @@ export type Destination = {
   /** `⌘1`–`⌘8`. Required, now that the two keyless doors have gone: a place
    *  in the rail with no number was the thing that made them read as doors. */
   key: string;
+  /** Drawn at the foot of the rail, just above the avatar, rather than with
+   *  the others at the top. Where it is drawn only: its place in this list,
+   *  and so its key and its place in the palette, are unchanged. */
+  foot?: true;
 };
 
 /** The eight. Order is the keyboard's order, so ⌘3 is always Artifacts. */
@@ -128,7 +132,9 @@ export const DESTINATIONS: Destination[] = [
      once. A building rather than a person, because the two panes under it are
      already a person and a group of them — the rail icon has to say *the
      organisation* and not *the first row of its first pane*. */
-  { id: "organisation", label: "Organisation", icon: Building2, href: "/configuration/people", key: "8" },
+  /* At the foot, beside the avatar: the organisation is the other thing in
+     the rail that is about who rather than where. */
+  { id: "organisation", label: "Organisation", icon: Building2, href: "/configuration/people", key: "8", foot: true },
 ];
 
 /**

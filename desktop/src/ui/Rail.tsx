@@ -6,8 +6,8 @@
  * between them. It is two things now: this, which is **where you can go**, and
  * `RailPanel`, which is **what is in the place you are pointing at**.
  *
- * Seven destinations and nothing under them but the avatar. 42px targets, 20px
- * icons, 4px gaps. Selection is a pill in the sheet's own colour, because the
+ * Seven destinations at the top, and Organisation at the foot just above the
+ * avatar. 42px targets, 20px icons, 4px gaps. Selection is a pill in the sheet's own colour, because the
  * selected destination is the sheet's handle; nothing else fills.
  *
  * **The rule and the two doors below it are gone.** Settings and Updates were
@@ -236,6 +236,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
         {DESTINATIONS.map((d) => (
           <RailButton
             key={d.id}
+            foot={d.foot}
             icon={d.icon}
             label={d.label}
             hint={advertisedKey(d.key)}
@@ -247,7 +248,10 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
           />
         ))}
 
-        <span className="flex-1" />
+        {/* A destination at the foot pushes itself, and the avatar after it,
+            to the bottom (`mt-auto` on its button); a spacer here as well
+            would take that room first and leave it at the top. */}
+        {!DESTINATIONS.some((d) => d.foot) && <span className="flex-1" />}
 
         <ProfileMenu backend={backend} waitingElsewhere={elsewhere} onSwitch={onSwitch} onForgot={onForgot} />
       </nav>
@@ -290,6 +294,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
  * it enforces is right, and this is the one surface that argues with it.
  */
 function RailButton({
+  foot,
   icon: Glyph,
   label,
   hint,
@@ -299,6 +304,8 @@ function RailButton({
   onPoint,
   onFocus,
 }: {
+  /** At the foot of the rail rather than the top. See `Destination.foot`. */
+  foot?: boolean;
   icon: LucideIcon;
   label: string;
   hint?: string;
@@ -317,7 +324,7 @@ function RailButton({
       aria-label={label}
       title={hint ? `${label}  ${hint}` : label}
       data-peek={peeked}
-      className="rbtn"
+      className={foot ? "rbtn mt-auto" : "rbtn"}
     >
       {/* **No dot can appear on a destination**, in any state. The one mark
           the rail ever carried — *a newer build is out* — is on the avatar
