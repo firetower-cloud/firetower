@@ -123,8 +123,9 @@ describe("what the footer says will happen", () => {
     expect(consequence([ada], [alone], null, "t_2")).toContain("cannot hand work to anybody");
   });
 
-  it("tells somebody with nothing yet what these are for, and offers the way in", () => {
-    expect(consequence([], [], null, null)).toContain("divide your work across teams of agents");
+  it("says nothing to somebody with nothing yet, and still offers the way in", () => {
+    expect(consequence([], [], null, null)).toBe("");
+    expect(draw([])).toContain("Create a profile");
   });
 
   it("says nothing at all when there is a choice and none is made", () => {
