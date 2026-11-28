@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Firetower</title>
+    <!-- The tab's glyph. SVG so one file covers every size a browser asks for
+         and the mark can follow the system theme; `/favicon.ico` is the
+         fallback for browsers that will not take an SVG, and is served from
+         the administration bundle, which is the only place that name exists.
+         See public/favicon.svg. -->
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="alternate icon" href="/favicon.ico" sizes="48x48" />
   </head>
   <body>
     <div id="root"></div>
