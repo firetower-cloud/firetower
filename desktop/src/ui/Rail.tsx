@@ -231,7 +231,7 @@ export function Rail({ backend, onSwitch, onForgot }: { backend: Backend; onSwit
       <nav
         aria-label="Destinations"
         onMouseLeave={endPeek}
-        className="relative z-5 flex w-(--rail) shrink-0 flex-col items-center gap-1 pt-0.5 pb-3.5"
+        className="rail relative z-5 flex w-(--rail) shrink-0 flex-col items-center gap-1 pt-0.5 pb-3.5"
       >
         {DESTINATIONS.map((d) => (
           <RailButton
