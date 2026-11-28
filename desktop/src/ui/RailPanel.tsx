@@ -6,8 +6,9 @@
  * swapped wholesale between them. This is the second job, per destination: a
  * few sub-destinations, then the live things you actually have.
  *
- * **It previews.** Pointing at a rail icon, or giving it focus, swaps what is
- * in here without navigating; pressing it commits. So the panel is often
+ * **It previews, when collapsed.** Pointing at a rail icon, or giving it focus,
+ * floats this in with that destination's contents without navigating;
+ * pressing it commits. An open panel is left alone. So the panel is often
  * showing somewhere you are *not*, which is the point — looking into a
  * destination without leaving the one you are in.
  *
