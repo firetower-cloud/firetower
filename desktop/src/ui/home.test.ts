@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { greeting, ROWS, severityFirst } from "./Home";
+import { OPENERS, opener, ROWS, severityFirst } from "./Home";
 import type { Workspace } from "~/api/workspaces";
 import type { Session, SessionStatus } from "~/api/generated/model";
 
@@ -76,22 +76,36 @@ describe("the order of Recent agents", () => {
   });
 });
 
-describe("the greeting", () => {
-  const at = (h: number) => greeting(new Date(2026, 10, 7, h, 30));
-
-  test("morning, afternoon, evening — and the small hours take evening", () => {
-    expect(at(2)).toBe("Good evening");
-    expect(at(9)).toBe("Good morning");
-    expect(at(14)).toBe("Good afternoon");
-    expect(at(21)).toBe("Good evening");
+/**
+ * The headline is not the same sentence every morning.
+ *
+ * `opener` takes its randomness as an argument, so these are facts rather
+ * than five hundred rolls and a hope.
+ */
+describe("the opening line", () => {
+  test("offers five, so the home does not wear one sentence out", () => {
+    expect(new Set(OPENERS).size).toBe(5);
   });
 
-  test("the boundaries are where the comments say they are", () => {
-    expect(at(4)).toBe("Good evening");
-    expect(at(5)).toBe("Good morning");
-    expect(at(11)).toBe("Good morning");
-    expect(at(12)).toBe("Good afternoon");
-    expect(at(17)).toBe("Good afternoon");
-    expect(at(18)).toBe("Good evening");
+  /* Each stands alone now — there is no greeting in front of it — so each
+     opens with a capital and closes its own sentence. */
+  test("is a whole sentence on its own", () => {
+    for (const line of OPENERS) {
+      expect(line[0]).toBe(line[0]?.toUpperCase());
+      expect(line).toMatch(/[.?]$/);
+    }
+  });
+
+  test("can reach every one of them", () => {
+    const seen = OPENERS.map((_, i) => opener(() => i / OPENERS.length));
+    expect(new Set(seen).size).toBe(OPENERS.length);
+  });
+
+  /** The ends of the range, where a rounding slip would read past the array
+      and render the word `undefined` across the top of the home. */
+  test("never falls off either end", () => {
+    expect(opener(() => 0)).toBe(OPENERS[0]);
+    expect(opener(() => 0.999999)).toBe(OPENERS[OPENERS.length - 1]);
+    expect(opener(() => 1)).toBe(OPENERS[OPENERS.length - 1]);
   });
 });
