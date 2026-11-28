@@ -2116,6 +2116,13 @@ html[data-shell="browser"] .rhead {
 html[data-shell="browser"] .sheet {
   margin-top: --spacing(2);
 }
+/* And the panel that floats over it when the rail is hovered, whose top edge
+   would otherwise sit 8px above the sheet's. Unlayered, so it outranks the
+   `top-0` utility it is drawn with; the window keeps that, where both meet
+   the title bar. */
+html[data-shell="browser"] .panel-float {
+  top: --spacing(2);
+}
 
 /* With the walk stopped, working would be a solid square — the one shape the
    glyph never makes, and no longer one of the family. It keeps a quadrant
