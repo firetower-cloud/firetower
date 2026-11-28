@@ -49,11 +49,15 @@
   --chrome-title: 40px;
   --chrome-lights: 78px;
 
-  /* The rail, and the panel beside it. 62px holds a 42px target with 10px of
-     air each side; 252px is a workspace name and a timestamp without either
-     of them truncating at the widths people actually use. Measured on the
-     artifact at 1280 × 824, where they leave the sheet 958px. */
-  --rail: 62px;
+  /* The rail, and the panel beside it. 50px holds the 34px `.rbtn` with 8px
+     each side, and that 8px is the whole gap to whatever is next: the sheet
+     sits straight against the rail when the panel is collapsed, and the
+     pinned panel carries the same 8px on its own far side (`RailPanel`). It
+     was 62px around a button that had shrunk from 42 to 34, plus the sheet's
+     own 8px — 22px from the icons to the sheet. 252px is a workspace name and
+     a timestamp without either of them truncating at the widths people
+     actually use. */
+  --rail: 50px;
   --panel: 252px;
 
   /* One radius on one object. The sheet is rounded on the side that faces the

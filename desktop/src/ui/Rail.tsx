@@ -1,5 +1,5 @@
 /**
- * The 62px rail, and the panel it opens.
+ * The 50px rail, and the panel it opens.
  *
  * What used to be here was a 256px column doing three jobs at once —
  * navigation, the workspace list and the configuration index — and swapping
