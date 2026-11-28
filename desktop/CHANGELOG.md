@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.39.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.38.0...desktop-v0.39.0) (2026-11-28)
+
+
+### Features
+
+* **desktop:** the home opens on one of five lines, centred ([a4ce084](https://github.com/firetower-cloud/firetower/commit/a4ce08414004163b73242a00a5a213134ff30cd7))
+
+
+### Bug Fixes
+
+* **desktop:** the rail and the panel's name clear the top of a tab ([e7931f9](https://github.com/firetower-cloud/firetower/commit/e7931f987c756c95d0a7d3281ed106bb51341c0b))
+* **desktop:** the rail and the panel's name clear the top of a tab ([dad052b](https://github.com/firetower-cloud/firetower/commit/dad052bd0157d6c4ce873f29889a29bbfd8b53a4))
+
 ## [0.38.0](https://github.com/firetower-cloud/firetower/compare/desktop-v0.37.0...desktop-v0.38.0) (2026-11-28)
 
 
