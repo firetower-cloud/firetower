@@ -5,23 +5,33 @@
  * stored user can be stale, and whether a password still has to be replaced is
  * a fact about the server, not about this client.
  *
- * **No password form.** Passwords are replaced on the control plane's own
- * interface, which is one address this app already knows and is never a
- * version behind the server. What is left here is the two things that are
- * about this client rather than about the account: sign out revokes this
- * client's token on the server, and forget drops the server from it without
- * asking the server anything — for the day it is no longer reachable.
+ * **A password form in a tab, and none in the app.** The installed app sends
+ * you to the control plane's own interface, which is one address it already
+ * knows and is never a version behind the server, as an app can be. A page in
+ * a tab *is* that interface, served by the same server, so sending it
+ * elsewhere was sending somebody to where they already were. It carries the
+ * form itself: current, new, again, as `web/components/Account.tsx` does.
+ * The server answers a change with a fresh token and ends every other
+ * session, this one included, so the token is swapped before anything else
+ * can be refused (`updateToken`).
+ *
+ * What is left here is the two things that are about this client rather than
+ * about the account: sign out revokes this client's token on the server, and
+ * forget drops the server from it without asking the server anything — for
+ * the day it is no longer reachable.
  *
  * **Forget is the installed app's alone.** It is half of being able to hold
  * several Firetowers at once, and a page served by one can only ever reach
  * that one — see `~/installed-app`. Sign out is everybody's.
  */
+import { useState, type FormEvent } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ExternalLink, KeyRound, LogOut, Trash2, UsersRound } from "lucide-react";
-import { useLogout, useMe } from "~/api/generated/auth/auth";
+import { useChangePassword, useLogout, useMe } from "~/api/generated/auth/auth";
+import { Input } from "~/components/ui";
 import { useBackendKey, dropCache } from "~/backend";
 import { installedApp } from "~/installed-app";
-import { forget, servers } from "~/servers";
+import { forget, servers, updateToken } from "~/servers";
 import { navigate } from "~/shims/next-navigation";
 import { openExternal } from "~/open";
 import { passwordPage } from "~/ui/ReplacePassword";
@@ -98,8 +108,8 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
           <div className="warnbar">
             <span className="g"><KeyRound className="h-4 w-4" strokeWidth={1.75} /></span>
             <p>
-              <b>This password has to be replaced before anything else here will work.</b> Open the control
-              plane below and choose your own.
+              <b>This password has to be replaced before anything else here will work.</b>{" "}
+              {canForget ? "Open the control plane below and choose your own." : "Choose your own below."}
             </p>
           </div>
         )}
@@ -128,19 +138,32 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
             to where you already are. There were exactly two screens that send
             somebody to this Firetower's own web interface, and the rule they
             both go through now lives in `ReplacePassword.tsx` beside the
-            reasoning for it. `replace-password.test.ts` pins both. */}
+            reasoning for it. `replace-password.test.ts` pins both.
+
+            **The app's only.** In a tab this page is already the control
+            plane's own interface, so the form is drawn here instead; see the
+            top of this file. */}
         <section className="lsec">
           <h2>Password</h2>
-          <p className="note">
-            Your account and your password are managed on the Firetower control plane — one address this app
-            already knows, and never a version behind the server.
-          </p>
-          <div className="card1">
-            <button onClick={() => void openExternal(passwordPage(origin))} className="btn plain">
-              Open {origin.replace(/^https?:\/\//, "")}
-              <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
-            </button>
-          </div>
+          {canForget ? (
+            <>
+              <p className="note">
+                Your account and your password are managed on the Firetower control plane — one address this app
+                already knows, and never a version behind the server.
+              </p>
+              <div className="card1">
+                <button onClick={() => void openExternal(passwordPage(origin))} className="btn plain">
+                  Open {origin.replace(/^https?:\/\//, "")}
+                  <ExternalLink className="h-3 w-3" strokeWidth={1.75} />
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <p className="note">Changing it signs every other browser and app out.</p>
+              <NewPassword serverId={key} />
+            </>
+          )}
         </section>
 
         {/* **"This sign-in", not "this Mac".** The two controls under it are
@@ -208,5 +231,61 @@ export function Account({ backend, onForgot }: { backend: Backend; onForgot: () 
         </WhereTo>
       </div>
     </div>
+  );
+}
+
+/**
+ * Current, new, again — the form `web/components/Account.tsx` carries, for a
+ * page served by the control plane.
+ *
+ * The length rule is the server's and so is its sentence: it is checked
+ * there, and a second copy here would be a second number to keep in step.
+ * Only the one thing the server cannot see is checked before asking — that
+ * the two new ones agree.
+ */
+function NewPassword({ serverId }: { serverId: string }) {
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [again, setAgain] = useState("");
+  const [done, setDone] = useState(false);
+  const [trouble, setTrouble] = useState<string | null>(null);
+  /* The swap is the hook's own `onSuccess`, which runs before anything the
+     caller passes to `mutate`: the old token is dead the moment the server
+     answered, and every request until this runs is refused. */
+  const change = useChangePassword({ mutation: { onSuccess: ({ token }) => updateToken(serverId, token) } });
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!current || !next || change.isPending) return;
+    setDone(false);
+    setTrouble(null);
+    if (next !== again) return setTrouble("The two new passwords differ.");
+    change.mutate(
+      { data: { current, new: next } },
+      {
+        onSuccess: () => {
+          setCurrent("");
+          setNext("");
+          setAgain("");
+          setDone(true);
+        },
+        onError: (err) => setTrouble(why(err)),
+      },
+    );
+  };
+
+  return (
+    <form onSubmit={submit} className="card1 flex max-w-[24rem] flex-col gap-2">
+      <Input type="password" value={current} onChange={setCurrent} placeholder="Current password" aria-label="Current password" autoComplete="current-password" />
+      <Input type="password" value={next} onChange={setNext} placeholder="New password" aria-label="New password" autoComplete="new-password" />
+      <Input type="password" value={again} onChange={setAgain} placeholder="New password, again" aria-label="New password, again" autoComplete="new-password" />
+      <div className="mt-1 flex flex-wrap items-center gap-3">
+        <button type="submit" disabled={!current || !next || change.isPending} className="btn primary">
+          {change.isPending ? "Changing…" : "Change password"}
+        </button>
+        {done && <span className="text-meta text-sage">Password changed.</span>}
+        {trouble && <span role="alert" className="text-meta text-brick">{trouble}</span>}
+      </div>
+    </form>
   );
 }
