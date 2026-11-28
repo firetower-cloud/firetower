@@ -71,6 +71,9 @@ type Suggestion =
   | { kind: "artifact"; artifact: Artifact };
 const directoryOf = (q: string) => (q.includes("/") ? q.slice(0, q.lastIndexOf("/")) : "");
 
+/** Send's height and corners, which stop and the mic beside it share. */
+const SEND = "h-8 rounded-full";
+
 export function Composer({
   session,
   conversation,
@@ -591,8 +594,6 @@ export function Composer({
               <input type="file" multiple className="hidden" onChange={(e) => take(e.target.files)} />
             </label>
 
-            {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} />}
-
             {/* Beside the model and the mode, because all three decide how the
                 next turn is answered. Not ember: ember means an agent is
                 waiting on somebody, and this is not that. */}
@@ -638,6 +639,13 @@ export function Composer({
 
             </div>
 
+            {/* **Beside send, and outside the group that wraps**, so it stays
+                on the first line next to it however the controls fold. It is
+                a way of typing, and it belongs beside the thing that sends
+                what was typed — the new-workspace composer draws it in the
+                same place. */}
+            {voice.possible && <Mic state={voice.state} onStart={voice.start} onStop={voice.stop} pair={SEND} />}
+
             {/* `interruptible`, not `working`: a subagent the turn left
                 running keeps the session working, but an interrupt cannot
                 reach it — so the button would report success and do nothing. */}
@@ -646,7 +654,7 @@ export function Composer({
                 onClick={stop}
                 disabled={stopping}
                 title={stopping ? "Stopping" : "Interrupt the agent"}
-                className="ml-auto grid h-8 w-8 place-items-center rounded-full border border-line bg-raise text-bone transition-colors hover:bg-overlay disabled:text-mute disabled:hover:bg-raise"
+                className={`${SEND} ml-auto grid w-8 place-items-center border border-line bg-raise text-bone transition-colors hover:bg-overlay disabled:text-mute disabled:hover:bg-raise`}
               >
                 {stopping ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.5} />
@@ -659,7 +667,7 @@ export function Composer({
                 onClick={say}
                 disabled={disabled || busy || (!text.trim() && chips.length === 0)}
                 title={busy ? (chips.some((c) => c.pending && c.kind === "artifact") ? "Waiting for the artifact" : "Waiting for the files") : "Send"}
-                className="ml-auto grid h-8 w-8 place-items-center rounded-full bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-raise disabled:text-mute"
+                className={`${SEND} ml-auto grid w-8 place-items-center bg-bone text-ground transition-opacity duration-150 hover:opacity-90 disabled:bg-raise disabled:text-mute`}
               >
                 <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
               </button>

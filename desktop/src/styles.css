@@ -961,6 +961,9 @@
     align-items: center;
     gap: 3px;
     margin-top: 12px;
+    /* Send's size, and the mic's beside it, which takes the same so the two
+       read as a pair. */
+    --send: 34px;
   }
   /* A chip in the composer's footer, and a chip on its shelf: the same object
      at two jobs. Quiet until it has been set, because an unset default is not
@@ -1131,8 +1134,8 @@
     place-items: center;
     flex: none;
     margin-left: auto;
-    width: 34px;
-    height: 34px;
+    width: var(--send);
+    height: var(--send);
     border-radius: 99px;
     background: var(--color-bone);
     color: var(--color-panel);
