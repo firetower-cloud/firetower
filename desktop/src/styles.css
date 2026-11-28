@@ -2082,6 +2082,21 @@ html:not([data-platform="macos"]) {
   --chrome-lights: 0.75rem;
 }
 
+/* **In a tab there is no title bar to leave room for.** `Titlebar` draws
+   nothing when the page is not inside the native shell, so the overlays that
+   clear it must clear nothing: `.dveil` and `.mapdrawer`, `.bigroom`, and the
+   expanded artifact in `ArtifactTab.tsx`. Left at 40px they began a modal
+   scrim forty pixels down the viewport — the workspace header and the
+   inspector tabs sat above it, undimmed and still reachable, while the page
+   claimed to be modal.
+
+   Their own comments give window reasons for clearing it ("the traffic
+   lights", "minimise/maximise at the top right"), and every one of those
+   reasons is absent in a browser. */
+html[data-shell="browser"] {
+  --chrome-title: 0px;
+}
+
 /* With the walk stopped, working would be a solid square — the one shape the
    glyph never makes, and no longer one of the family. It keeps a quadrant
    away, and the glow does the work the movement was doing. */
@@ -3096,7 +3111,7 @@ html:not([data-platform="macos"]) {
      controls off the end either. Past it the ellipsis does the work. */
   .whead .nm {
     flex: 0 1 auto;
-    min-width: 12rem;
+    min-width: 10rem;
     max-width: 28rem;
     font-size: 1.0625rem;
     font-weight: var(--font-weight-mid);

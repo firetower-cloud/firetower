@@ -148,3 +148,16 @@ export function installedApp(): boolean {
 export function advertisedKey(k: string): string | undefined {
   return installedApp() ? key(k) : undefined;
 }
+
+/* Told to the stylesheet, the way `~/platform` tells it which desktop this
+   is. The chrome tokens differ between a window and a tab — `--chrome-title`
+   is the height of a bar that does not exist here — and CSS cannot ask
+   `bridge.native` for itself.
+
+   Safe at module scope: `bridge.native` is decided synchronously from
+   `window.__TAURI_INTERNALS__`, which the shell injects before this script
+   runs. Guarded on `document` because the tests render to a string with no
+   DOM at all. */
+if (typeof document !== "undefined") {
+  document.documentElement.dataset.shell = installedApp() ? "native" : "browser";
+}

@@ -24,6 +24,7 @@
  * only thing `~/installed-app` reads, so what is flipped is the real
  * observable rather than the predicate.
  */
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -374,5 +375,50 @@ describe("what a browser is left with", () => {
       { hash: "#/sessions/w_1" },
     );
     expect(tab).not.toContain("data-rail-panel");
+  });
+});
+
+/**
+ * **The bar going away is not the same as the space going away.**
+ *
+ * `--chrome-title` is the height a fixed overlay leaves clear so it does not
+ * cover the window's own controls, and four of them position off it: the team
+ * drawer and its scrim, the big-text room, and the expanded artifact. With
+ * the bar gone from a tab the token was still 40px, so a modal scrim began
+ * forty pixels down the viewport and the workspace header and inspector tabs
+ * sat above it — undimmed, still reachable, while the page claimed to be
+ * modal. QA measured it: bar height 0, scrim top 40.
+ *
+ * Every one of those overlays gives a *window* reason for the gap in its own
+ * comment — the traffic lights, minimise and maximise at the top right — and
+ * none of those things is in a browser tab.
+ *
+ * Asserted at the source: this is a custom property resolved by the
+ * stylesheet, which these tests do not load, and a static render has no
+ * computed styles to read. Driven in Chrome against the built sheet, where
+ * the four overlays read 40/40/46/40 under the native shell and 0/0/6/0 in a
+ * tab — `.bigroom` carrying a 6px offset of its own in both.
+ */
+describe("the space the title bar used to take", () => {
+  const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+  const gate = readFileSync(new URL("../installed-app.ts", import.meta.url), "utf8");
+
+  it("is zero in a tab, so an overlay that clears it clears nothing", () => {
+    const at = css.indexOf('html[data-shell="browser"] {');
+    expect(at, "an override keyed on the shell").toBeGreaterThan(-1);
+    expect(css.slice(at, css.indexOf("}", at))).toMatch(/--chrome-title:\s*0/);
+  });
+
+  /** CSS cannot ask `bridge.native`, so the gate tells it — the same way
+      `~/platform` tells it which desktop this is. */
+  it("is told to the stylesheet by the gate itself", () => {
+    expect(gate).toContain("documentElement.dataset.shell");
+    expect(gate).toContain("installedApp() ?");
+  });
+
+  /** And the window keeps its gap: the controls it clears are still there. */
+  it("is unchanged where there is a window", () => {
+    const root = css.slice(css.indexOf("--chrome-title:"));
+    expect(root).toMatch(/--chrome-title:\s*40px/);
   });
 });
