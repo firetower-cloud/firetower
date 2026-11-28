@@ -3147,6 +3147,18 @@ html:not([data-platform="macos"]) {
      the space actually left. The slug's `truncate` takes it from there. */
   .whead .repo > .who {
     max-width: min(15rem, 100%);
+    /* **Capping the box is not the same as containing what is in it.** The
+       host mark and the `+N` counter are both `shrink-0`, so once the chip is
+       narrower than mark + gap + counter they simply paint outside it — the
+       counter landed on *Another agent here* at 1200px, thirteen pixels past
+       the controls' left edge, while every control still passed hit-testing.
+       A visibly collided row that reports clean is worse than one that does
+       not, so this is the rule that makes the cap mean something.
+
+       Safe here and nowhere above: the repositories sheet is a *sibling* of
+       this button inside `.repo`, so clipping the button cannot clip the
+       sheet. On the wrapper it would. */
+    overflow: hidden;
   }
 
   .whead .right {

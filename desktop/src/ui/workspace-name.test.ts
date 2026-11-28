@@ -87,6 +87,26 @@ describe("the repository chip, which is what yields", () => {
     expect(workbench, "the utility would win over the rule above").not.toContain("max-w-[15rem]");
   });
 
+  /**
+   * **Capping the box is not containing what is in it**, and the guard that
+   * only knew about the cap reported green on a visibly collided row.
+   *
+   * The host mark and the `+N` counter are both `shrink-0`. Once the chip is
+   * narrower than mark + gap + counter they paint outside it — QA measured
+   * the counter thirteen pixels onto *Another agent here* at 1200px, and up
+   * to thirty-seven at 1000px, while `elementFromPoint` passed at every
+   * control centre throughout. Hit-testing cannot see this: the controls are
+   * still on top where they are probed, they are simply drawn over
+   * elsewhere.
+   *
+   * So the chip clips. Asserted here because the alternative is a browser,
+   * and because this is the single declaration that makes the cap mean
+   * anything.
+   */
+  it("clips its children, so a shrink-0 child cannot paint past it", () => {
+    expect(rule(".whead .repo > .who")).toContain("overflow: hidden");
+  });
+
   it("is marked as the thing that yields", () => {
     expect(workbench).toContain('className="repo relative"');
   });
