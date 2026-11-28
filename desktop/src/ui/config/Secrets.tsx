@@ -22,7 +22,7 @@ import { Eye, EyeOff, KeyRound, ScrollText, Trash2 } from "lucide-react";
 import { Icon, IconButton } from "~/components/ui";
 import { getListSecretsQueryKey, useListSecrets, useRemoveSecret, useReplaceSecret, useRevealSecret } from "~/api/generated/secrets/secrets";
 import type { HeldSecret } from "~/api/generated/model";
-import { Group, Section, WhereTo } from "~/ui/config/bits";
+import { Group, Section } from "~/ui/config/bits";
 import { WhoCanAccess } from "~/ui/Sharing";
 
 import { why } from "~/data";
@@ -54,12 +54,6 @@ export function Secrets() {
           <Row key={s.id} id={s.id} scope={s.scope} name={s.name} mine={s.mine} path={s.path} onGone={refresh} />
         ))}
       </Group>
-
-      <WhereTo>
-        Nothing reads a scope somebody invented here, so there is no control that makes one — you
-        would store the thing, reasonably expect an agent to be given it, and it never would be.
-        What is left is <b>seeing what is held, replacing a value, and taking one away</b>.
-      </WhereTo>
     </Section>
   );
 }
