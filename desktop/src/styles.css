@@ -3759,6 +3759,20 @@ html[data-shell="browser"] .rhead {
     background: var(--color-panel);
     box-shadow: var(--shadow-raise);
   }
+  /* Icons only: a small pill of round 24px segments. The track and the
+     raised knob are the rules above, unchanged; only the size and the
+     corners differ. */
+  .seg[data-icons] {
+    padding: 2px;
+    border-radius: 99px;
+  }
+  .seg[data-icons] button {
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 99px;
+  }
 
   /* ── A labelled input, with its hint and its error ───────────────── */
   .form {
