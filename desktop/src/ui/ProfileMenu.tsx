@@ -63,6 +63,7 @@ import {
   CircleFadingArrowUp,
   KeyRound,
   LogOut,
+  Monitor,
   Moon,
   Plus,
   Settings2,
@@ -332,28 +333,28 @@ export function Profile({
           from the other two — a window still in light at midnight is the bug
           a light theme ships with if nobody offers it.
 
-          Two lines rather than one, because all three want a word. "System"
-          as an icon alone is a choice nobody can name, and the whole point of
-          it is that it is the one you do not have to think about. */}
-      <div className="px-2.5 pt-1.5 pb-2">
-        <p className="flex items-center gap-2.5">
-          <span className="shrink-0 text-mute">
-            <Icon of={resolved === "light" ? Sun : Moon} size={16} />
-          </span>
-          <span className="min-w-0 flex-1 truncate">Appearance</span>
-        </p>
+          **One row, and icons rather than words.** It used to be two lines
+          because all three wanted a word, and that read as a form in the
+          middle of a menu; the user asked for something lighter. A monitor,
+          a sun and a moon is the switch most apps already use, so the
+          glyphs carry it, and the words are still each segment's name and
+          tooltip. System keeps its place and its explanation on hover. */}
+      <div className="flex items-center gap-2.5 px-2.5 py-1.5">
+        <span className="shrink-0 text-mute">
+          <Icon of={resolved === "light" ? Sun : Moon} size={16} />
+        </span>
+        <span className="min-w-0 flex-1 truncate">Appearance</span>
         {/* `Segmented`, not a third copy of it. This was a hand-rolled
             `.track` beside the component that exists for it, which is why it
             drifted far enough for somebody to notice. */}
         <Segmented
-          className="mt-1.5 ml-[26px] flex"
           label="Appearance"
           value={choice}
           onChange={setChoice}
           options={[
-            ["system", "System", `Follow the Mac — ${resolved} right now`],
-            ["light", "Light"],
-            ["dark", "Dark"],
+            ["system", "System", `System — follows the Mac, ${resolved} right now`, Monitor],
+            ["light", "Light", undefined, Sun],
+            ["dark", "Dark", undefined, Moon],
           ] as const}
         />
       </div>

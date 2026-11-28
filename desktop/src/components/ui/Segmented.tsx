@@ -1,6 +1,8 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
+import { Icon } from "./Icon";
 
 /**
  * Two or three mutually exclusive things, one of them on.
@@ -21,6 +23,11 @@ import type { ReactNode } from "react";
  * A label may be a node, because one of those three picks widths with icons,
  * and an option may carry its own title for the same reason. Widening the
  * component is the fix; editing three call sites to look alike is not.
+ *
+ * **Or an icon in place of the words.** Give every option a glyph and the
+ * control draws only those, smaller and round (`.seg[data-icons]`), with
+ * each option's words kept as its accessible name and, when it has no hint
+ * of its own, its tooltip. The appearance switch is the one that does.
  */
 export function Segmented<T extends string>({
   options,
@@ -30,8 +37,8 @@ export function Segmented<T extends string>({
   label,
   testId,
 }: {
-  /** `[id, what it says, what it says on hover]`. */
-  options: readonly (readonly [T, ReactNode, string?])[];
+  /** `[id, what it says, what it says on hover, the glyph that says it instead]`. */
+  options: readonly (readonly [T, ReactNode, string?, LucideIcon?])[];
   value: T;
   onChange: (value: T) => void;
   className?: string;
@@ -50,21 +57,32 @@ export function Segmented<T extends string>({
    */
   testId?: string;
 }) {
+  const icons = options.length > 0 && options.every(([, , , glyph]) => glyph);
   return (
-    <div className={`seg shrink-0 ${className}`} role="group" aria-label={label} data-testid={testId}>
-      {options.map(([id, says, hint]) => (
-        <button
-          key={id}
-          type="button"
-          aria-pressed={id === value}
-          title={hint}
-          onClick={() => onChange(id)}
-          className="max-md:min-h-[44px]"
-          data-testid={testId && `${testId}-${id}`}
-        >
-          {says}
-        </button>
-      ))}
+    <div
+      className={`seg shrink-0 ${className}`}
+      role="group"
+      aria-label={label}
+      data-testid={testId}
+      data-icons={icons || undefined}
+    >
+      {options.map(([id, says, hint, glyph]) => {
+        const name = typeof says === "string" ? says : undefined;
+        return (
+          <button
+            key={id}
+            type="button"
+            aria-pressed={id === value}
+            aria-label={icons ? name : undefined}
+            title={hint ?? (icons ? name : undefined)}
+            onClick={() => onChange(id)}
+            className="max-md:min-h-[44px]"
+            data-testid={testId && `${testId}-${id}`}
+          >
+            {icons && glyph ? <Icon of={glyph} size={14} /> : says}
+          </button>
+        );
+      })}
     </div>
   );
 }
