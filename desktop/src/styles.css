@@ -2925,8 +2925,17 @@ html:not([data-platform="macos"]) {
     height: 52px;
     padding: 0 18px 0 24px;
   }
+  /* **The name does not give up its width to anything beside it.** Every
+     other item in this row is `flex: none`, so this was the only thing that
+     could absorb a narrow window — and it absorbed all of it, down to a
+     single letter. The workspace's name is what the screen is *about*; the
+     repository chip beside it truncates far more cheaply, and now does.
+
+     A cap rather than no limit, because a long name should not push the
+     controls off the end either. Past it the ellipsis does the work. */
   .whead .nm {
-    min-width: 0;
+    flex: none;
+    max-width: 28rem;
     font-size: 1.0625rem;
     font-weight: var(--font-weight-mid);
     letter-spacing: -0.008em;

@@ -631,7 +631,13 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               per repository, and the second and third of them had nowhere to be
               said — so this names the first, counts the rest, and goes brick
               when one of them is not there. */}
-          <div className="relative shrink-0">
+          {/* **This is what gives when the row is narrow, not the name.**
+              It was `shrink-0`, which left the workspace's own name as the
+              only flexible thing in the row — so a narrow window ate the
+              name down to one letter while a repository slug kept its full
+              width. A slug already truncates well and is the cheaper thing
+              to lose. */}
+          <div className="relative min-w-0">
             <button
               onClick={() => setRepos((r) => !r)}
               title="Repositories in this workspace"
