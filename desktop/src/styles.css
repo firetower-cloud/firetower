@@ -497,6 +497,148 @@
       background var(--dur-native) var(--ease-swift),
       color var(--dur-native) var(--ease-swift);
   }
+  /* A denser row for a list somebody reads at a glance rather than works
+     through. Four of these used to stand as tall as the composer they hang
+     off, which made a short list look like a settings screen. */
+  /* A catalogue is scanned, not read. Two columns of hairline rows rather
+     than cards: the padding, the border and the separate footer each spent
+     height saying nothing, and six cards filled a screen that now holds
+     twelve rows. */
+  .offers {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 28px;
+  }
+  @media (max-width: 900px) {
+    .offers { grid-template-columns: 1fr; }
+  }
+  /* **No rules between them.** A hairline under every row drew a grid
+     nobody asked for and made a short list look like a table. This design
+     separates by fill: a row lifts when the pointer is on it, and the space
+     does the rest. */
+  .offer {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 9px 10px;
+    margin: 0 -10px;
+    border-radius: 10px;
+    min-width: 0;
+    transition: background var(--dur-native) var(--ease-swift);
+  }
+  .offer:hover {
+    background: var(--color-raise);
+  }
+  .offer .g {
+    flex: none;
+  }
+  .offer .tx {
+    flex: 1;
+    min-width: 0;
+    display: block;
+  }
+  .offer .tx b {
+    display: block;
+    font-size: var(--text-ui);
+    font-weight: var(--weight-mid);
+    color: var(--color-bone);
+  }
+  .offer .tx s,
+  .offer .tx u {
+    display: block;
+    text-decoration: none;
+    font-size: var(--text-meta);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .offer .tx s { color: var(--color-dim); }
+  .offer .tx u { color: var(--color-mute); margin-top: 1px; }
+  /* **One shape for the one action, wherever it is drawn.** A catalogue row,
+     an installed row and a detail header each had their own button for
+     taking something — different sizes, different words, a few pixels apart.
+     `.act` is that control; `Take` is the component that picks its words. */
+  .act {
+    flex: none;
+    height: 28px;
+    padding: 0 11px;
+    border-radius: 99px;
+    font-size: var(--text-ui);
+    color: var(--color-dim);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    background: var(--color-panel);
+    box-shadow: var(--shadow-raise);
+    transition:
+      opacity var(--dur-native) var(--ease-swift),
+      background var(--dur-native) var(--ease-swift),
+      color var(--dur-native) var(--ease-swift);
+  }
+  .act:hover {
+    color: var(--color-bone);
+  }
+  .act[disabled] {
+    opacity: 0.5;
+  }
+  /* **Quiet until the row is under the pointer.** A list of thirty rows each
+     carrying a lit button is thirty things asking to be pressed; the row is
+     the thing being read, and the action belongs to the one being looked at.
+     Opacity rather than display, so it keeps its space — a row must not
+     reflow under the pointer — and `:focus-within` so the keyboard still
+     reaches it. */
+  .offer .act,
+  .r .act {
+    opacity: 0;
+  }
+  .offer:hover .act,
+  .offer:focus-within .act,
+  .r:hover .act,
+  .r:focus-within .act {
+    opacity: 1;
+  }
+  /* What is already true is not an action, so it is always legible. */
+  .act-said {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    font-size: var(--text-meta);
+    color: var(--color-dim);
+  }
+  .act-done {
+    color: var(--color-sage);
+  }
+  /* The detail screen has one subject and one action; nothing to reveal. */
+  .act-page {
+    height: 32px;
+    padding: 0 14px;
+    color: var(--color-bone);
+    background: var(--color-raise);
+    opacity: 1;
+  }
+  .offer > span:last-child {
+    flex: none;
+    white-space: nowrap;
+  }
+
+  .prow.tight {
+    min-height: 30px;
+    gap: 8px;
+    padding: 3px 9px;
+  }
+  .prow.tight .plg {
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    font-size: 9px;
+  }
+  .prow.tight .plg img {
+    width: 14px;
+    height: 14px;
+  }
   .prow:hover,
   .mrow:hover {
     background: color-mix(in srgb, var(--color-raise) 70%, transparent);
@@ -855,6 +997,25 @@
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  /* A start that is going to be short of something. Ember and nowhere else:
+     a server nobody authorized is the one thing on this bar that stops the
+     agent doing what it was asked, and it fails on the first turn rather
+     than here if it is not said now. */
+  .chip .need {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--color-dim);
+  }
+  .chip .need::before {
+    content: "";
+    display: inline-block;
+    width: 1px;
+    height: 11px;
+    margin-right: 7px;
+    vertical-align: -1px;
+    background: var(--color-line);
   }
   .chip:hover {
     background: var(--color-raise);
@@ -3570,6 +3731,28 @@ html:not([data-platform="macos"]) {
     border-radius: 12px;
     background: var(--color-ground);
     transition: border-color var(--dur-native) var(--ease-swift);
+  }
+  /* **A box that stacks, for a control that is a list.**
+     `.fld .box` is a row — a label beside an input, centred — which is right
+     for every field that holds one control. A field whose control is a filter
+     over a list has two children, and as a row they sat side by side at half
+     the width each, with every name truncated to four characters. */
+  .fld .box.stack {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 9px;
+  }
+  /* `.fld .box input` is `flex: 1`, which in a row means "take the width
+     left over" and in a column means "grow tall". Unset along this axis, or
+     the filter stretches and the list it filters is squeezed under it. */
+  .fld .box.stack > input {
+    flex: none;
+  }
+  .fld .box.stack .rows {
+    max-height: 232px;
+    overflow-y: auto;
+    margin: 0 -3px;
   }
   .fld .box:focus-within {
     border-color: var(--color-dim);
