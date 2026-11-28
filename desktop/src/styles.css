@@ -3095,7 +3095,8 @@ html:not([data-platform="macos"]) {
      A cap rather than no limit, because a long name should not push the
      controls off the end either. Past it the ellipsis does the work. */
   .whead .nm {
-    flex: none;
+    flex: 0 1 auto;
+    min-width: 12rem;
     max-width: 28rem;
     font-size: 1.0625rem;
     font-weight: var(--font-weight-mid);
@@ -3113,6 +3114,41 @@ html:not([data-platform="macos"]) {
     font-size: 0.875rem;
     color: var(--color-dim);
   }
+  /* **The repository chip is what yields, and the only thing that can.**
+     It drew straight over *Another agent here*, *Who can access it* and the
+     terminal button — three controls that became unclickable while still
+     looking clickable.
+
+     Two rules because there are two elements, and the first attempt fixed the
+     wrong one. **The flex item of this row is the wrapper, not the chip**:
+     the chip sits inside it, so `flex-shrink` on the chip is a property on a
+     thing that is not a flex item and does nothing at all. The wrapper duly
+     shrank, the chip kept its content width, and the overflow is what landed
+     on the controls.
+
+     So the wrapper yields — hard, because it has to go *before* the name
+     does, and flex shares shortfall in proportion to this — and the chip is
+     held to the wrapper it is in. The slug's own `truncate` does the rest.
+
+     No `overflow` on the wrapper: it is the positioning context for the
+     repositories sheet, and clipping there would cut the sheet off. */
+  .whead .repo {
+    flex-shrink: 1000;
+    min-width: 0;
+  }
+  /* **Both caps in one declaration, because they cannot be in two.** The
+     chip carried its 15rem cap as a `max-w-[15rem]` utility, and utilities
+     are a later layer than components — so they win here whatever the
+     specificity, and a `max-width: 100%` written beside this rule was simply
+     overridden. The button kept its content width, escaped the wrapper, and
+     landed on the controls.
+
+     `min()` says the real rule: never wider than 15rem, and never wider than
+     the space actually left. The slug's `truncate` takes it from there. */
+  .whead .repo > .who {
+    max-width: min(15rem, 100%);
+  }
+
   .whead .right {
     display: flex;
     align-items: center;

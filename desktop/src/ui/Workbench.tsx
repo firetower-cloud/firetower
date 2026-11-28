@@ -637,7 +637,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
               name down to one letter while a repository slug kept its full
               width. A slug already truncates well and is the cheaper thing
               to lose. */}
-          <div className="relative min-w-0">
+          <div className="repo relative">
             <button
               onClick={() => setRepos((r) => !r)}
               title="Repositories in this workspace"
@@ -646,7 +646,7 @@ export function Workbench({ backend, workspace }: { backend: Backend; workspace:
                  does not say where this sheet opens from — it reaches it from
                  its own control strip — so this is the build's answer and is
                  recorded as such in the reconciliation. */
-              className={`who max-w-[15rem] rounded-md px-1.5 py-1 transition-colors ${repos ? "bg-raise text-bone" : "hover:text-bone"}`}
+              className={`who rounded-md px-1.5 py-1 transition-colors ${repos ? "bg-raise text-bone" : "hover:text-bone"}`}
             >
               <HostMark kind={hostOf(checkouts[0]?.slug)?.kind} size={13} className={checkouts.some((c) => c.trouble) ? "text-brick" : ""} />
               <span className="min-w-0 truncate">{checkouts[0]?.slug ?? "No repository"}</span>
