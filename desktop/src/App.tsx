@@ -387,7 +387,7 @@ function Window() {
                     that faces the chrome and flush to the window's own
                     corners on the other, because an app does not draw a
                     second set of corners inside the ones it has. */}
-                <div className="ml-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-l-sheet bg-panel shadow-(--shadow-raise)">
+                <div className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-l-sheet bg-panel shadow-(--shadow-raise)">
                   <Routes
                     backend={here}
                     onSwitch={pick}

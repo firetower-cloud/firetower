@@ -103,10 +103,13 @@ export function RailPanel({
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onFocusCapture={onEnter}
+      /* Pinned, the 8px between the panel and the sheet is the panel's: the
+         sheet has no margin of its own, so that with the panel collapsed it
+         sits the rail's 8px from the icons and no more. See `--rail`. */
       className={
         floating
           ? "panel-float absolute top-0 bottom-3 left-(--rail) z-20 flex w-(--panel) flex-col overflow-hidden"
-          : "flex w-(--panel) shrink-0 flex-col overflow-hidden"
+          : "mr-2 flex w-(--panel) shrink-0 flex-col overflow-hidden"
       }
     >
       <div className={`flex min-h-0 flex-1 flex-col ${stale ? "stale" : ""}`}>

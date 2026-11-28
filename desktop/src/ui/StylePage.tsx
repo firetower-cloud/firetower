@@ -298,7 +298,7 @@ export function StylePage() {
 
         <Section
           name="The shell"
-          note="A 62px rail, a 252px panel, an 8px gutter and the sheet — flush right and bottom, rounded only on the side that faces the chrome. The selected destination is a pill in the sheet's own colour, because it is the sheet's handle."
+          note="A 50px rail, a 252px panel, an 8px gutter and the sheet — flush right and bottom, rounded only on the side that faces the chrome. The selected destination is a pill in the sheet's own colour, because it is the sheet's handle."
         >
           <div className="overflow-hidden rounded-md border border-line">
             <div className="flex h-(--chrome-title) items-center gap-2.5 bg-ground px-3">

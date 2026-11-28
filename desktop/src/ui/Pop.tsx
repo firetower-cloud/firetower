@@ -54,7 +54,7 @@ export function place(
   view: { width: number; height: number },
   /**
    * Beside the button rather than under it, for a menu dropped from something
-   * in a 62px rail. There is nothing below the rail's avatar and nothing to
+   * in a 50px rail. There is nothing below the rail's avatar and nothing to
    * the left of it, so the two axes both change: the card opens to the right
    * and its **bottom edge lines up with the button's**, which is what makes it
    * read as belonging to that button rather than floating over the window.
